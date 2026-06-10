@@ -867,6 +867,26 @@ mod tests {
     }
 
     #[test]
+    fn legacy_history_entry_has_no_adaptive_metadata() {
+        let conn = setup_conn();
+        insert_entry(&conn, 100, "legacy raw", None);
+
+        let entry = HistoryManager::get_latest_entry_with_conn(&conn)
+            .expect("fetch latest entry")
+            .expect("entry exists");
+
+        assert_eq!(entry.transcription_text, "legacy raw");
+        assert!(entry.post_processed_text.is_none());
+        assert!(entry.adaptive_profile_id.is_none());
+        assert!(entry.adaptive_profile_name.is_none());
+        assert!(entry.adaptive_routing_json.is_none());
+        assert!(entry.adaptive_context_json.is_none());
+        assert!(entry.adaptive_language_json.is_none());
+        assert!(entry.adaptive_insertion_json.is_none());
+        assert!(entry.adaptive_parent_entry_id.is_none());
+    }
+
+    #[test]
     fn get_latest_completed_entry_skips_empty_entries() {
         let conn = setup_conn();
         insert_entry(&conn, 100, "completed", None);
