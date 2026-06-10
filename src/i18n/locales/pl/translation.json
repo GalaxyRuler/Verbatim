@@ -100,7 +100,7 @@
     },
     "permissions": {
       "title": "Wymagane uprawnienia",
-      "description": "Handy potrzebuje kilku uprawnień, aby działać poprawnie.",
+      "description": "Verbatim potrzebuje kilku uprawnień, aby działać poprawnie.",
       "microphone": {
         "title": "Dostęp do mikrofonu",
         "description": "Wymagany do słyszenia Twojego głosu w celu transkrypcji."
@@ -176,7 +176,7 @@
     "general": {
       "title": "Ogólne",
       "shortcut": {
-        "title": "Skróty Handy",
+        "title": "Skróty Verbatim",
         "description": "Skonfiguruj skróty klawiaturowe do uruchamiania nagrywania mowy",
         "loading": "Wczytywanie skrótów...",
         "none": "Brak skonfigurowanych skrótów",
@@ -276,11 +276,11 @@
       },
       "autostart": {
         "label": "Uruchamiaj przy starcie",
-        "description": "Automatycznie uruchamiaj Handy po zalogowaniu."
+        "description": "Automatycznie uruchamiaj Verbatim po zalogowaniu."
       },
       "showTrayIcon": {
         "label": "Pokaż ikonę w zasobniku",
-        "description": "Wyświetlaj ikonę Handy w zasobniku systemowym."
+        "description": "Wyświetlaj ikonę Verbatim w zasobniku systemowym."
       },
       "overlay": {
         "title": "Pozycja nakładki",
@@ -356,6 +356,34 @@
         "add": "Dodaj",
         "remove": "Usuń {{word}}",
         "duplicate": "\"{{word}}\" już istnieje"
+      },
+      "adaptiveProfiles": {
+        "enabled": {
+          "label": "Adaptive Profiles",
+          "description": "Route each dictation through a context-aware profile for email, notes, code, chat, or raw output."
+        },
+        "defaultProfile": {
+          "title": "Default Profile",
+          "description": "Fallback profile when Verbatim cannot identify the foreground app or language mix confidently.",
+          "placeholder": "Select a profile"
+        },
+        "languages": {
+          "title": "Language Shortlist",
+          "description": "Comma-separated language codes used for adaptive language hints, such as en, ar, fr, es.",
+          "placeholder": "en, ar"
+        },
+        "correctionMemory": {
+          "label": "Correction Memory",
+          "description": "Allow future corrections to bias profile choices for similar apps and contexts."
+        },
+        "actions": {
+          "title": "Adaptive Actions",
+          "description": "Reprocess the latest adaptive history item or clear learned correction preferences.",
+          "reprocess": "Reprocess Last",
+          "reset": "Reset Memory",
+          "reprocessDone": "Latest adaptive entry reprocessed.",
+          "resetDone": "Adaptive correction memory reset."
+        }
       }
     },
     "postProcessing": {
@@ -445,7 +473,7 @@
       },
       "updateChecks": {
         "label": "Sprawdzaj aktualizacje",
-        "description": "Automatycznie sprawdzaj nowe wersje Handy"
+        "description": "Automatycznie sprawdzaj nowe wersje Verbatim"
       },
       "soundTheme": {
         "label": "Motyw dźwiękowy",
@@ -513,11 +541,11 @@
       "title": "O programie",
       "version": {
         "title": "Wersja",
-        "description": "Aktualna wersja Handy"
+        "description": "Aktualna wersja Verbatim"
       },
       "appDataDirectory": {
         "title": "Katalog danych aplikacji",
-        "description": "Miejsce, gdzie Handy przechowuje swoje dane"
+        "description": "Miejsce, gdzie Verbatim przechowuje swoje dane"
       },
       "sourceCode": {
         "title": "Kod źródłowy",
@@ -526,7 +554,7 @@
       },
       "supportDevelopment": {
         "title": "Wspieraj rozwój",
-        "description": "Pomóż nam dalej rozwijać Handy",
+        "description": "Pomóż nam dalej rozwijać Verbatim",
         "button": "Wesprzyj"
       },
       "acknowledgments": {
@@ -534,7 +562,7 @@
         "whisper": {
           "title": "Whisper.cpp",
           "description": "Wydajne wykonywanie modelu rozpoznawania mowy Whisper od OpenAI",
-          "details": "Handy używa Whisper.cpp do szybkiego, lokalnego przetwarzania mowy na tekst. Dzięki niesamowitej pracy Georgi Gerganova i współtwórców."
+          "details": "Verbatim używa Whisper.cpp do szybkiego, lokalnego przetwarzania mowy na tekst. Dzięki niesamowitej pracy Georgi Gerganova i współtwórców."
         }
       }
     }
@@ -576,11 +604,12 @@
     "off": "Wyłącz",
     "yes": "Tak",
     "no": "Nie",
-    "noOptionsFound": "Nie znaleziono opcji"
+    "noOptionsFound": "Nie znaleziono opcji",
+    "appName": "Verbatim"
   },
   "accessibility": {
     "permissionsRequired": "Wymagane uprawnienia dostępności",
-    "permissionsDescription": "Handy potrzebuje uprawnień dostępności, aby wpisywać transkrybowany tekst.",
+    "permissionsDescription": "Verbatim potrzebuje uprawnień dostępności, aby wpisywać transkrybowany tekst.",
     "openSettings": "Otwórz ustawienia systemowe",
     "dismiss": "Zamknij"
   },
@@ -603,7 +632,7 @@
   },
   "appLanguage": {
     "title": "Język aplikacji",
-    "description": "Zmień język interfejsu Handy"
+    "description": "Zmień język interfejsu Verbatim"
   },
   "overlay": {
     "transcribing": "Transkrypcja...",

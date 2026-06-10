@@ -100,7 +100,7 @@
     },
     "permissions": {
       "title": "الأذونات المطلوبة",
-      "description": ".يحتاج Handy إلى بعض الأذونات ليعمل بشكل صحيح",
+      "description": ".يحتاج Verbatim إلى بعض الأذونات ليعمل بشكل صحيح",
       "microphone": {
         "title": "الوصول إلى الميكروفون",
         "description": ".مطلوب لسماع صوتك من أجل التفريغ الصوتي"
@@ -154,7 +154,7 @@
     "general": {
       "title": "عام",
       "shortcut": {
-        "title": "اختصارات Handy",
+        "title": "اختصارات Verbatim",
         "description": "إعداد اختصارات لوحة المفاتيح لبدء تسجيل التفريغ الصوتي",
         "loading": "...جاري تحميل الاختصارات",
         "none": "لا توجد اختصارات مجهزة",
@@ -254,11 +254,11 @@
       },
       "autostart": {
         "label": "التشغيل عند بدء التشغيل",
-        "description": ".بدء تشغيل Handy تلقائياً عند تسجيل الدخول إلى جهاز الكمبيوتر الخاص بك"
+        "description": ".بدء تشغيل Verbatim تلقائياً عند تسجيل الدخول إلى جهاز الكمبيوتر الخاص بك"
       },
       "showTrayIcon": {
         "label": "إظهار أيقونة شريط النظام",
-        "description": ".عرض أيقونة Handy في شريط النظام"
+        "description": ".عرض أيقونة Verbatim في شريط النظام"
       },
       "overlay": {
         "title": "موقع التراكب",
@@ -334,6 +334,34 @@
         "add": "إضافة",
         "remove": "إزالة {{word}}",
         "duplicate": "\"{{word}}\" موجود بالفعل"
+      },
+      "adaptiveProfiles": {
+        "enabled": {
+          "label": "Adaptive Profiles",
+          "description": "Route each dictation through a context-aware profile for email, notes, code, chat, or raw output."
+        },
+        "defaultProfile": {
+          "title": "Default Profile",
+          "description": "Fallback profile when Verbatim cannot identify the foreground app or language mix confidently.",
+          "placeholder": "Select a profile"
+        },
+        "languages": {
+          "title": "Language Shortlist",
+          "description": "Comma-separated language codes used for adaptive language hints, such as en, ar, fr, es.",
+          "placeholder": "en, ar"
+        },
+        "correctionMemory": {
+          "label": "Correction Memory",
+          "description": "Allow future corrections to bias profile choices for similar apps and contexts."
+        },
+        "actions": {
+          "title": "Adaptive Actions",
+          "description": "Reprocess the latest adaptive history item or clear learned correction preferences.",
+          "reprocess": "Reprocess Last",
+          "reset": "Reset Memory",
+          "reprocessDone": "Latest adaptive entry reprocessed.",
+          "resetDone": "Adaptive correction memory reset."
+        }
       }
     },
     "postProcessing": {
@@ -423,7 +451,7 @@
       },
       "updateChecks": {
         "label": "التحقق من وجود تحديثات",
-        "description": "التحقق تلقائياً من وجود إصدارات جديدة من Handy"
+        "description": "التحقق تلقائياً من وجود إصدارات جديدة من Verbatim"
       },
       "soundTheme": {
         "label": "سمة الصوت",
@@ -491,11 +519,11 @@
       "title": "حول",
       "version": {
         "title": "الإصدار",
-        "description": "الإصدار الحالي من Handy"
+        "description": "الإصدار الحالي من Verbatim"
       },
       "appDataDirectory": {
         "title": "مجلد بيانات التطبيق",
-        "description": "الموقع الذي يخزن فيه Handy بياناته"
+        "description": "الموقع الذي يخزن فيه Verbatim بياناته"
       },
       "sourceCode": {
         "title": "كود المصدر",
@@ -504,7 +532,7 @@
       },
       "supportDevelopment": {
         "title": "دعم التطوير",
-        "description": "ساعدنا في مواصلة بناء Handy",
+        "description": "ساعدنا في مواصلة بناء Verbatim",
         "button": "تبرع"
       },
       "acknowledgments": {
@@ -512,7 +540,7 @@
         "whisper": {
           "title": "Whisper.cpp",
           "description": "استنتاج عالي الأداء لنموذج التعرف التلقائي على الكلام Whisper من OpenAI",
-          "details": ".يستخدم Handy برنامج Whisper.cpp لمعالجة سريعة ومحلية لتحويل الكلام إلى نص. شكراً للعمل الرائع الذي قام به Georgi Gerganov والمساهمون"
+          "details": ".يستخدم Verbatim برنامج Whisper.cpp لمعالجة سريعة ومحلية لتحويل الكلام إلى نص. شكراً للعمل الرائع الذي قام به Georgi Gerganov والمساهمون"
         }
       }
     },
@@ -576,11 +604,12 @@
     "off": "إيقاف",
     "yes": "نعم",
     "no": "لا",
-    "noOptionsFound": "لم يتم العثور على خيارات"
+    "noOptionsFound": "لم يتم العثور على خيارات",
+    "appName": "Verbatim"
   },
   "accessibility": {
     "permissionsRequired": "أذونات إمكانية الوصول مطلوبة",
-    "permissionsDescription": ".يحتاج Handy إلى أذونات إمكانية الوصول لكتابة النص المفرغ",
+    "permissionsDescription": ".يحتاج Verbatim إلى أذونات إمكانية الوصول لكتابة النص المفرغ",
     "openSettings": "فتح إعدادات النظام",
     "dismiss": "تجاهل"
   },
@@ -603,7 +632,7 @@
   },
   "appLanguage": {
     "title": "لغة التطبيق",
-    "description": "تغيير لغة واجهة Handy"
+    "description": "تغيير لغة واجهة Verbatim"
   },
   "overlay": {
     "transcribing": "...جاري التفريغ",

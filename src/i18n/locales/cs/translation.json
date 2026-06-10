@@ -100,7 +100,7 @@
     },
     "permissions": {
       "title": "Vyžadována oprávnění",
-      "description": "Handy potřebuje několik oprávnění pro správné fungování.",
+      "description": "Verbatim potřebuje několik oprávnění pro správné fungování.",
       "microphone": {
         "title": "Přístup k mikrofonu",
         "description": "Potřebný pro zachycení vašeho hlasu k přepisu."
@@ -176,7 +176,7 @@
     "general": {
       "title": "Obecné",
       "shortcut": {
-        "title": "Zkratky Handy",
+        "title": "Zkratky Verbatim",
         "description": "Nastavte klávesové zkratky pro spuštění nahrávání řeči na text",
         "loading": "Načítám zkratky...",
         "none": "Žádné zkratky nejsou nastavené",
@@ -276,11 +276,11 @@
       },
       "autostart": {
         "label": "Spouštět při startu",
-        "description": "Automaticky spustit Handy po přihlášení do počítače."
+        "description": "Automaticky spustit Verbatim po přihlášení do počítače."
       },
       "showTrayIcon": {
         "label": "Zobrazit ikonu v systémové liště",
-        "description": "Zobrazit ikonu Handy v systémové liště."
+        "description": "Zobrazit ikonu Verbatim v systémové liště."
       },
       "overlay": {
         "title": "Pozice překryvu",
@@ -356,6 +356,34 @@
         "add": "Přidat",
         "remove": "Odebrat {{word}}",
         "duplicate": "\"{{word}}\" již existuje"
+      },
+      "adaptiveProfiles": {
+        "enabled": {
+          "label": "Adaptive Profiles",
+          "description": "Route each dictation through a context-aware profile for email, notes, code, chat, or raw output."
+        },
+        "defaultProfile": {
+          "title": "Default Profile",
+          "description": "Fallback profile when Verbatim cannot identify the foreground app or language mix confidently.",
+          "placeholder": "Select a profile"
+        },
+        "languages": {
+          "title": "Language Shortlist",
+          "description": "Comma-separated language codes used for adaptive language hints, such as en, ar, fr, es.",
+          "placeholder": "en, ar"
+        },
+        "correctionMemory": {
+          "label": "Correction Memory",
+          "description": "Allow future corrections to bias profile choices for similar apps and contexts."
+        },
+        "actions": {
+          "title": "Adaptive Actions",
+          "description": "Reprocess the latest adaptive history item or clear learned correction preferences.",
+          "reprocess": "Reprocess Last",
+          "reset": "Reset Memory",
+          "reprocessDone": "Latest adaptive entry reprocessed.",
+          "resetDone": "Adaptive correction memory reset."
+        }
       }
     },
     "postProcessing": {
@@ -445,7 +473,7 @@
       },
       "updateChecks": {
         "label": "Kontrolovat aktualizace",
-        "description": "Automaticky kontrolovat nové verze Handy"
+        "description": "Automaticky kontrolovat nové verze Verbatim"
       },
       "soundTheme": {
         "label": "Zvukový motiv",
@@ -513,11 +541,11 @@
       "title": "O aplikaci",
       "version": {
         "title": "Verze",
-        "description": "Aktuální verze Handy"
+        "description": "Aktuální verze Verbatim"
       },
       "appDataDirectory": {
         "title": "Adresář dat aplikace",
-        "description": "Umístění, kde Handy ukládá data"
+        "description": "Umístění, kde Verbatim ukládá data"
       },
       "sourceCode": {
         "title": "Zdrojový kód",
@@ -526,7 +554,7 @@
       },
       "supportDevelopment": {
         "title": "Podpořte vývoj",
-        "description": "Pomozte nám pokračovat ve vývoji Handy",
+        "description": "Pomozte nám pokračovat ve vývoji Verbatim",
         "button": "Přispět"
       },
       "acknowledgments": {
@@ -534,7 +562,7 @@
         "whisper": {
           "title": "Whisper.cpp",
           "description": "Vysoce výkonné inferenční zpracování modelu automatického rozpoznávání řeči Whisper od OpenAI",
-          "details": "Handy používá Whisper.cpp pro rychlé lokální zpracování řeči na text. Díky skvělé práci Georgiho Gerganova a přispěvatelů."
+          "details": "Verbatim používá Whisper.cpp pro rychlé lokální zpracování řeči na text. Díky skvělé práci Georgiho Gerganova a přispěvatelů."
         }
       }
     }
@@ -576,11 +604,12 @@
     "off": "Vypnuto",
     "yes": "Ano",
     "no": "Ne",
-    "noOptionsFound": "Nenalezeny žádné možnosti"
+    "noOptionsFound": "Nenalezeny žádné možnosti",
+    "appName": "Verbatim"
   },
   "accessibility": {
     "permissionsRequired": "Vyžadována oprávnění usnadnění přístupu",
-    "permissionsDescription": "Handy potřebuje oprávnění usnadnění přístupu, aby mohlo psát přepsaný text.",
+    "permissionsDescription": "Verbatim potřebuje oprávnění usnadnění přístupu, aby mohlo psát přepsaný text.",
     "openSettings": "Otevřít Nastavení systému",
     "dismiss": "Zavřít"
   },
@@ -603,7 +632,7 @@
   },
   "appLanguage": {
     "title": "Jazyk aplikace",
-    "description": "Změňte jazyk rozhraní Handy"
+    "description": "Změňte jazyk rozhraní Verbatim"
   },
   "overlay": {
     "transcribing": "Přepisuji...",

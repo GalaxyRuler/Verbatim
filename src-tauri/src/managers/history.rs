@@ -824,7 +824,7 @@ mod tests {
                 adaptive_parent_entry_id
             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
             params![
-                format!("handy-{}.wav", timestamp),
+                format!("verbatim-{}.wav", timestamp),
                 timestamp,
                 false,
                 format!("Recording {}", timestamp),
@@ -884,7 +884,7 @@ mod tests {
     fn adaptive_history_entry_can_hold_routing_metadata() {
         let entry = HistoryEntry {
             id: 1,
-            file_name: "handy-1.wav".to_string(),
+            file_name: "verbatim-1.wav".to_string(),
             timestamp: 1,
             saved: false,
             title: "now".to_string(),
