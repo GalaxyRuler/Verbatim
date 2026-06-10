@@ -390,6 +390,24 @@ fn serialize_json<T: serde::Serialize>(value: &T) -> Option<String> {
     serde_json::to_string(value).ok()
 }
 
+fn adaptive_target_verified(
+    original_context: &crate::adaptive::types::CapturedContext,
+    current_context: &crate::adaptive::types::CapturedContext,
+) -> bool {
+    original_context.target_fingerprint.is_none()
+        || current_context.target_fingerprint == original_context.target_fingerprint
+}
+
+fn skipped_wrong_target_receipt() -> crate::adaptive::types::InsertionReceipt {
+    crate::adaptive::types::InsertionReceipt {
+        attempted: false,
+        succeeded: false,
+        method: crate::adaptive::types::InsertionMethod::None,
+        target_verified: false,
+        error: Some("target changed before insertion".to_string()),
+    }
+}
+
 pub(crate) async fn process_adaptive_transcription_output(
     settings: &AppSettings,
     transcription: &str,
@@ -454,7 +472,20 @@ pub(crate) async fn process_adaptive_transcription_output(
 #[cfg(test)]
 mod adaptive_action_tests {
     use super::*;
-    use crate::adaptive::types::{InsertionMethod, InsertionReceipt};
+    use crate::adaptive::types::{CapturedContext, InsertionMethod, InsertionReceipt, TargetKind};
+
+    fn context_with_fingerprint(fingerprint: Option<&str>) -> CapturedContext {
+        CapturedContext {
+            captured_at_ms: 0,
+            process_name: fingerprint.map(ToString::to_string),
+            window_title: None,
+            window_title_hash: None,
+            window_class: None,
+            target_kind: TargetKind::Unknown,
+            target_fingerprint: fingerprint.map(ToString::to_string),
+            is_sensitive: false,
+        }
+    }
 
     #[test]
     fn serialize_json_returns_some_for_receipt() {
@@ -466,6 +497,43 @@ mod adaptive_action_tests {
             error: None,
         };
         assert!(serialize_json(&receipt).unwrap().contains("succeeded"));
+    }
+
+    #[test]
+    fn adaptive_target_verification_allows_matching_fingerprint() {
+        assert!(adaptive_target_verified(
+            &context_with_fingerprint(Some("notepad|edit")),
+            &context_with_fingerprint(Some("notepad|edit"))
+        ));
+    }
+
+    #[test]
+    fn adaptive_target_verification_rejects_changed_fingerprint() {
+        assert!(!adaptive_target_verified(
+            &context_with_fingerprint(Some("outlook|richedit")),
+            &context_with_fingerprint(Some("notepad|edit"))
+        ));
+    }
+
+    #[test]
+    fn adaptive_target_verification_allows_unknown_original_target() {
+        assert!(adaptive_target_verified(
+            &context_with_fingerprint(None),
+            &context_with_fingerprint(Some("notepad|edit"))
+        ));
+    }
+
+    #[test]
+    fn wrong_target_receipt_is_not_attempted() {
+        let receipt = skipped_wrong_target_receipt();
+        assert!(!receipt.attempted);
+        assert!(!receipt.succeeded);
+        assert!(!receipt.target_verified);
+        assert_eq!(receipt.method, InsertionMethod::None);
+        assert_eq!(
+            receipt.error.as_deref(),
+            Some("target changed before insertion")
+        );
     }
 }
 
@@ -748,15 +816,23 @@ impl ShortcutAction for TranscribeAction {
                                             crate::adaptive::context::capture_context(
                                                 &private_patterns,
                                             );
-                                        let target_verified =
-                                            original_context.target_fingerprint.is_none()
-                                                || current_context.target_fingerprint
-                                                    == original_context.target_fingerprint;
-                                        let receipt = utils::paste_with_receipt(
-                                            final_text,
-                                            ah_clone.clone(),
-                                            target_verified,
+                                        let target_verified = adaptive_target_verified(
+                                            &original_context,
+                                            &current_context,
                                         );
+                                        let receipt = if target_verified {
+                                            utils::paste_with_receipt(
+                                                final_text,
+                                                ah_clone.clone(),
+                                                true,
+                                            )
+                                        } else {
+                                            error!(
+                                                "Adaptive paste skipped because the foreground target changed before insertion"
+                                            );
+                                            let _ = ah_clone.emit("paste-error", ());
+                                            skipped_wrong_target_receipt()
+                                        };
                                         if receipt.succeeded {
                                             debug!(
                                                 "Text pasted successfully in {:?}",
