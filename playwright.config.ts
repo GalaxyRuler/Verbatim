@@ -1,5 +1,9 @@
 import { defineConfig, devices } from "@playwright/test";
 
+const chromiumOptions = process.env.PLAYWRIGHT_USE_SYSTEM_CHROME
+  ? { ...devices["Desktop Chrome"], channel: "chrome" as const }
+  : { ...devices["Desktop Chrome"] };
+
 export default defineConfig({
   testDir: "./tests",
   fullyParallel: true,
@@ -14,7 +18,7 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
-      use: { ...devices["Desktop Chrome"] },
+      use: chromiumOptions,
     },
   ],
   webServer: {
