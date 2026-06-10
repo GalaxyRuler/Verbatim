@@ -89,6 +89,88 @@ fn build_whisper_initial_prompt(
     }
 }
 
+fn transcription_language_candidates(
+    validated_language: &str,
+    language_shortlist: &[String],
+) -> Vec<String> {
+    if validated_language != "auto" {
+        return vec![normalize_language_for_engine(validated_language)];
+    }
+
+    language_shortlist
+        .iter()
+        .map(|language| normalize_language_for_engine(language))
+        .filter(|language| language != "auto")
+        .fold(Vec::<String>::new(), |mut acc, language| {
+            if !acc.contains(&language) {
+                acc.push(language);
+            }
+            acc
+        })
+}
+
+fn score_text_for_language(text: &str, language: &str) -> f32 {
+    let mut arabic = 0usize;
+    let mut cjk = 0usize;
+    let mut latin = 0usize;
+    let mut letters = 0usize;
+
+    for ch in text.chars() {
+        if !ch.is_alphabetic() {
+            continue;
+        }
+
+        letters += 1;
+        let codepoint = ch as u32;
+        if matches!(
+            codepoint,
+            0x0600..=0x06FF | 0x0750..=0x077F | 0x08A0..=0x08FF | 0xFB50..=0xFDFF | 0xFE70..=0xFEFF
+        ) {
+            arabic += 1;
+        } else if matches!(
+            codepoint,
+            0x4E00..=0x9FFF | 0x3040..=0x30FF | 0xAC00..=0xD7AF
+        ) {
+            cjk += 1;
+        } else if ch.is_ascii_alphabetic() {
+            latin += 1;
+        }
+    }
+
+    if letters == 0 {
+        return 0.0;
+    }
+
+    let ratio = |count: usize| count as f32 / letters as f32;
+    match language {
+        "ar" | "fa" | "ur" | "ps" | "sd" => {
+            let arabic_ratio = ratio(arabic);
+            arabic_ratio * 2.0 + if arabic > 0 { 0.25 } else { 0.0 }
+        }
+        "zh" | "ja" | "ko" | "zh-Hans" | "zh-Hant" => ratio(cjk) * 2.0,
+        _ => ratio(latin),
+    }
+}
+
+fn select_best_language_candidate(
+    candidates: Vec<(String, transcribe_rs::TranscriptionResult)>,
+) -> transcribe_rs::TranscriptionResult {
+    candidates
+        .into_iter()
+        .max_by(
+            |(left_language, left_result), (right_language, right_result)| {
+                score_text_for_language(&left_result.text, left_language)
+                    .partial_cmp(&score_text_for_language(&right_result.text, right_language))
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            },
+        )
+        .map(|(_, result)| result)
+        .unwrap_or(transcribe_rs::TranscriptionResult {
+            text: String::new(),
+            segments: None,
+        })
+}
+
 /// RAII guard that clears the `is_loading` flag and notifies waiters on drop.
 /// Ensures the loading flag is always reset, even on early returns or panics.
 pub struct LoadingGuard {
@@ -646,22 +728,47 @@ impl TranscriptionManager {
                                 .map_err(|e| anyhow::anyhow!("Canary transcription failed: {}", e))
                         }
                         LoadedEngine::Cohere(cohere_engine) => {
-                            let lang = if validated_language == "auto" {
-                                None
-                            } else if validated_language == "zh-Hans"
-                                || validated_language == "zh-Hant"
-                            {
-                                Some("zh".to_string())
+                            let language_candidates = transcription_language_candidates(
+                                &validated_language,
+                                &settings.adaptive_language_shortlist,
+                            );
+
+                            if validated_language == "auto" && language_candidates.len() > 1 {
+                                let mut results = Vec::new();
+                                let mut last_error = None;
+
+                                for language in language_candidates {
+                                    let options = TranscribeOptions {
+                                        language: Some(language.clone()),
+                                        ..Default::default()
+                                    };
+
+                                    match cohere_engine.transcribe(&audio, &options) {
+                                        Ok(result) => results.push((language, result)),
+                                        Err(error) => last_error = Some(error),
+                                    }
+                                }
+
+                                if results.is_empty() {
+                                    Err(anyhow::anyhow!(
+                                        "Cohere transcription failed: {}",
+                                        last_error.map(|error| error.to_string()).unwrap_or_else(
+                                            || "no language candidates succeeded".to_string()
+                                        )
+                                    ))
+                                } else {
+                                    Ok(select_best_language_candidate(results))
+                                }
                             } else {
-                                Some(validated_language.clone())
-                            };
-                            let options = TranscribeOptions {
-                                language: lang,
-                                ..Default::default()
-                            };
-                            cohere_engine
-                                .transcribe(&audio, &options)
-                                .map_err(|e| anyhow::anyhow!("Cohere transcription failed: {}", e))
+                                let lang = language_candidates.first().cloned();
+                                let options = TranscribeOptions {
+                                    language: lang,
+                                    ..Default::default()
+                                };
+                                cohere_engine.transcribe(&audio, &options).map_err(|e| {
+                                    anyhow::anyhow!("Cohere transcription failed: {}", e)
+                                })
+                            }
                         }
                     }
                 },
@@ -921,5 +1028,46 @@ mod tests {
         assert_eq!(normalize_language_for_engine("zh-Hans"), "zh");
         assert_eq!(normalize_language_for_engine("zh-Hant"), "zh");
         assert_eq!(normalize_language_for_engine("ar"), "ar");
+    }
+
+    #[test]
+    fn uses_shortlist_as_candidates_when_language_is_auto() {
+        assert_eq!(
+            transcription_language_candidates(
+                "auto",
+                &["en".to_string(), "ar".to_string(), "en".to_string()],
+            ),
+            vec!["en".to_string(), "ar".to_string()]
+        );
+    }
+
+    #[test]
+    fn forced_language_overrides_shortlist_candidates() {
+        assert_eq!(
+            transcription_language_candidates("ar", &["en".to_string()]),
+            vec!["ar".to_string()]
+        );
+    }
+
+    #[test]
+    fn cohere_candidate_selection_prefers_arabic_script_for_arabic_hint() {
+        let result = select_best_language_candidate(vec![
+            (
+                "en".to_string(),
+                transcribe_rs::TranscriptionResult {
+                    text: "this is an unrelated English sentence".to_string(),
+                    segments: None,
+                },
+            ),
+            (
+                "ar".to_string(),
+                transcribe_rs::TranscriptionResult {
+                    text: "هذا نص عربي واضح".to_string(),
+                    segments: None,
+                },
+            ),
+        ]);
+
+        assert_eq!(result.text, "هذا نص عربي واضح");
     }
 }

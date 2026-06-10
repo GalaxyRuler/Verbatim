@@ -186,7 +186,7 @@
       },
       "language": {
         "title": "Languages",
-        "description": "Choose one or more speech languages. A single language is used as a recognition hint; multiple languages keep auto-detect on and guide adaptive cleanup.",
+        "description": "Choose one or more speech languages. Verbatim uses model-specific hints so selected languages can guide transcription before cleanup.",
         "descriptionUnsupported": "Parakeet model automatically detects the language. No manual selection is needed.",
         "searchPlaceholder": "Search languages...",
         "noResults": "No languages found",

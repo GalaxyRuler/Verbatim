@@ -87,26 +87,12 @@ export const LanguageSelector: React.FC<LanguageSelectorProps> = ({
     LANGUAGES.find((lang) => lang.value === languageCode)?.label ||
     languageCode;
 
-  const autoLabel =
-    LANGUAGES.find((lang) => lang.value === "auto")?.label ||
-    t("settings.general.language.auto");
-
   const selectedLanguageNames = activeLanguageSelection
     .map(getLanguageLabel)
     .join(", ");
 
   const selectedLanguageName =
-    selectedLanguage === "auto"
-      ? selectedLanguageNames
-        ? `${autoLabel}: ${selectedLanguageNames}`
-        : autoLabel
-      : selectedLanguageNames || autoLabel;
-
-  const handleAutoSelect = async () => {
-    await updateSetting("selected_language", "auto");
-    setIsOpen(false);
-    setSearchQuery("");
-  };
+    selectedLanguageNames || t("settings.general.language.auto");
 
   const handleLanguageToggle = async (languageCode: string) => {
     const nextSelection = getNextLanguageSelection({
@@ -204,25 +190,6 @@ export const LanguageSelector: React.FC<LanguageSelectorProps> = ({
               </div>
 
               <div className="max-h-48 overflow-y-auto">
-                <button
-                  type="button"
-                  className={`w-full px-2 py-1 text-sm text-start hover:bg-logo-primary/10 transition-colors duration-150 ${
-                    selectedLanguage === "auto"
-                      ? "bg-logo-primary/20 text-logo-primary font-semibold"
-                      : ""
-                  }`}
-                  onClick={handleAutoSelect}
-                >
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      readOnly
-                      checked={selectedLanguage === "auto"}
-                      className="h-3.5 w-3.5 accent-logo-primary"
-                    />
-                    <span className="truncate">{autoLabel}</span>
-                  </div>
-                </button>
                 {filteredLanguages.length === 0 ? (
                   <div className="px-2 py-2 text-sm text-mid-gray text-center">
                     {t("settings.general.language.noResults")}
