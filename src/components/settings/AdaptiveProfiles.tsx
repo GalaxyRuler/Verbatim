@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { RotateCcw } from "lucide-react";
 import { toast } from "sonner";
@@ -7,7 +7,6 @@ import { commands } from "@/bindings";
 import { useSettings } from "../../hooks/useSettings";
 import { Button } from "../ui/Button";
 import { Dropdown, type DropdownOption } from "../ui/Dropdown";
-import { Input } from "../ui/Input";
 import { SettingContainer } from "../ui/SettingContainer";
 import { ToggleSwitch } from "../ui/ToggleSwitch";
 
@@ -15,12 +14,6 @@ interface AdaptiveProfilesProps {
   descriptionMode?: "inline" | "tooltip";
   grouped?: boolean;
 }
-
-const normalizeLanguageShortlist = (value: string): string[] =>
-  value
-    .split(",")
-    .map((language) => language.trim().toLowerCase())
-    .filter(Boolean);
 
 export const AdaptiveProfiles: React.FC<AdaptiveProfilesProps> = ({
   descriptionMode = "tooltip",
@@ -30,17 +23,7 @@ export const AdaptiveProfiles: React.FC<AdaptiveProfilesProps> = ({
   const { settings, updateSetting, isUpdating, refreshSettings } =
     useSettings();
   const [profiles, setProfiles] = useState<AdaptiveProfile[]>([]);
-  const [languageText, setLanguageText] = useState("");
   const [isCommandRunning, setCommandRunning] = useState(false);
-
-  const languageShortlist = useMemo(
-    () => settings?.adaptive_language_shortlist ?? [],
-    [settings?.adaptive_language_shortlist],
-  );
-
-  useEffect(() => {
-    setLanguageText(languageShortlist.join(", "));
-  }, [languageShortlist]);
 
   useEffect(() => {
     let cancelled = false;
@@ -63,18 +46,6 @@ export const AdaptiveProfiles: React.FC<AdaptiveProfilesProps> = ({
     value: profile.id,
     label: profile.name,
   }));
-
-  const handleLanguageBlur = async () => {
-    const nextShortlist = normalizeLanguageShortlist(languageText);
-    if (
-      nextShortlist.join(",") ===
-      languageShortlist.map((item) => item).join(",")
-    ) {
-      return;
-    }
-
-    await updateSetting("adaptive_language_shortlist", nextShortlist);
-  };
 
   const handleResetCorrectionMemory = async () => {
     setCommandRunning(true);
@@ -146,26 +117,6 @@ export const AdaptiveProfiles: React.FC<AdaptiveProfilesProps> = ({
           disabled={isUpdating("adaptive_default_profile_id")}
           placeholder={t(
             "settings.advanced.adaptiveProfiles.defaultProfile.placeholder",
-          )}
-        />
-      </SettingContainer>
-
-      <SettingContainer
-        title={t("settings.advanced.adaptiveProfiles.languages.title")}
-        description={t(
-          "settings.advanced.adaptiveProfiles.languages.description",
-        )}
-        descriptionMode={descriptionMode}
-        grouped={grouped}
-      >
-        <Input
-          className="w-[200px]"
-          value={languageText}
-          onChange={(event) => setLanguageText(event.target.value)}
-          onBlur={handleLanguageBlur}
-          disabled={isUpdating("adaptive_language_shortlist")}
-          placeholder={t(
-            "settings.advanced.adaptiveProfiles.languages.placeholder",
           )}
         />
       </SettingContainer>

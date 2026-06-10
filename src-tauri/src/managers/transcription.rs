@@ -47,6 +47,48 @@ enum LoadedEngine {
     Cohere(CohereModel),
 }
 
+fn normalize_language_for_engine(language: &str) -> String {
+    if language == "zh-Hans" || language == "zh-Hant" {
+        "zh".to_string()
+    } else {
+        language.to_string()
+    }
+}
+
+fn build_whisper_initial_prompt(
+    custom_words: &[String],
+    language_shortlist: &[String],
+) -> Option<String> {
+    let mut prompt_parts = Vec::new();
+    let languages = language_shortlist
+        .iter()
+        .map(|language| normalize_language_for_engine(language))
+        .filter(|language| language != "auto")
+        .fold(Vec::<String>::new(), |mut acc, language| {
+            if !acc.contains(&language) {
+                acc.push(language);
+            }
+            acc
+        });
+
+    if !languages.is_empty() {
+        prompt_parts.push(format!(
+            "The speech may be in these languages: {}. Transcribe in the spoken language. Do not translate unless translation is enabled.",
+            languages.join(", ")
+        ));
+    }
+
+    if !custom_words.is_empty() {
+        prompt_parts.push(format!("Relevant words: {}", custom_words.join(", ")));
+    }
+
+    if prompt_parts.is_empty() {
+        None
+    } else {
+        Some(prompt_parts.join("\n"))
+    }
+}
+
 /// RAII guard that clears the `is_loading` flag and notifies waiters on drop.
 /// Ensures the loading flag is always reset, even on early returns or panics.
 pub struct LoadingGuard {
@@ -530,24 +572,16 @@ impl TranscriptionManager {
                             let whisper_language = if validated_language == "auto" {
                                 None
                             } else {
-                                let normalized = if validated_language == "zh-Hans"
-                                    || validated_language == "zh-Hant"
-                                {
-                                    "zh".to_string()
-                                } else {
-                                    validated_language.clone()
-                                };
-                                Some(normalized)
+                                Some(normalize_language_for_engine(&validated_language))
                             };
 
                             let params = WhisperInferenceParams {
                                 language: whisper_language,
                                 translate: settings.translate_to_english,
-                                initial_prompt: if settings.custom_words.is_empty() {
-                                    None
-                                } else {
-                                    Some(settings.custom_words.join(", "))
-                                },
+                                initial_prompt: build_whisper_initial_prompt(
+                                    &settings.custom_words,
+                                    &settings.adaptive_language_shortlist,
+                                ),
                                 ..Default::default()
                             };
 
@@ -850,5 +884,42 @@ impl Drop for TranscriptionManager {
                 debug!("Idle watcher thread joined successfully");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn whisper_initial_prompt_includes_selected_language_shortlist() {
+        let prompt = build_whisper_initial_prompt(
+            &[],
+            &["en".to_string(), "ar".to_string(), "en".to_string()],
+        )
+        .expect("prompt should be built from language shortlist");
+
+        assert!(prompt.contains("en, ar"));
+        assert!(prompt.contains("Transcribe in the spoken language"));
+        assert!(prompt.contains("Do not translate unless translation is enabled"));
+    }
+
+    #[test]
+    fn whisper_initial_prompt_preserves_custom_words() {
+        let prompt = build_whisper_initial_prompt(
+            &["Verbatim".to_string(), "Codex".to_string()],
+            &["auto".to_string()],
+        )
+        .expect("prompt should include custom words");
+
+        assert!(prompt.contains("Relevant words: Verbatim, Codex"));
+        assert!(!prompt.contains("The speech may be in these languages"));
+    }
+
+    #[test]
+    fn normalizes_chinese_language_variants_for_engine_hints() {
+        assert_eq!(normalize_language_for_engine("zh-Hans"), "zh");
+        assert_eq!(normalize_language_for_engine("zh-Hant"), "zh");
+        assert_eq!(normalize_language_for_engine("ar"), "ar");
     }
 }

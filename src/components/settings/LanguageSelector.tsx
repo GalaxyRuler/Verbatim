@@ -4,6 +4,10 @@ import { SettingContainer } from "../ui/SettingContainer";
 import { ResetButton } from "../ui/ResetButton";
 import { useSettings } from "../../hooks/useSettings";
 import { LANGUAGES } from "../../lib/constants/languages";
+import {
+  getActiveLanguageSelection,
+  getNextLanguageSelection,
+} from "../../lib/languageSelection";
 
 interface LanguageSelectorProps {
   descriptionMode?: "inline" | "tooltip";
@@ -24,6 +28,11 @@ export const LanguageSelector: React.FC<LanguageSelectorProps> = ({
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   const selectedLanguage = getSetting("selected_language") || "auto";
+  const adaptiveLanguageShortlist =
+    getSetting("adaptive_language_shortlist") ?? [];
+  const isLanguageUpdating =
+    isUpdating("selected_language") ||
+    isUpdating("adaptive_language_shortlist");
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -50,12 +59,21 @@ export const LanguageSelector: React.FC<LanguageSelectorProps> = ({
 
   const availableLanguages = useMemo(() => {
     if (!supportedLanguages || supportedLanguages.length === 0)
-      return LANGUAGES;
+      return LANGUAGES.filter((lang) => lang.value !== "auto");
     return LANGUAGES.filter(
       (lang) =>
-        lang.value === "auto" || supportedLanguages.includes(lang.value),
+        lang.value !== "auto" && supportedLanguages.includes(lang.value),
     );
   }, [supportedLanguages]);
+
+  const activeLanguageSelection = useMemo(
+    () =>
+      getActiveLanguageSelection({
+        selectedLanguage,
+        adaptiveLanguageShortlist,
+      }),
+    [selectedLanguage, adaptiveLanguageShortlist],
+  );
 
   const filteredLanguages = useMemo(
     () =>
@@ -65,14 +83,50 @@ export const LanguageSelector: React.FC<LanguageSelectorProps> = ({
     [searchQuery, availableLanguages],
   );
 
-  const selectedLanguageName =
-    LANGUAGES.find((lang) => lang.value === selectedLanguage)?.label ||
+  const getLanguageLabel = (languageCode: string) =>
+    LANGUAGES.find((lang) => lang.value === languageCode)?.label ||
+    languageCode;
+
+  const autoLabel =
+    LANGUAGES.find((lang) => lang.value === "auto")?.label ||
     t("settings.general.language.auto");
 
-  const handleLanguageSelect = async (languageCode: string) => {
-    await updateSetting("selected_language", languageCode);
+  const selectedLanguageNames = activeLanguageSelection
+    .map(getLanguageLabel)
+    .join(", ");
+
+  const selectedLanguageName =
+    selectedLanguage === "auto"
+      ? selectedLanguageNames
+        ? `${autoLabel}: ${selectedLanguageNames}`
+        : autoLabel
+      : selectedLanguageNames || autoLabel;
+
+  const handleAutoSelect = async () => {
+    await updateSetting("selected_language", "auto");
     setIsOpen(false);
     setSearchQuery("");
+  };
+
+  const handleLanguageToggle = async (languageCode: string) => {
+    const nextSelection = getNextLanguageSelection({
+      selectedLanguage,
+      adaptiveLanguageShortlist,
+      toggledLanguage: languageCode,
+    });
+
+    if (nextSelection.adaptiveLanguageShortlist.length === 0) {
+      return;
+    }
+
+    await updateSetting(
+      "adaptive_language_shortlist",
+      nextSelection.adaptiveLanguageShortlist,
+    );
+
+    if (nextSelection.selectedLanguage !== selectedLanguage) {
+      await updateSetting("selected_language", nextSelection.selectedLanguage);
+    }
   };
 
   const handleReset = async () => {
@@ -80,7 +134,7 @@ export const LanguageSelector: React.FC<LanguageSelectorProps> = ({
   };
 
   const handleToggle = () => {
-    if (isUpdating("selected_language")) return;
+    if (isLanguageUpdating) return;
     setIsOpen(!isOpen);
   };
 
@@ -90,8 +144,7 @@ export const LanguageSelector: React.FC<LanguageSelectorProps> = ({
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
     if (event.key === "Enter" && filteredLanguages.length > 0) {
-      // Select first filtered language on Enter
-      handleLanguageSelect(filteredLanguages[0].value);
+      handleLanguageToggle(filteredLanguages[0].value);
     } else if (event.key === "Escape") {
       setIsOpen(false);
       setSearchQuery("");
@@ -110,12 +163,12 @@ export const LanguageSelector: React.FC<LanguageSelectorProps> = ({
           <button
             type="button"
             className={`px-2 py-1 text-sm font-semibold bg-mid-gray/10 border border-mid-gray/80 rounded min-w-[200px] text-start flex items-center justify-between transition-all duration-150 ${
-              isUpdating("selected_language")
+              isLanguageUpdating
                 ? "opacity-50 cursor-not-allowed"
                 : "hover:bg-logo-primary/10 cursor-pointer hover:border-logo-primary"
             }`}
             onClick={handleToggle}
-            disabled={isUpdating("selected_language")}
+            disabled={isLanguageUpdating}
           >
             <span className="truncate">{selectedLanguageName}</span>
             <svg
@@ -135,7 +188,7 @@ export const LanguageSelector: React.FC<LanguageSelectorProps> = ({
             </svg>
           </button>
 
-          {isOpen && !isUpdating("selected_language") && (
+          {isOpen && !isLanguageUpdating && (
             <div className="absolute top-full left-0 right-0 mt-1 bg-background border border-mid-gray/80 rounded shadow-lg z-50 max-h-60 overflow-hidden">
               {/* Search input */}
               <div className="p-2 border-b border-mid-gray/80">
@@ -151,27 +204,61 @@ export const LanguageSelector: React.FC<LanguageSelectorProps> = ({
               </div>
 
               <div className="max-h-48 overflow-y-auto">
+                <button
+                  type="button"
+                  className={`w-full px-2 py-1 text-sm text-start hover:bg-logo-primary/10 transition-colors duration-150 ${
+                    selectedLanguage === "auto"
+                      ? "bg-logo-primary/20 text-logo-primary font-semibold"
+                      : ""
+                  }`}
+                  onClick={handleAutoSelect}
+                >
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      readOnly
+                      checked={selectedLanguage === "auto"}
+                      className="h-3.5 w-3.5 accent-logo-primary"
+                    />
+                    <span className="truncate">{autoLabel}</span>
+                  </div>
+                </button>
                 {filteredLanguages.length === 0 ? (
                   <div className="px-2 py-2 text-sm text-mid-gray text-center">
                     {t("settings.general.language.noResults")}
                   </div>
                 ) : (
-                  filteredLanguages.map((language) => (
-                    <button
-                      key={language.value}
-                      type="button"
-                      className={`w-full px-2 py-1 text-sm text-start hover:bg-logo-primary/10 transition-colors duration-150 ${
-                        selectedLanguage === language.value
-                          ? "bg-logo-primary/20 text-logo-primary font-semibold"
-                          : ""
-                      }`}
-                      onClick={() => handleLanguageSelect(language.value)}
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="truncate">{language.label}</span>
-                      </div>
-                    </button>
-                  ))
+                  filteredLanguages.map((language) => {
+                    const isChecked = activeLanguageSelection.includes(
+                      language.value,
+                    );
+                    const isOnlyChecked =
+                      isChecked && activeLanguageSelection.length === 1;
+
+                    return (
+                      <button
+                        key={language.value}
+                        type="button"
+                        className={`w-full px-2 py-1 text-sm text-start hover:bg-logo-primary/10 transition-colors duration-150 ${
+                          isChecked
+                            ? "bg-logo-primary/20 text-logo-primary font-semibold"
+                            : ""
+                        } ${isOnlyChecked ? "cursor-default" : ""}`}
+                        onClick={() => handleLanguageToggle(language.value)}
+                        disabled={isOnlyChecked}
+                      >
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            readOnly
+                            checked={isChecked}
+                            className="h-3.5 w-3.5 accent-logo-primary"
+                          />
+                          <span className="truncate">{language.label}</span>
+                        </div>
+                      </button>
+                    );
+                  })
                 )}
               </div>
             </div>
@@ -179,10 +266,10 @@ export const LanguageSelector: React.FC<LanguageSelectorProps> = ({
         </div>
         <ResetButton
           onClick={handleReset}
-          disabled={isUpdating("selected_language")}
+          disabled={isLanguageUpdating}
         />
       </div>
-      {isUpdating("selected_language") && (
+      {isLanguageUpdating && (
         <div className="absolute inset-0 bg-mid-gray/10 rounded flex items-center justify-center">
           <div className="w-4 h-4 border-2 border-logo-primary border-t-transparent rounded-full animate-spin"></div>
         </div>

@@ -185,8 +185,8 @@
         }
       },
       "language": {
-        "title": "Language",
-        "description": "Select the language for speech recognition. Auto will automatically determine the language, while selecting a specific language can improve accuracy for that language.",
+        "title": "Languages",
+        "description": "Choose one or more speech languages. A single language is used as a recognition hint; multiple languages keep auto-detect on and guide adaptive cleanup.",
         "descriptionUnsupported": "Parakeet model automatically detects the language. No manual selection is needed.",
         "searchPlaceholder": "Search languages...",
         "noResults": "No languages found",
