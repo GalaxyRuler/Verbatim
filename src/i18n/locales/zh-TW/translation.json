@@ -548,14 +548,9 @@
         "description": "Verbatim 儲存資料的位置"
       },
       "sourceCode": {
-        "title": "原始碼",
-        "description": "檢視原始碼並參與貢獻",
-        "button": "在 GitHub 上檢視"
-      },
-      "supportDevelopment": {
-        "title": "支持開發",
-        "description": "幫助我們繼續開發 Verbatim",
-        "button": "捐贈"
+        "title": "Original Source Code",
+        "description": "View the original Handy project that Verbatim is based on.",
+        "button": "View Handy on GitHub"
       },
       "acknowledgments": {
         "title": "致謝",
@@ -563,6 +558,16 @@
           "title": "Whisper.cpp",
           "description": "針對 OpenAI Whisper 自動語音識別模型的高效能推理引擎",
           "details": "Verbatim 使用 Whisper.cpp 進行快速的本機語音轉文字處理。感謝 Georgi Gerganov 和貢獻者們的傑出工作"
+        },
+        "handy": {
+          "title": "Handy",
+          "description": "Original speech-to-text app by CJ Pais.",
+          "details": "Verbatim is based on Handy, an MIT-licensed project created by CJ Pais and contributors. Verbatim keeps attribution to the original project while adapting the app for this fork."
+        },
+        "license": {
+          "title": "MIT License Notice",
+          "description": "Original Handy copyright and license notice.",
+          "details": "Portions of this app are derived from Handy. Original copyright: Copyright (c) 2025 CJ Pais. Handy is licensed under the MIT License; the license and copyright notice are preserved with this fork."
         }
       }
     }

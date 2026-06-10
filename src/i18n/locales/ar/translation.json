@@ -526,14 +526,9 @@
         "description": "الموقع الذي يخزن فيه Verbatim بياناته"
       },
       "sourceCode": {
-        "title": "كود المصدر",
-        "description": "عرض كود المصدر والمساهمة",
-        "button": "عرض على GitHub"
-      },
-      "supportDevelopment": {
-        "title": "دعم التطوير",
-        "description": "ساعدنا في مواصلة بناء Verbatim",
-        "button": "تبرع"
+        "title": "كود المصدر الأصلي",
+        "description": "عرض مشروع Handy الأصلي الذي بُني عليه Verbatim.",
+        "button": "عرض Handy على GitHub"
       },
       "acknowledgments": {
         "title": "شكر وتقدير",
@@ -541,6 +536,16 @@
           "title": "Whisper.cpp",
           "description": "استنتاج عالي الأداء لنموذج التعرف التلقائي على الكلام Whisper من OpenAI",
           "details": ".يستخدم Verbatim برنامج Whisper.cpp لمعالجة سريعة ومحلية لتحويل الكلام إلى نص. شكراً للعمل الرائع الذي قام به Georgi Gerganov والمساهمون"
+        },
+        "handy": {
+          "title": "Handy",
+          "description": "تطبيق تحويل الكلام إلى نص الأصلي من CJ Pais.",
+          "details": "يعتمد Verbatim على Handy، وهو مشروع مرخص برخصة MIT أنشأه CJ Pais والمساهمون. يحتفظ Verbatim بالإشارة إلى المشروع الأصلي مع تعديل التطبيق لهذا الفرع."
+        },
+        "license": {
+          "title": "إشعار رخصة MIT",
+          "description": "إشعار حقوق النشر والرخصة الأصلي لمشروع Handy.",
+          "details": "أجزاء من هذا التطبيق مشتقة من Handy. حقوق النشر الأصلية: Copyright (c) 2025 CJ Pais. مشروع Handy مرخص برخصة MIT، ويتم الحفاظ على إشعار الرخصة وحقوق النشر في هذا الفرع."
         }
       }
     },

@@ -548,14 +548,9 @@
         "description": "Speicherort der Verbatim-Daten"
       },
       "sourceCode": {
-        "title": "Quellcode",
-        "description": "Quellcode ansehen und beitragen",
-        "button": "Auf GitHub ansehen"
-      },
-      "supportDevelopment": {
-        "title": "Entwicklung unterstützen",
-        "description": "Hilf uns, Verbatim weiterzuentwickeln",
-        "button": "Spenden"
+        "title": "Original Source Code",
+        "description": "View the original Handy project that Verbatim is based on.",
+        "button": "View Handy on GitHub"
       },
       "acknowledgments": {
         "title": "Danksagungen",
@@ -563,6 +558,16 @@
           "title": "Whisper.cpp",
           "description": "Hochleistungs-Inferenz des Whisper-Spracherkennungsmodells von OpenAI",
           "details": "Verbatim verwendet Whisper.cpp für schnelle, lokale Sprach-zu-Text-Verarbeitung. Dank an Georgi Gerganov und die Mitwirkenden für ihre großartige Arbeit."
+        },
+        "handy": {
+          "title": "Handy",
+          "description": "Original speech-to-text app by CJ Pais.",
+          "details": "Verbatim is based on Handy, an MIT-licensed project created by CJ Pais and contributors. Verbatim keeps attribution to the original project while adapting the app for this fork."
+        },
+        "license": {
+          "title": "MIT License Notice",
+          "description": "Original Handy copyright and license notice.",
+          "details": "Portions of this app are derived from Handy. Original copyright: Copyright (c) 2025 CJ Pais. Handy is licensed under the MIT License; the license and copyright notice are preserved with this fork."
         }
       }
     }
