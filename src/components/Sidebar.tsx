@@ -1,7 +1,6 @@
 import React from "react";
 import { useTranslation } from "react-i18next";
 import { Cog, FlaskConical, History, Info, Sparkles, Cpu } from "lucide-react";
-import VerbatimTextLogo from "./icons/VerbatimTextLogo";
 import VerbatimMark from "./icons/VerbatimMark";
 import { useSettings } from "../hooks/useSettings";
 import {
@@ -13,6 +12,7 @@ import {
   PostProcessingSettings,
   ModelsSettings,
 } from "./settings";
+import verbatimLockup from "@/assets/verbatim-lockup-horizontal.svg";
 
 export type SidebarSection = keyof typeof SECTIONS_CONFIG;
 
@@ -94,7 +94,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   return (
     <div className="flex flex-col w-40 h-full border-e border-mid-gray/20 items-center px-2">
-      <VerbatimTextLogo width={120} className="m-4" />
+      <div className="m-4 flex h-8 w-full items-center justify-center">
+        <img
+          src={verbatimLockup}
+          alt={t("common.appName")}
+          className="h-7 w-auto max-w-[8.5rem]"
+        />
+      </div>
       <div className="flex flex-col w-full items-center gap-1 pt-2 border-t border-mid-gray/20">
         {availableSections.map((section) => {
           const Icon = section.icon;

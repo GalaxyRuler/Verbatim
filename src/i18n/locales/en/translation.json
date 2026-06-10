@@ -563,6 +563,7 @@
     "portableUpdateButton": "Open GitHub Releases"
   },
   "common": {
+    "appName": "Verbatim",
     "loading": "Loading...",
     "save": "Save",
     "cancel": "Cancel",

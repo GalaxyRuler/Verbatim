@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="src-tauri/icons/logo.png" alt="Verbatim logo" width="128" height="128">
+  <img src="src-tauri/icons/logo.png" alt="Verbatim logo" width="400">
 
 # Verbatim
 
