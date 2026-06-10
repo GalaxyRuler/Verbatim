@@ -57,26 +57,9 @@ fn normalize_language_for_engine(language: &str) -> String {
 
 fn build_whisper_initial_prompt(
     custom_words: &[String],
-    language_shortlist: &[String],
+    _language_shortlist: &[String],
 ) -> Option<String> {
     let mut prompt_parts = Vec::new();
-    let languages = language_shortlist
-        .iter()
-        .map(|language| normalize_language_for_engine(language))
-        .filter(|language| language != "auto")
-        .fold(Vec::<String>::new(), |mut acc, language| {
-            if !acc.contains(&language) {
-                acc.push(language);
-            }
-            acc
-        });
-
-    if !languages.is_empty() {
-        prompt_parts.push(format!(
-            "The speech may be in these languages: {}. Transcribe in the spoken language. Do not translate unless translation is enabled.",
-            languages.join(", ")
-        ));
-    }
 
     if !custom_words.is_empty() {
         prompt_parts.push(format!("Relevant words: {}", custom_words.join(", ")));
@@ -598,15 +581,20 @@ impl TranscriptionManager {
 
         // Get current settings for configuration
         let settings = get_settings(&self.app_handle);
+        let current_model_info = self.model_manager.get_model_info(&settings.selected_model);
+        let effective_translate_to_english = settings.translate_to_english
+            && current_model_info
+                .as_ref()
+                .map(|info| info.supports_translation)
+                .unwrap_or(false);
 
         // Validate selected language against the model's supported languages.
         // If the language isn't supported, fall back to "auto" to prevent errors.
         let validated_language = if settings.selected_language == "auto" {
             "auto".to_string()
         } else {
-            let is_supported = self
-                .model_manager
-                .get_model_info(&settings.selected_model)
+            let is_supported = current_model_info
+                .as_ref()
                 .map(|info| {
                     info.supported_languages.is_empty()
                         || info
@@ -662,7 +650,7 @@ impl TranscriptionManager {
 
                             if validated_language == "auto"
                                 && language_candidates.len() > 1
-                                && !settings.translate_to_english
+                                && !effective_translate_to_english
                             {
                                 let mut results = Vec::new();
                                 let mut last_error = None;
@@ -700,7 +688,7 @@ impl TranscriptionManager {
 
                                 let params = WhisperInferenceParams {
                                     language: whisper_language,
-                                    translate: settings.translate_to_english,
+                                    translate: effective_translate_to_english,
                                     initial_prompt,
                                     ..Default::default()
                                 };
@@ -761,7 +749,7 @@ impl TranscriptionManager {
                             };
                             let options = TranscribeOptions {
                                 language: lang,
-                                translate: settings.translate_to_english,
+                                translate: effective_translate_to_english,
                                 ..Default::default()
                             };
                             canary_engine
@@ -890,7 +878,7 @@ impl TranscriptionManager {
         );
 
         let et = std::time::Instant::now();
-        let translation_note = if settings.translate_to_english {
+        let translation_note = if effective_translate_to_english {
             " (translated)"
         } else {
             ""
@@ -1040,16 +1028,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn whisper_initial_prompt_includes_selected_language_shortlist() {
+    fn whisper_initial_prompt_ignores_language_shortlist() {
         let prompt = build_whisper_initial_prompt(
             &[],
             &["en".to_string(), "ar".to_string(), "en".to_string()],
-        )
-        .expect("prompt should be built from language shortlist");
+        );
 
-        assert!(prompt.contains("en, ar"));
-        assert!(prompt.contains("Transcribe in the spoken language"));
-        assert!(prompt.contains("Do not translate unless translation is enabled"));
+        assert!(prompt.is_none());
     }
 
     #[test]

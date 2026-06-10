@@ -782,7 +782,7 @@ impl ShortcutAction for TranscribeAction {
                                     match hm.save_entry_with_metadata(
                                         file_name,
                                         transcription,
-                                        true,
+                                        post_process,
                                         processed.post_processed_text.clone(),
                                         processed.post_process_prompt.clone(),
                                         metadata,
