@@ -1,0 +1,18 @@
+<svg viewBox="0 0 640 128" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Verbatim">
+  <g fill="#FFFFFF">
+    <rect x="20" y="54" width="8" height="20" rx="4"/>
+    <rect x="36" y="41" width="8" height="46" rx="4"/>
+    <rect x="52" y="30" width="8" height="68" rx="4"/>
+    <rect x="68" y="41" width="8" height="46" rx="4"/>
+    <rect x="84" y="50" width="8" height="28" rx="4"/>
+    <rect x="100" y="55" width="8" height="18" rx="4"/>
+    <rect x="116" y="59" width="8" height="10" rx="4"/>
+    <circle cx="138" cy="64" r="4"/>
+    <circle cx="156" cy="64" r="4"/>
+    <circle cx="174" cy="64" r="4"/>
+    <circle cx="192" cy="64" r="4"/>
+    <circle cx="210" cy="64" r="4"/>
+    <rect x="244" y="32" width="7" height="64" rx="3.5"/>
+  </g>
+  <text x="284" y="86" fill="#FFFFFF" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="68" font-weight="650" letter-spacing="0">Verbatim</text>
+</svg>
