@@ -386,6 +386,89 @@ pub(crate) async fn process_transcription_output(
     }
 }
 
+fn serialize_json<T: serde::Serialize>(value: &T) -> Option<String> {
+    serde_json::to_string(value).ok()
+}
+
+pub(crate) async fn process_adaptive_transcription_output(
+    settings: &AppSettings,
+    transcription: &str,
+    context: crate::adaptive::types::CapturedContext,
+    shortcut: crate::adaptive::types::ShortcutIntent,
+) -> crate::adaptive::types::AdaptiveProcessResult {
+    let pre_route = crate::adaptive::routing::route_before_recording(
+        &settings.adaptive_profiles,
+        shortcut,
+        &context,
+        &settings.adaptive_language_shortlist,
+        &settings.adaptive_default_profile_id,
+    );
+    let language = crate::adaptive::language::analyze_language(
+        transcription,
+        &settings.adaptive_language_shortlist,
+    );
+    let routing = crate::adaptive::routing::route_after_transcription(
+        &settings.adaptive_profiles,
+        pre_route,
+        &context,
+        &language,
+        None,
+    );
+    let profile = crate::adaptive::profile::find_profile_or_default(
+        &settings.adaptive_profiles,
+        &routing.profile_id,
+    );
+
+    let final_text = crate::adaptive::processor::deterministic_process(transcription, profile);
+    let final_text = match crate::adaptive::processor::validate_output(
+        transcription,
+        &final_text,
+        profile,
+    ) {
+        Ok(()) => final_text,
+        Err(err) => {
+            warn!(
+                    "Adaptive processing failed validation for profile '{}': {}. Falling back to raw transcript.",
+                    profile.id, err
+                );
+            transcription.to_string()
+        }
+    };
+    let post_process_prompt =
+        crate::adaptive::processor::build_profile_prompt(transcription, profile);
+    let post_processed_text = if final_text == transcription {
+        None
+    } else {
+        Some(final_text.clone())
+    };
+
+    crate::adaptive::types::AdaptiveProcessResult {
+        final_text,
+        post_processed_text,
+        post_process_prompt,
+        language,
+        routing,
+    }
+}
+
+#[cfg(test)]
+mod adaptive_action_tests {
+    use super::*;
+    use crate::adaptive::types::{InsertionMethod, InsertionReceipt};
+
+    #[test]
+    fn serialize_json_returns_some_for_receipt() {
+        let receipt = InsertionReceipt {
+            attempted: true,
+            succeeded: true,
+            method: InsertionMethod::Direct,
+            target_verified: true,
+            error: None,
+        };
+        assert!(serialize_json(&receipt).unwrap().contains("succeeded"));
+    }
+}
+
 impl ShortcutAction for TranscribeAction {
     fn start(&self, app: &AppHandle, binding_id: &str, _shortcut_str: &str) {
         let start_time = Instant::now();
@@ -592,52 +675,169 @@ impl ShortcutAction for TranscribeAction {
                                 transcription
                             );
 
-                            if post_process {
+                            let settings = get_settings(&ah);
+                            let adaptive_context = if settings.adaptive_profiles_enabled {
+                                ah.try_state::<crate::adaptive::session::ActiveDictationContext>()
+                                    .and_then(|store| store.take(&binding_id))
+                            } else {
+                                None
+                            };
+
+                            if post_process || adaptive_context.is_some() {
                                 show_processing_overlay(&ah);
                             }
-                            let processed =
-                                process_transcription_output(&ah, &transcription, post_process)
-                                    .await;
 
-                            // Save to history if WAV was saved
-                            if wav_saved {
-                                if let Err(err) = hm.save_entry(
-                                    file_name,
-                                    transcription,
-                                    post_process,
-                                    processed.post_processed_text.clone(),
-                                    processed.post_process_prompt.clone(),
-                                ) {
-                                    error!("Failed to save history entry: {}", err);
-                                }
-                            }
+                            if let Some(context) = adaptive_context {
+                                let processed = process_adaptive_transcription_output(
+                                    &settings,
+                                    &transcription,
+                                    context.clone(),
+                                    crate::adaptive::types::ShortcutIntent::Default,
+                                )
+                                .await;
+                                let profile = crate::adaptive::profile::find_profile_or_default(
+                                    &settings.adaptive_profiles,
+                                    &processed.routing.profile_id,
+                                );
 
-                            if processed.final_text.is_empty() {
-                                utils::hide_recording_overlay(&ah);
-                                change_tray_icon(&ah, TrayIconState::Idle);
-                            } else {
-                                let ah_clone = ah.clone();
-                                let paste_time = Instant::now();
-                                let final_text = processed.final_text;
-                                ah.run_on_main_thread(move || {
-                                    match utils::paste(final_text, ah_clone.clone()) {
-                                        Ok(()) => debug!(
-                                            "Text pasted successfully in {:?}",
-                                            paste_time.elapsed()
-                                        ),
-                                        Err(e) => {
-                                            error!("Failed to paste transcription: {}", e);
-                                            let _ = ah_clone.emit("paste-error", ());
+                                let saved_entry_id = if wav_saved {
+                                    let metadata =
+                                        crate::managers::history::AdaptiveHistoryMetadata {
+                                            profile_id: Some(profile.id.clone()),
+                                            profile_name: Some(profile.name.clone()),
+                                            routing_json: serialize_json(&processed.routing),
+                                            context_json: serialize_json(&context),
+                                            language_json: serialize_json(&processed.language),
+                                            insertion_json: None,
+                                            parent_entry_id: None,
+                                        };
+                                    match hm.save_entry_with_metadata(
+                                        file_name,
+                                        transcription,
+                                        true,
+                                        processed.post_processed_text.clone(),
+                                        processed.post_process_prompt.clone(),
+                                        metadata,
+                                    ) {
+                                        Ok(entry) => Some(entry.id),
+                                        Err(err) => {
+                                            error!(
+                                                "Failed to save adaptive history entry: {}",
+                                                err
+                                            );
+                                            None
                                         }
                                     }
-                                    utils::hide_recording_overlay(&ah_clone);
-                                    change_tray_icon(&ah_clone, TrayIconState::Idle);
-                                })
-                                .unwrap_or_else(|e| {
-                                    error!("Failed to run paste on main thread: {:?}", e);
+                                } else {
+                                    None
+                                };
+
+                                if processed.final_text.is_empty() {
                                     utils::hide_recording_overlay(&ah);
                                     change_tray_icon(&ah, TrayIconState::Idle);
-                                });
+                                } else {
+                                    let ah_clone = ah.clone();
+                                    let hm_for_receipt = Arc::clone(&hm);
+                                    let paste_time = Instant::now();
+                                    let final_text = processed.final_text;
+                                    let original_context = context.clone();
+                                    let private_patterns =
+                                        settings.adaptive_private_app_patterns.clone();
+                                    ah.run_on_main_thread(move || {
+                                        let current_context =
+                                            crate::adaptive::context::capture_context(
+                                                &private_patterns,
+                                            );
+                                        let target_verified =
+                                            original_context.target_fingerprint.is_none()
+                                                || current_context.target_fingerprint
+                                                    == original_context.target_fingerprint;
+                                        let receipt = utils::paste_with_receipt(
+                                            final_text,
+                                            ah_clone.clone(),
+                                            target_verified,
+                                        );
+                                        if receipt.succeeded {
+                                            debug!(
+                                                "Text pasted successfully in {:?}",
+                                                paste_time.elapsed()
+                                            );
+                                        } else {
+                                            error!(
+                                                "Failed to paste transcription: {:?}",
+                                                receipt.error
+                                            );
+                                            let _ = ah_clone.emit("paste-error", ());
+                                        }
+                                        if let Some(entry_id) = saved_entry_id {
+                                            if let Some(receipt_json) = serialize_json(&receipt) {
+                                                if let Err(err) = hm_for_receipt
+                                                    .update_insertion_receipt(
+                                                        entry_id,
+                                                        receipt_json,
+                                                    )
+                                                {
+                                                    error!(
+                                                        "Failed to update insertion receipt: {}",
+                                                        err
+                                                    );
+                                                }
+                                            }
+                                        }
+                                        utils::hide_recording_overlay(&ah_clone);
+                                        change_tray_icon(&ah_clone, TrayIconState::Idle);
+                                    })
+                                    .unwrap_or_else(|e| {
+                                        error!("Failed to run paste on main thread: {:?}", e);
+                                        utils::hide_recording_overlay(&ah);
+                                        change_tray_icon(&ah, TrayIconState::Idle);
+                                    });
+                                }
+                            } else {
+                                let processed =
+                                    process_transcription_output(&ah, &transcription, post_process)
+                                        .await;
+
+                                // Save to history if WAV was saved
+                                if wav_saved {
+                                    if let Err(err) = hm.save_entry(
+                                        file_name,
+                                        transcription,
+                                        post_process,
+                                        processed.post_processed_text.clone(),
+                                        processed.post_process_prompt.clone(),
+                                    ) {
+                                        error!("Failed to save history entry: {}", err);
+                                    }
+                                }
+
+                                if processed.final_text.is_empty() {
+                                    utils::hide_recording_overlay(&ah);
+                                    change_tray_icon(&ah, TrayIconState::Idle);
+                                } else {
+                                    let ah_clone = ah.clone();
+                                    let paste_time = Instant::now();
+                                    let final_text = processed.final_text;
+                                    ah.run_on_main_thread(move || {
+                                        match utils::paste(final_text, ah_clone.clone()) {
+                                            Ok(()) => debug!(
+                                                "Text pasted successfully in {:?}",
+                                                paste_time.elapsed()
+                                            ),
+                                            Err(e) => {
+                                                error!("Failed to paste transcription: {}", e);
+                                                let _ = ah_clone.emit("paste-error", ());
+                                            }
+                                        }
+                                        utils::hide_recording_overlay(&ah_clone);
+                                        change_tray_icon(&ah_clone, TrayIconState::Idle);
+                                    })
+                                    .unwrap_or_else(|e| {
+                                        error!("Failed to run paste on main thread: {:?}", e);
+                                        utils::hide_recording_overlay(&ah);
+                                        change_tray_icon(&ah, TrayIconState::Idle);
+                                    });
+                                }
                             }
                         }
                         Err(err) => {
