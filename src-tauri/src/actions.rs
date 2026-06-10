@@ -410,6 +410,15 @@ impl ShortcutAction for TranscribeAction {
 
         // Get the microphone mode to determine audio feedback timing
         let settings = get_settings(app);
+        if settings.adaptive_profiles_enabled {
+            if let Some(store) = app.try_state::<crate::adaptive::session::ActiveDictationContext>()
+            {
+                let context = crate::adaptive::context::capture_context(
+                    &settings.adaptive_private_app_patterns,
+                );
+                store.insert(&binding_id, context);
+            }
+        }
         let is_always_on = settings.always_on_microphone;
         debug!("Microphone mode - always_on: {}", is_always_on);
 
@@ -463,6 +472,10 @@ impl ShortcutAction for TranscribeAction {
         } else {
             // Starting failed (for example due to blocked microphone permissions).
             // Revert UI state so we don't stay stuck in the recording overlay.
+            if let Some(store) = app.try_state::<crate::adaptive::session::ActiveDictationContext>()
+            {
+                store.clear(&binding_id);
+            }
             utils::hide_recording_overlay(app);
             change_tray_icon(app, TrayIconState::Idle);
             if let Some(err) = recording_error {
@@ -664,8 +677,11 @@ impl ShortcutAction for TranscribeAction {
 struct CancelAction;
 
 impl ShortcutAction for CancelAction {
-    fn start(&self, app: &AppHandle, _binding_id: &str, _shortcut_str: &str) {
+    fn start(&self, app: &AppHandle, binding_id: &str, _shortcut_str: &str) {
         utils::cancel_current_operation(app);
+        if let Some(store) = app.try_state::<crate::adaptive::session::ActiveDictationContext>() {
+            store.clear(binding_id);
+        }
     }
 
     fn stop(&self, _app: &AppHandle, _binding_id: &str, _shortcut_str: &str) {
