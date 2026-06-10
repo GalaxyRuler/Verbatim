@@ -1,3 +1,4 @@
+use crate::adaptive::types::{InsertionMethod, InsertionReceipt};
 use crate::input::{self, EnigoState};
 #[cfg(target_os = "linux")]
 use crate::settings::TypingTool;
@@ -588,6 +589,41 @@ fn should_send_auto_submit(auto_submit: bool, paste_method: PasteMethod) -> bool
     auto_submit && paste_method != PasteMethod::None
 }
 
+fn insertion_method_for_paste_method(paste_method: PasteMethod) -> InsertionMethod {
+    match paste_method {
+        PasteMethod::None => InsertionMethod::None,
+        PasteMethod::Direct => InsertionMethod::Direct,
+        PasteMethod::CtrlV | PasteMethod::CtrlShiftV | PasteMethod::ShiftInsert => {
+            InsertionMethod::Clipboard
+        }
+        PasteMethod::ExternalScript => InsertionMethod::ExternalScript,
+    }
+}
+
+fn receipt_from_result(
+    paste_method: PasteMethod,
+    target_verified: bool,
+    result: Result<(), String>,
+) -> InsertionReceipt {
+    let attempted = paste_method != PasteMethod::None;
+    match result {
+        Ok(()) => InsertionReceipt {
+            attempted,
+            succeeded: true,
+            method: insertion_method_for_paste_method(paste_method),
+            target_verified,
+            error: None,
+        },
+        Err(error) => InsertionReceipt {
+            attempted,
+            succeeded: false,
+            method: insertion_method_for_paste_method(paste_method),
+            target_verified,
+            error: Some(error),
+        },
+    }
+}
+
 pub fn paste(text: String, app_handle: AppHandle) -> Result<(), String> {
     let settings = get_settings(&app_handle);
     let paste_method = settings.paste_method;
@@ -662,6 +698,17 @@ pub fn paste(text: String, app_handle: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+pub fn paste_with_receipt(
+    text: String,
+    app_handle: AppHandle,
+    target_verified: bool,
+) -> InsertionReceipt {
+    let settings = get_settings(&app_handle);
+    let paste_method = settings.paste_method;
+    let result = paste(text, app_handle);
+    receipt_from_result(paste_method, target_verified, result)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -683,5 +730,49 @@ mod tests {
         assert!(should_send_auto_submit(true, PasteMethod::Direct));
         assert!(should_send_auto_submit(true, PasteMethod::CtrlShiftV));
         assert!(should_send_auto_submit(true, PasteMethod::ShiftInsert));
+    }
+
+    #[test]
+    fn receipt_method_matches_paste_method() {
+        assert_eq!(
+            insertion_method_for_paste_method(PasteMethod::None),
+            InsertionMethod::None
+        );
+        assert_eq!(
+            insertion_method_for_paste_method(PasteMethod::Direct),
+            InsertionMethod::Direct
+        );
+        assert_eq!(
+            insertion_method_for_paste_method(PasteMethod::CtrlV),
+            InsertionMethod::Clipboard
+        );
+        assert_eq!(
+            insertion_method_for_paste_method(PasteMethod::CtrlShiftV),
+            InsertionMethod::Clipboard
+        );
+        assert_eq!(
+            insertion_method_for_paste_method(PasteMethod::ShiftInsert),
+            InsertionMethod::Clipboard
+        );
+        assert_eq!(
+            insertion_method_for_paste_method(PasteMethod::ExternalScript),
+            InsertionMethod::ExternalScript
+        );
+    }
+
+    #[test]
+    fn paste_none_receipt_counts_as_not_attempted() {
+        let receipt = receipt_from_result(PasteMethod::None, true, Ok(()));
+        assert!(!receipt.attempted);
+        assert!(receipt.succeeded);
+        assert_eq!(receipt.method, InsertionMethod::None);
+    }
+
+    #[test]
+    fn failed_receipt_keeps_error_message() {
+        let receipt = receipt_from_result(PasteMethod::Direct, true, Err("failed".to_string()));
+        assert!(receipt.attempted);
+        assert!(!receipt.succeeded);
+        assert_eq!(receipt.error.as_deref(), Some("failed"));
     }
 }
