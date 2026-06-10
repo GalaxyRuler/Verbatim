@@ -243,4 +243,25 @@ mod tests {
 
         assert_eq!(post.profile_id, "mixed_multilingual");
     }
+
+    #[test]
+    fn unknown_plain_text_routes_to_default_profile() {
+        let profiles = default_profiles();
+        let ctx = context(TargetKind::Unknown, "unknown.exe");
+        let pre = route_before_recording(
+            &profiles,
+            ShortcutIntent::Default,
+            &ctx,
+            &["en".to_string(), "ar".to_string()],
+            "default_clean",
+        );
+        let language = analyze_language(
+            "please send the file tomorrow",
+            &["en".to_string(), "ar".to_string()],
+        );
+        let post = route_after_transcription(&profiles, pre, &ctx, &language, None);
+
+        assert_eq!(post.profile_id, "default_clean");
+        assert_eq!(post.confidence, 50);
+    }
 }

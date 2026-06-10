@@ -236,6 +236,16 @@ mod tests {
     }
 
     #[test]
+    fn classifies_telegram_as_casual_message() {
+        let kind = classify_target(
+            Some("Telegram.exe"),
+            Some("Telegram"),
+            Some("Qt5152QWindowIcon"),
+        );
+        assert_eq!(kind, TargetKind::CasualMessage);
+    }
+
+    #[test]
     fn classifies_vscode_and_terminal_as_technical() {
         assert_eq!(
             classify_target(Some("Code.exe"), Some("actions.rs - Handy"), None),
