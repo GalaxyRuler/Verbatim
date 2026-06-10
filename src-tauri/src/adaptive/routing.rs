@@ -42,6 +42,10 @@ pub fn route_before_recording(
     }
 
     candidate_profile_ids.retain(|id| {
+        if id == "translation" {
+            return false;
+        }
+
         profiles
             .iter()
             .any(|profile| profile.id == *id && profile.enabled)
@@ -97,9 +101,10 @@ pub fn route_after_transcription(
     }
 
     if let Some(learned) = learned_profile_id {
-        if profiles
-            .iter()
-            .any(|profile| profile.id == learned && profile.enabled)
+        if learned != "translation"
+            && profiles
+                .iter()
+                .any(|profile| profile.id == learned && profile.enabled)
         {
             profile_id = learned.to_string();
             reasons.push(format!("learned profile preference: {}", learned));
@@ -108,7 +113,7 @@ pub fn route_after_transcription(
 
     if !profiles
         .iter()
-        .any(|profile| profile.id == profile_id && profile.enabled)
+        .any(|profile| profile.id == profile_id && profile.enabled && profile.id != "translation")
     {
         profile_id = "default_clean".to_string();
         reasons.push("selected profile unavailable; using default_clean".to_string());
@@ -242,6 +247,23 @@ mod tests {
         let post = route_after_transcription(&profiles, pre, &ctx, &language, None);
 
         assert_eq!(post.profile_id, "mixed_multilingual");
+    }
+
+    #[test]
+    fn learned_translation_profile_is_ignored() {
+        let profiles = default_profiles();
+        let ctx = context(TargetKind::Unknown, "unknown.exe");
+        let pre = route_before_recording(
+            &profiles,
+            ShortcutIntent::Default,
+            &ctx,
+            &["en".to_string(), "ar".to_string()],
+            "default_clean",
+        );
+        let language = analyze_language("هذا نص عربي واضح", &["en".to_string(), "ar".to_string()]);
+        let post = route_after_transcription(&profiles, pre, &ctx, &language, Some("translation"));
+
+        assert_eq!(post.profile_id, "default_clean");
     }
 
     #[test]

@@ -142,10 +142,9 @@ mod tests {
     }
 
     #[test]
-    fn validator_allows_translation_profile_to_change_language() {
-        let translation = profile("translation");
-        let validation =
-            validate_output("اكتب هذا بالانجليزي", "Write this in English", &translation);
-        assert!(validation.is_ok());
+    fn default_clean_profile_rejects_arabic_to_english_translation() {
+        let default_clean = profile("default_clean");
+        let validation = validate_output("هذا نص عربي", "This is Arabic text", &default_clean);
+        assert!(validation.is_err());
     }
 }

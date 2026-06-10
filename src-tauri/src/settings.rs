@@ -749,6 +749,14 @@ fn ensure_post_process_defaults(settings: &mut AppSettings) -> bool {
 fn ensure_adaptive_defaults(settings: &mut AppSettings) -> bool {
     let mut changed = false;
 
+    let original_profile_count = settings.adaptive_profiles.len();
+    settings
+        .adaptive_profiles
+        .retain(|profile| profile.id != "translation");
+    if settings.adaptive_profiles.len() != original_profile_count {
+        changed = true;
+    }
+
     for default_profile in default_adaptive_profiles() {
         if !settings
             .adaptive_profiles
@@ -766,6 +774,11 @@ fn ensure_adaptive_defaults(settings: &mut AppSettings) -> bool {
     }
 
     if settings.adaptive_default_profile_id.is_empty() {
+        settings.adaptive_default_profile_id = default_adaptive_default_profile_id();
+        changed = true;
+    }
+
+    if settings.adaptive_default_profile_id == "translation" {
         settings.adaptive_default_profile_id = default_adaptive_default_profile_id();
         changed = true;
     }
@@ -1054,7 +1067,29 @@ mod tests {
             .adaptive_profiles
             .iter()
             .any(|profile| profile.id == "mixed_multilingual"));
+        assert!(settings
+            .adaptive_profiles
+            .iter()
+            .all(|profile| profile.id != "translation"));
         assert!(settings.adaptive_correction_memory_enabled);
+    }
+
+    #[test]
+    fn adaptive_defaults_remove_legacy_translation_profile() {
+        let mut settings = get_default_settings();
+        let mut legacy_profile = settings.adaptive_profiles[0].clone();
+        legacy_profile.id = "translation".to_string();
+        settings.adaptive_profiles.push(legacy_profile);
+        settings.adaptive_default_profile_id = "translation".to_string();
+
+        let changed = ensure_adaptive_defaults(&mut settings);
+
+        assert!(changed);
+        assert_eq!(settings.adaptive_default_profile_id, "default_clean");
+        assert!(settings
+            .adaptive_profiles
+            .iter()
+            .all(|profile| profile.id != "translation"));
     }
 
     #[test]

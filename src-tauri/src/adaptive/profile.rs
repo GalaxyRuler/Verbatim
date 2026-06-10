@@ -199,31 +199,6 @@ pub fn default_profiles() -> Vec<AdaptiveProfile> {
                 priority: 70,
             },
         },
-        AdaptiveProfile {
-            id: "translation".to_string(),
-            name: "Translation".to_string(),
-            enabled: true,
-            cleanup: clean_policy(),
-            rewrite: RewritePolicy {
-                mode: RewriteMode::LlmOptional,
-                system_instruction:
-                    "Translate only when the selected profile or trigger explicitly requests translation."
-                        .to_string(),
-                user_instruction:
-                    "Translate the transcript according to the active profile direction.".to_string(),
-            },
-            validation: ValidationPolicy {
-                preserve_raw_language: false,
-                forbid_unrequested_translation: false,
-                ..base_validation()
-            },
-            routing: RoutingPolicy {
-                app_hints: vec![],
-                language_hints: vec!["translation_requested".to_string()],
-                target_hints: vec![],
-                priority: 50,
-            },
-        },
     ]
 }
 
@@ -257,7 +232,7 @@ mod tests {
         assert!(ids.contains(&"technical"));
         assert!(ids.contains(&"email"));
         assert!(ids.contains(&"notes_markdown"));
-        assert!(ids.contains(&"translation"));
+        assert!(!ids.contains(&"translation"));
     }
 
     #[test]
