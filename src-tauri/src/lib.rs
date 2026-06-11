@@ -1,4 +1,5 @@
 mod actions;
+pub mod adaptive;
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 mod apple_intelligence;
 mod audio_feedback;
@@ -164,6 +165,7 @@ fn initialize_core_logic(app_handle: &AppHandle) {
     app_handle.manage(model_manager.clone());
     app_handle.manage(transcription_manager.clone());
     app_handle.manage(history_manager.clone());
+    app_handle.manage(adaptive::session::ActiveDictationContext::default());
 
     // Note: Shortcuts are NOT initialized here.
     // The frontend is responsible for calling the `initialize_shortcuts` command
@@ -358,6 +360,10 @@ pub fn run(cli_args: CliArgs) {
             shortcut::delete_post_process_prompt,
             shortcut::set_post_process_selected_prompt,
             shortcut::update_custom_words,
+            shortcut::change_adaptive_profiles_enabled_setting,
+            shortcut::change_adaptive_language_shortlist_setting,
+            shortcut::change_adaptive_default_profile_setting,
+            shortcut::reset_adaptive_profiles,
             shortcut::suspend_binding,
             shortcut::resume_binding,
             shortcut::change_mute_while_recording_setting,
@@ -389,6 +395,10 @@ pub fn run(cli_args: CliArgs) {
             commands::check_apple_intelligence_available,
             commands::initialize_enigo,
             commands::initialize_shortcuts,
+            commands::adaptive::get_adaptive_profiles,
+            commands::adaptive::reset_adaptive_correction_memory,
+            commands::adaptive::set_adaptive_correction_memory_enabled,
+            commands::adaptive::reprocess_last_adaptive_entry,
             commands::models::get_available_models,
             commands::models::get_model_info,
             commands::models::download_model,

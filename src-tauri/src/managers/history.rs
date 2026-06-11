@@ -31,7 +31,16 @@ static MIGRATIONS: &[M] = &[
     M::up("ALTER TABLE transcription_history ADD COLUMN post_processed_text TEXT;"),
     M::up("ALTER TABLE transcription_history ADD COLUMN post_process_prompt TEXT;"),
     M::up("ALTER TABLE transcription_history ADD COLUMN post_process_requested BOOLEAN NOT NULL DEFAULT 0;"),
+    M::up("ALTER TABLE transcription_history ADD COLUMN adaptive_profile_id TEXT;"),
+    M::up("ALTER TABLE transcription_history ADD COLUMN adaptive_profile_name TEXT;"),
+    M::up("ALTER TABLE transcription_history ADD COLUMN adaptive_routing_json TEXT;"),
+    M::up("ALTER TABLE transcription_history ADD COLUMN adaptive_context_json TEXT;"),
+    M::up("ALTER TABLE transcription_history ADD COLUMN adaptive_language_json TEXT;"),
+    M::up("ALTER TABLE transcription_history ADD COLUMN adaptive_insertion_json TEXT;"),
+    M::up("ALTER TABLE transcription_history ADD COLUMN adaptive_parent_entry_id INTEGER;"),
 ];
+
+const HISTORY_COLUMNS: &str = "id, file_name, timestamp, saved, title, transcription_text, post_processed_text, post_process_prompt, post_process_requested, adaptive_profile_id, adaptive_profile_name, adaptive_routing_json, adaptive_context_json, adaptive_language_json, adaptive_insertion_json, adaptive_parent_entry_id";
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 pub struct PaginatedHistory {
@@ -63,6 +72,37 @@ pub struct HistoryEntry {
     pub post_processed_text: Option<String>,
     pub post_process_prompt: Option<String>,
     pub post_process_requested: bool,
+    pub adaptive_profile_id: Option<String>,
+    pub adaptive_profile_name: Option<String>,
+    pub adaptive_routing_json: Option<String>,
+    pub adaptive_context_json: Option<String>,
+    pub adaptive_language_json: Option<String>,
+    pub adaptive_insertion_json: Option<String>,
+    pub adaptive_parent_entry_id: Option<i64>,
+}
+
+pub struct AdaptiveHistoryMetadata {
+    pub profile_id: Option<String>,
+    pub profile_name: Option<String>,
+    pub routing_json: Option<String>,
+    pub context_json: Option<String>,
+    pub language_json: Option<String>,
+    pub insertion_json: Option<String>,
+    pub parent_entry_id: Option<i64>,
+}
+
+impl AdaptiveHistoryMetadata {
+    pub fn empty() -> Self {
+        Self {
+            profile_id: None,
+            profile_name: None,
+            routing_json: None,
+            context_json: None,
+            language_json: None,
+            insertion_json: None,
+            parent_entry_id: None,
+        }
+    }
 }
 
 pub struct HistoryManager {
@@ -207,6 +247,13 @@ impl HistoryManager {
             post_processed_text: row.get("post_processed_text")?,
             post_process_prompt: row.get("post_process_prompt")?,
             post_process_requested: row.get("post_process_requested")?,
+            adaptive_profile_id: row.get("adaptive_profile_id")?,
+            adaptive_profile_name: row.get("adaptive_profile_name")?,
+            adaptive_routing_json: row.get("adaptive_routing_json")?,
+            adaptive_context_json: row.get("adaptive_context_json")?,
+            adaptive_language_json: row.get("adaptive_language_json")?,
+            adaptive_insertion_json: row.get("adaptive_insertion_json")?,
+            adaptive_parent_entry_id: row.get("adaptive_parent_entry_id")?,
         })
     }
 
@@ -224,6 +271,25 @@ impl HistoryManager {
         post_processed_text: Option<String>,
         post_process_prompt: Option<String>,
     ) -> Result<HistoryEntry> {
+        self.save_entry_with_metadata(
+            file_name,
+            transcription_text,
+            post_process_requested,
+            post_processed_text,
+            post_process_prompt,
+            AdaptiveHistoryMetadata::empty(),
+        )
+    }
+
+    pub fn save_entry_with_metadata(
+        &self,
+        file_name: String,
+        transcription_text: String,
+        post_process_requested: bool,
+        post_processed_text: Option<String>,
+        post_process_prompt: Option<String>,
+        metadata: AdaptiveHistoryMetadata,
+    ) -> Result<HistoryEntry> {
         let timestamp = Utc::now().timestamp();
         let title = self.format_timestamp_title(timestamp);
 
@@ -237,8 +303,15 @@ impl HistoryManager {
                 transcription_text,
                 post_processed_text,
                 post_process_prompt,
-                post_process_requested
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                post_process_requested,
+                adaptive_profile_id,
+                adaptive_profile_name,
+                adaptive_routing_json,
+                adaptive_context_json,
+                adaptive_language_json,
+                adaptive_insertion_json,
+                adaptive_parent_entry_id
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
             params![
                 &file_name,
                 timestamp,
@@ -248,6 +321,13 @@ impl HistoryManager {
                 &post_processed_text,
                 &post_process_prompt,
                 post_process_requested,
+                &metadata.profile_id,
+                &metadata.profile_name,
+                &metadata.routing_json,
+                &metadata.context_json,
+                &metadata.language_json,
+                &metadata.insertion_json,
+                &metadata.parent_entry_id,
             ],
         )?;
 
@@ -261,6 +341,13 @@ impl HistoryManager {
             post_processed_text,
             post_process_prompt,
             post_process_requested,
+            adaptive_profile_id: metadata.profile_id,
+            adaptive_profile_name: metadata.profile_name,
+            adaptive_routing_json: metadata.routing_json,
+            adaptive_context_json: metadata.context_json,
+            adaptive_language_json: metadata.language_json,
+            adaptive_insertion_json: metadata.insertion_json,
+            adaptive_parent_entry_id: metadata.parent_entry_id,
         };
 
         debug!("Saved history entry with id {}", entry.id);
@@ -306,13 +393,11 @@ impl HistoryManager {
             return Err(anyhow!("History entry {} not found", id));
         }
 
-        let entry = conn
-            .query_row(
-                "SELECT id, file_name, timestamp, saved, title, transcription_text, post_processed_text, post_process_prompt, post_process_requested
-                 FROM transcription_history WHERE id = ?1",
-                params![id],
-                Self::map_history_entry,
-            )?;
+        let query = format!(
+            "SELECT {} FROM transcription_history WHERE id = ?1",
+            HISTORY_COLUMNS
+        );
+        let entry = conn.query_row(&query, params![id], Self::map_history_entry)?;
 
         debug!("Updated transcription for history entry {}", id);
 
@@ -458,13 +543,15 @@ impl HistoryManager {
         let mut entries: Vec<HistoryEntry> = match (cursor, limit) {
             (Some(cursor_id), Some(lim)) => {
                 let fetch_count = (lim + 1) as i64;
-                let mut stmt = conn.prepare(
-                    "SELECT id, file_name, timestamp, saved, title, transcription_text, post_processed_text, post_process_prompt, post_process_requested
+                let query = format!(
+                    "SELECT {}
                      FROM transcription_history
                      WHERE id < ?1
                      ORDER BY id DESC
                      LIMIT ?2",
-                )?;
+                    HISTORY_COLUMNS
+                );
+                let mut stmt = conn.prepare(&query)?;
                 let result = stmt
                     .query_map(params![cursor_id, fetch_count], Self::map_history_entry)?
                     .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -472,23 +559,27 @@ impl HistoryManager {
             }
             (None, Some(lim)) => {
                 let fetch_count = (lim + 1) as i64;
-                let mut stmt = conn.prepare(
-                    "SELECT id, file_name, timestamp, saved, title, transcription_text, post_processed_text, post_process_prompt, post_process_requested
+                let query = format!(
+                    "SELECT {}
                      FROM transcription_history
                      ORDER BY id DESC
                      LIMIT ?1",
-                )?;
+                    HISTORY_COLUMNS
+                );
+                let mut stmt = conn.prepare(&query)?;
                 let result = stmt
                     .query_map(params![fetch_count], Self::map_history_entry)?
                     .collect::<std::result::Result<Vec<_>, _>>()?;
                 result
             }
             (_, None) => {
-                let mut stmt = conn.prepare(
-                    "SELECT id, file_name, timestamp, saved, title, transcription_text, post_processed_text, post_process_prompt, post_process_requested
+                let query = format!(
+                    "SELECT {}
                      FROM transcription_history
                      ORDER BY id DESC",
-                )?;
+                    HISTORY_COLUMNS
+                );
+                let mut stmt = conn.prepare(&query)?;
                 let result = stmt
                     .query_map([], Self::map_history_entry)?
                     .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -506,21 +597,14 @@ impl HistoryManager {
 
     #[cfg(test)]
     fn get_latest_entry_with_conn(conn: &Connection) -> Result<Option<HistoryEntry>> {
-        let mut stmt = conn.prepare(
-            "SELECT
-                id,
-                file_name,
-                timestamp,
-                saved,
-                title,
-                transcription_text,
-                post_processed_text,
-                post_process_prompt,
-                post_process_requested
+        let query = format!(
+            "SELECT {}
              FROM transcription_history
              ORDER BY timestamp DESC
              LIMIT 1",
-        )?;
+            HISTORY_COLUMNS
+        );
+        let mut stmt = conn.prepare(&query)?;
 
         let entry = stmt.query_row([], Self::map_history_entry).optional()?;
         Ok(entry)
@@ -532,23 +616,31 @@ impl HistoryManager {
         Self::get_latest_completed_entry_with_conn(&conn)
     }
 
+    pub async fn get_latest_adaptive_entry(&self) -> Result<Option<HistoryEntry>> {
+        let conn = self.get_connection()?;
+        let query = format!(
+            "SELECT {}
+             FROM transcription_history
+             WHERE transcription_text != ''
+             ORDER BY timestamp DESC, id DESC
+             LIMIT 1",
+            HISTORY_COLUMNS
+        );
+        let mut stmt = conn.prepare(&query)?;
+        let entry = stmt.query_row([], Self::map_history_entry).optional()?;
+        Ok(entry)
+    }
+
     fn get_latest_completed_entry_with_conn(conn: &Connection) -> Result<Option<HistoryEntry>> {
-        let mut stmt = conn.prepare(
-            "SELECT
-                id,
-                file_name,
-                timestamp,
-                saved,
-                title,
-                transcription_text,
-                post_processed_text,
-                post_process_prompt,
-                post_process_requested
+        let query = format!(
+            "SELECT {}
              FROM transcription_history
              WHERE transcription_text != ''
              ORDER BY timestamp DESC
              LIMIT 1",
-        )?;
+            HISTORY_COLUMNS
+        );
+        let mut stmt = conn.prepare(&query)?;
 
         let entry = stmt.query_row([], Self::map_history_entry).optional()?;
         Ok(entry)
@@ -587,22 +679,54 @@ impl HistoryManager {
 
     pub async fn get_entry_by_id(&self, id: i64) -> Result<Option<HistoryEntry>> {
         let conn = self.get_connection()?;
-        let mut stmt = conn.prepare(
-            "SELECT
-                id,
-                file_name,
-                timestamp,
-                saved,
-                title,
-                transcription_text,
-                post_processed_text,
-                post_process_prompt,
-                post_process_requested
+        let query = format!(
+            "SELECT {}
              FROM transcription_history
              WHERE id = ?1",
-        )?;
+            HISTORY_COLUMNS
+        );
+        let mut stmt = conn.prepare(&query)?;
 
         let entry = stmt.query_row([id], Self::map_history_entry).optional()?;
+
+        Ok(entry)
+    }
+
+    fn get_entry_by_id_blocking(&self, id: i64) -> Result<HistoryEntry> {
+        let conn = self.get_connection()?;
+        let query = format!(
+            "SELECT {}
+             FROM transcription_history
+             WHERE id = ?1",
+            HISTORY_COLUMNS
+        );
+        conn.query_row(&query, params![id], Self::map_history_entry)
+            .map_err(Into::into)
+    }
+
+    pub fn update_insertion_receipt(
+        &self,
+        id: i64,
+        insertion_json: String,
+    ) -> Result<HistoryEntry> {
+        let conn = self.get_connection()?;
+        let updated = conn.execute(
+            "UPDATE transcription_history SET adaptive_insertion_json = ?1 WHERE id = ?2",
+            params![insertion_json, id],
+        )?;
+
+        if updated == 0 {
+            return Err(anyhow!("History entry {} not found", id));
+        }
+
+        let entry = self.get_entry_by_id_blocking(id)?;
+        if let Err(e) = (HistoryUpdatePayload::Updated {
+            entry: entry.clone(),
+        })
+        .emit(&self.app_handle)
+        {
+            error!("Failed to emit history-updated event: {}", e);
+        }
 
         Ok(entry)
     }
@@ -666,7 +790,14 @@ mod tests {
                 transcription_text TEXT NOT NULL,
                 post_processed_text TEXT,
                 post_process_prompt TEXT,
-                post_process_requested BOOLEAN NOT NULL DEFAULT 0
+                post_process_requested BOOLEAN NOT NULL DEFAULT 0,
+                adaptive_profile_id TEXT,
+                adaptive_profile_name TEXT,
+                adaptive_routing_json TEXT,
+                adaptive_context_json TEXT,
+                adaptive_language_json TEXT,
+                adaptive_insertion_json TEXT,
+                adaptive_parent_entry_id INTEGER
             );",
         )
         .expect("create transcription_history table");
@@ -683,8 +814,15 @@ mod tests {
                 transcription_text,
                 post_processed_text,
                 post_process_prompt,
-                post_process_requested
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                post_process_requested,
+                adaptive_profile_id,
+                adaptive_profile_name,
+                adaptive_routing_json,
+                adaptive_context_json,
+                adaptive_language_json,
+                adaptive_insertion_json,
+                adaptive_parent_entry_id
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
             params![
                 format!("verbatim-{}.wav", timestamp),
                 timestamp,
@@ -694,6 +832,13 @@ mod tests {
                 post_processed,
                 Option::<String>::None,
                 false,
+                Option::<String>::None,
+                Option::<String>::None,
+                Option::<String>::None,
+                Option::<String>::None,
+                Option::<String>::None,
+                Option::<String>::None,
+                Option::<i64>::None,
             ],
         )
         .expect("insert history entry");
@@ -722,6 +867,26 @@ mod tests {
     }
 
     #[test]
+    fn legacy_history_entry_has_no_adaptive_metadata() {
+        let conn = setup_conn();
+        insert_entry(&conn, 100, "legacy raw", None);
+
+        let entry = HistoryManager::get_latest_entry_with_conn(&conn)
+            .expect("fetch latest entry")
+            .expect("entry exists");
+
+        assert_eq!(entry.transcription_text, "legacy raw");
+        assert!(entry.post_processed_text.is_none());
+        assert!(entry.adaptive_profile_id.is_none());
+        assert!(entry.adaptive_profile_name.is_none());
+        assert!(entry.adaptive_routing_json.is_none());
+        assert!(entry.adaptive_context_json.is_none());
+        assert!(entry.adaptive_language_json.is_none());
+        assert!(entry.adaptive_insertion_json.is_none());
+        assert!(entry.adaptive_parent_entry_id.is_none());
+    }
+
+    #[test]
     fn get_latest_completed_entry_skips_empty_entries() {
         let conn = setup_conn();
         insert_entry(&conn, 100, "completed", None);
@@ -733,5 +898,31 @@ mod tests {
 
         assert_eq!(entry.timestamp, 100);
         assert_eq!(entry.transcription_text, "completed");
+    }
+
+    #[test]
+    fn adaptive_history_entry_can_hold_routing_metadata() {
+        let entry = HistoryEntry {
+            id: 1,
+            file_name: "verbatim-1.wav".to_string(),
+            timestamp: 1,
+            saved: false,
+            title: "now".to_string(),
+            transcription_text: "raw".to_string(),
+            post_processed_text: Some("processed".to_string()),
+            post_process_prompt: None,
+            post_process_requested: true,
+            adaptive_profile_id: Some("email".to_string()),
+            adaptive_profile_name: Some("Email".to_string()),
+            adaptive_routing_json: Some("{}".to_string()),
+            adaptive_context_json: Some("{}".to_string()),
+            adaptive_language_json: Some("{}".to_string()),
+            adaptive_insertion_json: Some("{}".to_string()),
+            adaptive_parent_entry_id: None,
+        };
+
+        assert_eq!(entry.transcription_text, "raw");
+        assert_eq!(entry.post_processed_text.as_deref(), Some("processed"));
+        assert_eq!(entry.adaptive_profile_id.as_deref(), Some("email"));
     }
 }

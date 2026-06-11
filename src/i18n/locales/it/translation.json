@@ -356,6 +356,34 @@
         "add": "Aggiungi",
         "remove": "Rimuovi {{word}}",
         "duplicate": "\"{{word}}\" esiste già"
+      },
+      "adaptiveProfiles": {
+        "enabled": {
+          "label": "Adaptive Profiles",
+          "description": "Route each dictation through a context-aware profile for email, notes, code, chat, or raw output."
+        },
+        "defaultProfile": {
+          "title": "Default Profile",
+          "description": "Fallback profile when Verbatim cannot identify the foreground app or language mix confidently.",
+          "placeholder": "Select a profile"
+        },
+        "languages": {
+          "title": "Language Shortlist",
+          "description": "Comma-separated language codes used for adaptive language hints, such as en, ar, fr, es.",
+          "placeholder": "en, ar"
+        },
+        "correctionMemory": {
+          "label": "Correction Memory",
+          "description": "Allow future corrections to bias profile choices for similar apps and contexts."
+        },
+        "actions": {
+          "title": "Adaptive Actions",
+          "description": "Reprocess the latest adaptive history item or clear learned correction preferences.",
+          "reprocess": "Reprocess Last",
+          "reset": "Reset Memory",
+          "reprocessDone": "Latest adaptive entry reprocessed.",
+          "resetDone": "Adaptive correction memory reset."
+        }
       }
     },
     "postProcessing": {
@@ -576,7 +604,8 @@
     "off": "Off",
     "yes": "Sì",
     "no": "No",
-    "noOptionsFound": "Nessuna opzione trovata"
+    "noOptionsFound": "Nessuna opzione trovata",
+    "appName": "Verbatim"
   },
   "accessibility": {
     "permissionsRequired": "Richiesti Permessi di Accessibilità",

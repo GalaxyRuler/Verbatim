@@ -185,8 +185,8 @@
         }
       },
       "language": {
-        "title": "Language",
-        "description": "Select the language for speech recognition. Auto will automatically determine the language, while selecting a specific language can improve accuracy for that language.",
+        "title": "Languages",
+        "description": "Choose one or more speech languages. Verbatim uses model-specific hints so selected languages can guide transcription before cleanup.",
         "descriptionUnsupported": "Parakeet model automatically detects the language. No manual selection is needed.",
         "searchPlaceholder": "Search languages...",
         "noResults": "No languages found",
@@ -356,6 +356,34 @@
         "add": "Add",
         "remove": "Remove {{word}}",
         "duplicate": "\"{{word}}\" already exists"
+      },
+      "adaptiveProfiles": {
+        "enabled": {
+          "label": "Adaptive Profiles",
+          "description": "Route each dictation through a context-aware profile for email, notes, code, chat, or raw output."
+        },
+        "defaultProfile": {
+          "title": "Default Profile",
+          "description": "Fallback profile when Verbatim cannot identify the foreground app or language mix confidently.",
+          "placeholder": "Select a profile"
+        },
+        "languages": {
+          "title": "Language Shortlist",
+          "description": "Comma-separated language codes used for adaptive language hints, such as en, ar, fr, es.",
+          "placeholder": "en, ar"
+        },
+        "correctionMemory": {
+          "label": "Correction Memory",
+          "description": "Allow future corrections to bias profile choices for similar apps and contexts."
+        },
+        "actions": {
+          "title": "Adaptive Actions",
+          "description": "Reprocess the latest adaptive history item or clear learned correction preferences.",
+          "reprocess": "Reprocess Last",
+          "reset": "Reset Memory",
+          "reprocessDone": "Latest adaptive entry reprocessed.",
+          "resetDone": "Adaptive correction memory reset."
+        }
       }
     },
     "postProcessing": {
@@ -541,6 +569,11 @@
           "title": "Whisper.cpp",
           "description": "High-performance inference of OpenAI's Whisper automatic speech recognition model",
           "details": "Verbatim uses Whisper.cpp for fast, local speech-to-text processing. Thanks to the amazing work by Georgi Gerganov and contributors."
+        },
+        "license": {
+          "title": "MIT License Notice",
+          "description": "Original Handy copyright and license notice.",
+          "details": "Portions of this app are derived from Handy. Original copyright: Copyright (c) 2025 CJ Pais. Handy is licensed under the MIT License; the license and copyright notice are preserved with this fork."
         }
       }
     }
@@ -583,7 +616,8 @@
     "off": "Off",
     "yes": "Yes",
     "no": "No",
-    "noOptionsFound": "No options found"
+    "noOptionsFound": "No options found",
+    "appName": "Verbatim"
   },
   "accessibility": {
     "permissionsRequired": "Accessibility Permissions Required",

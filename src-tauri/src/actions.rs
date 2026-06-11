@@ -386,6 +386,178 @@ pub(crate) async fn process_transcription_output(
     }
 }
 
+fn serialize_json<T: serde::Serialize>(value: &T) -> Option<String> {
+    serde_json::to_string(value).ok()
+}
+
+fn should_mute_before_start_feedback(settings: &AppSettings) -> bool {
+    settings.mute_while_recording && !settings.audio_feedback
+}
+
+fn adaptive_target_verified(
+    original_context: &crate::adaptive::types::CapturedContext,
+    current_context: &crate::adaptive::types::CapturedContext,
+) -> bool {
+    original_context.target_fingerprint.is_none()
+        || current_context.target_fingerprint == original_context.target_fingerprint
+}
+
+fn skipped_wrong_target_receipt() -> crate::adaptive::types::InsertionReceipt {
+    crate::adaptive::types::InsertionReceipt {
+        attempted: false,
+        succeeded: false,
+        method: crate::adaptive::types::InsertionMethod::None,
+        target_verified: false,
+        error: Some("target changed before insertion".to_string()),
+    }
+}
+
+pub(crate) async fn process_adaptive_transcription_output(
+    settings: &AppSettings,
+    transcription: &str,
+    context: crate::adaptive::types::CapturedContext,
+    shortcut: crate::adaptive::types::ShortcutIntent,
+) -> crate::adaptive::types::AdaptiveProcessResult {
+    let pre_route = crate::adaptive::routing::route_before_recording(
+        &settings.adaptive_profiles,
+        shortcut,
+        &context,
+        &settings.adaptive_language_shortlist,
+        &settings.adaptive_default_profile_id,
+    );
+    let language = crate::adaptive::language::analyze_language(
+        transcription,
+        &settings.adaptive_language_shortlist,
+    );
+    let routing = crate::adaptive::routing::route_after_transcription(
+        &settings.adaptive_profiles,
+        pre_route,
+        &context,
+        &language,
+        None,
+    );
+    let profile = crate::adaptive::profile::find_profile_or_default(
+        &settings.adaptive_profiles,
+        &routing.profile_id,
+    );
+
+    let final_text = crate::adaptive::processor::deterministic_process(transcription, profile);
+    let final_text = match crate::adaptive::processor::validate_output(
+        transcription,
+        &final_text,
+        profile,
+    ) {
+        Ok(()) => final_text,
+        Err(err) => {
+            warn!(
+                    "Adaptive processing failed validation for profile '{}': {}. Falling back to raw transcript.",
+                    profile.id, err
+                );
+            transcription.to_string()
+        }
+    };
+    let post_process_prompt =
+        crate::adaptive::processor::build_profile_prompt(transcription, profile);
+    let post_processed_text = if final_text == transcription {
+        None
+    } else {
+        Some(final_text.clone())
+    };
+
+    crate::adaptive::types::AdaptiveProcessResult {
+        final_text,
+        post_processed_text,
+        post_process_prompt,
+        language,
+        routing,
+    }
+}
+
+#[cfg(test)]
+mod adaptive_action_tests {
+    use super::*;
+    use crate::adaptive::types::{CapturedContext, InsertionMethod, InsertionReceipt, TargetKind};
+
+    fn context_with_fingerprint(fingerprint: Option<&str>) -> CapturedContext {
+        CapturedContext {
+            captured_at_ms: 0,
+            process_name: fingerprint.map(ToString::to_string),
+            window_title: None,
+            window_title_hash: None,
+            window_class: None,
+            target_kind: TargetKind::Unknown,
+            target_fingerprint: fingerprint.map(ToString::to_string),
+            is_sensitive: false,
+        }
+    }
+
+    #[test]
+    fn serialize_json_returns_some_for_receipt() {
+        let receipt = InsertionReceipt {
+            attempted: true,
+            succeeded: true,
+            method: InsertionMethod::Direct,
+            target_verified: true,
+            error: None,
+        };
+        assert!(serialize_json(&receipt).unwrap().contains("succeeded"));
+    }
+
+    #[test]
+    fn adaptive_target_verification_allows_matching_fingerprint() {
+        assert!(adaptive_target_verified(
+            &context_with_fingerprint(Some("notepad|edit")),
+            &context_with_fingerprint(Some("notepad|edit"))
+        ));
+    }
+
+    #[test]
+    fn adaptive_target_verification_rejects_changed_fingerprint() {
+        assert!(!adaptive_target_verified(
+            &context_with_fingerprint(Some("outlook|richedit")),
+            &context_with_fingerprint(Some("notepad|edit"))
+        ));
+    }
+
+    #[test]
+    fn adaptive_target_verification_allows_unknown_original_target() {
+        assert!(adaptive_target_verified(
+            &context_with_fingerprint(None),
+            &context_with_fingerprint(Some("notepad|edit"))
+        ));
+    }
+
+    #[test]
+    fn wrong_target_receipt_is_not_attempted() {
+        let receipt = skipped_wrong_target_receipt();
+        assert!(!receipt.attempted);
+        assert!(!receipt.succeeded);
+        assert!(!receipt.target_verified);
+        assert_eq!(receipt.method, InsertionMethod::None);
+        assert_eq!(
+            receipt.error.as_deref(),
+            Some("target changed before insertion")
+        );
+    }
+
+    #[test]
+    fn mute_happens_before_start_feedback_when_feedback_is_disabled() {
+        let mut settings = AppSettings {
+            mute_while_recording: true,
+            audio_feedback: false,
+            ..crate::settings::get_default_settings()
+        };
+
+        assert!(should_mute_before_start_feedback(&settings));
+
+        settings.audio_feedback = true;
+        assert!(!should_mute_before_start_feedback(&settings));
+
+        settings.mute_while_recording = false;
+        assert!(!should_mute_before_start_feedback(&settings));
+    }
+}
+
 impl ShortcutAction for TranscribeAction {
     fn start(&self, app: &AppHandle, binding_id: &str, _shortcut_str: &str) {
         let start_time = Instant::now();
@@ -410,25 +582,34 @@ impl ShortcutAction for TranscribeAction {
 
         // Get the microphone mode to determine audio feedback timing
         let settings = get_settings(app);
+        if settings.adaptive_profiles_enabled {
+            if let Some(store) = app.try_state::<crate::adaptive::session::ActiveDictationContext>()
+            {
+                let context = crate::adaptive::context::capture_context(
+                    &settings.adaptive_private_app_patterns,
+                );
+                store.insert(&binding_id, context);
+            }
+        }
         let is_always_on = settings.always_on_microphone;
         debug!("Microphone mode - always_on: {}", is_always_on);
 
         let mut recording_error: Option<String> = None;
         if is_always_on {
-            // Always-on mode: Play audio feedback immediately, then apply mute after sound finishes
-            debug!("Always-on mode: Playing audio feedback immediately");
-            let rm_clone = Arc::clone(&rm);
-            let app_clone = app.clone();
-            // The blocking helper exits immediately if audio feedback is disabled,
-            // so we can always reuse this thread to ensure mute happens right after playback.
-            std::thread::spawn(move || {
-                play_feedback_sound_blocking(&app_clone, SoundType::Start);
-                rm_clone.apply_mute();
-            });
-
             if let Err(e) = rm.try_start_recording(&binding_id) {
                 debug!("Recording failed: {}", e);
                 recording_error = Some(e);
+            } else if should_mute_before_start_feedback(&settings) {
+                rm.apply_mute();
+            } else if settings.audio_feedback || settings.mute_while_recording {
+                // Always-on mode: Play audio feedback immediately, then apply mute after sound finishes
+                debug!("Always-on mode: Playing audio feedback immediately");
+                let rm_clone = Arc::clone(&rm);
+                let app_clone = app.clone();
+                std::thread::spawn(move || {
+                    play_feedback_sound_blocking(&app_clone, SoundType::Start);
+                    rm_clone.apply_mute();
+                });
             }
         } else {
             // On-demand mode: Start recording first, then play audio feedback, then apply mute
@@ -438,17 +619,19 @@ impl ShortcutAction for TranscribeAction {
             match rm.try_start_recording(&binding_id) {
                 Ok(()) => {
                     debug!("Recording started in {:?}", recording_start_time.elapsed());
-                    // Small delay to ensure microphone stream is active
-                    let app_clone = app.clone();
-                    let rm_clone = Arc::clone(&rm);
-                    std::thread::spawn(move || {
-                        std::thread::sleep(std::time::Duration::from_millis(100));
-                        debug!("Handling delayed audio feedback/mute sequence");
-                        // Helper handles disabled audio feedback by returning early, so we reuse it
-                        // to keep mute sequencing consistent in every mode.
-                        play_feedback_sound_blocking(&app_clone, SoundType::Start);
-                        rm_clone.apply_mute();
-                    });
+                    if should_mute_before_start_feedback(&settings) {
+                        rm.apply_mute();
+                    } else if settings.audio_feedback || settings.mute_while_recording {
+                        // Small delay to ensure microphone stream is active before feedback playback
+                        let app_clone = app.clone();
+                        let rm_clone = Arc::clone(&rm);
+                        std::thread::spawn(move || {
+                            std::thread::sleep(std::time::Duration::from_millis(100));
+                            debug!("Handling delayed audio feedback/mute sequence");
+                            play_feedback_sound_blocking(&app_clone, SoundType::Start);
+                            rm_clone.apply_mute();
+                        });
+                    }
                 }
                 Err(e) => {
                     debug!("Failed to start recording: {}", e);
@@ -463,6 +646,10 @@ impl ShortcutAction for TranscribeAction {
         } else {
             // Starting failed (for example due to blocked microphone permissions).
             // Revert UI state so we don't stay stuck in the recording overlay.
+            if let Some(store) = app.try_state::<crate::adaptive::session::ActiveDictationContext>()
+            {
+                store.clear(&binding_id);
+            }
             utils::hide_recording_overlay(app);
             change_tray_icon(app, TrayIconState::Idle);
             if let Some(err) = recording_error {
@@ -579,52 +766,177 @@ impl ShortcutAction for TranscribeAction {
                                 transcription
                             );
 
-                            if post_process {
+                            let settings = get_settings(&ah);
+                            let adaptive_context = if settings.adaptive_profiles_enabled {
+                                ah.try_state::<crate::adaptive::session::ActiveDictationContext>()
+                                    .and_then(|store| store.take(&binding_id))
+                            } else {
+                                None
+                            };
+
+                            if post_process || adaptive_context.is_some() {
                                 show_processing_overlay(&ah);
                             }
-                            let processed =
-                                process_transcription_output(&ah, &transcription, post_process)
-                                    .await;
 
-                            // Save to history if WAV was saved
-                            if wav_saved {
-                                if let Err(err) = hm.save_entry(
-                                    file_name,
-                                    transcription,
-                                    post_process,
-                                    processed.post_processed_text.clone(),
-                                    processed.post_process_prompt.clone(),
-                                ) {
-                                    error!("Failed to save history entry: {}", err);
-                                }
-                            }
+                            if let Some(context) = adaptive_context {
+                                let processed = process_adaptive_transcription_output(
+                                    &settings,
+                                    &transcription,
+                                    context.clone(),
+                                    crate::adaptive::types::ShortcutIntent::Default,
+                                )
+                                .await;
+                                let profile = crate::adaptive::profile::find_profile_or_default(
+                                    &settings.adaptive_profiles,
+                                    &processed.routing.profile_id,
+                                );
 
-                            if processed.final_text.is_empty() {
-                                utils::hide_recording_overlay(&ah);
-                                change_tray_icon(&ah, TrayIconState::Idle);
-                            } else {
-                                let ah_clone = ah.clone();
-                                let paste_time = Instant::now();
-                                let final_text = processed.final_text;
-                                ah.run_on_main_thread(move || {
-                                    match utils::paste(final_text, ah_clone.clone()) {
-                                        Ok(()) => debug!(
-                                            "Text pasted successfully in {:?}",
-                                            paste_time.elapsed()
-                                        ),
-                                        Err(e) => {
-                                            error!("Failed to paste transcription: {}", e);
-                                            let _ = ah_clone.emit("paste-error", ());
+                                let saved_entry_id = if wav_saved {
+                                    let metadata =
+                                        crate::managers::history::AdaptiveHistoryMetadata {
+                                            profile_id: Some(profile.id.clone()),
+                                            profile_name: Some(profile.name.clone()),
+                                            routing_json: serialize_json(&processed.routing),
+                                            context_json: serialize_json(&context),
+                                            language_json: serialize_json(&processed.language),
+                                            insertion_json: None,
+                                            parent_entry_id: None,
+                                        };
+                                    match hm.save_entry_with_metadata(
+                                        file_name,
+                                        transcription,
+                                        post_process,
+                                        processed.post_processed_text.clone(),
+                                        processed.post_process_prompt.clone(),
+                                        metadata,
+                                    ) {
+                                        Ok(entry) => Some(entry.id),
+                                        Err(err) => {
+                                            error!(
+                                                "Failed to save adaptive history entry: {}",
+                                                err
+                                            );
+                                            None
                                         }
                                     }
-                                    utils::hide_recording_overlay(&ah_clone);
-                                    change_tray_icon(&ah_clone, TrayIconState::Idle);
-                                })
-                                .unwrap_or_else(|e| {
-                                    error!("Failed to run paste on main thread: {:?}", e);
+                                } else {
+                                    None
+                                };
+
+                                if processed.final_text.is_empty() {
                                     utils::hide_recording_overlay(&ah);
                                     change_tray_icon(&ah, TrayIconState::Idle);
-                                });
+                                } else {
+                                    let ah_clone = ah.clone();
+                                    let hm_for_receipt = Arc::clone(&hm);
+                                    let paste_time = Instant::now();
+                                    let final_text = processed.final_text;
+                                    let original_context = context.clone();
+                                    let private_patterns =
+                                        settings.adaptive_private_app_patterns.clone();
+                                    ah.run_on_main_thread(move || {
+                                        let current_context =
+                                            crate::adaptive::context::capture_context(
+                                                &private_patterns,
+                                            );
+                                        let target_verified = adaptive_target_verified(
+                                            &original_context,
+                                            &current_context,
+                                        );
+                                        let receipt = if target_verified {
+                                            utils::paste_with_receipt(
+                                                final_text,
+                                                ah_clone.clone(),
+                                                true,
+                                            )
+                                        } else {
+                                            error!(
+                                                "Adaptive paste skipped because the foreground target changed before insertion"
+                                            );
+                                            let _ = ah_clone.emit("paste-error", ());
+                                            skipped_wrong_target_receipt()
+                                        };
+                                        if receipt.succeeded {
+                                            debug!(
+                                                "Text pasted successfully in {:?}",
+                                                paste_time.elapsed()
+                                            );
+                                        } else {
+                                            error!(
+                                                "Failed to paste transcription: {:?}",
+                                                receipt.error
+                                            );
+                                            let _ = ah_clone.emit("paste-error", ());
+                                        }
+                                        if let Some(entry_id) = saved_entry_id {
+                                            if let Some(receipt_json) = serialize_json(&receipt) {
+                                                if let Err(err) = hm_for_receipt
+                                                    .update_insertion_receipt(
+                                                        entry_id,
+                                                        receipt_json,
+                                                    )
+                                                {
+                                                    error!(
+                                                        "Failed to update insertion receipt: {}",
+                                                        err
+                                                    );
+                                                }
+                                            }
+                                        }
+                                        utils::hide_recording_overlay(&ah_clone);
+                                        change_tray_icon(&ah_clone, TrayIconState::Idle);
+                                    })
+                                    .unwrap_or_else(|e| {
+                                        error!("Failed to run paste on main thread: {:?}", e);
+                                        utils::hide_recording_overlay(&ah);
+                                        change_tray_icon(&ah, TrayIconState::Idle);
+                                    });
+                                }
+                            } else {
+                                let processed =
+                                    process_transcription_output(&ah, &transcription, post_process)
+                                        .await;
+
+                                // Save to history if WAV was saved
+                                if wav_saved {
+                                    if let Err(err) = hm.save_entry(
+                                        file_name,
+                                        transcription,
+                                        post_process,
+                                        processed.post_processed_text.clone(),
+                                        processed.post_process_prompt.clone(),
+                                    ) {
+                                        error!("Failed to save history entry: {}", err);
+                                    }
+                                }
+
+                                if processed.final_text.is_empty() {
+                                    utils::hide_recording_overlay(&ah);
+                                    change_tray_icon(&ah, TrayIconState::Idle);
+                                } else {
+                                    let ah_clone = ah.clone();
+                                    let paste_time = Instant::now();
+                                    let final_text = processed.final_text;
+                                    ah.run_on_main_thread(move || {
+                                        match utils::paste(final_text, ah_clone.clone()) {
+                                            Ok(()) => debug!(
+                                                "Text pasted successfully in {:?}",
+                                                paste_time.elapsed()
+                                            ),
+                                            Err(e) => {
+                                                error!("Failed to paste transcription: {}", e);
+                                                let _ = ah_clone.emit("paste-error", ());
+                                            }
+                                        }
+                                        utils::hide_recording_overlay(&ah_clone);
+                                        change_tray_icon(&ah_clone, TrayIconState::Idle);
+                                    })
+                                    .unwrap_or_else(|e| {
+                                        error!("Failed to run paste on main thread: {:?}", e);
+                                        utils::hide_recording_overlay(&ah);
+                                        change_tray_icon(&ah, TrayIconState::Idle);
+                                    });
+                                }
                             }
                         }
                         Err(err) => {
@@ -664,8 +976,11 @@ impl ShortcutAction for TranscribeAction {
 struct CancelAction;
 
 impl ShortcutAction for CancelAction {
-    fn start(&self, app: &AppHandle, _binding_id: &str, _shortcut_str: &str) {
+    fn start(&self, app: &AppHandle, binding_id: &str, _shortcut_str: &str) {
         utils::cancel_current_operation(app);
+        if let Some(store) = app.try_state::<crate::adaptive::session::ActiveDictationContext>() {
+            store.clear(binding_id);
+        }
     }
 
     fn stop(&self, _app: &AppHandle, _binding_id: &str, _shortcut_str: &str) {

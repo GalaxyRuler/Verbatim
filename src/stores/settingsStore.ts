@@ -115,6 +115,14 @@ const settingUpdaters: {
     commands.changeOverlayPositionSetting(value as string),
   debug_mode: (value) => commands.changeDebugModeSetting(value as boolean),
   custom_words: (value) => commands.updateCustomWords(value as string[]),
+  adaptive_profiles_enabled: (value) =>
+    commands.changeAdaptiveProfilesEnabledSetting(value as boolean),
+  adaptive_language_shortlist: (value) =>
+    commands.changeAdaptiveLanguageShortlistSetting(value as string[]),
+  adaptive_default_profile_id: (value) =>
+    commands.changeAdaptiveDefaultProfileSetting(value as string),
+  adaptive_correction_memory_enabled: (value) =>
+    commands.setAdaptiveCorrectionMemoryEnabled(value as boolean),
   word_correction_threshold: (value) =>
     commands.changeWordCorrectionThresholdSetting(value as number),
   paste_delay_ms: (value) =>

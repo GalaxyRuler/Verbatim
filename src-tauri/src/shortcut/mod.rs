@@ -655,6 +655,75 @@ pub fn update_custom_words(app: AppHandle, words: Vec<String>) -> Result<(), Str
 
 #[tauri::command]
 #[specta::specta]
+pub fn change_adaptive_profiles_enabled_setting(
+    app: AppHandle,
+    enabled: bool,
+) -> Result<(), String> {
+    let mut settings = settings::get_settings(&app);
+    settings.adaptive_profiles_enabled = enabled;
+    settings::write_settings(&app, settings);
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn change_adaptive_language_shortlist_setting(
+    app: AppHandle,
+    languages: Vec<String>,
+) -> Result<(), String> {
+    let cleaned = languages
+        .into_iter()
+        .map(|language| language.trim().to_lowercase())
+        .filter(|language| !language.is_empty())
+        .fold(Vec::<String>::new(), |mut acc, language| {
+            if !acc.contains(&language) {
+                acc.push(language);
+            }
+            acc
+        });
+
+    if cleaned.is_empty() {
+        return Err("At least one adaptive language is required".to_string());
+    }
+
+    let mut settings = settings::get_settings(&app);
+    settings.adaptive_language_shortlist = cleaned;
+    settings::write_settings(&app, settings);
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn change_adaptive_default_profile_setting(
+    app: AppHandle,
+    profile_id: String,
+) -> Result<(), String> {
+    let mut settings = settings::get_settings(&app);
+    if !settings
+        .adaptive_profiles
+        .iter()
+        .any(|profile| profile.id == profile_id && profile.enabled)
+    {
+        return Err(format!("Unknown adaptive profile: {}", profile_id));
+    }
+
+    settings.adaptive_default_profile_id = profile_id;
+    settings::write_settings(&app, settings);
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn reset_adaptive_profiles(app: AppHandle) -> Result<(), String> {
+    let mut settings = settings::get_settings(&app);
+    settings.adaptive_profiles = crate::adaptive::profile::default_profiles();
+    settings.adaptive_default_profile_id = "default_clean".to_string();
+    settings::write_settings(&app, settings);
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
 pub fn change_word_correction_threshold_setting(
     app: AppHandle,
     threshold: f64,

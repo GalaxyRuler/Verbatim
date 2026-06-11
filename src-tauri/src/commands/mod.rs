@@ -1,3 +1,4 @@
+pub mod adaptive;
 pub mod audio;
 pub mod history;
 pub mod models;

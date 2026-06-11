@@ -49,16 +49,6 @@ export const AboutSettings: React.FC = () => {
         </SettingContainer>
 
         <SettingContainer
-          title={t("settings.about.supportDevelopment.title")}
-          description={t("settings.about.supportDevelopment.description")}
-          grouped={true}
-        >
-          <Button variant="primary" size="md" onClick={handleDonateClick}>
-            {t("settings.about.supportDevelopment.button")}
-          </Button>
-        </SettingContainer>
-
-        <SettingContainer
           title={t("settings.about.sourceCode.title")}
           description={t("settings.about.sourceCode.description")}
           grouped={true}
@@ -94,6 +84,17 @@ export const AboutSettings: React.FC = () => {
             >
               {t("settings.about.acknowledgments.handy.button")}
             </Button>
+          </div>
+        </SettingContainer>
+
+        <SettingContainer
+          title={t("settings.about.acknowledgments.license.title")}
+          description={t("settings.about.acknowledgments.license.description")}
+          grouped={true}
+          layout="stacked"
+        >
+          <div className="text-sm text-mid-gray">
+            {t("settings.about.acknowledgments.license.details")}
           </div>
         </SettingContainer>
         <SettingContainer

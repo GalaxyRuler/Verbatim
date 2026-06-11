@@ -332,6 +332,13 @@ mod tests {
             post_processed_text: post_processed.map(|text| text.to_string()),
             post_process_prompt: None,
             post_process_requested: false,
+            adaptive_profile_id: None,
+            adaptive_profile_name: None,
+            adaptive_routing_json: None,
+            adaptive_context_json: None,
+            adaptive_language_json: None,
+            adaptive_insertion_json: None,
+            adaptive_parent_entry_id: None,
         }
     }
 

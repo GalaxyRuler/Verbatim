@@ -15,10 +15,9 @@ export const ModelSettingsCard: React.FC = () => {
   const supportsLanguageSelection =
     currentModelInfo?.supports_language_selection ?? false;
   const supportsTranslation = currentModelInfo?.supports_translation ?? false;
-  const hasAnySettings = supportsLanguageSelection || supportsTranslation;
 
   // Don't render anything if no model is selected or no settings available
-  if (!currentModel || !currentModelInfo || !hasAnySettings) {
+  if (!currentModel || !currentModelInfo) {
     return null;
   }
 
@@ -35,9 +34,18 @@ export const ModelSettingsCard: React.FC = () => {
           supportedLanguages={currentModelInfo.supported_languages}
         />
       )}
-      {supportsTranslation && (
-        <TranslateToEnglish descriptionMode="tooltip" grouped={true} />
-      )}
+      <TranslateToEnglish
+        descriptionMode="tooltip"
+        grouped={true}
+        disabled={!supportsTranslation}
+        description={
+          supportsTranslation
+            ? undefined
+            : t("settings.advanced.translateToEnglish.descriptionUnsupported", {
+                model: currentModelInfo.name,
+              })
+        }
+      />
     </SettingsGroup>
   );
 };

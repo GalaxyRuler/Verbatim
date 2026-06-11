@@ -424,6 +424,18 @@ pub struct AppSettings {
     #[serde(default)]
     pub custom_filler_words: Option<Vec<String>>,
     #[serde(default)]
+    pub adaptive_profiles_enabled: bool,
+    #[serde(default = "default_adaptive_language_shortlist")]
+    pub adaptive_language_shortlist: Vec<String>,
+    #[serde(default = "default_adaptive_default_profile_id")]
+    pub adaptive_default_profile_id: String,
+    #[serde(default = "default_adaptive_profiles")]
+    pub adaptive_profiles: Vec<crate::adaptive::profile::AdaptiveProfile>,
+    #[serde(default = "default_adaptive_correction_memory_enabled")]
+    pub adaptive_correction_memory_enabled: bool,
+    #[serde(default = "default_adaptive_private_app_patterns")]
+    pub adaptive_private_app_patterns: Vec<String>,
+    #[serde(default)]
     pub whisper_accelerator: WhisperAcceleratorSetting,
     #[serde(default)]
     pub ort_accelerator: OrtAcceleratorSetting,
@@ -435,6 +447,30 @@ pub struct AppSettings {
 
 fn default_model() -> String {
     "".to_string()
+}
+
+fn default_adaptive_language_shortlist() -> Vec<String> {
+    vec!["en".to_string(), "ar".to_string()]
+}
+
+fn default_adaptive_default_profile_id() -> String {
+    "default_clean".to_string()
+}
+
+fn default_adaptive_profiles() -> Vec<crate::adaptive::profile::AdaptiveProfile> {
+    crate::adaptive::profile::default_profiles()
+}
+
+fn default_adaptive_correction_memory_enabled() -> bool {
+    true
+}
+
+fn default_adaptive_private_app_patterns() -> Vec<String> {
+    vec![
+        "1password".to_string(),
+        "bitwarden".to_string(),
+        "keepass".to_string(),
+    ]
 }
 
 fn default_always_on_microphone() -> bool {
@@ -711,6 +747,51 @@ fn ensure_post_process_defaults(settings: &mut AppSettings) -> bool {
     changed
 }
 
+fn ensure_adaptive_defaults(settings: &mut AppSettings) -> bool {
+    let mut changed = false;
+
+    let original_profile_count = settings.adaptive_profiles.len();
+    settings
+        .adaptive_profiles
+        .retain(|profile| profile.id != "translation");
+    if settings.adaptive_profiles.len() != original_profile_count {
+        changed = true;
+    }
+
+    for default_profile in default_adaptive_profiles() {
+        if !settings
+            .adaptive_profiles
+            .iter()
+            .any(|profile| profile.id == default_profile.id)
+        {
+            settings.adaptive_profiles.push(default_profile);
+            changed = true;
+        }
+    }
+
+    if settings.adaptive_language_shortlist.is_empty() {
+        settings.adaptive_language_shortlist = default_adaptive_language_shortlist();
+        changed = true;
+    }
+
+    if settings.adaptive_default_profile_id.is_empty() {
+        settings.adaptive_default_profile_id = default_adaptive_default_profile_id();
+        changed = true;
+    }
+
+    if settings.adaptive_default_profile_id == "translation" {
+        settings.adaptive_default_profile_id = default_adaptive_default_profile_id();
+        changed = true;
+    }
+
+    if settings.adaptive_private_app_patterns.is_empty() {
+        settings.adaptive_private_app_patterns = default_adaptive_private_app_patterns();
+        changed = true;
+    }
+
+    changed
+}
+
 pub const SETTINGS_STORE_PATH: &str = "settings_store.json";
 
 pub fn get_default_settings() -> AppSettings {
@@ -800,7 +881,7 @@ pub fn get_default_settings() -> AppSettings {
         post_process_models: default_post_process_models(),
         post_process_prompts: default_post_process_prompts(),
         post_process_selected_prompt_id: None,
-        mute_while_recording: false,
+        mute_while_recording: true,
         append_trailing_space: false,
         app_language: default_app_language(),
         experimental_enabled: false,
@@ -811,6 +892,12 @@ pub fn get_default_settings() -> AppSettings {
         typing_tool: default_typing_tool(),
         external_script_path: None,
         custom_filler_words: None,
+        adaptive_profiles_enabled: false,
+        adaptive_language_shortlist: default_adaptive_language_shortlist(),
+        adaptive_default_profile_id: default_adaptive_default_profile_id(),
+        adaptive_profiles: default_adaptive_profiles(),
+        adaptive_correction_memory_enabled: default_adaptive_correction_memory_enabled(),
+        adaptive_private_app_patterns: default_adaptive_private_app_patterns(),
         whisper_accelerator: WhisperAcceleratorSetting::default(),
         ort_accelerator: OrtAcceleratorSetting::default(),
         whisper_gpu_device: default_whisper_gpu_device(),
@@ -885,7 +972,9 @@ pub fn load_or_create_app_settings(app: &AppHandle) -> AppSettings {
         default_settings
     };
 
-    if ensure_post_process_defaults(&mut settings) {
+    let post_process_changed = ensure_post_process_defaults(&mut settings);
+    let adaptive_changed = ensure_adaptive_defaults(&mut settings);
+    if post_process_changed || adaptive_changed {
         store.set("settings", serde_json::to_value(&settings).unwrap());
     }
 
@@ -909,7 +998,9 @@ pub fn get_settings(app: &AppHandle) -> AppSettings {
         default_settings
     };
 
-    if ensure_post_process_defaults(&mut settings) {
+    let post_process_changed = ensure_post_process_defaults(&mut settings);
+    let adaptive_changed = ensure_adaptive_defaults(&mut settings);
+    if post_process_changed || adaptive_changed {
         store.set("settings", serde_json::to_value(&settings).unwrap());
     }
 
@@ -957,6 +1048,55 @@ mod tests {
         let settings = get_default_settings();
         assert!(!settings.auto_submit);
         assert_eq!(settings.auto_submit_key, AutoSubmitKey::Enter);
+    }
+
+    #[test]
+    fn default_settings_mute_system_audio_while_recording() {
+        let settings = get_default_settings();
+        assert!(settings.mute_while_recording);
+    }
+
+    #[test]
+    fn default_settings_enable_adaptive_data_but_not_adaptive_mode() {
+        let settings = get_default_settings();
+
+        assert!(!settings.adaptive_profiles_enabled);
+        assert_eq!(
+            settings.adaptive_language_shortlist,
+            vec!["en".to_string(), "ar".to_string()]
+        );
+        assert_eq!(settings.adaptive_default_profile_id, "default_clean");
+        assert!(settings
+            .adaptive_profiles
+            .iter()
+            .any(|profile| profile.id == "raw"));
+        assert!(settings
+            .adaptive_profiles
+            .iter()
+            .any(|profile| profile.id == "mixed_multilingual"));
+        assert!(settings
+            .adaptive_profiles
+            .iter()
+            .all(|profile| profile.id != "translation"));
+        assert!(settings.adaptive_correction_memory_enabled);
+    }
+
+    #[test]
+    fn adaptive_defaults_remove_legacy_translation_profile() {
+        let mut settings = get_default_settings();
+        let mut legacy_profile = settings.adaptive_profiles[0].clone();
+        legacy_profile.id = "translation".to_string();
+        settings.adaptive_profiles.push(legacy_profile);
+        settings.adaptive_default_profile_id = "translation".to_string();
+
+        let changed = ensure_adaptive_defaults(&mut settings);
+
+        assert!(changed);
+        assert_eq!(settings.adaptive_default_profile_id, "default_clean");
+        assert!(settings
+            .adaptive_profiles
+            .iter()
+            .all(|profile| profile.id != "translation"));
     }
 
     #[test]

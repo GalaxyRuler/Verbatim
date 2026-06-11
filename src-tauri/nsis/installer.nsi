@@ -588,7 +588,7 @@ Function .onInit
 
   ; --- PORTABLE MODE --- Auto-detect portable mode during updates.
   ; Preserve portable installs that use either the current magic-string marker
-  ; or the legacy empty marker created by older Handy releases. Require Data/
+  ; or the legacy empty marker created by older Verbatim releases. Require Data/
   ; for the legacy empty-marker case so stale scoop side-effect files do not
   ; accidentally opt an updater run into portable mode.
   ${If} $PortableMode <> 1
