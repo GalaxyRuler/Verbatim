@@ -1,7 +1,7 @@
 use crate::audio_toolkit::{apply_custom_words, filter_transcription_output};
 use crate::managers::audio::AudioRecordingManager;
 use crate::managers::model::{EngineType, ModelManager};
-use crate::providers::LoadedEngine;
+use crate::providers::{EngineProvider, TranscribeRsProvider};
 use crate::settings::{
     get_settings, ModelUnloadTimeout, OrtAcceleratorSetting, WhisperAcceleratorSetting,
 };
@@ -15,19 +15,6 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock};
 use std::thread;
 use std::time::{Duration, SystemTime};
 use tauri::{AppHandle, Emitter, Manager};
-use transcribe_rs::{
-    onnx::{
-        canary::CanaryModel,
-        cohere::CohereModel,
-        gigaam::GigaAMModel,
-        moonshine::{MoonshineModel, MoonshineVariant, StreamingModel},
-        parakeet::{ParakeetModel, ParakeetParams, TimestampGranularity},
-        sense_voice::{SenseVoiceModel, SenseVoiceParams},
-        Quantization,
-    },
-    whisper_cpp::{WhisperEngine, WhisperInferenceParams},
-    SpeechModel, TranscribeOptions,
-};
 
 #[derive(Clone, Debug, Serialize)]
 pub struct ModelStateEvent {
@@ -77,6 +64,33 @@ fn validate_selected_language(selected_language: &str, supported_languages: &[St
         selected_language.to_string()
     } else {
         "auto".to_string()
+    }
+}
+
+fn build_transcription_request(
+    audio: Vec<f32>,
+    selected_language: &str,
+    translate_to_english: bool,
+    language_shortlist: &[String],
+    custom_words: &[String],
+) -> crate::providers::SpeechRequest {
+    let source_language = if selected_language == "auto" {
+        crate::providers::LanguageSelection::Auto
+    } else {
+        crate::providers::LanguageSelection::Language(selected_language.to_string())
+    };
+
+    crate::providers::SpeechRequest {
+        task: crate::providers::SpeechTaskKind::Transcribe,
+        input: crate::providers::SpeechInput::Audio(std::sync::Arc::from(audio)),
+        source_language: source_language.clone(),
+        translation: translate_to_english.then_some(crate::providers::TranslationTarget {
+            source_language,
+            target_language: "en".to_string(),
+        }),
+        language_shortlist: language_shortlist.to_vec(),
+        custom_words: custom_words.to_vec(),
+        cancellation: crate::providers::CancellationToken::default(),
     }
 }
 
@@ -192,7 +206,7 @@ impl Drop for LoadingGuard {
 
 #[derive(Clone)]
 pub struct TranscriptionManager {
-    engine: Arc<Mutex<Option<LoadedEngine>>>,
+    engine: Arc<Mutex<Option<TranscribeRsProvider>>>,
     model_manager: Arc<ModelManager>,
     app_handle: AppHandle,
     current_model_id: Arc<Mutex<Option<String>>>,
@@ -292,7 +306,7 @@ impl TranscriptionManager {
     }
 
     /// Lock the engine mutex, recovering from poison if a previous transcription panicked.
-    fn lock_engine(&self) -> MutexGuard<'_, Option<LoadedEngine>> {
+    fn lock_engine(&self) -> MutexGuard<'_, Option<TranscribeRsProvider>> {
         self.engine.lock().unwrap_or_else(|poisoned| {
             warn!("Engine mutex was poisoned by a previous panic, recovering");
             poisoned.into_inner()
@@ -326,7 +340,10 @@ impl TranscriptionManager {
 
         {
             let mut engine = self.lock_engine();
-            // Dropping the engine frees all resources
+            if let Some(provider) = engine.as_mut() {
+                provider.unload();
+            }
+            // Dropping the provider frees all resources.
             *engine = None;
         }
         {
@@ -412,9 +429,6 @@ impl TranscriptionManager {
             return Err(anyhow::anyhow!(error_msg));
         }
 
-        let model_path = self.model_manager.get_model_path(model_id)?;
-
-        // Create appropriate engine based on model type
         let emit_loading_failed = |error_msg: &str| {
             let _ = self.app_handle.emit(
                 "model-state-changed",
@@ -427,90 +441,28 @@ impl TranscriptionManager {
             );
         };
 
-        let loaded_engine = match model_info.engine_type {
-            EngineType::Whisper => {
-                let engine = WhisperEngine::load(&model_path).map_err(|e| {
-                    let error_msg = format!("Failed to load whisper model {}: {}", model_id, e);
-                    emit_loading_failed(&error_msg);
-                    anyhow::anyhow!(error_msg)
-                })?;
-                LoadedEngine::Whisper(engine)
-            }
-            EngineType::Parakeet => {
-                let engine =
-                    ParakeetModel::load(&model_path, &Quantization::Int8).map_err(|e| {
-                        let error_msg =
-                            format!("Failed to load parakeet model {}: {}", model_id, e);
-                        emit_loading_failed(&error_msg);
-                        anyhow::anyhow!(error_msg)
-                    })?;
-                LoadedEngine::Parakeet(engine)
-            }
-            EngineType::Moonshine => {
-                let engine = MoonshineModel::load(
-                    &model_path,
-                    MoonshineVariant::Base,
-                    &Quantization::default(),
-                )
-                .map_err(|e| {
-                    let error_msg = format!("Failed to load moonshine model {}: {}", model_id, e);
-                    emit_loading_failed(&error_msg);
-                    anyhow::anyhow!(error_msg)
-                })?;
-                LoadedEngine::Moonshine(engine)
-            }
-            EngineType::MoonshineStreaming => {
-                let engine = StreamingModel::load(&model_path, 0, &Quantization::default())
-                    .map_err(|e| {
-                        let error_msg = format!(
-                            "Failed to load moonshine streaming model {}: {}",
-                            model_id, e
-                        );
-                        emit_loading_failed(&error_msg);
-                        anyhow::anyhow!(error_msg)
-                    })?;
-                LoadedEngine::MoonshineStreaming(engine)
-            }
-            EngineType::SenseVoice => {
-                let engine =
-                    SenseVoiceModel::load(&model_path, &Quantization::Int8).map_err(|e| {
-                        let error_msg =
-                            format!("Failed to load SenseVoice model {}: {}", model_id, e);
-                        emit_loading_failed(&error_msg);
-                        anyhow::anyhow!(error_msg)
-                    })?;
-                LoadedEngine::SenseVoice(engine)
-            }
-            EngineType::GigaAM => {
-                let engine = GigaAMModel::load(&model_path, &Quantization::Int8).map_err(|e| {
-                    let error_msg = format!("Failed to load gigaam model {}: {}", model_id, e);
-                    emit_loading_failed(&error_msg);
-                    anyhow::anyhow!(error_msg)
-                })?;
-                LoadedEngine::GigaAM(engine)
-            }
-            EngineType::Canary => {
-                let engine = CanaryModel::load(&model_path, &Quantization::Int8).map_err(|e| {
-                    let error_msg = format!("Failed to load canary model {}: {}", model_id, e);
-                    emit_loading_failed(&error_msg);
-                    anyhow::anyhow!(error_msg)
-                })?;
-                LoadedEngine::Canary(engine)
-            }
-            EngineType::Cohere => {
-                let engine = CohereModel::load(&model_path, &Quantization::Int8).map_err(|e| {
-                    let error_msg = format!("Failed to load cohere model {}: {}", model_id, e);
-                    emit_loading_failed(&error_msg);
-                    anyhow::anyhow!(error_msg)
-                })?;
-                LoadedEngine::Cohere(engine)
-            }
-        };
+        let model_asset = self.model_manager.get_model_asset(model_id)?;
+        let mut provider = TranscribeRsProvider::new();
+        provider.load(&model_asset).map_err(|e| {
+            let engine_label = match model_info.engine_type {
+                EngineType::Whisper => "whisper",
+                EngineType::Parakeet => "parakeet",
+                EngineType::Moonshine => "moonshine",
+                EngineType::MoonshineStreaming => "moonshine streaming",
+                EngineType::SenseVoice => "SenseVoice",
+                EngineType::GigaAM => "gigaam",
+                EngineType::Canary => "canary",
+                EngineType::Cohere => "cohere",
+            };
+            let error_msg = format!("Failed to load {} model {}: {}", engine_label, model_id, e);
+            emit_loading_failed(&error_msg);
+            anyhow::anyhow!(error_msg)
+        })?;
 
-        // Update the current engine and model ID
+        // Update the current provider and model ID
         {
             let mut engine = self.lock_engine();
-            *engine = Some(loaded_engine);
+            *engine = Some(provider);
         }
         {
             let mut current_model = self.current_model_id.lock().unwrap();
@@ -628,17 +580,25 @@ impl TranscriptionManager {
             );
         }
 
-        // Perform transcription with the appropriate engine.
+        let request = build_transcription_request(
+            audio,
+            &validated_language,
+            effective_translate_to_english,
+            &settings.adaptive_language_shortlist,
+            &settings.custom_words,
+        );
+
+        // Perform transcription with the appropriate provider.
         // We use catch_unwind to prevent engine panics from poisoning the mutex,
         // which would make the app hang indefinitely on subsequent operations.
         let result = {
             let mut engine_guard = self.lock_engine();
 
-            // Take the engine out so we own it during transcription.
-            // If the engine panics, we simply don't put it back (effectively unloading it)
+            // Take the provider out so we own it during transcription.
+            // If the provider panics, we simply don't put it back (effectively unloading it)
             // instead of poisoning the mutex.
-            let mut engine = match engine_guard.take() {
-                Some(e) => e,
+            let mut provider = match engine_guard.take() {
+                Some(provider) => provider,
                 None => {
                     return Err(anyhow::anyhow!(
                         "Model failed to load after auto-load attempt. Please check your model settings."
@@ -650,142 +610,20 @@ impl TranscriptionManager {
             drop(engine_guard);
 
             let transcribe_result = catch_unwind(AssertUnwindSafe(
-                || -> Result<transcribe_rs::TranscriptionResult> {
-                    match &mut engine {
-                        LoadedEngine::Whisper(whisper_engine) => {
-                            let initial_prompt = build_whisper_initial_prompt(
-                                &settings.custom_words,
-                                &settings.adaptive_language_shortlist,
-                            );
-                            let whisper_language = whisper_language_hint(
-                                &validated_language,
-                                &settings.adaptive_language_shortlist,
-                            );
-
-                            let params = WhisperInferenceParams {
-                                language: whisper_language,
-                                translate: effective_translate_to_english,
-                                initial_prompt,
-                                ..Default::default()
-                            };
-
-                            whisper_engine
-                                .transcribe_with(&audio, &params)
-                                .map_err(|e| anyhow::anyhow!("Whisper transcription failed: {}", e))
-                        }
-                        LoadedEngine::Parakeet(parakeet_engine) => {
-                            let params = ParakeetParams {
-                                timestamp_granularity: Some(TimestampGranularity::Segment),
-                                ..Default::default()
-                            };
-                            parakeet_engine
-                                .transcribe_with(&audio, &params)
-                                .map_err(|e| {
-                                    anyhow::anyhow!("Parakeet transcription failed: {}", e)
-                                })
-                        }
-                        LoadedEngine::Moonshine(moonshine_engine) => moonshine_engine
-                            .transcribe(&audio, &TranscribeOptions::default())
-                            .map_err(|e| anyhow::anyhow!("Moonshine transcription failed: {}", e)),
-                        LoadedEngine::MoonshineStreaming(streaming_engine) => streaming_engine
-                            .transcribe(&audio, &TranscribeOptions::default())
-                            .map_err(|e| {
-                                anyhow::anyhow!("Moonshine streaming transcription failed: {}", e)
-                            }),
-                        LoadedEngine::SenseVoice(sense_voice_engine) => {
-                            let language = match validated_language.as_str() {
-                                "zh" | "zh-Hans" | "zh-Hant" => Some("zh".to_string()),
-                                "en" => Some("en".to_string()),
-                                "ja" => Some("ja".to_string()),
-                                "ko" => Some("ko".to_string()),
-                                "yue" => Some("yue".to_string()),
-                                _ => None,
-                            };
-                            let params = SenseVoiceParams {
-                                language,
-                                use_itn: Some(true),
-                            };
-                            sense_voice_engine
-                                .transcribe_with(&audio, &params)
-                                .map_err(|e| {
-                                    anyhow::anyhow!("SenseVoice transcription failed: {}", e)
-                                })
-                        }
-                        LoadedEngine::GigaAM(gigaam_engine) => gigaam_engine
-                            .transcribe(&audio, &TranscribeOptions::default())
-                            .map_err(|e| anyhow::anyhow!("GigaAM transcription failed: {}", e)),
-                        LoadedEngine::Canary(canary_engine) => {
-                            let lang = if validated_language == "auto" {
-                                None
-                            } else {
-                                Some(validated_language.clone())
-                            };
-                            let options = TranscribeOptions {
-                                language: lang,
-                                translate: effective_translate_to_english,
-                                ..Default::default()
-                            };
-                            canary_engine
-                                .transcribe(&audio, &options)
-                                .map_err(|e| anyhow::anyhow!("Canary transcription failed: {}", e))
-                        }
-                        LoadedEngine::Cohere(cohere_engine) => {
-                            let language_candidates = transcription_language_candidates(
-                                &validated_language,
-                                &settings.adaptive_language_shortlist,
-                            );
-
-                            if validated_language == "auto" && language_candidates.len() > 1 {
-                                let mut results = Vec::new();
-                                let mut last_error = None;
-
-                                for language in language_candidates {
-                                    let options = TranscribeOptions {
-                                        language: Some(language.clone()),
-                                        ..Default::default()
-                                    };
-
-                                    match cohere_engine.transcribe(&audio, &options) {
-                                        Ok(result) => results.push((language, result)),
-                                        Err(error) => last_error = Some(error),
-                                    }
-                                }
-
-                                if results.is_empty() {
-                                    Err(anyhow::anyhow!(
-                                        "Cohere transcription failed: {}",
-                                        last_error.map(|error| error.to_string()).unwrap_or_else(
-                                            || "no language candidates succeeded".to_string()
-                                        )
-                                    ))
-                                } else {
-                                    Ok(select_best_language_candidate(results))
-                                }
-                            } else {
-                                let lang = language_candidates.first().cloned();
-                                let options = TranscribeOptions {
-                                    language: lang,
-                                    ..Default::default()
-                                };
-                                cohere_engine.transcribe(&audio, &options).map_err(|e| {
-                                    anyhow::anyhow!("Cohere transcription failed: {}", e)
-                                })
-                            }
-                        }
-                    }
-                },
+                || -> Result<crate::providers::SpeechResponse> { provider.run(request) },
             ));
 
             match transcribe_result {
                 Ok(inner_result) => {
-                    // Success or normal error — put the engine back
+                    // Success or normal error — put the provider back
                     let mut engine_guard = self.lock_engine();
-                    *engine_guard = Some(engine);
+                    *engine_guard = Some(provider);
                     inner_result?
                 }
                 Err(panic_payload) => {
-                    // Engine panicked — do NOT put it back (it's in an unknown state).
-                    // The engine is dropped here, effectively unloading it.
+                    // Provider panicked — do NOT put it back (it's in an unknown state).
+                    // The provider is unloaded and dropped here.
+                    provider.unload();
                     let panic_msg = if let Some(s) = panic_payload.downcast_ref::<&str>() {
                         s.to_string()
                     } else if let Some(s) = panic_payload.downcast_ref::<String>() {
@@ -1049,6 +887,49 @@ mod tests {
     #[test]
     fn empty_supported_language_list_accepts_any_selected_language() {
         assert_eq!(validate_selected_language("ar", &[]), "ar");
+    }
+
+    #[test]
+    fn speech_request_translation_is_absent_when_legacy_toggle_is_off() {
+        let request = build_transcription_request(
+            vec![0.0, 1.0],
+            "auto",
+            false,
+            &["en".to_string(), "ar".to_string()],
+            &[],
+        );
+
+        assert!(request.translation.is_none());
+    }
+
+    #[test]
+    fn speech_request_preserves_source_language_without_translation() {
+        let request = build_transcription_request(
+            vec![0.0, 1.0],
+            "ar",
+            false,
+            &["en".to_string(), "ar".to_string()],
+            &[],
+        );
+
+        assert_eq!(
+            request.source_language,
+            crate::providers::LanguageSelection::Language("ar".to_string())
+        );
+    }
+
+    #[test]
+    fn speech_request_uses_english_target_for_legacy_translation() {
+        let request = build_transcription_request(
+            vec![0.0, 1.0],
+            "auto",
+            true,
+            &["en".to_string(), "ar".to_string()],
+            &[],
+        );
+
+        let translation = request.translation.expect("translation should be present");
+        assert_eq!(translation.target_language, "en");
     }
 
     #[test]

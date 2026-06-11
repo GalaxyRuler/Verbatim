@@ -34,6 +34,7 @@ pub struct TranslationTarget {
 pub struct SpeechRequest {
     pub task: SpeechTaskKind,
     pub input: SpeechInput,
+    pub source_language: LanguageSelection,
     pub translation: Option<TranslationTarget>,
     pub language_shortlist: Vec<String>,
     pub custom_words: Vec<String>,
