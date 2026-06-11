@@ -1,7 +1,8 @@
 <div align="center">
-  <img src="src-tauri/icons/logo.png" alt="Verbatim logo" width="400">
-
-# Verbatim
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="src/assets/verbatim-lockup-horizontal-on-dark.svg">
+    <img src="src/assets/verbatim-lockup-horizontal.svg" alt="Verbatim" width="400">
+  </picture>
 
 **A free, open source, and extensible speech-to-text application that works completely offline.**
 
