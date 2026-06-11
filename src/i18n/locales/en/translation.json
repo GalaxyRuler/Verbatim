@@ -531,6 +531,12 @@
       },
       "acknowledgments": {
         "title": "Acknowledgments",
+        "handy": {
+          "title": "Handy",
+          "description": "The open source speech-to-text application Verbatim is forked from",
+          "details": "Verbatim is built on Handy by CJ Pais and its contributors, released under the MIT License. Their work on the architecture, audio pipeline, and cross-platform support made this app possible.",
+          "button": "View Handy on GitHub"
+        },
         "whisper": {
           "title": "Whisper.cpp",
           "description": "High-performance inference of OpenAI's Whisper automatic speech recognition model",

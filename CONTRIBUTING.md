@@ -92,8 +92,8 @@ For more details, see the Architecture section in [README.md](README.md) or [AGE
 
 ### Before Submitting a Bug Report
 
-1. **Search existing issues** at [github.com/cjpais/Verbatim/issues](https://github.com/GalaxyRuler/Verbatim/issues)
-2. **Check discussions** at [github.com/cjpais/Verbatim/discussions](https://github.com/GalaxyRuler/Verbatim/discussions)
+1. **Search existing issues** at [github.com/GalaxyRuler/Verbatim/issues](https://github.com/GalaxyRuler/Verbatim/issues)
+2. **Check discussions** at [github.com/GalaxyRuler/Verbatim/discussions](https://github.com/GalaxyRuler/Verbatim/discussions)
 3. **Try the latest release** to see if the issue has been fixed
 4. **Enable debug mode** (`Cmd/Ctrl+Shift+D`) to gather diagnostic information
 
@@ -125,10 +125,8 @@ We use GitHub Discussions for feature requests rather than issues. This keeps is
 
 ### Before Suggesting a Feature
 
-1. **Search existing discussions** at [github.com/cjpais/Verbatim/discussions](https://github.com/GalaxyRuler/Verbatim/discussions)
-2. **Check common feature requests**:
-   - [Post-processing / Editing Transcripts](https://github.com/GalaxyRuler/Verbatim/discussions/168)
-   - [Keyboard Shortcuts / Hotkeys](https://github.com/GalaxyRuler/Verbatim/discussions/211)
+1. **Search existing discussions** at [github.com/GalaxyRuler/Verbatim/discussions](https://github.com/GalaxyRuler/Verbatim/discussions)
+2. **Check whether the idea has already been discussed** before opening a new thread
 
 ### Submitting a Feature Request
 
@@ -309,9 +307,8 @@ Look for issues labeled `good first issue` or `help wanted` if you're new to the
 
 ## 📞 Getting Help
 
-- **Discord**: Join our [Discord community](https://discord.com/invite/WVBeWsNXK4)
 - **Discussions**: Ask questions in [GitHub Discussions](https://github.com/GalaxyRuler/Verbatim/discussions)
-- **Email**: Reach out at [contact@handy.computer](mailto:contact@handy.computer)
+- **Issues**: Report bugs via [GitHub Issues](https://github.com/GalaxyRuler/Verbatim/issues)
 
 ## 📜 License
 
