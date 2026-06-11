@@ -1,6 +1,7 @@
 use crate::audio_toolkit::{apply_custom_words, filter_transcription_output};
 use crate::managers::audio::AudioRecordingManager;
 use crate::managers::model::{EngineType, ModelManager};
+use crate::providers::LoadedEngine;
 use crate::settings::{
     get_settings, ModelUnloadTimeout, OrtAcceleratorSetting, WhisperAcceleratorSetting,
 };
@@ -34,17 +35,6 @@ pub struct ModelStateEvent {
     pub model_id: Option<String>,
     pub model_name: Option<String>,
     pub error: Option<String>,
-}
-
-enum LoadedEngine {
-    Whisper(WhisperEngine),
-    Parakeet(ParakeetModel),
-    Moonshine(MoonshineModel),
-    MoonshineStreaming(StreamingModel),
-    SenseVoice(SenseVoiceModel),
-    GigaAM(GigaAMModel),
-    Canary(CanaryModel),
-    Cohere(CohereModel),
 }
 
 fn normalize_language_for_engine(language: &str) -> String {
