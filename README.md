@@ -38,16 +38,26 @@ The process is entirely local:
   - **Parakeet V3** - CPU-optimized model with excellent performance and automatic language detection
 - Works on Windows, macOS, and Linux
 
+## Download Verbatim
+
+Download the latest Windows, macOS, and Linux installers from the [Verbatim Releases page](https://github.com/GalaxyRuler/Verbatim/releases/latest).
+
+- **Windows:** download the `.exe` setup file. Use the `.msi` for managed installs.
+- **macOS:** download the `.dmg` for your Mac: Apple Silicon (`aarch64`) or Intel (`x64`).
+- **Linux:** download the `.AppImage`, `.deb`, or `.rpm` package that matches your distribution and CPU.
+
 ## Quick Start
 
 ### Installation
 
-**Windows x64**
+**Recommended**
 
-- [Download Verbatim for Windows](https://github.com/GalaxyRuler/Verbatim/releases/latest/download/Verbatim-Windows-x64-Setup.exe) (recommended)
-- [Download Windows MSI](https://github.com/GalaxyRuler/Verbatim/releases/latest/download/Verbatim-Windows-x64.msi) (managed installs)
+- [Download the latest Verbatim release](https://github.com/GalaxyRuler/Verbatim/releases/latest)
 
-All release assets are available on the [GitHub Releases page](https://github.com/GalaxyRuler/Verbatim/releases/latest).
+**Windows x64 quick links**
+
+- [Download Verbatim for Windows](https://github.com/GalaxyRuler/Verbatim/releases/latest/download/Verbatim-Windows-x64-Setup.exe)
+- [Download Windows MSI](https://github.com/GalaxyRuler/Verbatim/releases/latest/download/Verbatim-Windows-x64.msi)
 
 1. Install the application
 2. Launch Verbatim and grant necessary system permissions (microphone, accessibility)
