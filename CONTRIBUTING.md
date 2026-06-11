@@ -1,6 +1,8 @@
 # Contributing to Handy
 
-Thank you for your interest in contributing to Handy! This guide will help you get started with contributing to this open source speech-to-text application.
+> This is a fork of [Handy](https://github.com/cjpais/Handy) by CJ Pais. Community resources (issues, discussions, Discord) are shared with the upstream project — links below point there intentionally.
+
+Thank you for your interest in contributing! This guide covers the workflow for this fork. We build on Handy's foundation and follow its contributing philosophy.
 
 ## ⚠️ Feature Freeze
 
