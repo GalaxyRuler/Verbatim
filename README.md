@@ -294,9 +294,9 @@ We're actively working on several features and improvements. Contributions and f
 
 ## Verify Release Signatures
 
-Verbatim release artifacts are signed with Tauri's updater signature format. The public key is stored in [`src-tauri/tauri.conf.json`](src-tauri/tauri.conf.json) under `plugins.updater.pubkey`.
+When a release includes matching `.sig` files, Verbatim release artifacts can be verified with Tauri's updater signature format. The public key is stored in [`src-tauri/tauri.conf.json`](src-tauri/tauri.conf.json) under `plugins.updater.pubkey`.
 
-To verify a release manually, set `ARTIFACT` to the filename you downloaded, save the `pubkey` value from `src-tauri/tauri.conf.json` to `verbatim.pub.b64`, then decode the public key and matching `.sig` file from base64 and verify the artifact with `minisign`:
+To verify a signed release manually, set `ARTIFACT` to the filename you downloaded, save the `pubkey` value from `src-tauri/tauri.conf.json` to `verbatim.pub.b64`, then decode the public key and matching `.sig` file from base64 and verify the artifact with `minisign`:
 
 ```bash
 # Replace with the file you downloaded
