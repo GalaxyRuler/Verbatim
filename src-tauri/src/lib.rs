@@ -15,6 +15,7 @@ mod managers;
 mod overlay;
 pub mod portable;
 mod post_paste_learning;
+pub mod providers;
 mod settings;
 mod shortcut;
 mod signal_handle;
