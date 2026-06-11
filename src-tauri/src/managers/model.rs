@@ -1451,6 +1451,17 @@ impl ModelManager {
         }
     }
 
+    pub fn get_model_asset(&self, model_id: &str) -> Result<crate::providers::ModelAsset> {
+        let model_info = self
+            .get_model_info(model_id)
+            .ok_or_else(|| anyhow::anyhow!("Model not found: {}", model_id))?;
+        let model_path = self.get_model_path(model_id)?;
+
+        Ok(crate::providers::ModelAsset::from_model_info(
+            model_info, model_path,
+        ))
+    }
+
     pub fn cancel_download(&self, model_id: &str) -> Result<()> {
         debug!("ModelManager: cancel_download called for: {}", model_id);
 

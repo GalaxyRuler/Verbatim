@@ -56,6 +56,22 @@ pub struct ModelAsset {
     pub metadata: ModelInfo,
 }
 
+impl ModelAsset {
+    pub fn from_model_info(metadata: ModelInfo, resolved_path: PathBuf) -> Self {
+        let locator = if metadata.is_directory {
+            ModelLocator::Directory(resolved_path)
+        } else {
+            ModelLocator::File(resolved_path)
+        };
+
+        Self {
+            id: metadata.id.clone(),
+            locator,
+            metadata,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ModelLocator {
     File(PathBuf),
@@ -148,7 +164,33 @@ pub trait EngineProvider: Send {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::managers::model::{EngineType, ModelInfo};
+    use std::path::PathBuf;
     use std::sync::Arc;
+
+    fn minimal_model_info(id: &str, is_directory: bool) -> ModelInfo {
+        ModelInfo {
+            id: id.to_string(),
+            name: "Test Model".to_string(),
+            description: "Test".to_string(),
+            filename: "test-model".to_string(),
+            url: None,
+            sha256: None,
+            size_mb: 1,
+            is_downloaded: true,
+            is_downloading: false,
+            partial_size: 0,
+            is_directory,
+            engine_type: EngineType::Whisper,
+            accuracy_score: 0.0,
+            speed_score: 0.0,
+            supports_translation: false,
+            is_recommended: false,
+            supported_languages: vec![],
+            supports_language_selection: true,
+            is_custom: false,
+        }
+    }
 
     #[test]
     fn speech_input_requires_exactly_one_input_kind() {
@@ -212,5 +254,19 @@ mod tests {
         assert!(capabilities.supports_task(&SpeechTaskKind::Transcribe));
         assert!(capabilities.supports_task(&SpeechTaskKind::TranslateText));
         assert!(!capabilities.supports_task(&SpeechTaskKind::TranslateSpeech));
+    }
+
+    #[test]
+    fn model_asset_uses_directory_locator_for_directory_models() {
+        let info = minimal_model_info("dir-model", true);
+        let asset = ModelAsset::from_model_info(info, PathBuf::from("C:/models/dir-model"));
+        assert!(matches!(asset.locator, ModelLocator::Directory(_)));
+    }
+
+    #[test]
+    fn model_asset_uses_file_locator_for_file_models() {
+        let info = minimal_model_info("file-model", false);
+        let asset = ModelAsset::from_model_info(info, PathBuf::from("C:/models/model.bin"));
+        assert!(matches!(asset.locator, ModelLocator::File(_)));
     }
 }
