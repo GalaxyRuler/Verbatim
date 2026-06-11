@@ -390,6 +390,10 @@ fn serialize_json<T: serde::Serialize>(value: &T) -> Option<String> {
     serde_json::to_string(value).ok()
 }
 
+fn should_mute_before_start_feedback(settings: &AppSettings) -> bool {
+    settings.mute_while_recording && !settings.audio_feedback
+}
+
 fn adaptive_target_verified(
     original_context: &crate::adaptive::types::CapturedContext,
     current_context: &crate::adaptive::types::CapturedContext,
@@ -535,6 +539,23 @@ mod adaptive_action_tests {
             Some("target changed before insertion")
         );
     }
+
+    #[test]
+    fn mute_happens_before_start_feedback_when_feedback_is_disabled() {
+        let mut settings = AppSettings {
+            mute_while_recording: true,
+            audio_feedback: false,
+            ..crate::settings::get_default_settings()
+        };
+
+        assert!(should_mute_before_start_feedback(&settings));
+
+        settings.audio_feedback = true;
+        assert!(!should_mute_before_start_feedback(&settings));
+
+        settings.mute_while_recording = false;
+        assert!(!should_mute_before_start_feedback(&settings));
+    }
 }
 
 impl ShortcutAction for TranscribeAction {
@@ -575,20 +596,20 @@ impl ShortcutAction for TranscribeAction {
 
         let mut recording_error: Option<String> = None;
         if is_always_on {
-            // Always-on mode: Play audio feedback immediately, then apply mute after sound finishes
-            debug!("Always-on mode: Playing audio feedback immediately");
-            let rm_clone = Arc::clone(&rm);
-            let app_clone = app.clone();
-            // The blocking helper exits immediately if audio feedback is disabled,
-            // so we can always reuse this thread to ensure mute happens right after playback.
-            std::thread::spawn(move || {
-                play_feedback_sound_blocking(&app_clone, SoundType::Start);
-                rm_clone.apply_mute();
-            });
-
             if let Err(e) = rm.try_start_recording(&binding_id) {
                 debug!("Recording failed: {}", e);
                 recording_error = Some(e);
+            } else if should_mute_before_start_feedback(&settings) {
+                rm.apply_mute();
+            } else if settings.audio_feedback || settings.mute_while_recording {
+                // Always-on mode: Play audio feedback immediately, then apply mute after sound finishes
+                debug!("Always-on mode: Playing audio feedback immediately");
+                let rm_clone = Arc::clone(&rm);
+                let app_clone = app.clone();
+                std::thread::spawn(move || {
+                    play_feedback_sound_blocking(&app_clone, SoundType::Start);
+                    rm_clone.apply_mute();
+                });
             }
         } else {
             // On-demand mode: Start recording first, then play audio feedback, then apply mute
@@ -598,17 +619,19 @@ impl ShortcutAction for TranscribeAction {
             match rm.try_start_recording(&binding_id) {
                 Ok(()) => {
                     debug!("Recording started in {:?}", recording_start_time.elapsed());
-                    // Small delay to ensure microphone stream is active
-                    let app_clone = app.clone();
-                    let rm_clone = Arc::clone(&rm);
-                    std::thread::spawn(move || {
-                        std::thread::sleep(std::time::Duration::from_millis(100));
-                        debug!("Handling delayed audio feedback/mute sequence");
-                        // Helper handles disabled audio feedback by returning early, so we reuse it
-                        // to keep mute sequencing consistent in every mode.
-                        play_feedback_sound_blocking(&app_clone, SoundType::Start);
-                        rm_clone.apply_mute();
-                    });
+                    if should_mute_before_start_feedback(&settings) {
+                        rm.apply_mute();
+                    } else if settings.audio_feedback || settings.mute_while_recording {
+                        // Small delay to ensure microphone stream is active before feedback playback
+                        let app_clone = app.clone();
+                        let rm_clone = Arc::clone(&rm);
+                        std::thread::spawn(move || {
+                            std::thread::sleep(std::time::Duration::from_millis(100));
+                            debug!("Handling delayed audio feedback/mute sequence");
+                            play_feedback_sound_blocking(&app_clone, SoundType::Start);
+                            rm_clone.apply_mute();
+                        });
+                    }
                 }
                 Err(e) => {
                     debug!("Failed to start recording: {}", e);
