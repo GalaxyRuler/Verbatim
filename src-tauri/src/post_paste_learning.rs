@@ -1,4 +1,6 @@
 use log::{debug, info};
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+use std::process::Command;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 
@@ -240,14 +242,195 @@ fn same_chars(left: &[char], right: &[char]) -> bool {
             .all(|(left, right)| left == right)
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
 fn capture_platform_focused_text_snapshot() -> Result<FocusedTextSnapshot, String> {
     Err("post-paste dictionary learning is not implemented on this platform yet".to_string())
+}
+
+#[cfg(target_os = "macos")]
+fn capture_platform_focused_text_snapshot() -> Result<FocusedTextSnapshot, String> {
+    macos_focused_text::capture()
+}
+
+#[cfg(target_os = "linux")]
+fn capture_platform_focused_text_snapshot() -> Result<FocusedTextSnapshot, String> {
+    linux_focused_text::capture()
 }
 
 #[cfg(target_os = "windows")]
 fn capture_platform_focused_text_snapshot() -> Result<FocusedTextSnapshot, String> {
     windows_focused_text::capture()
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn parse_snapshot_output(output: &[u8]) -> Result<FocusedTextSnapshot, String> {
+    let stdout = String::from_utf8_lossy(output);
+    let Some((target_id, text)) = stdout.split_once('\n') else {
+        return Err("focused text snapshot command returned malformed output".to_string());
+    };
+
+    let target_id = target_id.trim().to_string();
+    let text = text.trim_end_matches(['\r', '\n']).to_string();
+
+    if target_id.is_empty() {
+        return Err("focused text snapshot command returned an empty target id".to_string());
+    }
+
+    if text.is_empty() {
+        return Err("focused element has no readable text".to_string());
+    }
+
+    Ok(FocusedTextSnapshot { target_id, text })
+}
+
+#[cfg(target_os = "macos")]
+mod macos_focused_text {
+    use super::{parse_snapshot_output, Command, FocusedTextSnapshot};
+
+    pub fn capture() -> Result<FocusedTextSnapshot, String> {
+        let output = Command::new("osascript")
+            .args(["-e", MACOS_FOCUSED_TEXT_SCRIPT])
+            .output()
+            .map_err(|error| format!("failed to run osascript: {}", error))?;
+
+        if !output.status.success() {
+            return Err(format!(
+                "macOS Accessibility snapshot failed: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            ));
+        }
+
+        parse_snapshot_output(&output.stdout)
+    }
+
+    const MACOS_FOCUSED_TEXT_SCRIPT: &str = r#"
+on attrText(elementRef, attrName)
+  try
+    set attrValue to value of attribute attrName of elementRef
+    if attrValue is missing value then return ""
+    return attrValue as text
+  on error
+    return ""
+  end try
+end attrText
+
+tell application "System Events"
+  set frontApp to first application process whose frontmost is true
+  set focusedElement to value of attribute "AXFocusedUIElement" of frontApp
+  set textValue to my attrText(focusedElement, "AXValue")
+  if textValue is "" then error "focused element has no readable AXValue"
+
+  set targetParts to {unix id of frontApp as text, my attrText(focusedElement, "AXRole"), my attrText(focusedElement, "AXSubrole"), my attrText(focusedElement, "AXIdentifier"), my attrText(focusedElement, "AXTitle")}
+  set AppleScript's text item delimiters to "|"
+  set targetId to targetParts as text
+  set AppleScript's text item delimiters to ""
+  return targetId & linefeed & textValue
+end tell
+"#;
+}
+
+#[cfg(target_os = "linux")]
+mod linux_focused_text {
+    use super::{parse_snapshot_output, Command, FocusedTextSnapshot};
+
+    pub fn capture() -> Result<FocusedTextSnapshot, String> {
+        run_python("python3").or_else(|python3_error| {
+            run_python("python").map_err(|python_error| {
+                format!(
+                    "Linux AT-SPI snapshot failed with python3 ({}) and python ({})",
+                    python3_error, python_error
+                )
+            })
+        })
+    }
+
+    fn run_python(binary: &str) -> Result<FocusedTextSnapshot, String> {
+        let output = Command::new(binary)
+            .args(["-c", LINUX_FOCUSED_TEXT_SCRIPT])
+            .output()
+            .map_err(|error| format!("failed to run {binary}: {error}"))?;
+
+        if !output.status.success() {
+            return Err(format!(
+                "{} AT-SPI snapshot failed: {}",
+                binary,
+                String::from_utf8_lossy(&output.stderr).trim()
+            ));
+        }
+
+        parse_snapshot_output(&output.stdout)
+    }
+
+    const LINUX_FOCUSED_TEXT_SCRIPT: &str = r#"
+import sys
+
+try:
+    import pyatspi
+except Exception as exc:
+    raise SystemExit(f"pyatspi is unavailable: {exc}")
+
+def active_window():
+    desktop = pyatspi.Registry.getDesktop(0)
+    for app in desktop:
+        for window in app:
+            try:
+                if window.getState().contains(pyatspi.STATE_ACTIVE):
+                    return app, window
+            except Exception:
+                pass
+    return None, None
+
+def find_focused(root, path=""):
+    try:
+        if root.getState().contains(pyatspi.STATE_FOCUSED):
+            return root, path
+    except Exception:
+        pass
+
+    try:
+        child_count = root.childCount
+    except Exception:
+        child_count = 0
+
+    for index in range(child_count):
+        try:
+            child = root.getChildAtIndex(index)
+        except Exception:
+            continue
+        found, found_path = find_focused(child, f"{path}/{index}")
+        if found is not None:
+            return found, found_path
+
+    return None, ""
+
+def accessible_text(obj):
+    try:
+        text = obj.queryText()
+        return text.getText(0, text.characterCount)
+    except Exception:
+        return ""
+
+app, window = active_window()
+if window is None:
+    raise SystemExit("no active AT-SPI window")
+
+focused, path = find_focused(window)
+if focused is None:
+    raise SystemExit("no focused AT-SPI element")
+
+text = accessible_text(focused)
+if not text:
+    raise SystemExit("focused AT-SPI element has no readable text")
+
+parts = [
+    getattr(app, "name", "") or "",
+    getattr(window, "name", "") or "",
+    focused.getRoleName() if hasattr(focused, "getRoleName") else "",
+    path,
+]
+print("|".join(parts))
+print(text, end="")
+"#;
 }
 
 #[cfg(target_os = "windows")]
@@ -408,5 +591,24 @@ mod tests {
     #[test]
     fn correction_window_allows_human_edit_latency() {
         assert!(POST_PASTE_LEARNING_WINDOW >= Duration::from_secs(6));
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn parses_script_snapshot_output() {
+        let snapshot =
+            super::parse_snapshot_output(b"app|window|role|/0\nhello world\n").expect("snapshot");
+
+        assert_eq!(snapshot.target_id, "app|window|role|/0");
+        assert_eq!(snapshot.text, "hello world");
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn rejects_script_snapshot_without_target_line() {
+        let error = super::parse_snapshot_output(b"hello world")
+            .expect_err("malformed snapshot should fail");
+
+        assert!(error.contains("malformed"));
     }
 }

@@ -147,6 +147,16 @@ For reliable text input on Linux, install the appropriate tool for your display 
 
 Without these tools, Verbatim falls back to enigo which may have limited compatibility, especially on Wayland.
 
+**Custom Dictionary Auto-Add:**
+
+The custom dictionary auto-add watcher uses each platform's accessibility text APIs to read the focused text field after Verbatim pastes. Windows uses UI Automation, macOS uses the Accessibility permission already requested during onboarding, and Linux uses AT-SPI through `pyatspi`.
+
+On Ubuntu/Debian, install the Linux accessibility binding with:
+
+```bash
+sudo apt install python3-pyatspi
+```
+
 **Other Notes:**
 
 - **Runtime library dependency (`libgtk-layer-shell.so.0`)**:
