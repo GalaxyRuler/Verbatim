@@ -69,6 +69,11 @@ to grow inside a single `match LoadedEngine`.
 The first implementation should keep the interface small:
 
 ```rust
+pub enum SpeechInput {
+    Audio(Arc<[f32]>),
+    Text(String),
+}
+
 pub enum SpeechTaskKind {
     Transcribe,
     TranslateSpeech,
@@ -76,28 +81,71 @@ pub enum SpeechTaskKind {
     PostProcessText,
 }
 
+pub struct TranslationTarget {
+    pub source_language: LanguageSelection,
+    pub target_language: String,
+}
+
 pub struct SpeechRequest {
     pub task: SpeechTaskKind,
-    pub audio: Option<Vec<f32>>,
-    pub text: Option<String>,
-    pub source_language: LanguageSelection,
-    pub target_language: Option<String>,
+    pub input: SpeechInput,
+    pub translation: Option<TranslationTarget>,
     pub language_shortlist: Vec<String>,
     pub custom_words: Vec<String>,
+    pub cancellation: CancellationToken,
 }
 
 pub struct SpeechResponse {
     pub text: String,
     pub detected_language: Option<String>,
     pub translated: bool,
-    pub provider_id: String,
+    pub provider_id: &'static str,
     pub model_id: String,
+}
+
+pub struct ModelAsset {
+    pub id: String,
+    pub locator: ModelLocator,
+    pub metadata: ModelInfo,
+}
+
+pub enum ModelLocator {
+    File(PathBuf),
+    Directory(PathBuf),
+    ManagedServer { endpoint: Url, health_url: Option<Url> },
+    ExternalHttp { endpoint: Url, credential_ref: Option<String> },
+}
+
+pub struct ProviderCapabilities {
+    pub tasks: Vec<SpeechTaskKind>,
+    pub translation_pairs: TranslationPairSupport,
+    pub streaming: StreamingSupport,
+    pub lifecycle: LifecycleCost,
+}
+
+pub enum TranslationPairSupport {
+    None,
+    EnglishOnly,
+    Explicit(Vec<(String, String)>),
+    AnyToAny { languages: Vec<String> },
+}
+
+pub enum StreamingSupport {
+    None,
+    PartialText,
+}
+
+pub enum LifecycleCost {
+    NoLoad,
+    Cheap,
+    Expensive,
+    SidecarProcess,
 }
 
 pub trait EngineProvider: Send {
     fn provider_id(&self) -> &'static str;
-    fn supports(&self, model: &ModelInfo, task: &SpeechTaskKind) -> bool;
-    fn load(&mut self, model: &ModelInfo, model_path: &Path) -> anyhow::Result<()>;
+    fn capabilities(&self, asset: &ModelAsset) -> ProviderCapabilities;
+    fn load(&mut self, asset: &ModelAsset) -> anyhow::Result<()>;
     fn unload(&mut self);
     fn run(&mut self, request: SpeechRequest) -> anyhow::Result<SpeechResponse>;
 }
@@ -105,6 +153,28 @@ pub trait EngineProvider: Send {
 
 This does not need to be the final interface. It is the smallest useful seam for
 moving existing engine branching out of `TranscriptionManager`.
+
+The important constraints are:
+
+- Capability checks must include translation source/target support. A provider
+  cannot simply say it supports `TranslateSpeech`; it must expose which language
+  pairs are legal.
+- Provider loading must take a `ModelAsset`, not a raw path. Some providers load
+  from files or directories, while others point to sidecars or external HTTP
+  endpoints.
+- Request input must be a sum type, not independent optional audio/text fields,
+  so invalid both-empty and both-present states cannot be represented.
+- Audio input should use `Arc<[f32]>` so orchestration and providers do not clone
+  full recordings unnecessarily.
+- The panic boundary should remain in the orchestrator so one provider panic
+  still unloads that provider and reports a consistent model-state event.
+- `EngineProvider: Send` is sufficient for the first adapter because current
+  inference is single-flight behind a mutex. HTTP providers may later use a
+  separate `Sync` or cloneable client adapter if parallel requests become useful.
+
+Streaming is deliberately not in the first trait method. When implemented, add a
+sibling interface such as `run_streaming(request, sink)` rather than overloading
+the batch `run()` response.
 
 ## Translation Model
 Replace the English-only setting over time:
@@ -119,9 +189,11 @@ Target:
 
 ```text
 translation_enabled: bool
-translation_source_language: "auto" | language_code
-translation_target_language: language_code | null
-translation_mode: "native" | "text" | "speech" | "auto"
+translation_request: null | {
+  source_language: "auto" | language_code
+  target_language: language_code
+  route: "auto" | "direct_speech" | "text_after_transcription"
+}
 translation_provider_id: string | null
 translation_model_id: string | null
 ```
@@ -130,16 +202,36 @@ Rules:
 
 - Translation is off by default.
 - Dictation never translates unless translation is explicitly enabled.
+- `translation_enabled` and a missing target language must not be representable
+  together in the internal Rust request type. UI storage may be more permissive
+  for migration, but command handlers must normalize it before execution.
 - Adaptive profiles may format or clean text but must not translate.
 - Native ASR translation is allowed only when the selected provider reports that
   exact source/target pair as supported.
 - If native translation is not supported, Verbatim may offer text translation as
   a second step through a translation-capable provider.
+- Legacy migration rule: `translate_to_english = true` maps to
+  `translation_request = { source_language: "auto", target_language: "en",
+  route: "auto" }`. Any shortcut or command path that currently writes
+  `translate_to_english` must write the new request shape after migration.
+
+Route semantics:
+
+- `auto`: choose direct speech translation when the active provider supports the
+  exact language pair, otherwise choose text-after-transcription when available.
+- `direct_speech`: provider translates from speech to target text in one step.
+- `text_after_transcription`: provider first transcribes, then a translation
+  provider translates the resulting text.
 
 ## Migration Plan
 Implement this in small slices:
 
-1. Add provider/task types without changing behavior.
+0. Add characterization tests around current orchestration before moving code:
+   - fake provider selection and unsupported-pair rejection;
+   - translation off means no translation;
+   - model load/unload policy calls happen in the expected order;
+   - current Whisper/Canary English-translation behavior remains unchanged.
+1. Add provider/task/capability types without changing behavior.
 2. Wrap the current `transcribe-rs` engines in one provider adapter.
 3. Move the existing `LoadedEngine` match behind that provider.
 4. Keep current model IDs and settings working.
@@ -186,6 +278,11 @@ Trade-offs:
 - Existing `ModelInfo` will need to evolve into task/provider capability data.
 - Some providers will require sidecar runtimes, health checks, and clearer
   installation UX.
+- Error handling should start as `anyhow::Result` while moving the seam, but a
+  typed provider error taxonomy is required before polishing the UI. Known
+  categories: model missing, unsupported task, unsupported language pair, server
+  unavailable, network failure, cancelled, provider panic, and invalid provider
+  configuration.
 
 Risks:
 
@@ -201,8 +298,12 @@ The provider architecture is working when:
 
 - Existing Whisper, Parakeet, Moonshine, SenseVoice, GigaAM, Canary, and Cohere
   behavior passes current tests unchanged.
+- Characterization tests pass through a fake provider without model weights.
+- Unsupported translation pairs fail before provider-specific invocation.
 - Translation cannot occur unless `translation_enabled` is true.
 - UI can distinguish dictation models from translation providers.
 - Adding a new provider requires adding an adapter and metadata, not editing the
   main transcription orchestration.
-- A fake provider can be tested without downloading model weights.
+- Load/unload policy remains centralized: local engines can unload to free RAM,
+  HTTP providers can no-op, and sidecar providers can report expensive lifecycle
+  costs so the orchestrator does not restart them casually.
