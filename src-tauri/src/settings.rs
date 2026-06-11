@@ -106,6 +106,21 @@ pub struct PostProcessProvider {
     pub supports_structured_output: bool,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum TranslationRoute {
+    Auto,
+    DirectSpeech,
+    TextAfterTranscription,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Type)]
+pub struct TranslationRequestSettings {
+    pub source_language: String,
+    pub target_language: String,
+    pub route: TranslationRoute,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Type)]
 #[serde(rename_all = "lowercase")]
 pub enum OverlayPosition {
@@ -361,6 +376,14 @@ pub struct AppSettings {
     pub selected_output_device: Option<String>,
     #[serde(default = "default_translate_to_english")]
     pub translate_to_english: bool,
+    #[serde(default)]
+    pub translation_enabled: bool,
+    #[serde(default)]
+    pub translation_request: Option<TranslationRequestSettings>,
+    #[serde(default)]
+    pub translation_provider_id: Option<String>,
+    #[serde(default)]
+    pub translation_model_id: Option<String>,
     #[serde(default = "default_selected_language")]
     pub selected_language: String,
     #[serde(default = "default_overlay_position")]
@@ -797,6 +820,25 @@ fn ensure_adaptive_defaults(settings: &mut AppSettings) -> bool {
     changed
 }
 
+fn ensure_translation_defaults(settings: &mut AppSettings) -> bool {
+    if settings.translate_to_english && settings.translation_request.is_none() {
+        settings.translation_enabled = true;
+        settings.translation_request = Some(TranslationRequestSettings {
+            source_language: "auto".to_string(),
+            target_language: "en".to_string(),
+            route: TranslationRoute::Auto,
+        });
+        return true;
+    }
+
+    if !settings.translation_enabled && settings.translation_request.is_some() {
+        settings.translation_request = None;
+        return true;
+    }
+
+    false
+}
+
 pub const SETTINGS_STORE_PATH: &str = "settings_store.json";
 
 pub fn get_default_settings() -> AppSettings {
@@ -866,6 +908,10 @@ pub fn get_default_settings() -> AppSettings {
         clamshell_microphone: None,
         selected_output_device: None,
         translate_to_english: false,
+        translation_enabled: false,
+        translation_request: None,
+        translation_provider_id: None,
+        translation_model_id: None,
         selected_language: "auto".to_string(),
         overlay_position: default_overlay_position(),
         debug_mode: false,
@@ -980,7 +1026,8 @@ pub fn load_or_create_app_settings(app: &AppHandle) -> AppSettings {
 
     let post_process_changed = ensure_post_process_defaults(&mut settings);
     let adaptive_changed = ensure_adaptive_defaults(&mut settings);
-    if post_process_changed || adaptive_changed {
+    let translation_changed = ensure_translation_defaults(&mut settings);
+    if post_process_changed || adaptive_changed || translation_changed {
         store.set("settings", serde_json::to_value(&settings).unwrap());
     }
 
@@ -1006,7 +1053,8 @@ pub fn get_settings(app: &AppHandle) -> AppSettings {
 
     let post_process_changed = ensure_post_process_defaults(&mut settings);
     let adaptive_changed = ensure_adaptive_defaults(&mut settings);
-    if post_process_changed || adaptive_changed {
+    let translation_changed = ensure_translation_defaults(&mut settings);
+    if post_process_changed || adaptive_changed || translation_changed {
         store.set("settings", serde_json::to_value(&settings).unwrap());
     }
 
@@ -1109,6 +1157,32 @@ mod tests {
             .adaptive_profiles
             .iter()
             .all(|profile| profile.id != "translation"));
+    }
+
+    #[test]
+    fn legacy_translate_to_english_maps_to_translation_request() {
+        let mut settings = get_default_settings();
+        settings.translate_to_english = true;
+
+        let changed = ensure_translation_defaults(&mut settings);
+
+        assert!(changed);
+        assert!(settings.translation_enabled);
+        assert_eq!(
+            settings
+                .translation_request
+                .as_ref()
+                .expect("translation request")
+                .target_language,
+            "en"
+        );
+    }
+
+    #[test]
+    fn translation_request_absent_when_translation_is_disabled() {
+        let settings = get_default_settings();
+        assert!(!settings.translation_enabled);
+        assert!(settings.translation_request.is_none());
     }
 
     #[test]

@@ -23,7 +23,8 @@ use tauri_plugin_autostart::ManagerExt;
 use crate::settings::APPLE_INTELLIGENCE_DEFAULT_MODEL_ID;
 use crate::settings::{
     self, get_settings, AutoSubmitKey, ClipboardHandling, KeyboardImplementation, LLMPrompt,
-    OverlayPosition, PasteMethod, ShortcutBinding, SoundTheme, TypingTool,
+    OverlayPosition, PasteMethod, ShortcutBinding, SoundTheme, TranslationRequestSettings,
+    TranslationRoute, TypingTool,
     APPLE_INTELLIGENCE_PROVIDER_ID,
 };
 use crate::tray;
@@ -526,6 +527,12 @@ pub fn change_sound_theme_setting(app: AppHandle, theme: String) -> Result<(), S
 pub fn change_translate_to_english_setting(app: AppHandle, enabled: bool) -> Result<(), String> {
     let mut settings = settings::get_settings(&app);
     settings.translate_to_english = enabled;
+    settings.translation_enabled = enabled;
+    settings.translation_request = enabled.then_some(TranslationRequestSettings {
+        source_language: "auto".to_string(),
+        target_language: "en".to_string(),
+        route: TranslationRoute::Auto,
+    });
     settings::write_settings(&app, settings);
     Ok(())
 }
