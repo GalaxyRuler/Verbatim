@@ -31,6 +31,8 @@ dist-ssr
 .agents/
 .superpowers/
 docs/superpowers/
+CLAUDE.md
+CRUSH.md
 
 /target/
 recording_*

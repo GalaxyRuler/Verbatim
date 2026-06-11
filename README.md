@@ -342,7 +342,7 @@ Download the models you want from below
 Downloaded from the official [ggerganov/whisper.cpp](https://huggingface.co/ggerganov/whisper.cpp) repository on Hugging Face where available:
 
 - Small (487 MB): `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin`
-- Medium (492 MB): `https://blob.handy.computer/whisper-medium-q4_1.bin` (custom q4_1 quantization packaged by the upstream Handy project; not available on Hugging Face)
+- Medium (492 MB): `https://cdn.galaxyruler.com/verbatim/whisper-medium-q4_1.bin` (custom q4_1 quantization originally packaged by the upstream Handy project; not available on Hugging Face)
 - Turbo (1600 MB): `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin`
 - Large (1100 MB): `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-q5_0.bin`
 
@@ -350,8 +350,8 @@ Downloaded from the official [ggerganov/whisper.cpp](https://huggingface.co/gger
 
 These are int8-quantized packagings (by the upstream Handy project) of NVIDIA's [parakeet-tdt-0.6b-v2](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2) and [parakeet-tdt-0.6b-v3](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3) models from Hugging Face:
 
-- V2 (473 MB): `https://blob.handy.computer/parakeet-v2-int8.tar.gz`
-- V3 (478 MB): `https://blob.handy.computer/parakeet-v3-int8.tar.gz`
+- V2 (473 MB): `https://cdn.galaxyruler.com/verbatim/parakeet-v2-int8.tar.gz`
+- V3 (478 MB): `https://cdn.galaxyruler.com/verbatim/parakeet-v3-int8.tar.gz`
 
 #### Step 4: Install Models
 

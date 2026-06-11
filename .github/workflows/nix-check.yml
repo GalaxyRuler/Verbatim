@@ -1,8 +1,10 @@
 # Nix CI — two tiers:
 #
-# 1. Quick checks (bun.nix sync, flake eval) run on ANY source change
+# 1. Repo health checks run on ANY source change and produce a compact
+#    artifact/step-summary evidence trail.
+# 2. Quick nix checks (bun.nix sync, flake eval) run on ANY source change
 #    so compilation-breaking edits are caught by flake eval.
-# 2. Full nix build (~25 min) only runs when nix packaging files change.
+# 3. Full nix build (~25 min) only runs when nix packaging files change.
 #
 # Setting up a Cachix binary cache would further reduce full-build times.
 
@@ -34,7 +36,54 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  repo-health:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Check translations
+        run: bun run check:translations
+
+      - name: Lint frontend
+        run: bun run lint
+
+      - name: Build frontend
+        run: bun run build
+
+      - name: Check Rust formatting
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
+
+      - name: Write CI evidence summary
+        if: always()
+        run: |
+          {
+            echo "# Verbatim CI Evidence"
+            echo ""
+            echo "- Commit: ${GITHUB_SHA}"
+            echo "- Workflow: ${GITHUB_WORKFLOW}"
+            echo "- Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            echo "- Checks: bun install --frozen-lockfile, translations, lint, frontend build, cargo fmt"
+          } | tee ci-evidence.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload CI evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-evidence
+          path: ci-evidence.md
+          if-no-files-found: error
+
   nix-build:
+    needs: repo-health
     runs-on: ubuntu-24.04
     continue-on-error: false
     steps:

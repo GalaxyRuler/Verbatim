@@ -54,7 +54,7 @@ Before you begin, ensure you have the following installed:
 
    ```bash
    mkdir -p src-tauri/resources/models
-   curl -o src-tauri/resources/models/silero_vad_v4.onnx https://blob.handy.computer/silero_vad_v4.onnx
+   curl -o src-tauri/resources/models/silero_vad_v4.onnx https://cdn.galaxyruler.com/verbatim/silero_vad_v4.onnx
    ```
 
 6. **Run in development mode**:

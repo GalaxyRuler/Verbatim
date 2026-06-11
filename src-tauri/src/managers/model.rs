@@ -17,6 +17,15 @@ use std::time::{Duration, Instant};
 use tar::Archive;
 use tauri::{AppHandle, Emitter, Manager};
 
+const DEFAULT_VERBATIM_ASSET_BASE_URL: &str = "https://cdn.galaxyruler.com/verbatim";
+
+fn verbatim_asset_url(filename: &str) -> String {
+    let base_url = option_env!("VERBATIM_ASSET_BASE_URL")
+        .unwrap_or(DEFAULT_VERBATIM_ASSET_BASE_URL)
+        .trim_end_matches('/');
+    format!("{}/{}", base_url, filename.trim_start_matches('/'))
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub enum EngineType {
     Whisper,
@@ -161,7 +170,7 @@ impl ModelManager {
                 name: "Whisper Medium".to_string(),
                 description: "Good accuracy, medium speed".to_string(),
                 filename: "whisper-medium-q4_1.bin".to_string(),
-                url: Some("https://blob.handy.computer/whisper-medium-q4_1.bin".to_string()),
+                url: Some(verbatim_asset_url("whisper-medium-q4_1.bin")),
                 sha256: Some(
                     "79283fc1f9fe12ca3248543fbd54b73292164d8df5a16e095e2bceeaaabddf57".to_string(),
                 ),
@@ -249,7 +258,7 @@ impl ModelManager {
                 description: "Optimized for Taiwanese Mandarin. Code-switching support."
                     .to_string(),
                 filename: "breeze-asr-q5_k.bin".to_string(),
-                url: Some("https://blob.handy.computer/breeze-asr-q5_k.bin".to_string()),
+                url: Some(verbatim_asset_url("breeze-asr-q5_k.bin")),
                 sha256: Some(
                     "8efbf0ce8a3f50fe332b7617da787fb81354b358c288b008d3bdef8359df64c6".to_string(),
                 ),
@@ -277,7 +286,7 @@ impl ModelManager {
                 name: "Parakeet V2".to_string(),
                 description: "English only. The best model for English speakers.".to_string(),
                 filename: "parakeet-tdt-0.6b-v2-int8".to_string(), // Directory name
-                url: Some("https://blob.handy.computer/parakeet-v2-int8.tar.gz".to_string()),
+                url: Some(verbatim_asset_url("parakeet-v2-int8.tar.gz")),
                 sha256: Some(
                     "ac9b9429984dd565b25097337a887bb7f0f8ac393573661c651f0e7d31563991".to_string(),
                 ),
@@ -314,7 +323,7 @@ impl ModelManager {
                 name: "Parakeet V3".to_string(),
                 description: "Fast and accurate. Supports 25 European languages.".to_string(),
                 filename: "parakeet-tdt-0.6b-v3-int8".to_string(), // Directory name
-                url: Some("https://blob.handy.computer/parakeet-v3-int8.tar.gz".to_string()),
+                url: Some(verbatim_asset_url("parakeet-v3-int8.tar.gz")),
                 sha256: Some(
                     "43d37191602727524a7d8c6da0eef11c4ba24320f5b4730f1a2497befc2efa77".to_string(),
                 ),
@@ -341,7 +350,7 @@ impl ModelManager {
                 name: "Moonshine Base".to_string(),
                 description: "Very fast, English only. Handles accents well.".to_string(),
                 filename: "moonshine-base".to_string(),
-                url: Some("https://blob.handy.computer/moonshine-base.tar.gz".to_string()),
+                url: Some(verbatim_asset_url("moonshine-base.tar.gz")),
                 sha256: Some(
                     "04bf6ab012cfceebd4ac7cf88c1b31d027bbdd3cd704649b692e2e935236b7e8".to_string(),
                 ),
@@ -368,9 +377,7 @@ impl ModelManager {
                 name: "Moonshine V2 Tiny".to_string(),
                 description: "Ultra-fast, English only".to_string(),
                 filename: "moonshine-tiny-streaming-en".to_string(),
-                url: Some(
-                    "https://blob.handy.computer/moonshine-tiny-streaming-en.tar.gz".to_string(),
-                ),
+                url: Some(verbatim_asset_url("moonshine-tiny-streaming-en.tar.gz")),
                 sha256: Some(
                     "465addcfca9e86117415677dfdc98b21edc53537210333a3ecdb58509a80abaf".to_string(),
                 ),
@@ -397,9 +404,7 @@ impl ModelManager {
                 name: "Moonshine V2 Small".to_string(),
                 description: "Fast, English only. Good balance of speed and accuracy.".to_string(),
                 filename: "moonshine-small-streaming-en".to_string(),
-                url: Some(
-                    "https://blob.handy.computer/moonshine-small-streaming-en.tar.gz".to_string(),
-                ),
+                url: Some(verbatim_asset_url("moonshine-small-streaming-en.tar.gz")),
                 sha256: Some(
                     "dbb3e1c1832bd88a4ac712f7449a136cc2c9a18c5fe33a12ed1b7cb1cfe9cdd5".to_string(),
                 ),
@@ -426,9 +431,7 @@ impl ModelManager {
                 name: "Moonshine V2 Medium".to_string(),
                 description: "English only. High quality.".to_string(),
                 filename: "moonshine-medium-streaming-en".to_string(),
-                url: Some(
-                    "https://blob.handy.computer/moonshine-medium-streaming-en.tar.gz".to_string(),
-                ),
+                url: Some(verbatim_asset_url("moonshine-medium-streaming-en.tar.gz")),
                 sha256: Some(
                     "07a66f3bff1c77e75a2f637e5a263928a08baae3c29c4c053fc968a9a9373d13".to_string(),
                 ),
@@ -463,7 +466,7 @@ impl ModelManager {
                 description: "Very fast. Chinese, English, Japanese, Korean, Cantonese."
                     .to_string(),
                 filename: "sense-voice-int8".to_string(),
-                url: Some("https://blob.handy.computer/sense-voice-int8.tar.gz".to_string()),
+                url: Some(verbatim_asset_url("sense-voice-int8.tar.gz")),
                 sha256: Some(
                     "171d611fe5d353a50bbb741b6f3ef42559b1565685684e9aa888ef563ba3e8a4".to_string(),
                 ),
@@ -493,7 +496,7 @@ impl ModelManager {
                 name: "GigaAM v3".to_string(),
                 description: "Russian speech recognition. Fast and accurate.".to_string(),
                 filename: "giga-am-v3-int8".to_string(),
-                url: Some("https://blob.handy.computer/giga-am-v3-int8.tar.gz".to_string()),
+                url: Some(verbatim_asset_url("giga-am-v3-int8.tar.gz")),
                 sha256: Some(
                     "d872462268430db140b69b72e0fc4b787b194c1dbe51b58de39444d55b6da45b".to_string(),
                 ),
@@ -527,7 +530,7 @@ impl ModelManager {
                 description: "Very fast. English, German, Spanish, French. Supports translation."
                     .to_string(),
                 filename: "canary-180m-flash".to_string(),
-                url: Some("https://blob.handy.computer/canary-180m-flash.tar.gz".to_string()),
+                url: Some(verbatim_asset_url("canary-180m-flash.tar.gz")),
                 sha256: Some(
                     "6d9cfca6118b296e196eaedc1c8fa9788305a7b0f1feafdb6dc91932ab6e53f7".to_string(),
                 ),
@@ -564,7 +567,7 @@ impl ModelManager {
                 description: "Accurate multilingual. 25 European languages. Supports translation."
                     .to_string(),
                 filename: "canary-1b-v2".to_string(),
-                url: Some("https://blob.handy.computer/canary-1b-v2.tar.gz".to_string()),
+                url: Some(verbatim_asset_url("canary-1b-v2.tar.gz")),
                 sha256: Some(
                     "02305b2a25f9cf3e7deaffa7f94df00efa44f442cd55c101c2cb9c000f904666".to_string(),
                 ),
@@ -599,7 +602,7 @@ impl ModelManager {
                 name: "Cohere".to_string(),
                 description: "A large, slower, but very accurate multilingual model.".to_string(),
                 filename: "cohere-int8".to_string(),
-                url: Some("https://blob.handy.computer/cohere-int8.tar.gz".to_string()),
+                url: Some(verbatim_asset_url("cohere-int8.tar.gz")),
                 sha256: Some(
                     "ea2257d52434f3644574f187dcdcf666e302cd11b92866116ab8e14cd9c887f0".to_string(),
                 ),

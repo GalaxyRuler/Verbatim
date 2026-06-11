@@ -110,9 +110,9 @@ gtk = "0.18"
 transcribe-rs = { version = "0.3.3", features = ["whisper-vulkan"] }
 
 [patch.crates-io]
-tauri-runtime = { git = "https://github.com/cjpais/tauri.git", branch = "handy-2.10.2" }
-tauri-runtime-wry = { git = "https://github.com/cjpais/tauri.git", branch = "handy-2.10.2" }
-tauri-utils = { git = "https://github.com/cjpais/tauri.git", branch = "handy-2.10.2" }
+tauri-runtime = { git = "https://github.com/GalaxyRuler/tauri.git", branch = "verbatim-2.10.2-pinned" }
+tauri-runtime-wry = { git = "https://github.com/GalaxyRuler/tauri.git", branch = "verbatim-2.10.2-pinned" }
+tauri-utils = { git = "https://github.com/GalaxyRuler/tauri.git", branch = "verbatim-2.10.2-pinned" }
 
 [dev-dependencies]
 tempfile = "3"

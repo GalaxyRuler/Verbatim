@@ -563,6 +563,17 @@
           "title": "Whisper.cpp",
           "description": "Inferência de alto desempenho do modelo de reconhecimento automático de fala Whisper da OpenAI",
           "details": "O Verbatim usa Whisper.cpp para processamento rápido e local de fala para texto. Agradecemos ao incrível trabalho de Georgi Gerganov e colaboradores."
+        },
+        "handy": {
+          "title": "Handy",
+          "description": "The open source speech-to-text application Verbatim is forked from",
+          "details": "Verbatim is built on Handy by CJ Pais and its contributors, released under the MIT License. Their work on the architecture, audio pipeline, and cross-platform support made this app possible.",
+          "button": "View Handy on GitHub"
+        },
+        "license": {
+          "title": "MIT License Notice",
+          "description": "Original Handy copyright and license notice.",
+          "details": "Portions of this app are derived from Handy. Original copyright: Copyright (c) 2025 CJ Pais. Handy is licensed under the MIT License; the license and copyright notice are preserved with this fork."
         }
       }
     }

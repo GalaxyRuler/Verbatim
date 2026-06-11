@@ -46,6 +46,8 @@ on:
 
 env:
   TSC_VERSION: "0.9.0"
+  VERBATIM_ASSET_BASE_URL: ${{ vars.VERBATIM_ASSET_BASE_URL || 'https://cdn.galaxyruler.com/verbatim' }}
+  ONNXRUNTIME_RELEASE_BASE_URL: "https://github.com/microsoft/onnxruntime/releases/download"
 
 jobs:
   build:
@@ -303,7 +305,7 @@ jobs:
         shell: bash
         run: |
           ORT_VERSION="1.24.2"
-          curl -L -o ort.tgz "https://blob.handy.computer/onnxruntime-osx-x86_64-${ORT_VERSION}.tgz"
+          curl -L -o ort.tgz "${VERBATIM_ASSET_BASE_URL%/}/onnxruntime-osx-x86_64-${ORT_VERSION}.tgz"
           tar xzf ort.tgz
           ORT_DIR="$(pwd)/onnxruntime-osx-x86_64-${ORT_VERSION}"
           echo "ORT_LIB_LOCATION=$ORT_DIR/lib" >> $GITHUB_ENV
@@ -318,9 +320,9 @@ jobs:
         shell: bash
         run: |
           ORT_VERSION="1.24.2"
-          curl -L -o ort.tgz "https://blob.handy.computer/onnxruntime-linux-x86_64-${ORT_VERSION}.tgz"
+          curl -L -o ort.tgz "${ONNXRUNTIME_RELEASE_BASE_URL}/v${ORT_VERSION}/onnxruntime-linux-x64-${ORT_VERSION}.tgz"
           tar xzf ort.tgz
-          ORT_DIR="$(pwd)/onnxruntime-linux-x86_64-${ORT_VERSION}"
+          ORT_DIR="$(pwd)/onnxruntime-linux-x64-${ORT_VERSION}"
           echo "ORT_LIB_LOCATION=$ORT_DIR/lib" >> $GITHUB_ENV
           echo "ORT_PREFER_DYNAMIC_LINK=1" >> $GITHUB_ENV
           # Resolve symlinks so the deb bundler gets real files (not broken symlinks)
