@@ -44,7 +44,7 @@ bun run format:backend    # cargo fmt only
 
 ```bash
 mkdir -p src-tauri/resources/models
-curl -o src-tauri/resources/models/silero_vad_v4.onnx https://galaxyruler.space/verbatim-assets/silero_vad_v4.onnx
+curl -o src-tauri/resources/models/silero_vad_v4.onnx https://verbatim-assets.galaxyruler.space/silero_vad_v4.onnx
 ```
 
 For detailed platform-specific build setup, see [BUILD.md](docs/BUILD.md).

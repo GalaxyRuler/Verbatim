@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 use tar::Archive;
 use tauri::{AppHandle, Emitter, Manager};
 
-const DEFAULT_VERBATIM_ASSET_BASE_URL: &str = "https://galaxyruler.space/verbatim-assets";
+const DEFAULT_VERBATIM_ASSET_BASE_URL: &str = "https://verbatim-assets.galaxyruler.space";
 
 fn verbatim_asset_url(filename: &str) -> String {
     let base_url = option_env!("VERBATIM_ASSET_BASE_URL")
