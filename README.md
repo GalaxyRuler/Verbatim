@@ -49,7 +49,7 @@ The process is entirely local:
 
 ### Development Setup
 
-For detailed build instructions including platform-specific requirements, see [BUILD.md](BUILD.md).
+For detailed build instructions including platform-specific requirements, see [BUILD.md](docs/BUILD.md).
 
 ## Architecture
 
