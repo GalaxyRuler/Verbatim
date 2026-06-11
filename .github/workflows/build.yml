@@ -277,7 +277,10 @@ jobs:
 
       # whisper-rs-sys cmake builds create paths that exceed Windows MAX_PATH
       # (260 chars). Shorten the target dir to keep paths under the limit.
-      - name: Shorten build path (Windows)
+      # Use Ninja instead of MSBuild for ggml's Vulkan shader generator; the
+      # Visual Studio generator can trip FileTracker and ExternalProject order
+      # failures in this dependency.
+      - name: Configure Windows native build
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
@@ -285,10 +288,15 @@ jobs:
           $targetDir = "$drive\t"
           New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
           echo "CARGO_TARGET_DIR=$targetDir" >> $env:GITHUB_ENV
+          if (-not (Get-Command ninja -ErrorAction SilentlyContinue)) {
+            choco install ninja -y --no-progress
+          }
+          echo "CMAKE_GENERATOR=Ninja" >> $env:GITHUB_ENV
+          echo "TrackFileAccess=false" >> $env:GITHUB_ENV
 
       # ggml requires clang for ARM. The VS generator determines the compiler
       # via the toolset (-T flag) which can't be overridden from env vars.
-      # Use Ninja + clang-cl instead, which respects CMAKE_C_COMPILER.
+      # Ninja + clang-cl respects CMAKE_C_COMPILER.
       - name: Configure cmake for ARM64 (Windows)
         if: contains(inputs.platform, 'windows') && contains(inputs.target, 'aarch64')
         shell: pwsh

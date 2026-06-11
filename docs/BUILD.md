@@ -37,6 +37,26 @@ ORT_LIB_LOCATION=$(brew --prefix onnxruntime)/lib ORT_PREFER_DYNAMIC_LINK=1 bun 
 - Microsoft C++ Build Tools
 - Visual Studio 2019/2022 with C++ development tools
 - Or Visual Studio Build Tools 2019/2022
+- Ninja on `PATH`
+- Vulkan SDK with `VULKAN_SDK` set
+
+The Windows Whisper/Vulkan dependency generates very deep CMake paths. Use the
+repo scripts for backend checks and tests so Cargo builds in a short target
+directory and CMake uses Ninja:
+
+```powershell
+bun run check:backend:windows
+bun run test:backend:windows -- portable --lib
+```
+
+To run Cargo directly from PowerShell, use the same environment:
+
+```powershell
+$env:CARGO_TARGET_DIR = "C:\t\verbatim"
+$env:CMAKE_GENERATOR = "Ninja"
+$env:TrackFileAccess = "false"
+cargo test --manifest-path src-tauri\Cargo.toml portable --lib
+```
 
 #### Linux
 

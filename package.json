@@ -15,6 +15,7 @@
     "format:frontend": "prettier --write .",
     "format:backend": "cd src-tauri && cargo fmt",
     "check:backend:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/cargo-check-windows.ps1",
+    "test:backend:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/cargo-test-windows.ps1",
     "test:playwright": "playwright test",
     "test:playwright:ui": "playwright test --ui",
     "check:translations": "bun scripts/check-translations.ts",
