@@ -100,6 +100,28 @@ pub enum LifecycleCost {
     SidecarProcess,
 }
 
+impl TranslationPairSupport {
+    pub fn supports_pair(&self, source_language: &str, target_language: &str) -> bool {
+        match self {
+            TranslationPairSupport::None => false,
+            TranslationPairSupport::EnglishOnly => target_language == "en",
+            TranslationPairSupport::Explicit(pairs) => pairs
+                .iter()
+                .any(|(source, target)| source == source_language && target == target_language),
+            TranslationPairSupport::AnyToAny { languages } => {
+                languages.iter().any(|language| language == source_language)
+                    && languages.iter().any(|language| language == target_language)
+            }
+        }
+    }
+}
+
+impl ProviderCapabilities {
+    pub fn supports_task(&self, task: &SpeechTaskKind) -> bool {
+        self.tasks.iter().any(|candidate| candidate == task)
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct CancellationToken {
     cancelled: Arc<AtomicBool>,
@@ -143,5 +165,52 @@ mod tests {
         assert!(!token.is_cancelled());
         token.cancel();
         assert!(token.is_cancelled());
+    }
+
+    #[test]
+    fn english_only_translation_supports_any_source_to_english_only() {
+        let support = TranslationPairSupport::EnglishOnly;
+        assert!(support.supports_pair("ar", "en"));
+        assert!(support.supports_pair("fr", "en"));
+        assert!(!support.supports_pair("en", "ar"));
+        assert!(!support.supports_pair("fr", "es"));
+    }
+
+    #[test]
+    fn explicit_translation_pairs_require_exact_match() {
+        let support = TranslationPairSupport::Explicit(vec![
+            ("es".to_string(), "fr".to_string()),
+            ("fr".to_string(), "yue".to_string()),
+        ]);
+
+        assert!(support.supports_pair("es", "fr"));
+        assert!(support.supports_pair("fr", "yue"));
+        assert!(!support.supports_pair("fr", "es"));
+    }
+
+    #[test]
+    fn any_to_any_translation_requires_both_languages_in_set() {
+        let support = TranslationPairSupport::AnyToAny {
+            languages: vec!["ar".to_string(), "en".to_string(), "fr".to_string()],
+        };
+
+        assert!(support.supports_pair("ar", "fr"));
+        assert!(support.supports_pair("fr", "en"));
+        assert!(!support.supports_pair("ar", "es"));
+        assert!(!support.supports_pair("es", "en"));
+    }
+
+    #[test]
+    fn capability_task_lookup_is_exact() {
+        let capabilities = ProviderCapabilities {
+            tasks: vec![SpeechTaskKind::Transcribe, SpeechTaskKind::TranslateText],
+            translation_pairs: TranslationPairSupport::None,
+            streaming: StreamingSupport::None,
+            lifecycle: LifecycleCost::Cheap,
+        };
+
+        assert!(capabilities.supports_task(&SpeechTaskKind::Transcribe));
+        assert!(capabilities.supports_task(&SpeechTaskKind::TranslateText));
+        assert!(!capabilities.supports_task(&SpeechTaskKind::TranslateSpeech));
     }
 }
