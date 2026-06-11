@@ -27,10 +27,15 @@ dist-ssr
 *.sw?
 
 .claude/
+.codex/
+.agents/
+.superpowers/
+docs/superpowers/
 
 /target/
 recording_*
 .crush/
+*.local.md
 
 # Playwright
 playwright-report/
