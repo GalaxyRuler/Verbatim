@@ -1,7 +1,16 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { readFile } from "@tauri-apps/plugin-fs";
-import { Check, Copy, FolderOpen, RotateCcw, Star, Trash2 } from "lucide-react";
+import {
+  Check,
+  Copy,
+  FolderOpen,
+  RotateCcw,
+  Sparkles,
+  Star,
+  Trash2,
+  X,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import {
@@ -11,6 +20,7 @@ import {
   type HistoryUpdatePayload,
 } from "@/bindings";
 import { useOsType } from "@/hooks/useOsType";
+import { useSettingsStore } from "@/stores/settingsStore";
 import { formatDateTime } from "@/utils/dateFormat";
 import { AudioPlayer } from "../../ui/AudioPlayer";
 import { Button } from "../../ui/Button";
@@ -310,10 +320,20 @@ const HistoryEntryComponent: React.FC<HistoryEntryProps> = ({
   retryTranscription,
 }) => {
   const { t, i18n } = useTranslation();
+  const refreshSettings = useSettingsStore((state) => state.refreshSettings);
   const [showCopied, setShowCopied] = useState(false);
   const [retrying, setRetrying] = useState(false);
+  const [isLearningCorrection, setIsLearningCorrection] = useState(false);
+  const [correctedText, setCorrectedText] = useState(entry.transcription_text);
+  const [learningCorrection, setLearningCorrection] = useState(false);
 
   const hasTranscription = entry.transcription_text.trim().length > 0;
+
+  useEffect(() => {
+    if (!isLearningCorrection) {
+      setCorrectedText(entry.transcription_text);
+    }
+  }, [entry.transcription_text, isLearningCorrection]);
 
   const handleLoadAudio = useCallback(
     () => getAudioUrl(entry.file_name),
@@ -351,6 +371,57 @@ const HistoryEntryComponent: React.FC<HistoryEntryProps> = ({
     }
   };
 
+  const handleStartLearningCorrection = () => {
+    if (!hasTranscription) {
+      return;
+    }
+
+    setCorrectedText(entry.transcription_text);
+    setIsLearningCorrection(true);
+  };
+
+  const handleCancelLearningCorrection = () => {
+    setCorrectedText(entry.transcription_text);
+    setIsLearningCorrection(false);
+  };
+
+  const handleLearnCorrection = async () => {
+    if (!correctedText.trim()) {
+      return;
+    }
+
+    try {
+      setLearningCorrection(true);
+      const result = await commands.learnCustomWordsFromCorrection(
+        entry.transcription_text,
+        correctedText,
+      );
+
+      if (result.status !== "ok") {
+        throw new Error(String(result.error));
+      }
+
+      if (result.data.length > 0) {
+        await refreshSettings();
+        toast.success(
+          t("settings.history.dictionaryLearned", {
+            count: result.data.length,
+            words: result.data.join(", "),
+          }),
+        );
+      } else {
+        toast.message(t("settings.history.dictionaryNoCandidates"));
+      }
+
+      setIsLearningCorrection(false);
+    } catch (error) {
+      console.error("Failed to learn dictionary correction:", error);
+      toast.error(t("settings.history.dictionaryLearnError"));
+    } finally {
+      setLearningCorrection(false);
+    }
+  };
+
   const formattedDate = formatDateTime(String(entry.timestamp), i18n.language);
 
   return (
@@ -368,6 +439,13 @@ const HistoryEntryComponent: React.FC<HistoryEntryProps> = ({
             ) : (
               <Copy width={16} height={16} />
             )}
+          </IconButton>
+          <IconButton
+            onClick={handleStartLearningCorrection}
+            disabled={!hasTranscription || retrying || isLearningCorrection}
+            title={t("settings.history.learnCorrection")}
+          >
+            <Sparkles width={16} height={16} />
           </IconButton>
           <IconButton
             onClick={onToggleSaved}
@@ -410,34 +488,62 @@ const HistoryEntryComponent: React.FC<HistoryEntryProps> = ({
         </div>
       </div>
 
-      <p
-        className={`italic text-sm pb-2 ${
-          retrying
-            ? ""
+      {isLearningCorrection ? (
+        <div className="space-y-2">
+          <textarea
+            value={correctedText}
+            onChange={(event) => setCorrectedText(event.target.value)}
+            disabled={learningCorrection}
+            aria-label={t("settings.history.correctedText")}
+            className="w-full min-h-24 rounded-md border border-mid-gray/20 bg-background p-2 text-sm text-text/90 outline-none focus:border-logo-primary disabled:opacity-60"
+          />
+          <div className="flex justify-end gap-1">
+            <IconButton
+              onClick={handleCancelLearningCorrection}
+              disabled={learningCorrection}
+              title={t("settings.history.cancelCorrection")}
+            >
+              <X width={16} height={16} />
+            </IconButton>
+            <IconButton
+              onClick={handleLearnCorrection}
+              disabled={!correctedText.trim() || learningCorrection}
+              title={t("settings.history.applyCorrection")}
+            >
+              <Check width={16} height={16} />
+            </IconButton>
+          </div>
+        </div>
+      ) : (
+        <p
+          className={`italic text-sm pb-2 ${
+            retrying
+              ? ""
+              : hasTranscription
+                ? "text-text/90 select-text cursor-text whitespace-pre-wrap break-words"
+                : "text-text/40"
+          }`}
+          style={
+            retrying
+              ? { animation: "transcribe-pulse 3s ease-in-out infinite" }
+              : undefined
+          }
+        >
+          {retrying && (
+            <style>{`
+              @keyframes transcribe-pulse {
+                0%, 100% { color: color-mix(in srgb, var(--color-text) 40%, transparent); }
+                50% { color: color-mix(in srgb, var(--color-text) 90%, transparent); }
+              }
+            `}</style>
+          )}
+          {retrying
+            ? t("settings.history.transcribing")
             : hasTranscription
-              ? "text-text/90 select-text cursor-text whitespace-pre-wrap break-words"
-              : "text-text/40"
-        }`}
-        style={
-          retrying
-            ? { animation: "transcribe-pulse 3s ease-in-out infinite" }
-            : undefined
-        }
-      >
-        {retrying && (
-          <style>{`
-            @keyframes transcribe-pulse {
-              0%, 100% { color: color-mix(in srgb, var(--color-text) 40%, transparent); }
-              50% { color: color-mix(in srgb, var(--color-text) 90%, transparent); }
-            }
-          `}</style>
-        )}
-        {retrying
-          ? t("settings.history.transcribing")
-          : hasTranscription
-            ? entry.transcription_text
-            : t("settings.history.transcriptionFailed")}
-      </p>
+              ? entry.transcription_text
+              : t("settings.history.transcriptionFailed")}
+        </p>
+      )}
 
       <AudioPlayer onLoadRequest={handleLoadAudio} className="w-full" />
     </div>

@@ -333,7 +333,11 @@
         "placeholder": "أضف كلمة",
         "add": "إضافة",
         "remove": "إزالة {{word}}",
-        "duplicate": "\"{{word}}\" موجود بالفعل"
+        "duplicate": "\"{{word}}\" موجود بالفعل",
+        "autoAdd": {
+          "label": "Auto-add corrected words",
+          "description": "After Verbatim pastes text, watch that same text field briefly and add uncommon words you correct to the custom dictionary."
+        }
       },
       "adaptiveProfiles": {
         "enabled": {
@@ -437,7 +441,14 @@
       "retranscribe": "إعادة النسخ",
       "retranscribeError": "فشلت إعادة النسخ. يرجى المحاولة مرة أخرى.",
       "transcribing": "جارٍ النسخ...",
-      "transcriptionFailed": "فشل النسخ. يمكنك إعادة النسخ باستخدام أيقونة إعادة المحاولة."
+      "transcriptionFailed": "فشل النسخ. يمكنك إعادة النسخ باستخدام أيقونة إعادة المحاولة.",
+      "learnCorrection": "Learn dictionary correction",
+      "correctedText": "Corrected transcription",
+      "applyCorrection": "Add learned words",
+      "cancelCorrection": "Cancel correction",
+      "dictionaryLearned": "Added to custom words: {{words}}",
+      "dictionaryNoCandidates": "No new custom words found in that correction.",
+      "dictionaryLearnError": "Failed to learn custom words. Please try again."
     },
     "debug": {
       "title": "تصحيح الأخطاء",

@@ -355,7 +355,11 @@
         "placeholder": "Wort hinzufügen",
         "add": "Hinzufügen",
         "remove": "{{word}} entfernen",
-        "duplicate": "\"{{word}}\" existiert bereits"
+        "duplicate": "\"{{word}}\" existiert bereits",
+        "autoAdd": {
+          "label": "Auto-add corrected words",
+          "description": "After Verbatim pastes text, watch that same text field briefly and add uncommon words you correct to the custom dictionary."
+        }
       },
       "adaptiveProfiles": {
         "enabled": {
@@ -459,7 +463,14 @@
       "retranscribe": "Erneut transkribieren",
       "retranscribeError": "Erneute Transkription fehlgeschlagen. Bitte versuche es erneut.",
       "transcribing": "Transkribiere...",
-      "transcriptionFailed": "Transkription fehlgeschlagen. Du kannst über das Wiederholen-Symbol erneut transkribieren."
+      "transcriptionFailed": "Transkription fehlgeschlagen. Du kannst über das Wiederholen-Symbol erneut transkribieren.",
+      "learnCorrection": "Learn dictionary correction",
+      "correctedText": "Corrected transcription",
+      "applyCorrection": "Add learned words",
+      "cancelCorrection": "Cancel correction",
+      "dictionaryLearned": "Added to custom words: {{words}}",
+      "dictionaryNoCandidates": "No new custom words found in that correction.",
+      "dictionaryLearnError": "Failed to learn custom words. Please try again."
     },
     "debug": {
       "title": "Debug",

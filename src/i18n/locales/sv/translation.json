@@ -355,7 +355,11 @@
         "placeholder": "Lägg till ett ord",
         "add": "Lägg till",
         "remove": "Ta bort {{word}}",
-        "duplicate": "\"{{word}}\" finns redan"
+        "duplicate": "\"{{word}}\" finns redan",
+        "autoAdd": {
+          "label": "Auto-add corrected words",
+          "description": "After Verbatim pastes text, watch that same text field briefly and add uncommon words you correct to the custom dictionary."
+        }
       },
       "adaptiveProfiles": {
         "enabled": {
@@ -459,7 +463,14 @@
       "retranscribe": "Transkribera igen",
       "retranscribeError": "Misslyckades med att transkribera igen. Försök igen.",
       "transcribing": "Transkriberar...",
-      "transcriptionFailed": "Transkribering misslyckades. Du kan transkribera igen med hjälp av ikonen för nytt försök."
+      "transcriptionFailed": "Transkribering misslyckades. Du kan transkribera igen med hjälp av ikonen för nytt försök.",
+      "learnCorrection": "Learn dictionary correction",
+      "correctedText": "Corrected transcription",
+      "applyCorrection": "Add learned words",
+      "cancelCorrection": "Cancel correction",
+      "dictionaryLearned": "Added to custom words: {{words}}",
+      "dictionaryNoCandidates": "No new custom words found in that correction.",
+      "dictionaryLearnError": "Failed to learn custom words. Please try again."
     },
     "debug": {
       "title": "Felsökning",

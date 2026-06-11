@@ -636,6 +636,13 @@ pub fn paste(text: String, app_handle: AppHandle) -> Result<(), String> {
         text
     };
 
+    let before_paste_snapshot =
+        if settings.auto_add_dictionary_words && paste_method != PasteMethod::None {
+            crate::post_paste_learning::capture_focused_text_snapshot()
+        } else {
+            None
+        };
+
     info!(
         "Using paste method: {:?}, delay: {}ms",
         paste_method, paste_delay_ms
@@ -693,6 +700,14 @@ pub fn paste(text: String, app_handle: AppHandle) -> Result<(), String> {
         clipboard
             .write_text(&text)
             .map_err(|e| format!("Failed to copy to clipboard: {}", e))?;
+    }
+
+    if settings.auto_add_dictionary_words && paste_method != PasteMethod::None {
+        crate::post_paste_learning::maybe_spawn_auto_add_watcher(
+            app_handle.clone(),
+            text,
+            before_paste_snapshot,
+        );
     }
 
     Ok(())

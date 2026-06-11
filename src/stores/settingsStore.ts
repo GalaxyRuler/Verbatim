@@ -115,6 +115,8 @@ const settingUpdaters: {
     commands.changeOverlayPositionSetting(value as string),
   debug_mode: (value) => commands.changeDebugModeSetting(value as boolean),
   custom_words: (value) => commands.updateCustomWords(value as string[]),
+  auto_add_dictionary_words: (value) =>
+    commands.changeAutoAddDictionaryWordsSetting(value as boolean),
   adaptive_profiles_enabled: (value) =>
     commands.changeAdaptiveProfilesEnabledSetting(value as boolean),
   adaptive_language_shortlist: (value) =>

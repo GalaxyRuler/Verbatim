@@ -355,7 +355,11 @@
         "placeholder": "단어 추가",
         "add": "추가",
         "remove": "{{word}} 제거",
-        "duplicate": "\"{{word}}\"이(가) 이미 존재합니다"
+        "duplicate": "\"{{word}}\"이(가) 이미 존재합니다",
+        "autoAdd": {
+          "label": "Auto-add corrected words",
+          "description": "After Verbatim pastes text, watch that same text field briefly and add uncommon words you correct to the custom dictionary."
+        }
       },
       "adaptiveProfiles": {
         "enabled": {
@@ -459,7 +463,14 @@
       "retranscribe": "다시 전사",
       "retranscribeError": "다시 전사에 실패했습니다. 다시 시도해주세요.",
       "transcribing": "전사 중...",
-      "transcriptionFailed": "전사에 실패했습니다. 재시도 아이콘을 사용하여 다시 전사할 수 있습니다."
+      "transcriptionFailed": "전사에 실패했습니다. 재시도 아이콘을 사용하여 다시 전사할 수 있습니다.",
+      "learnCorrection": "Learn dictionary correction",
+      "correctedText": "Corrected transcription",
+      "applyCorrection": "Add learned words",
+      "cancelCorrection": "Cancel correction",
+      "dictionaryLearned": "Added to custom words: {{words}}",
+      "dictionaryNoCandidates": "No new custom words found in that correction.",
+      "dictionaryLearnError": "Failed to learn custom words. Please try again."
     },
     "debug": {
       "title": "디버그",

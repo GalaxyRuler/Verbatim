@@ -355,7 +355,11 @@
         "placeholder": "Adicionar uma palavra",
         "add": "Adicionar",
         "remove": "Remover {{word}}",
-        "duplicate": "\"{{word}}\" já existe"
+        "duplicate": "\"{{word}}\" já existe",
+        "autoAdd": {
+          "label": "Auto-add corrected words",
+          "description": "After Verbatim pastes text, watch that same text field briefly and add uncommon words you correct to the custom dictionary."
+        }
       },
       "adaptiveProfiles": {
         "enabled": {
@@ -459,7 +463,14 @@
       "retranscribe": "Re-transcrever",
       "retranscribeError": "Falha ao re-transcrever. Por favor, tente novamente.",
       "transcribing": "Transcrevendo...",
-      "transcriptionFailed": "A transcrição falhou. Você pode re-transcrever usando o ícone de tentar novamente."
+      "transcriptionFailed": "A transcrição falhou. Você pode re-transcrever usando o ícone de tentar novamente.",
+      "learnCorrection": "Learn dictionary correction",
+      "correctedText": "Corrected transcription",
+      "applyCorrection": "Add learned words",
+      "cancelCorrection": "Cancel correction",
+      "dictionaryLearned": "Added to custom words: {{words}}",
+      "dictionaryNoCandidates": "No new custom words found in that correction.",
+      "dictionaryLearnError": "Failed to learn custom words. Please try again."
     },
     "debug": {
       "title": "Depuração",

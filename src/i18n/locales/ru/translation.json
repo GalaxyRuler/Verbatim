@@ -355,7 +355,11 @@
         "placeholder": "Добавить слово",
         "add": "Добавить",
         "remove": "Удалить {{word}}",
-        "duplicate": "\"{{word}}\" уже существует"
+        "duplicate": "\"{{word}}\" уже существует",
+        "autoAdd": {
+          "label": "Auto-add corrected words",
+          "description": "After Verbatim pastes text, watch that same text field briefly and add uncommon words you correct to the custom dictionary."
+        }
       },
       "adaptiveProfiles": {
         "enabled": {
@@ -459,7 +463,14 @@
       "retranscribe": "Перетранскрибировать",
       "retranscribeError": "Не удалось перетранскрибировать. Пожалуйста, попробуйте снова.",
       "transcribing": "Транскрибирование...",
-      "transcriptionFailed": "Транскрипция не удалась. Вы можете перетранскрибировать, используя значок повтора."
+      "transcriptionFailed": "Транскрипция не удалась. Вы можете перетранскрибировать, используя значок повтора.",
+      "learnCorrection": "Learn dictionary correction",
+      "correctedText": "Corrected transcription",
+      "applyCorrection": "Add learned words",
+      "cancelCorrection": "Cancel correction",
+      "dictionaryLearned": "Added to custom words: {{words}}",
+      "dictionaryNoCandidates": "No new custom words found in that correction.",
+      "dictionaryLearnError": "Failed to learn custom words. Please try again."
     },
     "debug": {
       "title": "Отлаживать",

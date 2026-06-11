@@ -5,6 +5,7 @@ import { useSettings } from "../../hooks/useSettings";
 import { Input } from "../ui/Input";
 import { Button } from "../ui/Button";
 import { SettingContainer } from "../ui/SettingContainer";
+import { ToggleSwitch } from "../ui/ToggleSwitch";
 
 interface CustomWordsProps {
   descriptionMode?: "inline" | "tooltip";
@@ -17,6 +18,8 @@ export const CustomWords: React.FC<CustomWordsProps> = React.memo(
     const { getSetting, updateSetting, isUpdating } = useSettings();
     const [newWord, setNewWord] = useState("");
     const customWords = getSetting("custom_words") || [];
+    const autoAddDictionaryWords =
+      getSetting("auto_add_dictionary_words") || false;
 
     const handleAddWord = () => {
       const trimmedWord = newWord.trim();
@@ -87,6 +90,17 @@ export const CustomWords: React.FC<CustomWordsProps> = React.memo(
             </Button>
           </div>
         </SettingContainer>
+        <ToggleSwitch
+          checked={autoAddDictionaryWords}
+          onChange={(enabled) =>
+            updateSetting("auto_add_dictionary_words", enabled)
+          }
+          isUpdating={isUpdating("auto_add_dictionary_words")}
+          label={t("settings.advanced.customWords.autoAdd.label")}
+          description={t("settings.advanced.customWords.autoAdd.description")}
+          descriptionMode={descriptionMode}
+          grouped={grouped}
+        />
         {customWords.length > 0 && (
           <div
             className={`px-4 p-2 ${grouped ? "" : "rounded-lg border border-mid-gray/20"} flex flex-wrap gap-1`}

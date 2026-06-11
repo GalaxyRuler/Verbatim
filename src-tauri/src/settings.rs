@@ -371,6 +371,8 @@ pub struct AppSettings {
     pub log_level: LogLevel,
     #[serde(default)]
     pub custom_words: Vec<String>,
+    #[serde(default = "default_auto_add_dictionary_words")]
+    pub auto_add_dictionary_words: bool,
     #[serde(default)]
     pub model_unload_timeout: ModelUnloadTimeout,
     #[serde(default = "default_word_correction_threshold")]
@@ -513,6 +515,10 @@ fn default_log_level() -> LogLevel {
 
 fn default_word_correction_threshold() -> f64 {
     0.18
+}
+
+fn default_auto_add_dictionary_words() -> bool {
+    false
 }
 
 fn default_paste_delay_ms() -> u64 {
@@ -865,6 +871,7 @@ pub fn get_default_settings() -> AppSettings {
         debug_mode: false,
         log_level: default_log_level(),
         custom_words: Vec::new(),
+        auto_add_dictionary_words: default_auto_add_dictionary_words(),
         model_unload_timeout: ModelUnloadTimeout::default(),
         word_correction_threshold: default_word_correction_threshold(),
         history_limit: default_history_limit(),
@@ -1053,6 +1060,12 @@ mod tests {
     fn default_settings_mute_system_audio_while_recording() {
         let settings = get_default_settings();
         assert!(settings.mute_while_recording);
+    }
+
+    #[test]
+    fn default_settings_disable_auto_add_dictionary_words() {
+        let settings = get_default_settings();
+        assert!(!settings.auto_add_dictionary_words);
     }
 
     #[test]

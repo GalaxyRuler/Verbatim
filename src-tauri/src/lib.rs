@@ -7,12 +7,14 @@ pub mod audio_toolkit;
 pub mod cli;
 mod clipboard;
 mod commands;
+mod dictionary_learning;
 mod helpers;
 mod input;
 mod llm_client;
 mod managers;
 mod overlay;
 pub mod portable;
+mod post_paste_learning;
 mod settings;
 mod shortcut;
 mod signal_handle;
@@ -360,6 +362,7 @@ pub fn run(cli_args: CliArgs) {
             shortcut::delete_post_process_prompt,
             shortcut::set_post_process_selected_prompt,
             shortcut::update_custom_words,
+            shortcut::change_auto_add_dictionary_words_setting,
             shortcut::change_adaptive_profiles_enabled_setting,
             shortcut::change_adaptive_language_shortlist_setting,
             shortcut::change_adaptive_default_profile_setting,
@@ -399,6 +402,7 @@ pub fn run(cli_args: CliArgs) {
             commands::adaptive::reset_adaptive_correction_memory,
             commands::adaptive::set_adaptive_correction_memory_enabled,
             commands::adaptive::reprocess_last_adaptive_entry,
+            commands::dictionary::learn_custom_words_from_correction,
             commands::models::get_available_models,
             commands::models::get_model_info,
             commands::models::download_model,
