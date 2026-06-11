@@ -92,6 +92,19 @@ fn transcription_language_candidates(
         })
 }
 
+fn whisper_language_hint(
+    validated_language: &str,
+    language_shortlist: &[String],
+) -> Option<String> {
+    if validated_language == "auto" {
+        None
+    } else {
+        transcription_language_candidates(validated_language, language_shortlist)
+            .first()
+            .cloned()
+    }
+}
+
 fn score_text_for_language(text: &str, language: &str) -> f32 {
     let mut arabic = 0usize;
     let mut cjk = 0usize;
@@ -639,66 +652,25 @@ impl TranscriptionManager {
                 || -> Result<transcribe_rs::TranscriptionResult> {
                     match &mut engine {
                         LoadedEngine::Whisper(whisper_engine) => {
-                            let language_candidates = transcription_language_candidates(
-                                &validated_language,
-                                &settings.adaptive_language_shortlist,
-                            );
                             let initial_prompt = build_whisper_initial_prompt(
                                 &settings.custom_words,
                                 &settings.adaptive_language_shortlist,
                             );
+                            let whisper_language = whisper_language_hint(
+                                &validated_language,
+                                &settings.adaptive_language_shortlist,
+                            );
 
-                            if validated_language == "auto"
-                                && language_candidates.len() > 1
-                                && !effective_translate_to_english
-                            {
-                                let mut results = Vec::new();
-                                let mut last_error = None;
+                            let params = WhisperInferenceParams {
+                                language: whisper_language,
+                                translate: effective_translate_to_english,
+                                initial_prompt,
+                                ..Default::default()
+                            };
 
-                                for language in language_candidates {
-                                    let params = WhisperInferenceParams {
-                                        language: Some(language.clone()),
-                                        translate: false,
-                                        initial_prompt: initial_prompt.clone(),
-                                        ..Default::default()
-                                    };
-
-                                    match whisper_engine.transcribe_with(&audio, &params) {
-                                        Ok(result) => results.push((language, result)),
-                                        Err(error) => last_error = Some(error),
-                                    }
-                                }
-
-                                if results.is_empty() {
-                                    Err(anyhow::anyhow!(
-                                        "Whisper transcription failed: {}",
-                                        last_error.map(|error| error.to_string()).unwrap_or_else(
-                                            || "no language candidates succeeded".to_string()
-                                        )
-                                    ))
-                                } else {
-                                    Ok(select_best_language_candidate(results))
-                                }
-                            } else {
-                                let whisper_language = if validated_language == "auto" {
-                                    None
-                                } else {
-                                    language_candidates.first().cloned()
-                                };
-
-                                let params = WhisperInferenceParams {
-                                    language: whisper_language,
-                                    translate: effective_translate_to_english,
-                                    initial_prompt,
-                                    ..Default::default()
-                                };
-
-                                whisper_engine
-                                    .transcribe_with(&audio, &params)
-                                    .map_err(|e| {
-                                        anyhow::anyhow!("Whisper transcription failed: {}", e)
-                                    })
-                            }
+                            whisper_engine
+                                .transcribe_with(&audio, &params)
+                                .map_err(|e| anyhow::anyhow!("Whisper transcription failed: {}", e))
                         }
                         LoadedEngine::Parakeet(parakeet_engine) => {
                             let params = ParakeetParams {
@@ -1072,6 +1044,22 @@ mod tests {
         assert_eq!(
             transcription_language_candidates("ar", &["en".to_string()]),
             vec!["ar".to_string()]
+        );
+    }
+
+    #[test]
+    fn whisper_auto_language_uses_native_auto_detect() {
+        assert_eq!(
+            whisper_language_hint("auto", &["en".to_string(), "ar".to_string()]),
+            None
+        );
+    }
+
+    #[test]
+    fn whisper_forced_language_uses_selected_language() {
+        assert_eq!(
+            whisper_language_hint("ar", &["en".to_string()]),
+            Some("ar".to_string())
         );
     }
 
