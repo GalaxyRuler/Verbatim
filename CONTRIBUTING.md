@@ -25,7 +25,7 @@ Before you begin, ensure you have the following installed:
 
 - [Rust](https://rustup.rs/) (latest stable)
 - [Bun](https://bun.sh/) package manager
-- Platform-specific build tools (see [BUILD.md](BUILD.md))
+- Platform-specific build tools (see [BUILD.md](docs/BUILD.md))
 
 ### Setting Up Your Development Environment
 
@@ -64,7 +64,7 @@ Before you begin, ensure you have the following installed:
    CMAKE_POLICY_VERSION_MINIMUM=3.5 bun run tauri dev
    ```
 
-For detailed platform-specific setup instructions, see [BUILD.md](BUILD.md).
+For detailed platform-specific setup instructions, see [BUILD.md](docs/BUILD.md).
 
 ### Understanding the Codebase
 
@@ -283,7 +283,7 @@ Test the production build to ensure it works as expected.
 
 Documentation improvements are highly valued! You can contribute by:
 
-- Improving README.md, BUILD.md, or this CONTRIBUTING.md
+- Improving README.md, docs/BUILD.md, or this CONTRIBUTING.md
 - Adding code comments and doc comments
 - Creating tutorials or guides
 - Improving error messages
