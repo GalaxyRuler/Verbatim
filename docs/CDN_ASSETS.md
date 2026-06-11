@@ -3,12 +3,13 @@
 Verbatim-owned release builds and model downloads should use:
 
 ```text
-https://cdn.galaxyruler.com/verbatim
+https://galaxyruler.space/verbatim-assets
 ```
 
 The base URL is configurable in GitHub Actions with the `VERBATIM_ASSET_BASE_URL`
 repository variable and in Rust builds with the compile-time
-`VERBATIM_ASSET_BASE_URL` environment variable.
+`VERBATIM_ASSET_BASE_URL` environment variable. The current production target is
+the `galaxyruler.space` VPS-hosted domain.
 
 Required mirrored files:
 
@@ -31,3 +32,42 @@ Required mirrored files:
 Linux ONNX Runtime builds use Microsoft release assets directly. The macOS
 x86_64 ONNX Runtime archive must be mirrored because Microsoft does not publish
 that file for 1.24.2.
+
+## VPS layout
+
+On the `galaxyruler.space` VPS, place the files under a static directory such as:
+
+```text
+/var/www/galaxyruler.space/verbatim-assets/
+```
+
+The URL for each file should be:
+
+```text
+https://galaxyruler.space/verbatim-assets/<filename>
+```
+
+Example Nginx location:
+
+```nginx
+location /verbatim-assets/ {
+    alias /var/www/galaxyruler.space/verbatim-assets/;
+    autoindex off;
+    add_header Cache-Control "public, max-age=31536000, immutable";
+    types {
+        application/octet-stream bin onnx;
+        application/gzip gz tgz;
+    }
+}
+```
+
+After syncing assets, verify the host with:
+
+```bash
+curl -I https://galaxyruler.space/verbatim-assets/silero_vad_v4.onnx
+curl -I https://galaxyruler.space/verbatim-assets/whisper-medium-q4_1.bin
+```
+
+The response must be the real asset, not the website fallback. Treat
+`Content-Type: text/html` as a failed deployment even if the HTTP status is
+`200`.

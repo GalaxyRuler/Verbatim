@@ -4957,7 +4957,7 @@ dependencies = [
 [[package]]
 name = "rodio"
 version = "0.20.1"
-source = "git+https://github.com/cjpais/rodio.git#fed30292db417cb95305c118c0e1d804fb74cbff"
+source = "git+https://github.com/GalaxyRuler/rodio.git?branch=verbatim-pinned#fed30292db417cb95305c118c0e1d804fb74cbff"
 dependencies = [
  "cpal",
  "dasp_sample",
@@ -7188,7 +7188,7 @@ dependencies = [
 [[package]]
 name = "vad-rs"
 version = "0.1.6"
-source = "git+https://github.com/cjpais/vad-rs#2a412ed858695b9251f3f5a1a20d95b59fa7c498"
+source = "git+https://github.com/GalaxyRuler/vad-rs?branch=verbatim-pinned#2a412ed858695b9251f3f5a1a20d95b59fa7c498"
 dependencies = [
  "eyre",
  "ndarray",
