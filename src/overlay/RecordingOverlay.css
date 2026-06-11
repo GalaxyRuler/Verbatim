@@ -1,4 +1,6 @@
 .recording-overlay {
+  --overlay-accent: #7aa2f7;
+  --overlay-accent-soft: #2563eb33;
   height: 36px;
   width: 172px;
   display: grid;
@@ -15,6 +17,7 @@
 .overlay-left {
   display: flex;
   align-items: center;
+  color: var(--overlay-accent);
 }
 
 .overlay-middle {
@@ -41,7 +44,7 @@
 
 .bar {
   width: 6px;
-  background: #ffe5ee;
+  background: var(--overlay-accent);
   max-height: 20px;
   border-radius: 2px;
   transition: height 80ms linear;
@@ -75,6 +78,7 @@
   height: 24px;
   border-radius: 50%;
   background: transparent;
+  color: var(--overlay-accent);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -86,7 +90,7 @@
 }
 
 .cancel-button:hover {
-  background: #faa2ca33;
+  background: var(--overlay-accent-soft);
   transform: scale(1.05);
 }
 
