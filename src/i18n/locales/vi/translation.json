@@ -335,6 +335,13 @@
         "description": "Tự động dịch giọng nói từ các ngôn ngữ khác sang tiếng Anh trong quá trình chuyển đổi.",
         "descriptionUnsupported": "Mô hình {{model}} không hỗ trợ dịch thuật."
       },
+      "translation": {
+        "label": "Translation",
+        "description": "Translate dictated output when the selected model or provider supports it.",
+        "descriptionUnsupported": "{{model}} does not support native translation. Text translation requires a translation provider.",
+        "targetLanguage": "Target language",
+        "targetLanguageDescription": "Choose the language for translated output."
+      },
       "modelUnload": {
         "title": "Giải phóng mô hình",
         "description": "Tự động giải phóng bộ nhớ GPU/CPU khi mô hình không được sử dụng trong thời gian quy định",

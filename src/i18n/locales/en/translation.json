@@ -335,6 +335,13 @@
         "description": "Automatically translate speech from other languages to English during transcription.",
         "descriptionUnsupported": "Translation is not supported by the {{model}} model."
       },
+      "translation": {
+        "label": "Translation",
+        "description": "Translate dictated output when the selected model or provider supports it.",
+        "descriptionUnsupported": "{{model}} does not support native translation. Text translation requires a translation provider.",
+        "targetLanguage": "Target language",
+        "targetLanguageDescription": "Choose the language for translated output."
+      },
       "modelUnload": {
         "title": "Unload Model",
         "description": "Automatically free GPU/CPU memory when the model hasn't been used for the specified time",
@@ -627,8 +634,7 @@
     "off": "Off",
     "yes": "Yes",
     "no": "No",
-    "noOptionsFound": "No options found",
-    "appName": "Verbatim"
+    "noOptionsFound": "No options found"
   },
   "accessibility": {
     "permissionsRequired": "Accessibility Permissions Required",

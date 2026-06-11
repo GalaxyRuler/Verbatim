@@ -335,6 +335,13 @@
         "description": "텍스트로 변환시 다른 언어의 음성을 자동으로 영어로 번역합니다.",
         "descriptionUnsupported": "번역은 {{model}} 모델에서 지원되지 않습니다."
       },
+      "translation": {
+        "label": "Translation",
+        "description": "Translate dictated output when the selected model or provider supports it.",
+        "descriptionUnsupported": "{{model}} does not support native translation. Text translation requires a translation provider.",
+        "targetLanguage": "Target language",
+        "targetLanguageDescription": "Choose the language for translated output."
+      },
       "modelUnload": {
         "title": "모델 언로드",
         "description": "모델을 지정된 시간 동안 사용하지 않으면 자동으로 GPU/CPU 메모리를 해제합니다",

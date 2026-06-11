@@ -335,6 +335,13 @@
         "description": "Během přepisu automaticky překládat řeč z jiných jazyků do angličtiny.",
         "descriptionUnsupported": "Překlad není podporován modelem {{model}}."
       },
+      "translation": {
+        "label": "Translation",
+        "description": "Translate dictated output when the selected model or provider supports it.",
+        "descriptionUnsupported": "{{model}} does not support native translation. Text translation requires a translation provider.",
+        "targetLanguage": "Target language",
+        "targetLanguageDescription": "Choose the language for translated output."
+      },
       "modelUnload": {
         "title": "Uvolnění modelu",
         "description": "Automaticky uvolnit paměť GPU/CPU, když model nebyl použit po zadanou dobu",

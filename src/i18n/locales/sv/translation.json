@@ -335,6 +335,13 @@
         "description": "Översätt automatiskt tal från andra språk till engelska under transkription.",
         "descriptionUnsupported": "Översättning stöds inte av {{model}}-modellen."
       },
+      "translation": {
+        "label": "Translation",
+        "description": "Translate dictated output when the selected model or provider supports it.",
+        "descriptionUnsupported": "{{model}} does not support native translation. Text translation requires a translation provider.",
+        "targetLanguage": "Target language",
+        "targetLanguageDescription": "Choose the language for translated output."
+      },
       "modelUnload": {
         "title": "Avlasta modell",
         "description": "Frigör automatiskt GPU/CPU-minne när modellen inte har använts under den angivna tiden",

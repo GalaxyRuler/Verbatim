@@ -4,6 +4,7 @@ import { SettingsGroup } from "../../ui/SettingsGroup";
 import { LanguageSelector } from "../LanguageSelector";
 import { TranslateToEnglish } from "../TranslateToEnglish";
 import { useModelStore } from "../../../stores/modelStore";
+import { translationSupportFromModel } from "../translationOptions";
 import type { ModelInfo } from "@/bindings";
 
 export const ModelSettingsCard: React.FC = () => {
@@ -38,10 +39,11 @@ export const ModelSettingsCard: React.FC = () => {
         descriptionMode="tooltip"
         grouped={true}
         disabled={!supportsTranslation}
+        translationSupport={translationSupportFromModel(supportsTranslation)}
         description={
           supportsTranslation
             ? undefined
-            : t("settings.advanced.translateToEnglish.descriptionUnsupported", {
+            : t("settings.advanced.translation.descriptionUnsupported", {
                 model: currentModelInfo.name,
               })
         }

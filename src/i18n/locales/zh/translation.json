@@ -335,6 +335,13 @@
         "description": "在转录过程中自动将其他语言的语音翻译为英语。",
         "descriptionUnsupported": "{{model}} 模型不支持翻译功能。"
       },
+      "translation": {
+        "label": "Translation",
+        "description": "Translate dictated output when the selected model or provider supports it.",
+        "descriptionUnsupported": "{{model}} does not support native translation. Text translation requires a translation provider.",
+        "targetLanguage": "Target language",
+        "targetLanguageDescription": "Choose the language for translated output."
+      },
       "modelUnload": {
         "title": "卸载模型",
         "description": "当模型在指定时间内未使用时自动释放 GPU/CPU 内存",

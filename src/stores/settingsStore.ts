@@ -4,6 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import type {
   AppSettings as Settings,
   AudioDevice,
+  TranslationRequestSettings,
   WhisperAcceleratorSetting,
   OrtAcceleratorSetting,
 } from "@/bindings";
@@ -111,6 +112,16 @@ const settingUpdaters: {
     commands.changeTranslateToEnglishSetting(value as boolean),
   translation_enabled: (value) =>
     commands.changeTranslateToEnglishSetting(value as boolean),
+  translation_request: (value) => {
+    const request = value as TranslationRequestSettings | null;
+    if (!request) {
+      return commands.changeTranslateToEnglishSetting(false);
+    }
+
+    return commands.changeTranslationTargetLanguageSetting(
+      request.target_language,
+    );
+  },
   selected_language: (value) =>
     commands.changeSelectedLanguageSetting(value as string),
   overlay_position: (value) =>

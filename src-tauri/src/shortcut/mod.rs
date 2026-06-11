@@ -24,8 +24,7 @@ use crate::settings::APPLE_INTELLIGENCE_DEFAULT_MODEL_ID;
 use crate::settings::{
     self, get_settings, AutoSubmitKey, ClipboardHandling, KeyboardImplementation, LLMPrompt,
     OverlayPosition, PasteMethod, ShortcutBinding, SoundTheme, TranslationRequestSettings,
-    TranslationRoute, TypingTool,
-    APPLE_INTELLIGENCE_PROVIDER_ID,
+    TranslationRoute, TypingTool, APPLE_INTELLIGENCE_PROVIDER_ID,
 };
 use crate::tray;
 
@@ -533,6 +532,23 @@ pub fn change_translate_to_english_setting(app: AppHandle, enabled: bool) -> Res
         target_language: "en".to_string(),
         route: TranslationRoute::Auto,
     });
+    settings::write_settings(&app, settings);
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn change_translation_target_language_setting(
+    app: AppHandle,
+    target_language: String,
+) -> Result<(), String> {
+    let target_language = target_language.trim();
+    if target_language.is_empty() {
+        return Err("Translation target language cannot be empty".to_string());
+    }
+
+    let mut settings = settings::get_settings(&app);
+    settings::set_translation_target_language(&mut settings, target_language.to_string());
     settings::write_settings(&app, settings);
     Ok(())
 }

@@ -335,6 +335,13 @@
         "description": "Автоматично перекладати мовлення з інших мов англійською під час транскрипції.",
         "descriptionUnsupported": "Переклад не підтримується моделлю {{model}}."
       },
+      "translation": {
+        "label": "Translation",
+        "description": "Translate dictated output when the selected model or provider supports it.",
+        "descriptionUnsupported": "{{model}} does not support native translation. Text translation requires a translation provider.",
+        "targetLanguage": "Target language",
+        "targetLanguageDescription": "Choose the language for translated output."
+      },
       "modelUnload": {
         "title": "Вивантаження моделі",
         "description": "Автоматично звільняти пам'ять GPU/CPU, коли модель не використовується протягом вказаного часу",

@@ -335,6 +335,13 @@
         "description": "Автоматичен превод на реч от други езици на английски по време на транскрипция.",
         "descriptionUnsupported": "Моделът {{model}} не поддържа превод."
       },
+      "translation": {
+        "label": "Translation",
+        "description": "Translate dictated output when the selected model or provider supports it.",
+        "descriptionUnsupported": "{{model}} does not support native translation. Text translation requires a translation provider.",
+        "targetLanguage": "Target language",
+        "targetLanguageDescription": "Choose the language for translated output."
+      },
       "modelUnload": {
         "title": "Разтоварване на модела",
         "description": "Автоматично освобождаване на памет на GPU/CPU, ако моделът не е използван за зададеното време",

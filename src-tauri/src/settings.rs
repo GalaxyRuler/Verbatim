@@ -839,6 +839,22 @@ fn ensure_translation_defaults(settings: &mut AppSettings) -> bool {
     false
 }
 
+pub fn set_translation_target_language(settings: &mut AppSettings, target_language: String) {
+    let mut request = settings
+        .translation_request
+        .clone()
+        .unwrap_or(TranslationRequestSettings {
+            source_language: "auto".to_string(),
+            target_language: "en".to_string(),
+            route: TranslationRoute::Auto,
+        });
+
+    request.target_language = target_language.clone();
+    settings.translation_enabled = true;
+    settings.translate_to_english = target_language == "en";
+    settings.translation_request = Some(request);
+}
+
 pub const SETTINGS_STORE_PATH: &str = "settings_store.json";
 
 pub fn get_default_settings() -> AppSettings {
@@ -1183,6 +1199,26 @@ mod tests {
         let settings = get_default_settings();
         assert!(!settings.translation_enabled);
         assert!(settings.translation_request.is_none());
+    }
+
+    #[test]
+    fn setting_translation_target_language_updates_general_translation_request() {
+        let mut settings = get_default_settings();
+        settings.translation_enabled = true;
+        settings.translation_request = Some(TranslationRequestSettings {
+            source_language: "fr".to_string(),
+            target_language: "en".to_string(),
+            route: TranslationRoute::TextAfterTranscription,
+        });
+
+        set_translation_target_language(&mut settings, "de".to_string());
+
+        assert!(settings.translation_enabled);
+        assert!(!settings.translate_to_english);
+        let request = settings.translation_request.expect("translation request");
+        assert_eq!(request.source_language, "fr");
+        assert_eq!(request.target_language, "de");
+        assert_eq!(request.route, TranslationRoute::TextAfterTranscription);
     }
 
     #[test]

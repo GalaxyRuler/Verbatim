@@ -335,6 +335,13 @@
         "description": "Transkripsiyon sırasında diğer dillerden İngilizceye otomatik olarak çevirir.",
         "descriptionUnsupported": "Çeviri {{model}} modeli tarafından desteklenmiyor."
       },
+      "translation": {
+        "label": "Translation",
+        "description": "Translate dictated output when the selected model or provider supports it.",
+        "descriptionUnsupported": "{{model}} does not support native translation. Text translation requires a translation provider.",
+        "targetLanguage": "Target language",
+        "targetLanguageDescription": "Choose the language for translated output."
+      },
       "modelUnload": {
         "title": "Modeli Boşalt",
         "description": "Belirtilen süre boyunca kullanılmadığında modelin GPU/CPU belleğini otomatik olarak serbest bırakır.",

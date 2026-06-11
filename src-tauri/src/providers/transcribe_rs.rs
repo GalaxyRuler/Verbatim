@@ -4,7 +4,6 @@ use crate::providers::{
     ProviderCapabilities, SpeechInput, SpeechRequest, SpeechResponse, SpeechTaskKind,
     StreamingSupport, TranslationPairSupport,
 };
-use anyhow::Result;
 use ::transcribe_rs::{
     onnx::{
         canary::CanaryModel,
@@ -18,6 +17,7 @@ use ::transcribe_rs::{
     whisper_cpp::{WhisperEngine, WhisperInferenceParams},
     SpeechModel, TranscribeOptions,
 };
+use anyhow::Result;
 
 pub enum LoadedEngine {
     Whisper(WhisperEngine),
@@ -271,8 +271,10 @@ impl EngineProvider for TranscribeRsProvider {
             .ok_or_else(|| anyhow::anyhow!("provider engine is not loaded"))?
         {
             LoadedEngine::Whisper(whisper_engine) => {
-                let initial_prompt =
-                    build_whisper_initial_prompt(&request.custom_words, &request.language_shortlist);
+                let initial_prompt = build_whisper_initial_prompt(
+                    &request.custom_words,
+                    &request.language_shortlist,
+                );
                 let whisper_language =
                     whisper_language_hint(&selected_language, &request.language_shortlist);
 
@@ -301,9 +303,7 @@ impl EngineProvider for TranscribeRsProvider {
                 .map_err(|e| anyhow::anyhow!("Moonshine transcription failed: {}", e))?,
             LoadedEngine::MoonshineStreaming(streaming_engine) => streaming_engine
                 .transcribe(audio.as_ref(), &TranscribeOptions::default())
-                .map_err(|e| {
-                    anyhow::anyhow!("Moonshine streaming transcription failed: {}", e)
-                })?,
+                .map_err(|e| anyhow::anyhow!("Moonshine streaming transcription failed: {}", e))?,
             LoadedEngine::SenseVoice(sense_voice_engine) => {
                 let language = match selected_language.as_str() {
                     "zh" | "zh-Hans" | "zh-Hant" => Some("zh".to_string()),
@@ -340,8 +340,10 @@ impl EngineProvider for TranscribeRsProvider {
                     .map_err(|e| anyhow::anyhow!("Canary transcription failed: {}", e))?
             }
             LoadedEngine::Cohere(cohere_engine) => {
-                let language_candidates =
-                    transcription_language_candidates(&selected_language, &request.language_shortlist);
+                let language_candidates = transcription_language_candidates(
+                    &selected_language,
+                    &request.language_shortlist,
+                );
 
                 if selected_language == "auto" && language_candidates.len() > 1 {
                     let mut results = Vec::new();

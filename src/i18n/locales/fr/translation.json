@@ -335,6 +335,13 @@
         "description": "Traduire automatiquement la parole d'autres langues vers l'anglais pendant la transcription.",
         "descriptionUnsupported": "La traduction n'est pas prise en charge par le modèle {{model}}."
       },
+      "translation": {
+        "label": "Translation",
+        "description": "Translate dictated output when the selected model or provider supports it.",
+        "descriptionUnsupported": "{{model}} does not support native translation. Text translation requires a translation provider.",
+        "targetLanguage": "Target language",
+        "targetLanguageDescription": "Choose the language for translated output."
+      },
       "modelUnload": {
         "title": "Décharger le modèle",
         "description": "Libérer automatiquement la mémoire GPU/CPU lorsque le modèle n'a pas été utilisé pendant le temps spécifié",

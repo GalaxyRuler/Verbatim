@@ -335,6 +335,13 @@
         "description": "Автоматически переводить речь с других языков на английский во время транскрипции.",
         "descriptionUnsupported": "Перевод не поддерживается моделью {{model}}."
       },
+      "translation": {
+        "label": "Translation",
+        "description": "Translate dictated output when the selected model or provider supports it.",
+        "descriptionUnsupported": "{{model}} does not support native translation. Text translation requires a translation provider.",
+        "targetLanguage": "Target language",
+        "targetLanguageDescription": "Choose the language for translated output."
+      },
       "modelUnload": {
         "title": "Выгрузить модель",
         "description": "Автоматически освобождать память, если модель не использовалась в течение указанного времени.",

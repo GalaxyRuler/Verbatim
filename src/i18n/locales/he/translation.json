@@ -335,6 +335,13 @@
         "description": "תרגם אוטומטית דיבור משפות אחרות לאנגלית בזמן התמלול.",
         "descriptionUnsupported": "המודל {{model}} לא תומך בתרגום."
       },
+      "translation": {
+        "label": "Translation",
+        "description": "Translate dictated output when the selected model or provider supports it.",
+        "descriptionUnsupported": "{{model}} does not support native translation. Text translation requires a translation provider.",
+        "targetLanguage": "Target language",
+        "targetLanguageDescription": "Choose the language for translated output."
+      },
       "modelUnload": {
         "title": "פרוק מודל",
         "description": "שחרר אוטומטית זיכרון GPU/CPU כשהמודל לא היה בשימוש במשך הזמן שנבחר",

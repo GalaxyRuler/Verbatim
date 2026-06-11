@@ -49,10 +49,7 @@ fn build_whisper_initial_prompt(
     }
 }
 
-fn effective_english_translation(
-    user_requested: bool,
-    model_supports_translation: bool,
-) -> bool {
+fn effective_english_translation(user_requested: bool, model_supports_translation: bool) -> bool {
     user_requested && model_supports_translation
 }
 

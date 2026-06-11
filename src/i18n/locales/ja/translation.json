@@ -335,6 +335,13 @@
         "description": "文字起こし中に他の言語から英語に自動的に翻訳。",
         "descriptionUnsupported": "翻訳は{{model}}モデルではサポートされていません。"
       },
+      "translation": {
+        "label": "Translation",
+        "description": "Translate dictated output when the selected model or provider supports it.",
+        "descriptionUnsupported": "{{model}} does not support native translation. Text translation requires a translation provider.",
+        "targetLanguage": "Target language",
+        "targetLanguageDescription": "Choose the language for translated output."
+      },
       "modelUnload": {
         "title": "モデルのアンロード",
         "description": "指定時間モデルが使用されていない場合、GPU/CPUメモリを自動的に解放",
