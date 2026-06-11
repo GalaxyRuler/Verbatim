@@ -36,26 +36,26 @@ This Code of Conduct applies within all project spaces — GitHub issues, pull r
 
 ## Enforcement
 
-Instances of abusive, harassing, or otherwise unacceptable behavior may be reported by contacting the maintainer at [contact@handy.computer](mailto:contact@handy.computer). All complaints will be reviewed and investigated promptly and fairly. The maintainer is obligated to maintain confidentiality with regard to the reporter of an incident.
+Instances of abusive, harassing, or otherwise unacceptable behavior may be reported by contacting the maintainer at [aoa@live.ca](mailto:aoa@live.ca). All complaints will be reviewed and investigated promptly and fairly. The maintainer is obligated to maintain confidentiality with regard to the reporter of an incident.
 
 ## Enforcement Guidelines
 
 Maintainers will follow these guidelines when determining consequences:
 
 **1. Correction**
-*Impact: Use of inappropriate language or other unprofessional behavior.*
+_Impact: Use of inappropriate language or other unprofessional behavior._
 Consequence: A private written warning, with clarity around the violation and an explanation of why the behavior was inappropriate.
 
 **2. Warning**
-*Impact: A violation through a single incident or series of actions.*
+_Impact: A violation through a single incident or series of actions._
 Consequence: A warning with consequences for continued behavior. No interaction with the people involved for a specified period of time. This includes avoiding interactions in community spaces as well as external channels. Violating these terms may lead to a temporary or permanent ban.
 
 **3. Temporary Ban**
-*Impact: A serious violation of community standards, including sustained inappropriate behavior.*
+_Impact: A serious violation of community standards, including sustained inappropriate behavior._
 Consequence: A temporary ban from any sort of interaction or public communication with the community for a specified period of time.
 
 **4. Permanent Ban**
-*Impact: Demonstrating a pattern of violation of community standards, including sustained inappropriate behavior, harassment of an individual, or aggression toward or disparagement of classes of individuals.*
+_Impact: Demonstrating a pattern of violation of community standards, including sustained inappropriate behavior, harassment of an individual, or aggression toward or disparagement of classes of individuals._
 Consequence: A permanent ban from any sort of public interaction within the community.
 
 ## Attribution

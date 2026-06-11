@@ -1,14 +1,19 @@
-# Verbatim
+<div align="center">
+  <img src="src-tauri/icons/logo.png" alt="Verbatim logo" width="128" height="128">
 
-[![Discord](https://img.shields.io/badge/Discord-%235865F2.svg?style=for-the-badge&logo=discord&logoColor=white)](https://discord.com/invite/WVBeWsNXK4)
+# Verbatim
 
 **A free, open source, and extensible speech-to-text application that works completely offline.**
 
+</div>
+
 Verbatim is a cross-platform desktop application that provides simple, privacy-focused speech transcription. Press a shortcut, speak, and have your words appear in any text field. This happens on your own computer without sending any information to the cloud.
+
+Verbatim is a fork of [Handy](https://github.com/cjpais/Handy) by [CJ Pais](https://github.com/cjpais), carrying its open-source foundation forward under a new identity and direction. See [Acknowledgments](#acknowledgments).
 
 ## Why Verbatim?
 
-Verbatim was created to fill the gap for a truly open source, extensible speech-to-text tool. As stated on [handy.computer](https://handy.computer):
+Verbatim exists to be a truly open source, extensible speech-to-text tool:
 
 - **Free**: Accessibility tooling belongs in everyone's hands, not behind a paywall
 - **Open Source**: Together we can build further. Extend Verbatim for yourself and contribute to something bigger
@@ -36,10 +41,7 @@ The process is entirely local:
 
 ### Installation
 
-1. Download the latest release from the [releases page](https://github.com/GalaxyRuler/Verbatim/releases) or the [website](https://handy.computer)
-   - **macOS**: Also available via [Homebrew cask](https://formulae.brew.sh/cask/handy): `brew install --cask handy`
-   - **Windows**: Also available via [winget](https://github.com/microsoft/winget-pkgs): `winget install GalaxyRuler.Verbatim` \
-     **Note:** The Homebrew cask and winget package are not maintained by the Verbatim developers.
+1. Download the latest release from the [releases page](https://github.com/GalaxyRuler/Verbatim/releases)
 2. Install the application
 3. Launch Verbatim and grant necessary system permissions (microphone, accessibility)
 4. Configure your preferred keyboard shortcuts in Settings
@@ -336,12 +338,16 @@ Download the models you want from below
 
 **Whisper Models (single .bin files):**
 
-- Small (487 MB): `https://blob.handy.computer/ggml-small.bin`
-- Medium (492 MB): `https://blob.handy.computer/whisper-medium-q4_1.bin`
-- Turbo (1600 MB): `https://blob.handy.computer/ggml-large-v3-turbo.bin`
-- Large (1100 MB): `https://blob.handy.computer/ggml-large-v3-q5_0.bin`
+Downloaded from the official [ggerganov/whisper.cpp](https://huggingface.co/ggerganov/whisper.cpp) repository on Hugging Face where available:
+
+- Small (487 MB): `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin`
+- Medium (492 MB): `https://blob.handy.computer/whisper-medium-q4_1.bin` (custom q4_1 quantization packaged by the upstream Handy project; not available on Hugging Face)
+- Turbo (1600 MB): `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin`
+- Large (1100 MB): `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-q5_0.bin`
 
 **Parakeet Models (compressed archives):**
+
+These are int8-quantized packagings (by the upstream Handy project) of NVIDIA's [parakeet-tdt-0.6b-v2](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2) and [parakeet-tdt-0.6b-v3](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3) models from Hugging Face:
 
 - V2 (473 MB): `https://blob.handy.computer/parakeet-v2-int8.tar.gz`
 - V3 (478 MB): `https://blob.handy.computer/parakeet-v3-int8.tar.gz`
@@ -458,41 +464,28 @@ If a workaround helps you, please [open an issue](https://github.com/GalaxyRuler
 2. **Fork the repository** and create a feature branch
 3. **Test thoroughly** on your target platform
 4. **Submit a pull request** with clear description of changes
-5. **Join the discussion** - reach out at [contact@handy.computer](mailto:contact@handy.computer)
+5. **Join the discussion** - reach out in [GitHub Discussions](https://github.com/GalaxyRuler/Verbatim/discussions)
 
 The goal is to create both a useful tool and a foundation for others to build upon—a well-patterned, simple codebase that serves the community.
 
-## Sponsors
-
-<div align="center">
-  We're grateful for the support of our sponsors who help make Verbatim possible:
-  <br><br>
-  <a href="https://wordcab.com">
-    <img src="sponsor-images/wordcab.png" alt="Wordcab" width="120" height="120">
-  </a>
-  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
-  <a href="https://github.com/epicenter-so/epicenter">
-    <img src="sponsor-images/epicenter.png" alt="Epicenter" width="120" height="120">
-  </a>
-  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
-  <a href="https://boltai.com?utm_source=handy">
-    <img src="sponsor-images/boltai.jpg" alt="Bolt AI" width="120" height="120">
-  </a>
-</div>
-
 ## Related Projects
 
-- **[Verbatim CLI](https://github.com/cjpais/handy-cli)** - The original Python command-line version
-- **[handy.computer](https://handy.computer)** - Project website with demos and documentation
+- **[Handy](https://github.com/cjpais/Handy)** - The original project Verbatim is forked from, by CJ Pais
+- **[Handy CLI](https://github.com/cjpais/handy-cli)** - The original Python command-line version of Handy
+- **[handy.computer](https://handy.computer)** - The upstream Handy project's website with demos and documentation
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) file for details.
+MIT License - see [LICENSE](LICENSE) file for details. Verbatim retains the original copyright notice of the upstream Handy project, as the license requires.
 
 ## Acknowledgments
 
+Verbatim stands on the shoulders of the people who built its foundations:
+
+- **[Handy](https://github.com/cjpais/Handy)** by **[CJ Pais](https://github.com/cjpais)** and its contributors and sponsors — the original application this project is forked from. Their work on the architecture, audio pipeline, and cross-platform support made Verbatim possible.
 - **Whisper** by OpenAI for the speech recognition model
-- **whisper.cpp and ggml** for amazing cross-platform whisper inference/acceleration
+- **whisper.cpp and ggml** by Georgi Gerganov and contributors for amazing cross-platform whisper inference/acceleration ([Hugging Face repository](https://huggingface.co/ggerganov/whisper.cpp))
+- **Parakeet** by NVIDIA for the CPU-friendly transcription models ([V2](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2), [V3](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3) on Hugging Face)
 - **Silero** for great lightweight VAD
 - **Tauri** team for the excellent Rust-based app framework
 - **Community contributors** helping make Verbatim better
