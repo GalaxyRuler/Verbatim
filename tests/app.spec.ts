@@ -229,7 +229,7 @@ test.describe("Verbatim App", () => {
         message: "page should not throw before rendering settings",
       })
       .toEqual([]);
-    await expect(page.getByText("Verbatim", { exact: true })).toBeVisible();
+    await expect(page.getByTitle("General")).toBeVisible();
     await page.getByText("Advanced").click();
     await expect(page.getByText("Adaptive Profiles")).toHaveCount(0);
 
@@ -239,7 +239,7 @@ test.describe("Verbatim App", () => {
 
     const adaptiveRow = settingRow(page, "Adaptive Profiles");
     await expect(adaptiveRow).toBeVisible();
-    await expect(page.getByText("Language Shortlist")).toBeVisible();
+    await expect(page.getByText("Default Profile")).toBeVisible();
     await expect(
       page.getByRole("button", { name: "Reprocess Last" }),
     ).toBeVisible();

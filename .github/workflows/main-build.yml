@@ -1,10 +1,11 @@
-name: "Main Branch Build"
+name: "Continuous Build"
 
 # Runs the full cross-platform build on every push to main so breakage is
 # caught before a manual release is triggered. Artifacts are kept for 30 days
 # so any commit on main has a downloadable, testable build.
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
 
@@ -48,5 +49,5 @@ jobs:
       target: ${{ matrix.target }}
       build-args: ${{ matrix.args }}
       upload-artifacts: true
-      sign-binaries: true
+      sign-binaries: false
     secrets: inherit
