@@ -47,17 +47,13 @@ The URL for each file should be:
 https://galaxyruler.space/verbatim-assets/<filename>
 ```
 
-Example Nginx location:
+Current production Caddy route:
 
-```nginx
-location /verbatim-assets/ {
-    alias /var/www/galaxyruler.space/verbatim-assets/;
-    autoindex off;
-    add_header Cache-Control "public, max-age=31536000, immutable";
-    types {
-        application/octet-stream bin onnx;
-        application/gzip gz tgz;
-    }
+```caddyfile
+handle /verbatim-assets/* {
+    root * /var/www/galaxyruler.space
+    header Cache-Control "public, max-age=31536000, immutable"
+    file_server
 }
 ```
 
