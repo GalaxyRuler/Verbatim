@@ -1,435 +1,506 @@
-<div align="center">
-  <img src="src-tauri/resources/handy.png" alt="Handy logo" width="120">
+# Verbatim
 
-  # Handy
+[![Discord](https://img.shields.io/badge/Discord-%235865F2.svg?style=for-the-badge&logo=discord&logoColor=white)](https://discord.com/invite/WVBeWsNXK4)
 
-  **Free, open source, offline speech-to-text. Press a key. Speak. Done.**
+**A free, open source, and extensible speech-to-text application that works completely offline.**
 
-  [![Discord](https://img.shields.io/badge/Discord-%235865F2.svg?style=for-the-badge&logo=discord&logoColor=white)](https://discord.com/invite/WVBeWsNXK4)
-  [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](LICENSE)
-  [![Version](https://img.shields.io/badge/version-0.8.3-blue?style=for-the-badge)](https://github.com/cjpais/Handy/releases)
-  [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey?style=for-the-badge)]()
+Verbatim is a cross-platform desktop application that provides simple, privacy-focused speech transcription. Press a shortcut, speak, and have your words appear in any text field. This happens on your own computer without sending any information to the cloud.
 
-  [Download](https://github.com/GalaxyRuler/Verbatim/releases) · [Website](https://handy.computer) · [Discord](https://discord.com/invite/WVBeWsNXK4) · [Discussions](https://github.com/cjpais/Handy/discussions)
-</div>
+## Why Verbatim?
 
----
+Verbatim was created to fill the gap for a truly open source, extensible speech-to-text tool. As stated on [handy.computer](https://handy.computer):
 
-> This project builds on **[Handy](https://github.com/cjpais/Handy)** by [CJ Pais](https://github.com/cjpais) — the most forkable offline speech-to-text application. See [About This Fork](#about-this-fork) for what's been built on top.
+- **Free**: Accessibility tooling belongs in everyone's hands, not behind a paywall
+- **Open Source**: Together we can build further. Extend Verbatim for yourself and contribute to something bigger
+- **Private**: Your voice stays on your computer. Get transcriptions without sending audio to the cloud
+- **Simple**: One tool, one job. Transcribe what you say and put it into a text box
 
----
-
-Handy is a cross-platform desktop application that provides privacy-focused speech transcription. Press a shortcut, speak, and have your words appear in any text field — entirely on your own computer, with no audio ever leaving your device.
-
-## Why Handy?
-
-- **Free** — Accessibility tooling belongs in everyone's hands, not behind a paywall
-- **Open Source** — Together we can build further. Extend Handy for yourself and contribute to something bigger
-- **Private** — Your voice stays on your computer. No audio sent to the cloud
-- **Simple** — One tool, one job. Transcribe what you say and put it into a text box
-
-> Handy isn't trying to be the best speech-to-text app — it's trying to be the most forkable one.
+Verbatim isn't trying to be the best speech-to-text app—it's trying to be the most forkable one.
 
 ## How It Works
 
-1. **Press** a configurable keyboard shortcut to start recording (or use push-to-talk mode)
+1. **Press** a configurable keyboard shortcut to start/stop recording (or use push-to-talk mode)
 2. **Speak** your words while the shortcut is active
-3. **Release** and Handy processes your speech using Whisper or Parakeet
+3. **Release** and Verbatim processes your speech using Whisper
 4. **Get** your transcribed text pasted directly into whatever app you're using
 
-The process is entirely local — silence filtered by VAD, transcription runs on-device:
+The process is entirely local:
 
-```mermaid
-sequenceDiagram
-    actor User
-    participant KB as Global Shortcut
-    participant Audio as AudioManager
-    participant VAD as Silero VAD
-    participant Trans as TranscriptionManager
-    participant Model as Whisper / Parakeet
-    participant SYS as System Clipboard
-
-    User->>KB: Press hotkey
-    KB->>Audio: start_recording()
-    loop Stream 30ms chunks
-        Audio->>VAD: audio frame
-        VAD-->>Audio: keep / discard (silence filtered)
-    end
-    User->>KB: Release hotkey
-    KB->>Trans: process_audio(pcm_data)
-    Trans->>Model: infer(pcm_data)
-    Model-->>Trans: transcribed text
-    Trans->>SYS: write to clipboard
-    SYS->>User: paste into active window
-```
-
-**Model options:**
-- **Whisper** (Small / Medium / Turbo / Large) — GPU-accelerated, high accuracy
-- **Parakeet V3** — CPU-only, ~5× real-time on mid-range hardware, auto language detection
-
-Works on Windows, macOS, and Linux.
-
-## Architecture
-
-Handy is a Tauri 2.x application: Rust backend handles system integration and ML inference; React/TypeScript frontend handles settings and overlay UI.
-
-```mermaid
-graph TB
-    subgraph UI["Frontend · React + TypeScript"]
-        App["App.tsx"]
-        OverlayUI["Overlay Window"]
-        SettingsUI["Settings UI"]
-        Zustand["Zustand Store"]
-    end
-
-    subgraph IPC["Tauri IPC Bridge"]
-        Cmds["Commands (invoke)"]
-        Evts["Events (emit/listen)"]
-    end
-
-    subgraph Core["Backend · Rust"]
-        LibRS["lib.rs · startup & init"]
-        ShortcutR["shortcut.rs · global hotkeys"]
-        SettingsR["settings.rs"]
-        CLIR["cli.rs · CLI args"]
-        subgraph Managers["Manager Layer"]
-            AudioMgr["AudioManager"]
-            ModelMgr["ModelManager"]
-            TransMgr["TranscriptionManager"]
-            HistMgr["HistoryManager"]
-        end
-        subgraph AudioKit["Audio Toolkit"]
-            CPAL["cpal · device I/O"]
-            Rubato["rubato · resampling"]
-            VADR["Silero VAD · silence filter"]
-        end
-    end
-
-    subgraph Models["AI Inference · transcribe-rs"]
-        Whisper["Whisper GGML\n(Small/Medium/Turbo/Large)"]
-        Parakeet["Parakeet V3\n(CPU-optimized)"]
-    end
-
-    subgraph SysOut["System Output"]
-        Clip["Clipboard"]
-        Active["Active Application"]
-    end
-
-    UI <-->|IPC| IPC
-    IPC <-->|handlers| Core
-    AudioMgr --> AudioKit
-    TransMgr -->|inference| Models
-    TransMgr --> Clip
-    Clip --> Active
-```
-
-### Application State
-
-```mermaid
-stateDiagram-v2
-    [*] --> Idle : App launches (tray only)
-    Idle --> Recording : Hotkey pressed
-    Recording --> Transcribing : Hotkey released / PTT end
-    Transcribing --> Idle : Text pasted ✓
-    Recording --> Idle : ESC / cancel
-    Transcribing --> Idle : Error / cancel
-    Idle --> Idle : Settings saved
-```
-
-### Key Patterns
-
-| Pattern | Implementation |
-|---|---|
-| Manager pattern | `AudioManager`, `ModelManager`, `TranscriptionManager` each own their lifecycle |
-| Command-Event | Frontend → Backend via `invoke`; Backend → Frontend via `emit` |
-| Single instance | `tauri_plugin_single_instance` — CLI flags route to running process |
-| State persistence | `tauri-plugin-store` (JSON), reactive via Zustand |
-
-### Core Stack
-
-| Layer | Technology |
-|---|---|
-| App framework | Tauri 2.x |
-| Frontend | React 18, TypeScript, Tailwind CSS, Zustand |
-| Backend | Rust, `cpal`, `rubato`, `rdev` |
-| ML inference | `transcribe-rs` (whisper.cpp + Parakeet / ONNX) |
-| VAD | Silero VAD via `vad-rs` |
-| i18n | i18next (en, de, es, fr, ja, zh, vi + more) |
+- Silence is filtered using VAD (Voice Activity Detection) with Silero
+- Transcription uses your choice of models:
+  - **Whisper models** (Small/Medium/Turbo/Large) with GPU acceleration when available
+  - **Parakeet V3** - CPU-optimized model with excellent performance and automatic language detection
+- Works on Windows, macOS, and Linux
 
 ## Quick Start
 
 ### Installation
 
-1. Download the latest release from the [releases page](https://github.com/cjpais/Handy/releases) or [handy.computer](https://handy.computer)
-   - **macOS**: `brew install --cask handy`
-   - **Windows**: `winget install cjpais.Handy`
-2. Launch Handy and grant necessary permissions (microphone, accessibility)
-3. Configure your keyboard shortcut in Settings
-4. Start transcribing
-
-> The Homebrew cask and winget package track the upstream Handy releases, not this fork.
+1. Download the latest release from the [releases page](https://github.com/GalaxyRuler/Verbatim/releases) or the [website](https://handy.computer)
+   - **macOS**: Also available via [Homebrew cask](https://formulae.brew.sh/cask/handy): `brew install --cask handy`
+   - **Windows**: Also available via [winget](https://github.com/microsoft/winget-pkgs): `winget install GalaxyRuler.Verbatim` \
+     **Note:** The Homebrew cask and winget package are not maintained by the Verbatim developers.
+2. Install the application
+3. Launch Verbatim and grant necessary system permissions (microphone, accessibility)
+4. Configure your preferred keyboard shortcuts in Settings
+5. Start transcribing!
 
 ### Development Setup
 
-For detailed platform-specific build instructions see [BUILD.md](BUILD.md).
-
-```bash
-# Prerequisites: Rust (stable), Bun
-bun install
-
-# Download required VAD model
-mkdir -p src-tauri/resources/models
-curl -o src-tauri/resources/models/silero_vad_v4.onnx https://blob.handy.computer/silero_vad_v4.onnx
-
-# Run in development
-bun run tauri dev
-
-# macOS cmake workaround
-CMAKE_POLICY_VERSION_MINIMUM=3.5 bun run tauri dev
-```
+For detailed build instructions including platform-specific requirements, see [BUILD.md](BUILD.md).
 
 ## Integrations
 
-<a href="https://www.raycast.com/mattiacolombomc/handy" title="Install Handy Raycast Extension"><img src="https://www.raycast.com/mattiacolombomc/handy/install_button@2x.png?v=1.1" height="64" style="height: 64px;" alt="Install handy Raycast Extension" /></a>
+<a href="https://www.raycast.com/mattiacolombomc/handy" title="Install Verbatim Raycast Extension"><img src="https://www.raycast.com/mattiacolombomc/handy/install_button@2x.png?v=1.1" height="64" style="height: 64px;" alt="Install Verbatim Raycast Extension" /></a>
 
-Control Handy from [Raycast](https://www.raycast.com) — start/stop recording, browse transcript history, manage dictionary, switch models and languages.
+Control Verbatim from [Raycast](https://www.raycast.com) — start/stop recording, browse transcript history, manage dictionary, switch models and languages.
 
 [Source](https://github.com/mattiacolombomc/raycast-handy) · by [@mattiacolombomc](https://github.com/mattiacolombomc)
 
-## CLI Parameters
+## Architecture
 
-All platforms support CLI flags for scripting, window managers, and autostart.
+Verbatim is built as a Tauri application combining:
 
-**Remote control** (routes to running instance via single-instance plugin):
+- **Frontend**: React + TypeScript with Tailwind CSS for the settings UI
+- **Backend**: Rust for system integration, audio processing, and ML inference
+- **Core Libraries**:
+  - `whisper-rs`: Local speech recognition with Whisper models
+  - `transcribe-rs`: CPU-optimized speech recognition with Parakeet models
+  - `cpal`: Cross-platform audio I/O
+  - `vad-rs`: Voice Activity Detection
+  - `rdev`: Global keyboard shortcuts and system events
+  - `rubato`: Audio resampling
+
+### Debug Mode
+
+Verbatim includes an advanced debug mode for development and troubleshooting. Access it by pressing:
+
+- **macOS**: `Cmd+Shift+D`
+- **Windows/Linux**: `Ctrl+Shift+D`
+
+### CLI Parameters
+
+Verbatim supports command-line flags for controlling a running instance and customizing startup behavior. These work on all platforms (macOS, Windows, Linux).
+
+**Remote control flags** (sent to an already-running instance via the single-instance plugin):
 
 ```bash
-handy --toggle-transcription    # Toggle recording on/off
-handy --toggle-post-process     # Toggle recording with post-processing
-handy --cancel                  # Cancel current operation
+verbatim --toggle-transcription    # Toggle recording on/off
+verbatim --toggle-post-process     # Toggle recording with post-processing on/off
+verbatim --cancel                  # Cancel the current operation
 ```
 
 **Startup flags:**
 
 ```bash
-handy --start-hidden            # Start without showing the main window
-handy --no-tray                 # Start without system tray (close = quit)
-handy --debug                   # Enable verbose (Trace) logging
+verbatim --start-hidden            # Start without showing the main window
+verbatim --no-tray                 # Start without the system tray icon
+verbatim --debug                   # Enable debug mode with verbose logging
+verbatim --help                    # Show all available flags
 ```
 
-Combine flags for autostart:
+Flags can be combined for autostart scenarios:
 
 ```bash
-handy --start-hidden --no-tray
+verbatim --start-hidden --no-tray
 ```
 
-> **macOS app bundle:** `/Applications/Handy.app/Contents/MacOS/Handy --toggle-transcription`
+> **macOS tip:** When Verbatim is installed as an app bundle, invoke the binary directly:
+>
+> ```bash
+> /Applications/Verbatim.app/Contents/MacOS/Verbatim --toggle-transcription
+> ```
 
-### Unix Signals (Linux / macOS)
+## Known Issues & Current Limitations
 
-| Signal | Action |
-|---|---|
-| `SIGUSR2` | Toggle transcription |
-| `SIGUSR1` | Toggle with post-processing |
+This project is actively being developed and has some [known issues](https://github.com/GalaxyRuler/Verbatim/issues). We believe in transparency about the current state:
 
-```bash
-pkill -USR2 -n handy   # toggle from a hotkey daemon
-```
+### Major Issues (Help Wanted)
 
-### Wayland Global Shortcuts
+**Whisper Model Crashes:**
 
-On Wayland, configure system-level shortcuts using CLI flags:
+- Whisper models crash on certain system configurations (Windows and Linux)
+- Does not affect all systems - issue is configuration-dependent
+  - If you experience crashes and are a developer, please help to fix and provide debug logs!
 
-**GNOME:** Settings → Keyboard → Custom Shortcuts → command: `handy --toggle-transcription`
+**Wayland Support (Linux):**
 
-**KDE Plasma:** System Settings → Shortcuts → Custom Shortcuts → Action: `handy --toggle-transcription`
+- Limited support for Wayland display server
+- Requires [`wtype`](https://github.com/atx/wtype) or [`dotool`](https://sr.ht/~geb/dotool/) for text input to work correctly (see [Linux Notes](#linux-notes) below for installation)
 
-**Sway / Hyprland:**
-```ini
-# Sway
-bindsym $mod+o exec handy --toggle-transcription
+### Linux Notes
 
-# Hyprland
-bind = $mainMod, O, exec, handy --toggle-transcription
-```
+**Text Input Tools:**
 
-## Debug Mode
+For reliable text input on Linux, install the appropriate tool for your display server:
 
-Press `Cmd+Shift+D` (macOS) or `Ctrl+Shift+D` (Windows/Linux) to open debug mode with detailed diagnostics, log paths, and audio device info.
+| Display Server | Recommended Tool | Install Command                                    |
+| -------------- | ---------------- | -------------------------------------------------- |
+| X11            | `xdotool`        | `sudo apt install xdotool`                         |
+| Wayland        | `wtype`          | `sudo apt install wtype`                           |
+| Both           | `dotool`         | `sudo apt install dotool` (requires `input` group) |
 
-## Known Issues & Limitations
+- **X11**: Install `xdotool` for both direct typing and clipboard paste shortcuts
+- **Wayland**: Install `wtype` (preferred) or `dotool` for text input to work correctly
+- **dotool setup**: Requires adding your user to the `input` group: `sudo usermod -aG input $USER` (then log out and back in)
 
-### Whisper Model Crashes
+Without these tools, Verbatim falls back to enigo which may have limited compatibility, especially on Wayland.
 
-Whisper models crash on certain system configurations (Windows and Linux). Not all systems are affected. If you're a developer experiencing this, please attach debug logs to the issue tracker.
+**Other Notes:**
 
-### Wayland
+- **Runtime library dependency (`libgtk-layer-shell.so.0`)**:
+  - Verbatim links `gtk-layer-shell` on Linux. If startup fails with `error while loading shared libraries: libgtk-layer-shell.so.0`, install the runtime package for your distro:
 
-Limited global shortcut support. Install `wtype` or `dotool` for text input and configure shortcuts via CLI flags (see above).
+    | Distro        | Package to install    | Example command                        |
+    | ------------- | --------------------- | -------------------------------------- |
+    | Ubuntu/Debian | `libgtk-layer-shell0` | `sudo apt install libgtk-layer-shell0` |
+    | Fedora/RHEL   | `gtk-layer-shell`     | `sudo dnf install gtk-layer-shell`     |
+    | Arch Linux    | `gtk-layer-shell`     | `sudo pacman -S gtk-layer-shell`       |
 
-### Linux Text Input Dependencies
+  - For building from source on Ubuntu/Debian, you may also need `libgtk-layer-shell-dev`.
 
-| Display Server | Tool | Install |
-|---|---|---|
-| X11 | `xdotool` | `sudo apt install xdotool` |
-| Wayland | `wtype` | `sudo apt install wtype` |
-| Both | `dotool` | `sudo apt install dotool` |
+- The recording overlay is disabled by default on Linux (`Overlay Position: None`) because certain compositors treat it as the active window. When the overlay is visible it can steal focus, which prevents Verbatim from pasting back into the application that triggered transcription. If you enable the overlay anyway, be aware that clipboard-based pasting might fail or end up in the wrong window.
+- If you are having trouble with the app, running with the environment variable `WEBKIT_DISABLE_DMABUF_RENDERER=1` may help
+- If Verbatim fails to start reliably on Linux, see [Troubleshooting → Linux Startup Crashes or Instability](#linux-startup-crashes-or-instability).
+- **Global keyboard shortcuts (Wayland):** On Wayland, system-level shortcuts must be configured through your desktop environment or window manager. Use the [CLI flags](#cli-parameters) as the command for your custom shortcut.
 
-Without these, Handy falls back to `enigo` which has limited Wayland compatibility.
+  **GNOME:**
+  1. Open **Settings > Keyboard > Keyboard Shortcuts > Custom Shortcuts**
+  2. Click the **+** button to add a new shortcut
+  3. Set the **Name** to `Toggle Verbatim Transcription`
+  4. Set the **Command** to `verbatim --toggle-transcription`
+  5. Click **Set Shortcut** and press your desired key combination (e.g., `Super+O`)
 
-### Linux Runtime Library
+  **KDE Plasma:**
+  1. Open **System Settings > Shortcuts > Custom Shortcuts**
+  2. Click **Edit > New > Global Shortcut > Command/URL**
+  3. Name it `Toggle Verbatim Transcription`
+  4. In the **Trigger** tab, set your desired key combination
+  5. In the **Action** tab, set the command to `verbatim --toggle-transcription`
 
-If startup fails with `libgtk-layer-shell.so.0`:
+  **Sway / i3:**
 
-| Distro | Command |
-|---|---|
-| Ubuntu/Debian | `sudo apt install libgtk-layer-shell0` |
-| Fedora/RHEL | `sudo dnf install gtk-layer-shell` |
-| Arch | `sudo pacman -S gtk-layer-shell` |
+  Add to your config file (`~/.config/sway/config` or `~/.config/i3/config`):
 
-Set `HANDY_NO_GTK_LAYER_SHELL=1` to skip GTK layer shell initialization entirely (falls back to always-on-top window).
+  ```ini
+  bindsym $mod+o exec verbatim --toggle-transcription
+  ```
 
-### Overlay & Pasting (Linux)
+  **Hyprland:**
 
-The recording overlay can steal focus and block pasting on Linux (X11). Fix: **Settings → Advanced → Overlay Position → None**. Enable **Audio Feedback** for audible recording confirmation.
+  Add to your config file (`~/.config/hypr/hyprland.conf`):
+
+  ```ini
+  bind = $mainMod, O, exec, verbatim --toggle-transcription
+  ```
+
+- You can also manage global shortcuts outside of Verbatim via Unix signals, which lets Wayland window managers or other hotkey daemons keep ownership of keybindings:
+
+  | Signal    | Action                                    | Example                   |
+  | --------- | ----------------------------------------- | ------------------------- |
+  | `SIGUSR2` | Toggle transcription                      | `pkill -USR2 -n verbatim` |
+  | `SIGUSR1` | Toggle transcription with post-processing | `pkill -USR1 -n verbatim` |
+
+  Example Sway config:
+
+  ```ini
+  bindsym $mod+o exec pkill -USR2 -n verbatim
+  bindsym $mod+p exec pkill -USR1 -n verbatim
+  ```
+
+  `pkill` here simply delivers the signal—it does not terminate the process.
+
+**Overlay & Pasting Issues (Linux):**
+
+- The recording overlay window can interfere with pasting transcribed text into target applications on Linux (X11)
+- **Solution:** Open **Settings > Advanced** and set **"Overlay Position"** to **"None"** to disable the overlay
+- Enable **"Audio Feedback"** (also in Advanced) if you still want audible confirmation of recording state
+- Users who upgrade from older versions or import settings from other platforms may need to manually apply this change
 
 ### Platform Support
 
-| Platform | Status |
-|---|---|
-| macOS (Apple Silicon + Intel) | ✅ |
-| Windows x64 | ✅ |
-| Linux x64 | ✅ (see notes above) |
+- **macOS (both Intel and Apple Silicon)**
+- **x64 Windows**
+- **x64 Linux**
 
-## System Requirements
+### System Requirements/Recommendations
 
-**Whisper models:**
-- macOS: M-series or Intel Mac
-- Windows/Linux: Any GPU (Intel / AMD / NVIDIA) recommended
+The following are recommendations for running Verbatim on your own machine. If you don't meet the system requirements, the performance of the application may be degraded. We are working on improving the performance across all kinds of computers and hardware.
 
-**Parakeet V3:**
-- CPU-only — minimum Intel Skylake (6th gen) or equivalent AMD
-- ~5× real-time on a mid-range i5, no GPU needed
+**For Whisper Models:**
 
-## Manual Model Installation (Proxy / Restricted Networks)
+- **macOS**: M series Mac, Intel Mac
+- **Windows**: Intel, AMD, or NVIDIA GPU
+- **Linux**: Intel, AMD, or NVIDIA GPU
+  - Ubuntu 22.04, 24.04
 
-Find your app data directory in **Settings → About** or via debug mode.
+**For Parakeet V3 Model:**
 
-| Model | URL | Size |
-|---|---|---|
-| Whisper Small | `https://blob.handy.computer/ggml-small.bin` | 487 MB |
-| Whisper Medium | `https://blob.handy.computer/whisper-medium-q4_1.bin` | 492 MB |
-| Whisper Turbo | `https://blob.handy.computer/ggml-large-v3-turbo.bin` | 1.6 GB |
-| Whisper Large | `https://blob.handy.computer/ggml-large-v3-q5_0.bin` | 1.1 GB |
-| Parakeet V3 | `https://blob.handy.computer/parakeet-v3-int8.tar.gz` | 478 MB |
+- **CPU-only operation** - runs on a wide variety of hardware
+- **Minimum**: Intel Skylake (6th gen) or equivalent AMD processors
+- **Performance**: ~5x real-time speed on mid-range hardware (tested on i5)
+- **Automatic language detection** - no manual language selection required
 
-Place Whisper `.bin` files directly in `{app_data}/models/`. Extract Parakeet archives — the directory must be named `parakeet-tdt-0.6b-v3-int8`.
+## Roadmap & Active Development
 
-### Custom Whisper Models
+We're actively working on several features and improvements. Contributions and feedback are welcome!
 
-Drop any Whisper GGML `.bin` file into the `models` directory. Handy auto-discovers it and shows it under **Custom Models** in Settings.
+### In Progress
+
+**Debug Logging:**
+
+- Adding debug logging to a file to help diagnose issues
+
+**macOS Keyboard Improvements:**
+
+- Support for Globe key as transcription trigger
+- A rewrite of global shortcut handling for MacOS, and potentially other OS's too.
+
+**Opt-in Analytics:**
+
+- Collect anonymous usage data to help improve Verbatim
+- Privacy-first approach with clear opt-in
+
+**Settings Refactoring:**
+
+- Cleanup and refactor settings system which is becoming bloated and messy
+- Implement better abstractions for settings management
+
+**Tauri Commands Cleanup:**
+
+- Abstract and organize Tauri command patterns
+- Investigate tauri-specta for improved type safety and organization
 
 ## Verify Release Signatures
 
-Release artifacts are signed with Tauri's updater format. Public key is in `src-tauri/tauri.conf.json` under `plugins.updater.pubkey`.
+Verbatim release artifacts are signed with Tauri's updater signature format. The public key is stored in [`src-tauri/tauri.conf.json`](src-tauri/tauri.conf.json) under `plugins.updater.pubkey`.
+
+To verify a release manually, set `ARTIFACT` to the filename you downloaded, save the `pubkey` value from `src-tauri/tauri.conf.json` to `verbatim.pub.b64`, then decode the public key and matching `.sig` file from base64 and verify the artifact with `minisign`:
 
 ```bash
-ARTIFACT="Handy_0.8.3_amd64.AppImage"
+# Replace with the file you downloaded
+ARTIFACT="Verbatim_0.8.1_amd64.AppImage"
 
 python3 - "$ARTIFACT" <<'PY'
 import base64, pathlib, sys
+
 artifact = sys.argv[1]
-pub = pathlib.Path("handy.pub.b64").read_text().strip()
-pathlib.Path("handy.pub").write_bytes(base64.b64decode(pub))
+
+pub = pathlib.Path("verbatim.pub.b64").read_text().strip()
+pathlib.Path("verbatim.pub").write_bytes(base64.b64decode(pub))
+
 sig = pathlib.Path(f"{artifact}.sig").read_text().strip()
 pathlib.Path(f"{artifact}.minisig").write_bytes(base64.b64decode(sig))
 PY
 
-minisign -Vm "$ARTIFACT" -p handy.pub -x "$ARTIFACT.minisig"
+minisign -Vm "$ARTIFACT" \
+  -p verbatim.pub \
+  -x "$ARTIFACT.minisig"
 ```
 
-## Linux Startup Troubleshooting
+On success, `minisign` prints:
 
-1. **Install/reinstall `gtk-layer-shell`** — most common cause of startup failures
-2. **Disable overlay**: `HANDY_NO_GTK_LAYER_SHELL=1 handy`
-3. **Disable WebKit DMA-BUF**: `WEBKIT_DISABLE_DMABUF_RENDERER=1 handy`
+```text
+Signature and comment signature verified
+```
 
-Make permanent in `~/.bashrc` or the `.desktop` `Exec=` line:
+Do not use `gpg` for these `.sig` files.
+
+## Troubleshooting
+
+### Manual Model Installation (For Proxy Users or Network Restrictions)
+
+If you're behind a proxy, firewall, or in a restricted network environment where Verbatim cannot download models automatically, you can manually download and install them. The URLs are publicly accessible from any browser.
+
+#### Step 1: Find Your App Data Directory
+
+1. Open Verbatim settings
+2. Navigate to the **About** section
+3. Copy the "App Data Directory" path shown there, or use the shortcuts:
+   - **macOS**: `Cmd+Shift+D` to open debug menu
+   - **Windows/Linux**: `Ctrl+Shift+D` to open debug menu
+
+The typical paths are:
+
+- **macOS**: `~/Library/Application Support/com.galaxyruler.verbatim/`
+- **Windows**: `C:\Users\{username}\AppData\Roaming\com.galaxyruler.verbatim\`
+- **Linux**: `~/.config/com.galaxyruler.verbatim/`
+
+#### Step 2: Create Models Directory
+
+Inside your app data directory, create a `models` folder if it doesn't already exist:
+
+```bash
+# macOS/Linux
+mkdir -p ~/Library/Application\ Support/com.galaxyruler.verbatim/models
+
+# Windows (PowerShell)
+New-Item -ItemType Directory -Force -Path "$env:APPDATA\com.galaxyruler.verbatim\models"
+```
+
+#### Step 3: Download Model Files
+
+Download the models you want from below
+
+**Whisper Models (single .bin files):**
+
+- Small (487 MB): `https://blob.handy.computer/ggml-small.bin`
+- Medium (492 MB): `https://blob.handy.computer/whisper-medium-q4_1.bin`
+- Turbo (1600 MB): `https://blob.handy.computer/ggml-large-v3-turbo.bin`
+- Large (1100 MB): `https://blob.handy.computer/ggml-large-v3-q5_0.bin`
+
+**Parakeet Models (compressed archives):**
+
+- V2 (473 MB): `https://blob.handy.computer/parakeet-v2-int8.tar.gz`
+- V3 (478 MB): `https://blob.handy.computer/parakeet-v3-int8.tar.gz`
+
+#### Step 4: Install Models
+
+**For Whisper Models (.bin files):**
+
+Simply place the `.bin` file directly into the `models` directory:
+
+```
+{app_data_dir}/models/
+├── ggml-small.bin
+├── whisper-medium-q4_1.bin
+├── ggml-large-v3-turbo.bin
+└── ggml-large-v3-q5_0.bin
+```
+
+**For Parakeet Models (.tar.gz archives):**
+
+1. Extract the `.tar.gz` file
+2. Place the **extracted directory** into the `models` folder
+3. The directory must be named exactly as follows:
+   - **Parakeet V2**: `parakeet-tdt-0.6b-v2-int8`
+   - **Parakeet V3**: `parakeet-tdt-0.6b-v3-int8`
+
+Final structure should look like:
+
+```
+{app_data_dir}/models/
+├── parakeet-tdt-0.6b-v2-int8/     (directory with model files inside)
+│   ├── (model files)
+│   └── (config files)
+└── parakeet-tdt-0.6b-v3-int8/     (directory with model files inside)
+    ├── (model files)
+    └── (config files)
+```
+
+**Important Notes:**
+
+- For Parakeet models, the extracted directory name **must** match exactly as shown above
+- Do not rename the `.bin` files for Whisper models—use the exact filenames from the download URLs
+- After placing the files, restart Verbatim to detect the new models
+
+#### Step 5: Verify Installation
+
+1. Restart Verbatim
+2. Open Settings → Models
+3. Your manually installed models should now appear as "Downloaded"
+4. Select the model you want to use and test transcription
+
+### Custom Whisper Models
+
+Verbatim can auto-discover custom Whisper GGML models placed in the `models` directory. This is useful for users who want to use fine-tuned or community models not included in the default model list.
+
+**How to use:**
+
+1. Obtain a Whisper model in GGML `.bin` format (e.g., from [Hugging Face](https://huggingface.co/models?search=whisper%20ggml))
+2. Place the `.bin` file in your `models` directory (see paths above)
+3. Restart Verbatim to discover the new model
+4. The model will appear in the "Custom Models" section of the Models settings page
+
+**Important:**
+
+- Community models are user-provided and may not receive troubleshooting assistance
+- The model must be a valid Whisper GGML format (`.bin` file)
+- Model name is derived from the filename (e.g., `my-custom-model.bin` → "My Custom Model")
+
+### Linux Startup Crashes or Instability
+
+If Verbatim fails to start reliably on Linux — for example, it crashes shortly after launch, never shows its window, or reports a Wayland protocol error — try the steps below in order.
+
+**1. Install (or reinstall) `gtk-layer-shell`**
+
+Verbatim uses `gtk-layer-shell` for its recording overlay and links against it at runtime. A missing or broken installation is the most common cause of startup failures and can manifest as a crash or a hang well before any window is shown. Make sure the runtime package is installed for your distro:
+
+| Distro        | Package to install    | Example command                        |
+| ------------- | --------------------- | -------------------------------------- |
+| Ubuntu/Debian | `libgtk-layer-shell0` | `sudo apt install libgtk-layer-shell0` |
+| Fedora/RHEL   | `gtk-layer-shell`     | `sudo dnf install gtk-layer-shell`     |
+| Arch Linux    | `gtk-layer-shell`     | `sudo pacman -S gtk-layer-shell`       |
+
+If it is already installed and you still see startup problems, try reinstalling it (e.g. `sudo pacman -S gtk-layer-shell` again) in case the library files were corrupted by a partial upgrade.
+
+**2. Disable the GTK layer shell overlay (`VERBATIM_NO_GTK_LAYER_SHELL`)**
+
+If installing the library does not help, you can skip `gtk-layer-shell` initialization entirely as a workaround. On some compositors (notably KDE Plasma under Wayland) it has been reported to interact poorly with the recording overlay. With this variable set, the overlay falls back to a regular always-on-top window:
+
+```bash
+VERBATIM_NO_GTK_LAYER_SHELL=1 verbatim
+```
+
+**3. Disable WebKit DMA-BUF renderer (`WEBKIT_DISABLE_DMABUF_RENDERER`)**
+
+On some GPU/driver combinations the WebKitGTK DMA-BUF renderer can cause the window to fail to render or to crash. Try:
+
+```bash
+WEBKIT_DISABLE_DMABUF_RENDERER=1 verbatim
+```
+
+**Making a workaround permanent**
+
+Once you've found a flag that helps, export it from your shell profile (`~/.bashrc`, `~/.zshenv`, …) or from the desktop autostart entry that launches Verbatim. If you launch Verbatim from a `.desktop` file, you can prefix the `Exec=` line, e.g.:
+
 ```ini
-Exec=env HANDY_NO_GTK_LAYER_SHELL=1 handy
+Exec=env VERBATIM_NO_GTK_LAYER_SHELL=1 verbatim
 ```
 
-## Roadmap
+If a workaround helps you, please [open an issue](https://github.com/GalaxyRuler/Verbatim/issues) describing your distro, desktop environment, and session type — that information helps us narrow down the underlying bug.
 
-| Item | Status |
-|---|---|
-| Debug logging to file | In progress |
-| Globe key support (macOS) | In progress |
-| Opt-in anonymous analytics | In progress |
-| Settings system refactor | Planned |
-| Tauri commands cleanup (tauri-specta) | Planned |
+### How to Contribute
 
-## About This Fork
+1. **Check existing issues** at [github.com/GalaxyRuler/Verbatim/issues](https://github.com/GalaxyRuler/Verbatim/issues)
+2. **Fork the repository** and create a feature branch
+3. **Test thoroughly** on your target platform
+4. **Submit a pull request** with clear description of changes
+5. **Join the discussion** - reach out at [contact@handy.computer](mailto:contact@handy.computer)
 
-This repository builds on **[Handy](https://github.com/cjpais/Handy)** — a cross-platform offline speech-to-text desktop app by [CJ Pais](https://github.com/cjpais). Handy's design philosophy (simple, forkable, private) made it the right foundation to build on.
-
-<!-- TODO: Describe what this fork adds or changes relative to upstream Handy -->
-
-Upstream project: [github.com/cjpais/Handy](https://github.com/cjpais/Handy)  
-Original website: [handy.computer](https://handy.computer)
-
-## About the Maintainer
-
-Maintained by **[@GalaxyRuler](https://github.com/GalaxyRuler)**.
-
-Building on open source foundations to make speech-to-text accessible, extensible, and entirely private. Contributions, bug reports, and forks are welcome.
-
-## Contributing
-
-Bug fixes are the top priority — there are [60+ open issues](https://github.com/cjpais/Handy/issues). New features require community support via [Discussions](https://github.com/cjpais/Handy/discussions) before a PR is opened. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full workflow.
-
-**TL;DR:**
-1. Search [issues](https://github.com/cjpais/Handy/issues) and [PRs](https://github.com/cjpais/Handy/pulls) (including closed ones) first
-2. Fork → feature branch → `bun run lint && bun run format:check`
-3. Test on your target platform
-4. Fill out the PR template completely (human-written description required)
-
-For translations see [CONTRIBUTING_TRANSLATIONS.md](CONTRIBUTING_TRANSLATIONS.md).
+The goal is to create both a useful tool and a foundation for others to build upon—a well-patterned, simple codebase that serves the community.
 
 ## Sponsors
 
 <div align="center">
-  <br>
+  We're grateful for the support of our sponsors who help make Verbatim possible:
+  <br><br>
   <a href="https://wordcab.com">
     <img src="sponsor-images/wordcab.png" alt="Wordcab" width="120" height="120">
   </a>
-  &nbsp;&nbsp;&nbsp;&nbsp;
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
   <a href="https://github.com/epicenter-so/epicenter">
     <img src="sponsor-images/epicenter.png" alt="Epicenter" width="120" height="120">
   </a>
-  &nbsp;&nbsp;&nbsp;&nbsp;
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
   <a href="https://boltai.com?utm_source=handy">
     <img src="sponsor-images/boltai.jpg" alt="Bolt AI" width="120" height="120">
   </a>
-  <br><br>
-  <em>Sponsors support the upstream Handy project.</em>
 </div>
 
 ## Related Projects
 
-- **[Handy (upstream)](https://github.com/cjpais/Handy)** — original project by CJ Pais
-- **[Handy CLI](https://github.com/cjpais/handy-cli)** — original Python command-line version
-- **[handy.computer](https://handy.computer)** — project website
+- **[Verbatim CLI](https://github.com/cjpais/handy-cli)** - The original Python command-line version
+- **[handy.computer](https://handy.computer)** - Project website with demos and documentation
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
-
-Built on Handy (MIT © 2025 CJ Pais). Modifications in this fork are also MIT.
+MIT License - see [LICENSE](LICENSE) file for details.
 
 ## Acknowledgments
 
-- **[OpenAI Whisper](https://github.com/openai/whisper)** — speech recognition model
-- **[whisper.cpp](https://github.com/ggerganov/whisper.cpp)** and **[ggml](https://github.com/ggerganov/ggml)** — cross-platform inference / acceleration
-- **[Silero VAD](https://github.com/snakers4/silero-vad)** — lightweight voice activity detection
-- **[Tauri](https://tauri.app)** — Rust-based app framework
-- **[CJ Pais](https://github.com/cjpais)** and all upstream Handy contributors
+- **Whisper** by OpenAI for the speech recognition model
+- **whisper.cpp and ggml** for amazing cross-platform whisper inference/acceleration
+- **Silero** for great lightweight VAD
+- **Tauri** team for the excellent Rust-based app framework
+- **Community contributors** helping make Verbatim better
