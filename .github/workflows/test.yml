@@ -33,8 +33,7 @@ jobs:
         run: |
           # Swap to mock adapter - avoids compiling whisper/Vulkan
           cp src/managers/transcription_mock.rs src/managers/transcription.rs
-          sed -i '/^transcribe-rs/d' Cargo.toml
 
       - name: Run Rust tests
         working-directory: src-tauri
-        run: cargo test
+        run: cargo test --no-default-features
