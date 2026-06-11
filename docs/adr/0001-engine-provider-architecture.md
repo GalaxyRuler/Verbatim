@@ -1,9 +1,11 @@
 # ADR-0001: Engine Provider Architecture
 
 ## Status
+
 Proposed
 
 ## Context
+
 Verbatim currently exposes models as a flat catalog through `ModelInfo`, with an
 `EngineType` enum describing the runtime needed for each model. `ModelManager`
 owns model metadata, downloads, and local file discovery. `TranscriptionManager`
@@ -29,6 +31,7 @@ must become an explicit workflow with source and target languages instead of an
 adaptive side effect or an English-only toggle.
 
 ## Decision
+
 Introduce an engine/provider architecture with three separated concepts:
 
 1. `ModelAsset`
@@ -66,6 +69,7 @@ Provider-specific logic should move behind an interface rather than continuing
 to grow inside a single `match LoadedEngine`.
 
 ## Target Interfaces
+
 The first implementation should keep the interface small:
 
 ```rust
@@ -177,6 +181,7 @@ sibling interface such as `run_streaming(request, sink)` rather than overloading
 the batch `run()` response.
 
 ## Translation Model
+
 Replace the English-only setting over time:
 
 Current:
@@ -212,7 +217,7 @@ Rules:
   a second step through a translation-capable provider.
 - Legacy migration rule: `translate_to_english = true` maps to
   `translation_request = { source_language: "auto", target_language: "en",
-  route: "auto" }`. Any shortcut or command path that currently writes
+route: "auto" }`. Any shortcut or command path that currently writes
   `translate_to_english` must write the new request shape after migration.
 
 Route semantics:
@@ -224,6 +229,7 @@ Route semantics:
   provider translates the resulting text.
 
 ## Migration Plan
+
 Implement this in small slices:
 
 0. Add characterization tests around current orchestration before moving code:
@@ -248,15 +254,18 @@ Implement this in small slices:
 ## Alternatives Considered
 
 ### Keep adding variants to `EngineType`
+
 This is the smallest immediate change, but it keeps growing the large
 `TranscriptionManager` match and forces every provider to fit the same local
 model lifecycle. It will make translation and streaming awkward.
 
 ### Use only OpenAI-compatible HTTP providers
+
 This would simplify runtime management, but it would weaken Verbatim's local and
 offline identity. It also does not handle local Whisper/ONNX models cleanly.
 
 ### Add separate managers for ASR, translation, and post-processing
+
 This may become useful later, but it is too much structure before the task and
 provider capabilities are explicit. Start with the provider seam first.
 
@@ -294,6 +303,7 @@ Risks:
   surfaced and not silently mixed into a public/commercial release.
 
 ## Verification
+
 The provider architecture is working when:
 
 - Existing Whisper, Parakeet, Moonshine, SenseVoice, GigaAM, Canary, and Cohere

@@ -231,10 +231,7 @@ export const LanguageSelector: React.FC<LanguageSelectorProps> = ({
             </div>
           )}
         </div>
-        <ResetButton
-          onClick={handleReset}
-          disabled={isLanguageUpdating}
-        />
+        <ResetButton onClick={handleReset} disabled={isLanguageUpdating} />
       </div>
       {isLanguageUpdating && (
         <div className="absolute inset-0 bg-mid-gray/10 rounded flex items-center justify-center">

@@ -15,6 +15,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/). Version
 ## [0.8.3] — 2025
 
 ### Added
+
 - Intel Mac (x86_64) build instructions with dynamic ONNX Runtime linking via Homebrew
 - Portuguese translation for portable update flow
 - AWS Bedrock (Mantle) as a post-processing provider option
@@ -22,6 +23,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/). Version
 - Cohere as a post-processing provider
 
 ### Fixed
+
 - Overlay / pasting issue on Linux documented with workaround (Settings → Advanced → Overlay Position → None)
 - GTK layer shell overlay initialization on KDE Plasma under Wayland
 - `VERBATIM_NO_GTK_LAYER_SHELL` environment variable now parsed correctly as boolean
@@ -30,11 +32,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/). Version
 - German translation quality improvements
 
 ### Changed
+
 - Nix: drop redundant `LD_LIBRARY_PATH` wrapper prefix; rely on `cargo-tauri.hook` standard phases
 - GPU info query is now async (no startup block)
 - `transcribe-rs` upgraded to 0.3.5 → 0.3.8
 
 ### Documentation
+
 - `AGENTS.md` updated as the single source of truth for AI coding assistants
 - GitHub workflow rules for AI coding assistants made actionable
 - Linux startup troubleshooting section expanded
@@ -44,16 +48,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/). Version
 ## [0.8.2]
 
 ### Added
+
 - Parakeet V3 CPU-optimized speech recognition model with automatic language detection
 - Italian translation
 - Cohere integration as post-processing provider
 
 ### Fixed
+
 - Crash on CPUs without AVX2 support
 - Nix: remove onnxruntime overlay, use nixpkgs native package
 - Preserve legacy portable marker during updates
 
 ### Changed
+
 - VAD and model loading now run in parallel at startup
 
 ---
@@ -61,6 +68,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/). Version
 ## [0.8.x] — Earlier 0.8 releases
 
 ### Highlights
+
 - Tauri 2.x migration
 - `transcribe-rs` library for unified Whisper + Parakeet inference
 - GPU-accelerated Whisper on Metal (macOS), Vulkan (Windows/Linux), DirectML (Windows)
