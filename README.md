@@ -49,14 +49,6 @@ The process is entirely local:
 
 For detailed build instructions including platform-specific requirements, see [BUILD.md](BUILD.md).
 
-## Integrations
-
-<a href="https://www.raycast.com/mattiacolombomc/handy" title="Install Verbatim Raycast Extension"><img src="https://www.raycast.com/mattiacolombomc/handy/install_button@2x.png?v=1.1" height="64" style="height: 64px;" alt="Install Verbatim Raycast Extension" /></a>
-
-Control Verbatim from [Raycast](https://www.raycast.com) — start/stop recording, browse transcript history, manage dictionary, switch models and languages.
-
-[Source](https://github.com/mattiacolombomc/raycast-handy) · by [@mattiacolombomc](https://github.com/mattiacolombomc)
-
 ## Architecture
 
 Verbatim is built as a Tauri application combining:

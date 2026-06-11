@@ -72,7 +72,6 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/). Version
 - CLI remote control flags (`--toggle-transcription`, `--cancel`, `--start-hidden`)
 - Unix signal support for Wayland hotkey daemons (`SIGUSR1`, `SIGUSR2`)
 - Recording overlay with platform-specific positioning
-- Raycast extension support
 
 ---
 
