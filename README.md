@@ -42,11 +42,17 @@ The process is entirely local:
 
 ### Installation
 
-1. Download the latest release from the [releases page](https://github.com/GalaxyRuler/Verbatim/releases)
-2. Install the application
-3. Launch Verbatim and grant necessary system permissions (microphone, accessibility)
-4. Configure your preferred keyboard shortcuts in Settings
-5. Start transcribing!
+**Windows x64**
+
+- [Download Verbatim for Windows](https://github.com/GalaxyRuler/Verbatim/releases/latest/download/Verbatim-Windows-x64-Setup.exe) (recommended)
+- [Download Windows MSI](https://github.com/GalaxyRuler/Verbatim/releases/latest/download/Verbatim-Windows-x64.msi) (managed installs)
+
+All release assets are available on the [GitHub Releases page](https://github.com/GalaxyRuler/Verbatim/releases/latest).
+
+1. Install the application
+2. Launch Verbatim and grant necessary system permissions (microphone, accessibility)
+3. Configure your preferred keyboard shortcuts in Settings
+4. Start transcribing!
 
 ### Development Setup
 
