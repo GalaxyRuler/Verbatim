@@ -248,7 +248,7 @@ mod tests {
     #[test]
     fn classifies_vscode_and_terminal_as_technical() {
         assert_eq!(
-            classify_target(Some("Code.exe"), Some("actions.rs - Handy"), None),
+            classify_target(Some("Code.exe"), Some("actions.rs - Verbatim"), None),
             TargetKind::Technical
         );
         assert_eq!(

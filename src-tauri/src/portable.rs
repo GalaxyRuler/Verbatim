@@ -10,7 +10,6 @@ use tauri::Manager;
 
 static PORTABLE_DATA_DIR: OnceLock<Option<PathBuf>> = OnceLock::new();
 const PORTABLE_MARKER: &str = "Verbatim Portable Mode";
-const LEGACY_PORTABLE_MARKER: &str = "Handy Portable Mode";
 
 /// Detect portable mode by looking for a `portable` marker file next to the exe.
 /// Must be called once at startup before Tauri initializes.
@@ -99,7 +98,7 @@ fn is_valid_portable_marker(path: &std::path::Path) -> bool {
     std::fs::read_to_string(path)
         .map(|s| {
             let marker = s.trim();
-            marker.starts_with(PORTABLE_MARKER) || marker.starts_with(LEGACY_PORTABLE_MARKER)
+            marker.starts_with(PORTABLE_MARKER)
         })
         .unwrap_or(false)
 }
@@ -112,17 +111,6 @@ mod tests {
     #[test]
     fn test_valid_magic_string_enables_portable() {
         let dir = std::env::temp_dir().join("verbatim_test_valid");
-        std::fs::create_dir_all(&dir).unwrap();
-        let marker = dir.join("portable");
-        let mut f = std::fs::File::create(&marker).unwrap();
-        write!(f, "Verbatim Portable Mode").unwrap();
-        assert!(is_valid_portable_marker(&marker));
-        std::fs::remove_dir_all(dir).unwrap();
-    }
-
-    #[test]
-    fn test_legacy_magic_string_enables_portable() {
-        let dir = std::env::temp_dir().join("verbatim_test_legacy_valid");
         std::fs::create_dir_all(&dir).unwrap();
         let marker = dir.join("portable");
         let mut f = std::fs::File::create(&marker).unwrap();

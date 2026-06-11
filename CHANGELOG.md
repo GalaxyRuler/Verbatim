@@ -24,7 +24,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/). Version
 ### Fixed
 - Overlay / pasting issue on Linux documented with workaround (Settings → Advanced → Overlay Position → None)
 - GTK layer shell overlay initialization on KDE Plasma under Wayland
-- `HANDY_NO_GTK_LAYER_SHELL` environment variable now parsed correctly as boolean
+- `VERBATIM_NO_GTK_LAYER_SHELL` environment variable now parsed correctly as boolean
 - Crash on older CPUs (pre-AVX2)
 - Whisper model crash surface area reduced; paste errors now shown as UI toast
 - German translation quality improvements
@@ -35,7 +35,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/). Version
 - `transcribe-rs` upgraded to 0.3.5 → 0.3.8
 
 ### Documentation
-- `CLAUDE.md` and `AGENTS.md` unified into single source of truth for AI assistants
+- `AGENTS.md` updated as the single source of truth for AI coding assistants
 - GitHub workflow rules for AI coding assistants made actionable
 - Linux startup troubleshooting section expanded
 
@@ -64,7 +64,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/). Version
 - Tauri 2.x migration
 - `transcribe-rs` library for unified Whisper + Parakeet inference
 - GPU-accelerated Whisper on Metal (macOS), Vulkan (Windows/Linux), DirectML (Windows)
-- Global shortcut handling rewrite with `handy-keys`
+- Global shortcut handling rewrite with Verbatim Keys
 - Tauri specta for type-safe command bindings
 - Internationalization (i18next): en, de, es, fr, ja, zh, vi
 - Transcription history with SQLite storage

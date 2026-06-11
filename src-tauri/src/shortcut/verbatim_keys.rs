@@ -27,7 +27,6 @@
 //! polled from a dedicated recording thread. Events are emitted to the frontend
 //! via Tauri's event system.
 
-use handy_keys as verbatim_keys;
 use log::{debug, error, info};
 use serde::Serialize;
 use specta::Type;
@@ -319,7 +318,7 @@ impl VerbatimKeysState {
                     is_key_down: key_event.is_key_down,
                     hotkey_string: key_event
                         .as_hotkey()
-                        .map(|h| h.to_handy_string())
+                        .map(|h| h.to_verbatim_string())
                         .unwrap_or_default(),
                 };
 

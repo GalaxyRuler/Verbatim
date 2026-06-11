@@ -344,7 +344,7 @@ fn validate_shortcut_for_implementation(
 fn parse_keyboard_implementation(s: &str) -> KeyboardImplementation {
     match s {
         "tauri" => KeyboardImplementation::Tauri,
-        "verbatim_keys" | "handy_keys" => KeyboardImplementation::VerbatimKeys,
+        "verbatim_keys" => KeyboardImplementation::VerbatimKeys,
         other => {
             warn!(
                 "Invalid keyboard implementation '{}', defaulting to tauri",

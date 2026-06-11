@@ -587,9 +587,9 @@ Function .onInit
 
 
   ; --- PORTABLE MODE --- Auto-detect portable mode during updates.
-  ; Preserve portable installs that use either the current magic-string marker
-  ; or the legacy empty marker created by older Verbatim releases. Require Data/
-  ; for the legacy empty-marker case so stale scoop side-effect files do not
+  ; Preserve portable installs that use the current magic-string marker or the
+  ; legacy empty marker created by older Verbatim releases. Require Data/ for
+  ; the legacy empty-marker case so stale scoop side-effect files do not
   ; accidentally opt an updater run into portable mode.
   ${If} $PortableMode <> 1
   ${AndIf} $UpdateMode = 1
@@ -598,8 +598,6 @@ Function .onInit
     FileRead $1 $2
     FileClose $1
     ${If} $2 == "Verbatim Portable Mode"
-      StrCpy $PortableMode 1
-    ${OrIf} $2 == "Handy Portable Mode"
       StrCpy $PortableMode 1
     ${OrIf} $2 == ""
     ${AndIf} ${FileExists} "$INSTDIR\Data"
