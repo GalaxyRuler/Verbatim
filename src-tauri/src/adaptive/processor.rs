@@ -19,6 +19,9 @@ pub fn deterministic_process(raw: &str, profile: &AdaptiveProfile) -> String {
     if profile.cleanup.normalize_punctuation {
         output = normalize_spacing(&output);
     }
+    if profile.id == "email" {
+        output = format_email_text(&output);
+    }
     output
 }
 
@@ -100,6 +103,92 @@ fn normalize_spacing(input: &str) -> String {
         .to_string()
 }
 
+fn format_email_text(input: &str) -> String {
+    let trimmed = input.trim();
+    let (greeting, body_with_closing) = split_email_greeting(trimmed);
+    let (body, closing) = split_email_closing(body_with_closing.trim());
+
+    if greeting.is_none() && closing.is_none() {
+        return trimmed.to_string();
+    }
+
+    let mut sections = Vec::new();
+    if let Some(greeting) = greeting {
+        sections.push(greeting.trim().to_string());
+    }
+    if !body.trim().is_empty() {
+        sections.push(body.trim().to_string());
+    }
+    if let Some(closing) = closing {
+        sections.push(format_email_closing(closing.trim()));
+    }
+
+    sections.join("\n\n")
+}
+
+fn split_email_greeting(input: &str) -> (Option<&str>, &str) {
+    let lower = input.to_lowercase();
+    let has_email_greeting = ["dear ", "hi ", "hello "]
+        .iter()
+        .any(|prefix| lower.starts_with(prefix));
+
+    if !has_email_greeting {
+        return (None, input);
+    }
+
+    if let Some(comma_index) = input.find(',') {
+        if comma_index <= 80 {
+            let split_index = comma_index + 1;
+            return (Some(&input[..split_index]), &input[split_index..]);
+        }
+    }
+
+    (None, input)
+}
+
+fn split_email_closing(input: &str) -> (&str, Option<&str>) {
+    let lower = input.to_lowercase();
+    let mut best_match: Option<(usize, usize)> = None;
+
+    for marker in [
+        "best regards,",
+        "kind regards,",
+        "regards,",
+        "sincerely,",
+        "thank you,",
+        "thanks,",
+    ] {
+        if let Some(index) = lower.rfind(marker) {
+            let end_index = index + marker.len();
+            let should_replace = best_match.is_none_or(|(current_index, current_end)| {
+                end_index > current_end || (end_index == current_end && index < current_index)
+            });
+            if should_replace {
+                best_match = Some((index, end_index));
+            }
+        }
+    }
+
+    if let Some((index, _)) = best_match {
+        return (&input[..index], Some(&input[index..]));
+    }
+
+    (input, None)
+}
+
+fn format_email_closing(input: &str) -> String {
+    if let Some(comma_index) = input.find(',') {
+        let split_index = comma_index + 1;
+        let signoff = input[..split_index].trim();
+        let signature = input[split_index..].trim();
+        if !signature.is_empty() {
+            return format!("{}\n{}", signoff, signature);
+        }
+    }
+
+    input.to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -132,6 +221,32 @@ mod tests {
         );
         assert!(result.contains("cargo_test"));
         assert!(result.contains("src-tauri/src/actions.rs"));
+    }
+
+    #[test]
+    fn email_profile_formats_dictated_greeting_body_and_closing() {
+        let result = deterministic_process(
+            "Dear James, I have received your Excel file. Sincerely, Abdullah Al-Khalid.",
+            &profile("email"),
+        );
+
+        assert_eq!(
+            result,
+            "Dear James,\n\nI have received your Excel file.\n\nSincerely,\nAbdullah Al-Khalid."
+        );
+    }
+
+    #[test]
+    fn email_profile_preserves_multi_word_closing_marker() {
+        let result = deterministic_process(
+            "Hello Dana, The report is attached. Best regards, Abdullah.",
+            &profile("email"),
+        );
+
+        assert_eq!(
+            result,
+            "Hello Dana,\n\nThe report is attached.\n\nBest regards,\nAbdullah."
+        );
     }
 
     #[test]
