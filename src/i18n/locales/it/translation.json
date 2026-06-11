@@ -365,7 +365,9 @@
         "duplicate": "\"{{word}}\" esiste già",
         "autoAdd": {
           "label": "Auto-add corrected words",
-          "description": "After Verbatim pastes text, watch that same text field briefly and add uncommon words you correct to the custom dictionary."
+          "description": "After Verbatim pastes text, watch that same text field for a few seconds and add uncommon words you correct to the custom dictionary.",
+          "learnedTitle": "Added to dictionary",
+          "learnedDescription": "Added: {{words}}"
         }
       },
       "adaptiveProfiles": {

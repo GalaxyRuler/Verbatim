@@ -1,11 +1,11 @@
 use log::{debug, info};
 use std::time::{Duration, Instant};
-use tauri::AppHandle;
+use tauri::{AppHandle, Emitter};
 
 const POST_PASTE_SETTLE_DELAY: Duration = Duration::from_millis(120);
 const POST_PASTE_POLL_INTERVAL: Duration = Duration::from_millis(150);
 const POST_PASTE_STABLE_EDIT_DELAY: Duration = Duration::from_millis(300);
-const POST_PASTE_LEARNING_WINDOW: Duration = Duration::from_secs(2);
+const POST_PASTE_LEARNING_WINDOW: Duration = Duration::from_secs(6);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FocusedTextSnapshot {
@@ -152,6 +152,7 @@ fn learn_from_text_snapshots(
 
     settings.custom_words = merged;
     crate::settings::write_settings(app, settings);
+    let _ = app.emit("custom-words-learned", learned_words.clone());
     info!(
         "Auto-added {} corrected custom word(s): {}",
         learned_words.len(),
@@ -368,7 +369,8 @@ mod windows_focused_text {
 
 #[cfg(test)]
 mod tests {
-    use super::extract_corrected_inserted_text;
+    use super::{extract_corrected_inserted_text, POST_PASTE_LEARNING_WINDOW};
+    use std::time::Duration;
 
     #[test]
     fn extracts_corrected_text_from_inside_pasted_span() {
@@ -401,5 +403,10 @@ mod tests {
         );
 
         assert!(corrected.is_none());
+    }
+
+    #[test]
+    fn correction_window_allows_human_edit_latency() {
+        assert!(POST_PASTE_LEARNING_WINDOW >= Duration::from_secs(6));
     }
 }

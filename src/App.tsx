@@ -137,6 +137,23 @@ function App() {
     };
   }, [t]);
 
+  // Show feedback when post-paste dictionary learning adds corrected words.
+  useEffect(() => {
+    const unlisten = listen<string[]>("custom-words-learned", (event) => {
+      if (event.payload.length === 0) return;
+
+      toast.success(t("settings.advanced.customWords.autoAdd.learnedTitle"), {
+        description: t(
+          "settings.advanced.customWords.autoAdd.learnedDescription",
+          { words: event.payload.join(", ") },
+        ),
+      });
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [t]);
+
   // Listen for model loading failures and show a toast
   useEffect(() => {
     const unlisten = listen<ModelStateEvent>("model-state-changed", (event) => {
