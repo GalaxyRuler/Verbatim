@@ -72,6 +72,24 @@ fn build_whisper_initial_prompt(
     }
 }
 
+fn effective_english_translation(
+    user_requested: bool,
+    model_supports_translation: bool,
+) -> bool {
+    user_requested && model_supports_translation
+}
+
+fn validate_selected_language(selected_language: &str, supported_languages: &[String]) -> String {
+    if selected_language == "auto"
+        || supported_languages.is_empty()
+        || supported_languages.contains(&selected_language.to_string())
+    {
+        selected_language.to_string()
+    } else {
+        "auto".to_string()
+    }
+}
+
 fn transcription_language_candidates(
     validated_language: &str,
     language_shortlist: &[String],
@@ -595,37 +613,30 @@ impl TranscriptionManager {
         // Get current settings for configuration
         let settings = get_settings(&self.app_handle);
         let current_model_info = self.model_manager.get_model_info(&settings.selected_model);
-        let effective_translate_to_english = settings.translate_to_english
-            && current_model_info
+        let effective_translate_to_english = effective_english_translation(
+            settings.translate_to_english,
+            current_model_info
                 .as_ref()
                 .map(|info| info.supports_translation)
-                .unwrap_or(false);
+                .unwrap_or(false),
+        );
 
         // Validate selected language against the model's supported languages.
         // If the language isn't supported, fall back to "auto" to prevent errors.
-        let validated_language = if settings.selected_language == "auto" {
-            "auto".to_string()
-        } else {
-            let is_supported = current_model_info
+        let validated_language = validate_selected_language(
+            &settings.selected_language,
+            &current_model_info
                 .as_ref()
-                .map(|info| {
-                    info.supported_languages.is_empty()
-                        || info
-                            .supported_languages
-                            .contains(&settings.selected_language)
-                })
-                .unwrap_or(true);
+                .map(|info| info.supported_languages.clone())
+                .unwrap_or_default(),
+        );
 
-            if is_supported {
-                settings.selected_language.clone()
-            } else {
-                warn!(
-                    "Language '{}' not supported by current model, falling back to auto-detect",
-                    settings.selected_language
-                );
-                "auto".to_string()
-            }
-        };
+        if validated_language == "auto" && settings.selected_language != "auto" {
+            warn!(
+                "Language '{}' not supported by current model, falling back to auto-detect",
+                settings.selected_language
+            );
+        }
 
         // Perform transcription with the appropriate engine.
         // We use catch_unwind to prevent engine panics from poisoning the mutex,
@@ -1019,6 +1030,35 @@ mod tests {
 
         assert!(prompt.contains("Relevant words: Verbatim, Codex"));
         assert!(!prompt.contains("The speech may be in these languages"));
+    }
+
+    #[test]
+    fn english_translation_requires_user_toggle_and_model_support() {
+        assert!(effective_english_translation(true, true));
+        assert!(!effective_english_translation(true, false));
+        assert!(!effective_english_translation(false, true));
+        assert!(!effective_english_translation(false, false));
+    }
+
+    #[test]
+    fn unsupported_selected_language_falls_back_to_auto() {
+        assert_eq!(
+            validate_selected_language("ar", &["en".to_string(), "fr".to_string()]),
+            "auto"
+        );
+        assert_eq!(
+            validate_selected_language("ar", &["en".to_string(), "ar".to_string()]),
+            "ar"
+        );
+        assert_eq!(
+            validate_selected_language("auto", &["en".to_string()]),
+            "auto"
+        );
+    }
+
+    #[test]
+    fn empty_supported_language_list_accepts_any_selected_language() {
+        assert_eq!(validate_selected_language("ar", &[]), "ar");
     }
 
     #[test]
