@@ -70,24 +70,12 @@ jobs:
           - platform: "macos-26" # for Arm based macs (M1 and above). Uses macOS 26 for Apple Intelligence SDK.
             args: "--target aarch64-apple-darwin"
             target: "aarch64-apple-darwin"
-          - platform: "macos-latest" # for Intel based macs.
-            args: "--target x86_64-apple-darwin"
-            target: "x86_64-apple-darwin"
           - platform: "ubuntu-22.04" # Build .deb on 22.04
             args: "--bundles deb"
             target: "x86_64-unknown-linux-gnu"
-          - platform: "ubuntu-24.04" # Build AppImage and RPM on 24.04
-            args: "--bundles appimage,rpm"
-            target: "x86_64-unknown-linux-gnu"
-          - platform: "ubuntu-24.04-arm" # Build for ARM64 Linux
-            args: "--bundles appimage,deb,rpm"
-            target: "aarch64-unknown-linux-gnu"
           - platform: "windows-latest"
             args: ""
             target: "x86_64-pc-windows-msvc"
-          - platform: "windows-11-arm" # for ARM64 Windows runner
-            args: "--target aarch64-pc-windows-msvc"
-            target: "aarch64-pc-windows-msvc"
 
     uses: ./.github/workflows/build.yml
     with:
@@ -151,16 +139,8 @@ jobs:
             const rows = [
               ['Windows x64', 'Setup EXE', `Verbatim_${version}_x64-setup.exe`],
               ['Windows x64', 'MSI', `Verbatim_${version}_x64_en-US.msi`],
-              ['Windows ARM64', 'Setup EXE', `Verbatim_${version}_arm64-setup.exe`],
-              ['Windows ARM64', 'MSI', `Verbatim_${version}_arm64_en-US.msi`],
               ['macOS Apple Silicon', 'DMG', `Verbatim_${version}_aarch64.dmg`],
-              ['macOS Intel', 'DMG', `Verbatim_${version}_x64.dmg`],
-              ['Ubuntu/Debian x64', 'DEB', `Verbatim_${version}_amd64.deb`],
-              ['Ubuntu/Debian ARM64', 'DEB', `Verbatim_${version}_arm64.deb`],
-              ['Linux x64', 'AppImage', `Verbatim_${version}_amd64.AppImage`],
-              ['Linux ARM64', 'AppImage', `Verbatim_${version}_aarch64.AppImage`],
-              ['Fedora/RHEL/openSUSE x64', 'RPM', `Verbatim-${version}-1.x86_64.rpm`],
-              ['Fedora/RHEL/openSUSE ARM64', 'RPM', `Verbatim-${version}-1.aarch64.rpm`],
+              ['Ubuntu x64', 'DEB', `Verbatim_${version}_amd64.deb`],
             ];
 
             const downloadTable = [
@@ -188,7 +168,7 @@ jobs:
               '',
               downloadTable,
               '',
-              'Use the setup `.exe` on Windows, `.dmg` on macOS, `.deb` on Ubuntu/Debian, `.rpm` on RPM-based distros, or `.AppImage` for a portable Linux build.',
+              'Use the setup `.exe` on Windows, `.dmg` on macOS Apple Silicon, or `.deb` on Ubuntu x64.',
               '',
               '## Signing Status',
               '',

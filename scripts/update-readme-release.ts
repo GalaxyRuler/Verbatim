@@ -32,41 +32,12 @@ const assetGroups: Array<{
     ],
   },
   {
-    platform: "Windows ARM64",
-    patterns: [
-      { label: "setup.exe", pattern: /^Verbatim_.*_arm64-setup\.exe$/ },
-      { label: "MSI", pattern: /^Verbatim_.*_arm64_en-US\.msi$/ },
-    ],
-  },
-  {
     platform: "macOS Apple Silicon",
     patterns: [{ label: "DMG", pattern: /^Verbatim_.*_aarch64\.dmg$/ }],
   },
   {
-    platform: "macOS Intel",
-    patterns: [{ label: "DMG", pattern: /^Verbatim_.*_x64\.dmg$/ }],
-  },
-  {
-    platform: "Ubuntu/Debian x64",
+    platform: "Ubuntu x64",
     patterns: [{ label: "DEB", pattern: /^Verbatim_.*_amd64\.deb$/ }],
-  },
-  {
-    platform: "Ubuntu/Debian ARM64",
-    patterns: [{ label: "DEB", pattern: /^Verbatim_.*_arm64\.deb$/ }],
-  },
-  {
-    platform: "Linux AppImage",
-    patterns: [
-      { label: "x64", pattern: /^Verbatim_.*_amd64\.AppImage$/ },
-      { label: "ARM64", pattern: /^Verbatim_.*_aarch64\.AppImage$/ },
-    ],
-  },
-  {
-    platform: "Fedora/RHEL/openSUSE",
-    patterns: [
-      { label: "x64 RPM", pattern: /^Verbatim-.*\.x86_64\.rpm$/ },
-      { label: "ARM64 RPM", pattern: /^Verbatim-.*\.aarch64\.rpm$/ },
-    ],
   },
 ];
 

@@ -17,21 +17,6 @@ This guide covers how to set up the development environment and build Verbatim f
 - Xcode Command Line Tools
 - Install with: `xcode-select --install`
 
-##### Intel Mac (x86_64)
-
-Prebuilt ONNX Runtime binaries are not available for Intel Macs. Install ONNX Runtime via Homebrew and link dynamically:
-
-```bash
-brew install onnxruntime
-ORT_LIB_LOCATION=$(brew --prefix onnxruntime)/lib ORT_PREFER_DYNAMIC_LINK=1 bun run tauri dev
-```
-
-The same environment variables apply for production builds:
-
-```bash
-ORT_LIB_LOCATION=$(brew --prefix onnxruntime)/lib ORT_PREFER_DYNAMIC_LINK=1 bun run tauri build
-```
-
 #### Windows
 
 - Microsoft C++ Build Tools
@@ -65,21 +50,9 @@ cargo test --manifest-path src-tauri\Cargo.toml portable --lib
 - Install with:
 
   ```bash
-  # Ubuntu/Debian
+  # Ubuntu
   sudo apt update
   sudo apt install build-essential libasound2-dev pkg-config libssl-dev libvulkan-dev vulkan-tools glslc libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libgtk-layer-shell0 libgtk-layer-shell-dev patchelf cmake
-
-  # Fedora/RHEL
-  sudo dnf groupinstall "Development Tools"
-  sudo dnf install alsa-lib-devel pkgconf openssl-devel vulkan-devel \
-    gtk3-devel webkit2gtk4.1-devel libappindicator-gtk3-devel librsvg2-devel \
-    gtk-layer-shell gtk-layer-shell-devel \
-    cmake
-
-  # Arch Linux
-  sudo pacman -S base-devel alsa-lib pkgconf openssl vulkan-devel \
-    gtk3 webkit2gtk-4.1 libappindicator-gtk3 librsvg gtk-layer-shell \
-    cmake
   ```
 
 ## Setup Instructions
@@ -109,13 +82,13 @@ bun tauri dev
 bun run tauri build
 ```
 
-This compiles a release binary and generates platform-specific bundles (deb, rpm, AppImage on Linux; dmg on macOS; msi on Windows).
+This compiles a release binary and generates platform-specific bundles for the supported release targets: `.deb` on Ubuntu x64, `.dmg` on macOS Apple Silicon, and Windows installers on Windows x64.
 
 ## Linux Install (from source)
 
 The raw binary (`src-tauri/target/release/verbatim`) cannot run standalone — it needs Tauri resource files (tray icons, sounds, VAD model) to be co-located at the expected path.
 
-**Install from the deb bundle** (works on any Linux distro):
+**Install from the deb bundle** (supported on Ubuntu x64):
 
 ```bash
 cd /tmp
@@ -135,31 +108,6 @@ sudo cp src-tauri/target/release/verbatim /usr/bin/
 
 Resources only need re-copying if they change upstream (new icons, sounds, etc.).
 
-## Troubleshooting
+## Unsupported Platforms
 
-### AppImage build fails on Arch / rolling-release distros
-
-`linuxdeploy` bundles its own `strip` binary which is too old to process system libraries built with newer toolchains on rolling-release distros (Arch, CachyOS, Manjaro, EndeavourOS).
-
-The error from Tauri:
-
-```
-Bundling Verbatim_*_amd64.AppImage
-failed to bundle project `failed to run linuxdeploy`
-```
-
-Tauri swallows the real linuxdeploy error. To see it, run linuxdeploy manually:
-
-```bash
-cd src-tauri/target/release/bundle/appimage
-~/.cache/tauri/linuxdeploy-x86_64.AppImage --appimage-extract-and-run \
-  --appdir Verbatim.AppDir --plugin gtk --output appimage
-```
-
-**Workaround:** The binary, deb, and rpm bundles all build fine — only the AppImage step fails. To skip it:
-
-```bash
-bun run tauri build -- --bundles deb
-```
-
-Then install using the deb extraction method above.
+Intel Mac, Windows ARM64, Linux ARM64, AppImage, and RPM/Fedora-style packages are not official release targets right now. The source may still build elsewhere, but CI and releases only cover Windows x64, macOS Apple Silicon, and Ubuntu x64.

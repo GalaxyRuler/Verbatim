@@ -53,31 +53,21 @@ Download the latest Windows, macOS, and Linux installers from the [Verbatim Rele
 
 **Latest published release:** [v0.8.4](https://github.com/GalaxyRuler/Verbatim/releases/tag/v0.8.4) (2026-06-12)
 
-| Platform             | Direct downloads                                                                                                                                                                                                      |
-| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Windows x64          | [setup.exe](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.8.4/Verbatim_0.8.4_x64-setup.exe) · [MSI](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.8.4/Verbatim_0.8.4_x64_en-US.msi)     |
-| Windows ARM64        | [setup.exe](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.8.4/Verbatim_0.8.4_arm64-setup.exe) · [MSI](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.8.4/Verbatim_0.8.4_arm64_en-US.msi) |
-| macOS Apple Silicon  | [DMG](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.8.4/Verbatim_0.8.4_aarch64.dmg)                                                                                                                    |
-| macOS Intel          | [DMG](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.8.4/Verbatim_0.8.4_x64.dmg)                                                                                                                        |
-| Ubuntu/Debian x64    | [DEB](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.8.4/Verbatim_0.8.4_amd64.deb)                                                                                                                      |
-| Ubuntu/Debian ARM64  | [DEB](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.8.4/Verbatim_0.8.4_arm64.deb)                                                                                                                      |
-| Linux AppImage       | [x64](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.8.4/Verbatim_0.8.4_amd64.AppImage) · [ARM64](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.8.4/Verbatim_0.8.4_aarch64.AppImage)     |
-| Fedora/RHEL/openSUSE | [x64 RPM](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.8.4/Verbatim-0.8.4-1.x86_64.rpm) · [ARM64 RPM](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.8.4/Verbatim-0.8.4-1.aarch64.rpm)  |
+| Platform            | Direct downloads                                                                                                                                                                                                  |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Windows x64         | [setup.exe](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.8.4/Verbatim_0.8.4_x64-setup.exe) · [MSI](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.8.4/Verbatim_0.8.4_x64_en-US.msi) |
+| macOS Apple Silicon | [DMG](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.8.4/Verbatim_0.8.4_aarch64.dmg)                                                                                                                |
+| Ubuntu x64          | [DEB](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.8.4/Verbatim_0.8.4_amd64.deb)                                                                                                                  |
 
 <!-- latest-release:end -->
 
 Choose the asset that matches your operating system and CPU:
 
-| Platform             | Recommended asset            | Notes                                                                               |
-| -------------------- | ---------------------------- | ----------------------------------------------------------------------------------- |
-| Windows x64          | `Verbatim_*_x64-setup.exe`   | Use the `.msi` for managed installs.                                                |
-| Windows ARM64        | `Verbatim_*_arm64-setup.exe` | For Snapdragon/ARM Windows devices.                                                 |
-| macOS Apple Silicon  | `Verbatim_*_aarch64.dmg`     | For M-series Macs.                                                                  |
-| macOS Intel          | `Verbatim_*_x64.dmg`         | For Intel Macs.                                                                     |
-| Ubuntu/Debian x64    | `Verbatim_*_amd64.deb`       | Installs recommended Linux helper packages through `apt` by default.                |
-| Ubuntu/Debian ARM64  | `Verbatim_*_arm64.deb`       | For ARM64 Linux devices.                                                            |
-| Fedora/RHEL/openSUSE | `Verbatim-*-*.rpm`           | Install distro helper packages if your package manager does not install recommends. |
-| Other Linux distros  | `Verbatim_*_*.AppImage`      | Portable option; see [Linux Notes](#linux-notes) for helper tools.                  |
+| Platform            | Recommended asset          | Notes                                                                |
+| ------------------- | -------------------------- | -------------------------------------------------------------------- |
+| Windows x64         | `Verbatim_*_x64-setup.exe` | Use the `.msi` for managed installs.                                 |
+| macOS Apple Silicon | `Verbatim_*_aarch64.dmg`   | For M-series Macs.                                                   |
+| Ubuntu x64          | `Verbatim_*_amd64.deb`     | Installs recommended Linux helper packages through `apt` by default. |
 
 Installed builds can update in place from the footer update control when update checks are enabled. Portable installs may require a manual download from the Releases page.
 
@@ -174,15 +164,15 @@ This project is actively being developed and has some [known issues](https://git
 
 **Text Input Tools:**
 
-For reliable text input on Linux, install the appropriate helper for your display server. The `.deb` package recommends the common helpers so normal Ubuntu/Debian installs pull them in automatically. AppImage, RPM, Arch, and minimal installs may still need manual setup.
+For reliable text input on Linux, install the appropriate helper for your display server. The `.deb` package recommends the common helpers so normal Ubuntu installs pull them in automatically. Minimal installs may still need manual setup.
 
-| Environment                        | Recommended tool                                  | Ubuntu/Debian                                    | Fedora/RHEL                                      | Arch                            |
-| ---------------------------------- | ------------------------------------------------- | ------------------------------------------------ | ------------------------------------------------ | ------------------------------- |
-| X11                                | `xdotool`                                         | `sudo apt install xdotool`                       | `sudo dnf install xdotool`                       | `sudo pacman -S xdotool`        |
-| GNOME/Wayland, wlroots compositors | `wtype`                                           | `sudo apt install wtype`                         | `sudo dnf install wtype`                         | `sudo pacman -S wtype`          |
-| KDE/Wayland                        | `kwtype` when packaged, otherwise clipboard paste | Install from your distro or KDE packaging source | Install from your distro or KDE packaging source | Install from your distro or AUR |
-| Both                               | `dotool` or `ydotool`                             | Install from your distro if packaged             | Install from your distro if packaged             | `sudo pacman -S dotool ydotool` |
-| Wayland clipboard                  | `wl-clipboard`                                    | `sudo apt install wl-clipboard`                  | `sudo dnf install wl-clipboard`                  | `sudo pacman -S wl-clipboard`   |
+| Environment                        | Recommended tool                                  | Ubuntu command                  |
+| ---------------------------------- | ------------------------------------------------- | ------------------------------- |
+| X11                                | `xdotool`                                         | `sudo apt install xdotool`      |
+| GNOME/Wayland, wlroots compositors | `wtype`                                           | `sudo apt install wtype`        |
+| KDE/Wayland                        | `kwtype` when packaged, otherwise clipboard paste | Install from KDE packaging      |
+| Both                               | `dotool` or `ydotool`                             | Install if packaged for Ubuntu  |
+| Wayland clipboard                  | `wl-clipboard`                                    | `sudo apt install wl-clipboard` |
 
 - **X11**: Install `xdotool` for both direct typing and clipboard paste shortcuts
 - **Wayland**: Prefer clipboard-based paste with `wl-clipboard`; use `wtype` for direct typing on supported compositors
@@ -195,7 +185,7 @@ Without these tools, Verbatim falls back to enigo which may have limited compati
 
 The custom dictionary auto-add watcher uses each platform's accessibility text APIs to read the focused text field after Verbatim pastes. Windows uses UI Automation, macOS uses the Accessibility permission already requested during onboarding, and Linux uses AT-SPI through `pyatspi`.
 
-The `.deb` package recommends the Linux accessibility binding. For AppImage, RPM, or minimal installs, install it manually:
+The `.deb` package recommends the Linux accessibility binding. For minimal installs, install it manually:
 
 ```bash
 sudo apt install python3-pyatspi
@@ -206,13 +196,11 @@ Current limitation: this feature depends on the target app exposing focused text
 **Other Notes:**
 
 - **Runtime library dependency (`libgtk-layer-shell.so.0`)**:
-  - Verbatim links `gtk-layer-shell` on Linux. The `.deb` and `.rpm` packages declare this as a runtime dependency. If AppImage startup fails with `error while loading shared libraries: libgtk-layer-shell.so.0`, or if your package manager skipped dependencies, install the runtime package for your distro:
+  - Verbatim links `gtk-layer-shell` on Linux. The `.deb` package declares this as a runtime dependency. If your package manager skipped dependencies, install the runtime package:
 
-    | Distro        | Package to install    | Example command                        |
-    | ------------- | --------------------- | -------------------------------------- |
-    | Ubuntu/Debian | `libgtk-layer-shell0` | `sudo apt install libgtk-layer-shell0` |
-    | Fedora/RHEL   | `gtk-layer-shell`     | `sudo dnf install gtk-layer-shell`     |
-    | Arch Linux    | `gtk-layer-shell`     | `sudo pacman -S gtk-layer-shell`       |
+    | Distro | Package to install    | Example command                        |
+    | ------ | --------------------- | -------------------------------------- |
+    | Ubuntu | `libgtk-layer-shell0` | `sudo apt install libgtk-layer-shell0` |
 
   - For building from source on Ubuntu/Debian, you may also need `libgtk-layer-shell-dev`.
 
@@ -276,9 +264,11 @@ Current limitation: this feature depends on the target app exposing focused text
 
 ### Platform Support
 
-- **macOS (both Intel and Apple Silicon)**
-- **Windows (x64 and ARM64)**
-- **Linux (x64 and ARM64 packages; AppImage, Debian, and RPM formats)**
+- **Windows x64**
+- **macOS Apple Silicon**
+- **Ubuntu x64 (`.deb`)**
+
+Intel Mac, Windows ARM64, Linux ARM64, AppImage, and RPM/Fedora-style packages are not official release targets right now.
 
 ### System Requirements/Recommendations
 
@@ -286,7 +276,7 @@ The following are recommendations for running Verbatim on your own machine. If y
 
 **For Whisper Models:**
 
-- **macOS**: M series Mac, Intel Mac
+- **macOS**: M series Mac
 - **Windows**: Intel, AMD, or NVIDIA GPU
 - **Linux**: Intel, AMD, or NVIDIA GPU
   - Ubuntu 22.04, 24.04
@@ -338,7 +328,7 @@ To verify a signed release manually, set `ARTIFACT` to the filename you download
 
 ```bash
 # Replace with the file you downloaded
-ARTIFACT="Verbatim_0.8.1_amd64.AppImage"
+ARTIFACT="Verbatim_0.8.5_amd64.deb"
 
 python3 - "$ARTIFACT" <<'PY'
 import base64, pathlib, sys
@@ -489,13 +479,11 @@ If Verbatim fails to start reliably on Linux — for example, it crashes shortly
 
 Verbatim uses `gtk-layer-shell` for its recording overlay and links against it at runtime. A missing or broken installation is the most common cause of startup failures and can manifest as a crash or a hang well before any window is shown. Make sure the runtime package is installed for your distro:
 
-| Distro        | Package to install    | Example command                        |
-| ------------- | --------------------- | -------------------------------------- |
-| Ubuntu/Debian | `libgtk-layer-shell0` | `sudo apt install libgtk-layer-shell0` |
-| Fedora/RHEL   | `gtk-layer-shell`     | `sudo dnf install gtk-layer-shell`     |
-| Arch Linux    | `gtk-layer-shell`     | `sudo pacman -S gtk-layer-shell`       |
+| Distro | Package to install    | Example command                        |
+| ------ | --------------------- | -------------------------------------- |
+| Ubuntu | `libgtk-layer-shell0` | `sudo apt install libgtk-layer-shell0` |
 
-If it is already installed and you still see startup problems, try reinstalling it (e.g. `sudo pacman -S gtk-layer-shell` again) in case the library files were corrupted by a partial upgrade.
+If it is already installed and you still see startup problems, try reinstalling it (for example, `sudo apt install --reinstall libgtk-layer-shell0`) in case the library files were corrupted by a partial upgrade.
 
 **2. Disable the GTK layer shell overlay (`VERBATIM_NO_GTK_LAYER_SHELL`)**
 
