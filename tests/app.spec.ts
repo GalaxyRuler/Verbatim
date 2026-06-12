@@ -110,14 +110,30 @@ const installTauriMocks = async (page: Page) => {
   await page.addInitScript(
     ({ settings, profiles, models }) => {
       let appSettings = { ...settings };
-      const listeners = new Map<number, () => void>();
+      const callbacks = new Map<number, (payload?: unknown) => void>();
+      const eventListeners = new Map<string, number[]>();
       let nextCallbackId = 1;
       const testWindow = window as typeof window & {
         __TAURI_INTERNALS__: any;
         __TAURI_OS_PLUGIN_INTERNALS__: any;
         __VERBATIM_TEST_COMMANDS__: string[];
+        __VERBATIM_TEST_LEARN_WORDS__: (words: string[]) => void;
       };
       testWindow.__VERBATIM_TEST_COMMANDS__ = [];
+      testWindow.__VERBATIM_TEST_LEARN_WORDS__ = (words: string[]) => {
+        appSettings = {
+          ...appSettings,
+          custom_words: [...appSettings.custom_words, ...words],
+        };
+        for (const callbackId of eventListeners.get("custom-words-learned") ??
+          []) {
+          callbacks.get(callbackId)?.({
+            event: "custom-words-learned",
+            id: callbackId,
+            payload: words,
+          });
+        }
+      };
 
       testWindow.__TAURI_OS_PLUGIN_INTERNALS__ = {
         platform: "windows",
@@ -134,6 +150,24 @@ const installTauriMocks = async (page: Page) => {
         convertFileSrc: (filePath: string) => filePath,
         invoke: async (cmd: string, args?: Record<string, unknown>) => {
           testWindow.__VERBATIM_TEST_COMMANDS__.push(cmd);
+          if (cmd === "plugin:event|listen") {
+            const event = args?.event as string;
+            const handler = args?.handler as number;
+            eventListeners.set(event, [
+              ...(eventListeners.get(event) ?? []),
+              handler,
+            ]);
+            return handler;
+          }
+          if (cmd === "plugin:event|unlisten") {
+            const event = args?.event as string;
+            const eventId = args?.eventId as number;
+            eventListeners.set(
+              event,
+              (eventListeners.get(event) ?? []).filter((id) => id !== eventId),
+            );
+            return null;
+          }
           switch (cmd) {
             case "get_default_settings":
             case "get_app_settings":
@@ -179,16 +213,16 @@ const installTauriMocks = async (page: Page) => {
               return null;
           }
         },
-        transformCallback: (callback: () => void) => {
+        transformCallback: (callback: (payload?: unknown) => void) => {
           const id = nextCallbackId++;
-          listeners.set(id, callback);
+          callbacks.set(id, callback);
           return id;
         },
         unregisterCallback: (id: number) => {
-          listeners.delete(id);
+          callbacks.delete(id);
         },
-        runCallback: (id: number) => {
-          listeners.get(id)?.();
+        runCallback: (id: number, payload?: unknown) => {
+          callbacks.get(id)?.(payload);
         },
         metadata: {
           currentWindow: { label: "main" },
@@ -248,5 +282,30 @@ test.describe("Verbatim App", () => {
     await expect(adaptiveToggle).not.toBeChecked();
     await adaptiveToggle.check({ force: true });
     await expect(adaptiveToggle).toBeChecked();
+  });
+
+  test("custom words list refreshes after auto-learn event", async ({
+    page,
+  }) => {
+    await installTauriMocks(page);
+    await page.goto("/");
+
+    await expect(page.getByTitle("General")).toBeVisible();
+    await page.getByText("Advanced").click();
+    await expect(page.getByText("Custom Words")).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Remove Robyn" }),
+    ).toHaveCount(0);
+
+    await page.evaluate(() => {
+      const win = window as typeof window & {
+        __VERBATIM_TEST_LEARN_WORDS__: (words: string[]) => void;
+      };
+      win.__VERBATIM_TEST_LEARN_WORDS__(["Robyn"]);
+    });
+
+    await expect(
+      page.getByRole("button", { name: "Remove Robyn" }),
+    ).toBeVisible();
   });
 });

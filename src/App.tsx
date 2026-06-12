@@ -44,6 +44,7 @@ function App() {
   const refreshOutputDevices = useSettingsStore(
     (state) => state.refreshOutputDevices,
   );
+  const refreshSettings = useSettingsStore((state) => state.refreshSettings);
   const hasCompletedPostOnboardingInit = useRef(false);
 
   useEffect(() => {
@@ -142,6 +143,7 @@ function App() {
     const unlisten = listen<string[]>("custom-words-learned", (event) => {
       if (event.payload.length === 0) return;
 
+      void refreshSettings();
       toast.success(t("settings.advanced.customWords.autoAdd.learnedTitle"), {
         description: t(
           "settings.advanced.customWords.autoAdd.learnedDescription",
@@ -152,7 +154,7 @@ function App() {
     return () => {
       unlisten.then((fn) => fn());
     };
-  }, [t]);
+  }, [refreshSettings, t]);
 
   // Listen for model loading failures and show a toast
   useEffect(() => {
