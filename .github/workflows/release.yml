@@ -99,3 +99,83 @@ jobs:
       upload-artifacts: false
       release-id: ${{ needs.create-release.outputs.release-id }}
     secrets: inherit
+
+  finalize-release:
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    needs:
+      - create-release
+      - publish-tauri
+    steps:
+      - name: Publish release with download guidance
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const version = '${{ needs.create-release.outputs.version }}';
+            const tag = `v${version}`;
+            const releaseId = Number('${{ needs.create-release.outputs.release-id }}');
+            const signed = '${{ inputs.sign_binaries }}' === 'true';
+            const latestDownload = (name) =>
+              `https://github.com/${context.repo.owner}/${context.repo.repo}/releases/latest/download/${name}`;
+
+            const rows = [
+              ['Windows x64', 'Setup EXE', `Verbatim_${version}_x64-setup.exe`],
+              ['Windows x64', 'MSI', `Verbatim_${version}_x64_en-US.msi`],
+              ['Windows ARM64', 'Setup EXE', `Verbatim_${version}_arm64-setup.exe`],
+              ['Windows ARM64', 'MSI', `Verbatim_${version}_arm64_en-US.msi`],
+              ['macOS Apple Silicon', 'DMG', `Verbatim_${version}_aarch64.dmg`],
+              ['macOS Intel', 'DMG', `Verbatim_${version}_x64.dmg`],
+              ['Ubuntu/Debian x64', 'DEB', `Verbatim_${version}_amd64.deb`],
+              ['Ubuntu/Debian ARM64', 'DEB', `Verbatim_${version}_arm64.deb`],
+              ['Linux x64', 'AppImage', `Verbatim_${version}_amd64.AppImage`],
+              ['Linux ARM64', 'AppImage', `Verbatim_${version}_aarch64.AppImage`],
+              ['Fedora/RHEL/openSUSE x64', 'RPM', `Verbatim-${version}-1.x86_64.rpm`],
+              ['Fedora/RHEL/openSUSE ARM64', 'RPM', `Verbatim-${version}-1.aarch64.rpm`],
+            ];
+
+            const downloadTable = [
+              '| Platform | Type | Download |',
+              '| -------- | ---- | -------- |',
+              ...rows.map(([platform, type, name]) =>
+                `| ${platform} | ${type} | [${name}](${latestDownload(name)}) |`
+              ),
+            ].join('\n');
+
+            const { data: release } = await github.rest.repos.getRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: releaseId,
+            });
+
+            const existingBody = release.body?.trim();
+            const generatedNotes = existingBody
+              && !existingBody.startsWith('## Downloads')
+              ? `\n\n## Generated Notes\n\n${existingBody}`
+              : '';
+
+            const body = [
+              '## Downloads',
+              '',
+              downloadTable,
+              '',
+              'Use the setup `.exe` on Windows, `.dmg` on macOS, `.deb` on Ubuntu/Debian, `.rpm` on RPM-based distros, or `.AppImage` for a portable Linux build.',
+              '',
+              '## Signing Status',
+              '',
+              signed
+                ? 'This release was built with signing enabled.'
+                : 'This release is unsigned. Windows SmartScreen and macOS Gatekeeper may warn before first launch.',
+              generatedNotes,
+            ].join('\n');
+
+            await github.request('PATCH /repos/{owner}/{repo}/releases/{release_id}', {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: releaseId,
+              name: tag,
+              body,
+              draft: false,
+              prerelease: false,
+              make_latest: 'true',
+            });

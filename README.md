@@ -42,9 +42,18 @@ The process is entirely local:
 
 Download the latest Windows, macOS, and Linux installers from the [Verbatim Releases page](https://github.com/GalaxyRuler/Verbatim/releases/latest).
 
-- **Windows:** download the `.exe` setup file. Use the `.msi` for managed installs.
-- **macOS:** download the `.dmg` for your Mac: Apple Silicon (`aarch64`) or Intel (`x64`).
-- **Linux:** download the `.AppImage`, `.deb`, or `.rpm` package that matches your distribution and CPU.
+Choose the asset that matches your operating system and CPU:
+
+| Platform             | Recommended asset            | Notes                                                                               |
+| -------------------- | ---------------------------- | ----------------------------------------------------------------------------------- |
+| Windows x64          | `Verbatim_*_x64-setup.exe`   | Use the `.msi` for managed installs.                                                |
+| Windows ARM64        | `Verbatim_*_arm64-setup.exe` | For Snapdragon/ARM Windows devices.                                                 |
+| macOS Apple Silicon  | `Verbatim_*_aarch64.dmg`     | For M-series Macs.                                                                  |
+| macOS Intel          | `Verbatim_*_x64.dmg`         | For Intel Macs.                                                                     |
+| Ubuntu/Debian x64    | `Verbatim_*_amd64.deb`       | Installs recommended Linux helper packages through `apt` by default.                |
+| Ubuntu/Debian ARM64  | `Verbatim_*_arm64.deb`       | For ARM64 Linux devices.                                                            |
+| Fedora/RHEL/openSUSE | `Verbatim-*-*.rpm`           | Install distro helper packages if your package manager does not install recommends. |
+| Other Linux distros  | `Verbatim_*_*.AppImage`      | Portable option; see [Linux Notes](#linux-notes) for helper tools.                  |
 
 ## Quick Start
 
@@ -131,24 +140,28 @@ This project is actively being developed and has some [known issues](https://git
 
 **Wayland Support (Linux):**
 
-- Limited support for Wayland display server
-- Requires [`wtype`](https://github.com/atx/wtype) or [`dotool`](https://sr.ht/~geb/dotool/) for text input to work correctly (see [Linux Notes](#linux-notes) below for installation)
+- Wayland does not allow one universal global-keyboard and text-injection API across all compositors
+- Verbatim supports the common helper-tool path: `wtype` on wlroots compositors, `kwtype` on KDE when available, and `dotool`/`ydotool` as fallback options
+- On Wayland, configure global shortcuts in your desktop environment or window manager and point them at Verbatim's CLI flags
 
 ### Linux Notes
 
 **Text Input Tools:**
 
-For reliable text input on Linux, install the appropriate tool for your display server:
+For reliable text input on Linux, install the appropriate helper for your display server. The `.deb` package recommends the common helpers so normal Ubuntu/Debian installs pull them in automatically. AppImage, RPM, Arch, and minimal installs may still need manual setup.
 
-| Display Server | Recommended Tool | Install Command                                    |
-| -------------- | ---------------- | -------------------------------------------------- |
-| X11            | `xdotool`        | `sudo apt install xdotool`                         |
-| Wayland        | `wtype`          | `sudo apt install wtype`                           |
-| Both           | `dotool`         | `sudo apt install dotool` (requires `input` group) |
+| Environment                        | Recommended tool                                  | Ubuntu/Debian                                    | Fedora/RHEL                                      | Arch                            |
+| ---------------------------------- | ------------------------------------------------- | ------------------------------------------------ | ------------------------------------------------ | ------------------------------- |
+| X11                                | `xdotool`                                         | `sudo apt install xdotool`                       | `sudo dnf install xdotool`                       | `sudo pacman -S xdotool`        |
+| GNOME/Wayland, wlroots compositors | `wtype`                                           | `sudo apt install wtype`                         | `sudo dnf install wtype`                         | `sudo pacman -S wtype`          |
+| KDE/Wayland                        | `kwtype` when packaged, otherwise clipboard paste | Install from your distro or KDE packaging source | Install from your distro or KDE packaging source | Install from your distro or AUR |
+| Both                               | `dotool` or `ydotool`                             | Install from your distro if packaged             | Install from your distro if packaged             | `sudo pacman -S dotool ydotool` |
+| Wayland clipboard                  | `wl-clipboard`                                    | `sudo apt install wl-clipboard`                  | `sudo dnf install wl-clipboard`                  | `sudo pacman -S wl-clipboard`   |
 
 - **X11**: Install `xdotool` for both direct typing and clipboard paste shortcuts
-- **Wayland**: Install `wtype` (preferred) or `dotool` for text input to work correctly
-- **dotool setup**: Requires adding your user to the `input` group: `sudo usermod -aG input $USER` (then log out and back in)
+- **Wayland**: Prefer clipboard-based paste with `wl-clipboard`; use `wtype` for direct typing on supported compositors
+- **KDE Wayland**: `wtype` usually does not work because KDE does not expose the wlroots virtual keyboard protocol. Use clipboard paste, `kwtype` if available, or a compositor shortcut that calls `verbatim --toggle-transcription`.
+- **dotool/ydotool setup**: These uinput-based tools may require a daemon, udev rules, or adding your user to the `input` group: `sudo usermod -aG input $USER` (then log out and back in)
 
 Without these tools, Verbatim falls back to enigo which may have limited compatibility, especially on Wayland.
 
@@ -156,16 +169,18 @@ Without these tools, Verbatim falls back to enigo which may have limited compati
 
 The custom dictionary auto-add watcher uses each platform's accessibility text APIs to read the focused text field after Verbatim pastes. Windows uses UI Automation, macOS uses the Accessibility permission already requested during onboarding, and Linux uses AT-SPI through `pyatspi`.
 
-On Ubuntu/Debian, install the Linux accessibility binding with:
+The `.deb` package recommends the Linux accessibility binding. For AppImage, RPM, or minimal installs, install it manually:
 
 ```bash
 sudo apt install python3-pyatspi
 ```
 
+Current limitation: this feature depends on the target app exposing focused text through the platform accessibility APIs. It may not learn edits from applications that hide text fields from Accessibility/AT-SPI, browser sandboxes, terminals, games, or remote-desktop sessions.
+
 **Other Notes:**
 
 - **Runtime library dependency (`libgtk-layer-shell.so.0`)**:
-  - Verbatim links `gtk-layer-shell` on Linux. If startup fails with `error while loading shared libraries: libgtk-layer-shell.so.0`, install the runtime package for your distro:
+  - Verbatim links `gtk-layer-shell` on Linux. The `.deb` and `.rpm` packages declare this as a runtime dependency. If AppImage startup fails with `error while loading shared libraries: libgtk-layer-shell.so.0`, or if your package manager skipped dependencies, install the runtime package for your distro:
 
     | Distro        | Package to install    | Example command                        |
     | ------------- | --------------------- | -------------------------------------- |
@@ -236,8 +251,8 @@ sudo apt install python3-pyatspi
 ### Platform Support
 
 - **macOS (both Intel and Apple Silicon)**
-- **x64 Windows**
-- **x64 Linux**
+- **Windows (x64 and ARM64)**
+- **Linux (x64 and ARM64 packages; AppImage, Debian, and RPM formats)**
 
 ### System Requirements/Recommendations
 
@@ -288,6 +303,8 @@ We're actively working on several features and improvements. Contributions and f
 - Investigate tauri-specta for improved type safety and organization
 
 ## Verify Release Signatures
+
+Current public installers are unsigned unless the release notes explicitly say otherwise. This means Windows SmartScreen and macOS Gatekeeper may warn before first launch.
 
 When a release includes matching `.sig` files, Verbatim release artifacts can be verified with Tauri's updater signature format. The public key is stored in [`src-tauri/tauri.conf.json`](src-tauri/tauri.conf.json) under `plugins.updater.pubkey`.
 
