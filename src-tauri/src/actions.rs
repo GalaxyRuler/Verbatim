@@ -63,6 +63,27 @@ fn build_system_prompt(prompt_template: &str) -> String {
     prompt_template.replace("${output}", "").trim().to_string()
 }
 
+fn validate_post_processed_text(transcription: &str, processed_text: &str) -> Result<(), String> {
+    crate::adaptive::processor::validate_unrequested_translation(transcription, processed_text)
+}
+
+fn accept_post_processed_text(
+    transcription: &str,
+    processed_text: String,
+    provider_id: &str,
+) -> Option<String> {
+    match validate_post_processed_text(transcription, &processed_text) {
+        Ok(()) => Some(processed_text),
+        Err(err) => {
+            warn!(
+                "Post-processing output rejected for provider '{}': {}. Falling back to raw transcript.",
+                provider_id, err
+            );
+            None
+        }
+    }
+}
+
 async fn post_process_transcription(settings: &AppSettings, transcription: &str) -> Option<String> {
     let provider = match settings.active_post_process_provider().cloned() {
         Some(provider) => provider,
@@ -174,7 +195,7 @@ async fn post_process_transcription(settings: &AppSettings, transcription: &str)
                                 "Apple Intelligence post-processing succeeded. Output length: {} chars",
                                 result.len()
                             );
-                            Some(result)
+                            accept_post_processed_text(transcription, result, &provider.id)
                         }
                     }
                     Err(err) => {
@@ -229,10 +250,14 @@ async fn post_process_transcription(settings: &AppSettings, transcription: &str)
                                 provider.id,
                                 result.len()
                             );
-                            return Some(result);
+                            return accept_post_processed_text(transcription, result, &provider.id);
                         } else {
                             error!("Structured output response missing 'transcription' field");
-                            return Some(strip_invisible_chars(&content));
+                            return accept_post_processed_text(
+                                transcription,
+                                strip_invisible_chars(&content),
+                                &provider.id,
+                            );
                         }
                     }
                     Err(e) => {
@@ -240,7 +265,11 @@ async fn post_process_transcription(settings: &AppSettings, transcription: &str)
                             "Failed to parse structured output JSON: {}. Returning raw content.",
                             e
                         );
-                        return Some(strip_invisible_chars(&content));
+                        return accept_post_processed_text(
+                            transcription,
+                            strip_invisible_chars(&content),
+                            &provider.id,
+                        );
                     }
                 }
             }
@@ -279,7 +308,7 @@ async fn post_process_transcription(settings: &AppSettings, transcription: &str)
                 provider.id,
                 content.len()
             );
-            Some(content)
+            accept_post_processed_text(transcription, content, &provider.id)
         }
         Ok(None) => {
             error!("LLM API response has no content");
@@ -555,6 +584,22 @@ mod adaptive_action_tests {
 
         settings.mute_while_recording = false;
         assert!(!should_mute_before_start_feedback(&settings));
+    }
+
+    #[test]
+    fn post_processing_rejects_english_to_arabic_translation() {
+        let validation =
+            validate_post_processed_text("Please send the file today", "يرجى إرسال الملف اليوم");
+        assert!(validation.is_err());
+    }
+
+    #[test]
+    fn post_processing_accepts_same_language_cleanup() {
+        let validation = validate_post_processed_text(
+            "please send the file today",
+            "Please send the file today.",
+        );
+        assert!(validation.is_ok());
     }
 }
 

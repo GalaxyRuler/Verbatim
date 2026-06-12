@@ -39,19 +39,7 @@ pub fn validate_output(raw: &str, output: &str, profile: &AdaptiveProfile) -> Re
     }
 
     if profile.validation.forbid_unrequested_translation {
-        let raw_language = analyze_language(raw, &[]);
-        let output_language = analyze_language(output, &[]);
-        if raw_language.class == LanguageClass::Mixed
-            && output_language.class != LanguageClass::Mixed
-            && output_language.class != LanguageClass::TechnicalMixed
-        {
-            return Err("mixed-language transcript was collapsed into one language".to_string());
-        }
-        if raw_language.class == LanguageClass::MostlyArabic
-            && output_language.class == LanguageClass::MostlyLatin
-        {
-            return Err("Arabic transcript appears translated without request".to_string());
-        }
+        validate_unrequested_translation(raw, output)?;
     }
 
     if profile.validation.preserve_urls {
@@ -74,6 +62,28 @@ pub fn validate_output(raw: &str, output: &str, profile: &AdaptiveProfile) -> Re
     }
 
     Ok(())
+}
+
+pub fn validate_unrequested_translation(raw: &str, output: &str) -> Result<(), String> {
+    let raw_language = analyze_language(raw, &[]);
+    let output_language = analyze_language(output, &[]);
+
+    if raw_language.class == LanguageClass::Mixed
+        && output_language.class != LanguageClass::Mixed
+        && output_language.class != LanguageClass::TechnicalMixed
+    {
+        return Err("mixed-language transcript was collapsed into one language".to_string());
+    }
+
+    match (&raw_language.class, &output_language.class) {
+        (LanguageClass::MostlyArabic, LanguageClass::MostlyLatin) => {
+            Err("Arabic transcript appears translated without request".to_string())
+        }
+        (LanguageClass::MostlyLatin, LanguageClass::MostlyArabic) => {
+            Err("Latin transcript appears translated without request".to_string())
+        }
+        _ => Ok(()),
+    }
 }
 
 pub fn build_profile_prompt(raw: &str, profile: &AdaptiveProfile) -> Option<String> {
@@ -260,6 +270,17 @@ mod tests {
     fn default_clean_profile_rejects_arabic_to_english_translation() {
         let default_clean = profile("default_clean");
         let validation = validate_output("هذا نص عربي", "This is Arabic text", &default_clean);
+        assert!(validation.is_err());
+    }
+
+    #[test]
+    fn default_clean_profile_rejects_english_to_arabic_translation() {
+        let default_clean = profile("default_clean");
+        let validation = validate_output(
+            "This is a clear English sentence",
+            "هذه جملة عربية",
+            &default_clean,
+        );
         assert!(validation.is_err());
     }
 }
