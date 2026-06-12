@@ -74,6 +74,12 @@ jobs:
           ref: ${{ inputs.ref }}
           fetch-depth: 0
 
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Check version consistency
+        run: bun run check:version
+
       - name: Get version from tauri.conf.json
         id: get-version
         shell: bash
@@ -137,9 +143,6 @@ jobs:
           jq '.bundle.createUpdaterArtifacts = true' src-tauri/tauri.conf.json > tmp.json
           Move-Item -Force tmp.json src-tauri/tauri.conf.json
           jq -e '.bundle.createUpdaterArtifacts == true' src-tauri/tauri.conf.json
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
 
       - name: install Rust stable
         uses: dtolnay/rust-toolchain@stable

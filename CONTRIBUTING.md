@@ -66,6 +66,10 @@ Before you begin, ensure you have the following installed:
 
 For detailed platform-specific setup instructions, see [BUILD.md](docs/BUILD.md).
 
+### Versioning
+
+Verbatim follows stable Semantic Versioning: `MAJOR.MINOR.PATCH`, with release tags like `v0.8.7`. Do not use fixed-width padding such as `0.08.007`; it is not SemVer-compatible. See [VERSIONING.md](docs/VERSIONING.md) and run `bun run check:version` before release work.
+
 ### Understanding the Codebase
 
 Verbatim follows a clean architecture pattern:
