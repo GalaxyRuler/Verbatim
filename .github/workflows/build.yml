@@ -32,6 +32,10 @@ on:
         required: false
         type: boolean
         default: false
+      create-updater-artifacts:
+        required: false
+        type: boolean
+        default: false
       repository:
         required: false
         type: string
@@ -89,6 +93,28 @@ jobs:
             echo "profile=release" >> "$GITHUB_OUTPUT"
             echo "Build profile: release"
           fi
+
+      - name: Enable updater artifacts for release builds
+        if: inputs.create-updater-artifacts
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          if [[ -z "$TAURI_SIGNING_PRIVATE_KEY" ]]; then
+            echo "TAURI_SIGNING_PRIVATE_KEY is required when create-updater-artifacts=true" >&2
+            exit 1
+          fi
+
+          if [[ -z "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" ]]; then
+            echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD is required when create-updater-artifacts=true" >&2
+            exit 1
+          fi
+
+          jq '.bundle.createUpdaterArtifacts = true' \
+            src-tauri/tauri.conf.json > tmp.json
+          mv tmp.json src-tauri/tauri.conf.json
+          jq -e '.bundle.createUpdaterArtifacts == true' src-tauri/tauri.conf.json
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -385,6 +411,8 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ inputs.create-updater-artifacts && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ inputs.create-updater-artifacts && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
           # Disable -march=native and all SIMD instruction sets above SSE4.2 for
           # x86_64 builds. Without this, CPUs lacking AVX/FMA (e.g. Celeron N2920,
           # FX-8350) crash with SIGILL. The Vulkan backend handles heavy compute

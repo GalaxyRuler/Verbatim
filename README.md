@@ -55,6 +55,8 @@ Choose the asset that matches your operating system and CPU:
 | Fedora/RHEL/openSUSE | `Verbatim-*-*.rpm`           | Install distro helper packages if your package manager does not install recommends. |
 | Other Linux distros  | `Verbatim_*_*.AppImage`      | Portable option; see [Linux Notes](#linux-notes) for helper tools.                  |
 
+Installed builds can update in place from the footer update control when update checks are enabled. Portable installs may require a manual download from the Releases page.
+
 ## Quick Start
 
 ### Installation
