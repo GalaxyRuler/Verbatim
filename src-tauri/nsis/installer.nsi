@@ -731,6 +731,9 @@ Section Install
 
   !insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
 
+  ; Remove stale resources left by pre-Verbatim installs.
+  Delete "$INSTDIR\resources\handy.png"
+
   ; Copy main executable
   File "${MAINBINARYSRCPATH}"
 
