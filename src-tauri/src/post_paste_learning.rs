@@ -113,6 +113,18 @@ fn capture_matching_snapshot(target_id: &str) -> Result<Option<FocusedTextSnapsh
     }
 }
 
+#[cfg_attr(target_os = "windows", allow(dead_code))]
+fn focused_text_snapshot_from_parts(
+    target_id: String,
+    text: String,
+) -> Result<FocusedTextSnapshot, String> {
+    if target_id.trim().is_empty() {
+        return Err("focused text snapshot command returned an empty target id".to_string());
+    }
+
+    Ok(FocusedTextSnapshot { target_id, text })
+}
+
 fn learn_from_text_snapshots(
     app: &AppHandle,
     inserted_text: &str,
@@ -269,18 +281,10 @@ fn parse_snapshot_output(output: &[u8]) -> Result<FocusedTextSnapshot, String> {
         return Err("focused text snapshot command returned malformed output".to_string());
     };
 
-    let target_id = target_id.trim().to_string();
-    let text = text.trim_end_matches(['\r', '\n']).to_string();
-
-    if target_id.is_empty() {
-        return Err("focused text snapshot command returned an empty target id".to_string());
-    }
-
-    if text.is_empty() {
-        return Err("focused element has no readable text".to_string());
-    }
-
-    Ok(FocusedTextSnapshot { target_id, text })
+    focused_text_snapshot_from_parts(
+        target_id.trim().to_string(),
+        text.trim_end_matches(['\r', '\n']).to_string(),
+    )
 }
 
 #[cfg(target_os = "macos")]
@@ -318,7 +322,6 @@ tell application "System Events"
   set frontApp to first application process whose frontmost is true
   set focusedElement to value of attribute "AXFocusedUIElement" of frontApp
   set textValue to my attrText(focusedElement, "AXValue")
-  if textValue is "" then error "focused element has no readable AXValue"
 
   set targetParts to {unix id of frontApp as text, my attrText(focusedElement, "AXRole"), my attrText(focusedElement, "AXSubrole"), my attrText(focusedElement, "AXIdentifier"), my attrText(focusedElement, "AXTitle")}
   set AppleScript's text item delimiters to "|"
@@ -408,7 +411,7 @@ def accessible_text(obj):
         text = obj.queryText()
         return text.getText(0, text.characterCount)
     except Exception:
-        return ""
+        return None
 
 app, window = active_window()
 if window is None:
@@ -419,7 +422,7 @@ if focused is None:
     raise SystemExit("no focused AT-SPI element")
 
 text = accessible_text(focused)
-if not text:
+if text is None:
     raise SystemExit("focused AT-SPI element has no readable text")
 
 parts = [
@@ -509,10 +512,7 @@ mod windows_focused_text {
         {
             if let Ok(range) = pattern.DocumentRange() {
                 if let Ok(text) = range.GetText(MAX_UIA_TEXT_CHARS) {
-                    let text = text.to_string();
-                    if !text.is_empty() {
-                        return Some(text);
-                    }
+                    return Some(text.to_string());
                 }
             }
         }
@@ -521,10 +521,7 @@ mod windows_focused_text {
             element.GetCurrentPatternAs::<IUIAutomationValuePattern>(UIA_ValuePatternId)
         {
             if let Ok(text) = pattern.CurrentValue() {
-                let text = text.to_string();
-                if !text.is_empty() {
-                    return Some(text);
-                }
+                return Some(text.to_string());
             }
         }
 
@@ -552,7 +549,10 @@ mod windows_focused_text {
 
 #[cfg(test)]
 mod tests {
-    use super::{extract_corrected_inserted_text, POST_PASTE_LEARNING_WINDOW};
+    use super::{
+        extract_corrected_inserted_text, focused_text_snapshot_from_parts,
+        POST_PASTE_LEARNING_WINDOW,
+    };
     use std::time::Duration;
 
     #[test]
@@ -561,6 +561,26 @@ mod tests {
             "prefix suffix",
             "prefix meet with robin tomorrow suffix",
             "prefix meet with Robyn tomorrow suffix",
+        );
+
+        assert_eq!(corrected.as_deref(), Some("meet with Robyn tomorrow"));
+    }
+
+    #[test]
+    fn accepts_empty_focused_text_before_paste() {
+        let snapshot = focused_text_snapshot_from_parts("target".to_string(), String::new())
+            .expect("empty focused fields are valid paste targets");
+
+        assert_eq!(snapshot.target_id, "target");
+        assert_eq!(snapshot.text, "");
+    }
+
+    #[test]
+    fn extracts_correction_when_paste_started_in_empty_field() {
+        let corrected = extract_corrected_inserted_text(
+            "",
+            "meet with robin tomorrow",
+            "meet with Robyn tomorrow",
         );
 
         assert_eq!(corrected.as_deref(), Some("meet with Robyn tomorrow"));
