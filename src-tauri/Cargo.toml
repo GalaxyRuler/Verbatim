@@ -1,6 +1,6 @@
 [package]
 name = "verbatim"
-version = "0.8.4"
+version = "0.8.5"
 description = "Verbatim"
 authors = ["GalaxyRuler"]
 edition = "2021"
