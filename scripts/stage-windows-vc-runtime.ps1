@@ -91,7 +91,9 @@ $runtimeConfig = [ordered]@{
   }
 }
 
-$runtimeConfig | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $runtimeConfigPath -Encoding UTF8
+$runtimeConfigJson = $runtimeConfig | ConvertTo-Json -Depth 100
+$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+[System.IO.File]::WriteAllText($runtimeConfigPath, $runtimeConfigJson, $utf8NoBom)
 
 if ($env:GITHUB_ENV) {
   Add-Content -LiteralPath $env:GITHUB_ENV -Value 'VERBATIM_WINDOWS_RUNTIME_CONFIG=--config src-tauri/nsis/runtime/tauri.windows-runtime.conf.json'
