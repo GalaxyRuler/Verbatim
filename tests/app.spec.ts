@@ -116,6 +116,7 @@ const installTauriMocks = async (page: Page) => {
       let nextCallbackId = 1;
       const testWindow = window as typeof window & {
         __TAURI_INTERNALS__: any;
+        __TAURI_EVENT_PLUGIN_INTERNALS__: any;
         __TAURI_OS_PLUGIN_INTERNALS__: any;
         __VERBATIM_TEST_COMMANDS__: string[];
         __VERBATIM_TEST_LEARN_ENTRIES__: (
@@ -172,6 +173,15 @@ const installTauriMocks = async (page: Page) => {
         arch: "x86_64",
         exe_extension: "exe",
         eol: "\r\n",
+      };
+      testWindow.__TAURI_EVENT_PLUGIN_INTERNALS__ = {
+        unregisterListener: (event: string, eventId: number) => {
+          eventListeners.set(
+            event,
+            (eventListeners.get(event) ?? []).filter((id) => id !== eventId),
+          );
+          callbacks.delete(eventId);
+        },
       };
 
       testWindow.__TAURI_INTERNALS__ = {
