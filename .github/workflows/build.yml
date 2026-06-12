@@ -96,24 +96,46 @@ jobs:
 
       - name: Enable updater artifacts for release builds
         if: inputs.create-updater-artifacts
-        shell: bash
+        shell: pwsh
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
-          if [[ -z "$TAURI_SIGNING_PRIVATE_KEY" ]]; then
-            echo "TAURI_SIGNING_PRIVATE_KEY is required when create-updater-artifacts=true" >&2
-            exit 1
-          fi
+          $privateKey = $env:TAURI_SIGNING_PRIVATE_KEY
+          $password = $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD
 
-          if [[ -z "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" ]]; then
-            echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD is required when create-updater-artifacts=true" >&2
+          if ([string]::IsNullOrWhiteSpace($privateKey)) {
+            Write-Error "TAURI_SIGNING_PRIVATE_KEY is required when create-updater-artifacts=true"
             exit 1
-          fi
+          }
 
-          jq '.bundle.createUpdaterArtifacts = true' \
-            src-tauri/tauri.conf.json > tmp.json
-          mv tmp.json src-tauri/tauri.conf.json
+          if ([string]::IsNullOrWhiteSpace($password)) {
+            Write-Error "TAURI_SIGNING_PRIVATE_KEY_PASSWORD is required when create-updater-artifacts=true"
+            exit 1
+          }
+
+          $privateKey = $privateKey.Trim().TrimStart([char]0xFEFF).Trim()
+          $password = $password.Trim().TrimStart([char]0xFEFF).Trim()
+
+          try {
+            [Convert]::FromBase64String($privateKey) | Out-Null
+          } catch {
+            Write-Error "TAURI_SIGNING_PRIVATE_KEY is not valid base64 after normalization"
+            exit 1
+          }
+
+          $keyDelimiter = "TAURI_KEY_$([guid]::NewGuid().ToString('N'))"
+          Add-Content -Path $env:GITHUB_ENV -Value "TAURI_SIGNING_PRIVATE_KEY<<$keyDelimiter"
+          Add-Content -Path $env:GITHUB_ENV -Value $privateKey
+          Add-Content -Path $env:GITHUB_ENV -Value $keyDelimiter
+
+          $passwordDelimiter = "TAURI_KEY_PASSWORD_$([guid]::NewGuid().ToString('N'))"
+          Add-Content -Path $env:GITHUB_ENV -Value "TAURI_SIGNING_PRIVATE_KEY_PASSWORD<<$passwordDelimiter"
+          Add-Content -Path $env:GITHUB_ENV -Value $password
+          Add-Content -Path $env:GITHUB_ENV -Value $passwordDelimiter
+
+          jq '.bundle.createUpdaterArtifacts = true' src-tauri/tauri.conf.json > tmp.json
+          Move-Item -Force tmp.json src-tauri/tauri.conf.json
           jq -e '.bundle.createUpdaterArtifacts == true' src-tauri/tauri.conf.json
 
       - name: Setup Bun
@@ -278,8 +300,6 @@ jobs:
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           # Disable -march=native and all SIMD instruction sets above SSE4.2 for
           # x86_64 builds. Without this, CPUs lacking AVX/FMA (e.g. Celeron N2920,
           # FX-8350) crash with SIGILL. The Vulkan backend handles heavy compute
@@ -301,8 +321,6 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ inputs.create-updater-artifacts && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ inputs.create-updater-artifacts && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
           # Disable -march=native and all SIMD instruction sets above SSE4.2 for
           # x86_64 builds. Without this, CPUs lacking AVX/FMA (e.g. Celeron N2920,
           # FX-8350) crash with SIGILL. The Vulkan backend handles heavy compute
