@@ -289,6 +289,12 @@ Documentation improvements are highly valued! You can contribute by:
 - Improving error messages
 - Updating the project website content
 
+### Contributor Attribution
+
+Verbatim preserves the upstream Handy commit history and credits for transparency and license compliance. When adding contributor lists, badges, release notes, or acknowledgments, distinguish post-fork Verbatim contributors from upstream Handy contributors.
+
+Use **Verbatim contributors** for work contributed to this repository after the Verbatim fork. Use **upstream Handy contributors** only in acknowledgments or historical attribution.
+
 ## 🤝 Community Guidelines
 
 - **Be respectful and inclusive** - We welcome contributors of all skill levels
