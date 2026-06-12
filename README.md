@@ -51,13 +51,13 @@ Download the latest Windows, macOS, and Linux installers from the [Verbatim Rele
 
 <!-- latest-release:start -->
 
-**Latest published release:** [v0.8.5](https://github.com/GalaxyRuler/Verbatim/releases/tag/v0.8.5) (2026-06-12)
+**Latest published release:** [v0.8.6](https://github.com/GalaxyRuler/Verbatim/releases/tag/v0.8.6) (2026-06-12)
 
 | Platform            | Direct downloads                                                                                                                                                                                                  |
 | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Windows x64         | [setup.exe](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.8.5/Verbatim_0.8.5_x64-setup.exe) · [MSI](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.8.5/Verbatim_0.8.5_x64_en-US.msi) |
-| macOS Apple Silicon | [DMG](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.8.5/Verbatim_0.8.5_aarch64.dmg)                                                                                                                |
-| Ubuntu x64          | [DEB](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.8.5/Verbatim_0.8.5_amd64.deb)                                                                                                                  |
+| Windows x64         | [setup.exe](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.8.6/Verbatim_0.8.6_x64-setup.exe) · [MSI](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.8.6/Verbatim_0.8.6_x64_en-US.msi) |
+| macOS Apple Silicon | [DMG](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.8.6/Verbatim_0.8.6_aarch64.dmg)                                                                                                                |
+| Ubuntu x64          | [DEB](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.8.6/Verbatim_0.8.6_amd64.deb)                                                                                                                  |
 
 <!-- latest-release:end -->
 
@@ -328,7 +328,7 @@ To verify a signed release manually, set `ARTIFACT` to the filename you download
 
 ```bash
 # Replace with the file you downloaded
-ARTIFACT="Verbatim_0.8.5_amd64.deb"
+ARTIFACT="Verbatim_<version>_amd64.deb"
 
 python3 - "$ARTIFACT" <<'PY'
 import base64, pathlib, sys
