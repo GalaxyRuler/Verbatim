@@ -68,7 +68,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEJBQjcyMDk1MjA2NjAxRjkKUldUNUFXWWdsU0MzdXRRZi8zYzhqV2FaNUVDbDd2Rk5VM1IvWWowVXdmRFNKQ1BrMXF5RFFsLy8K",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEJBOURERUZBRTE2NzBEODAKUldTQURXZmgrdDZkdWlEUFFFOHA5Z0FRMDY2bnpQWHAxdXNXUXFTUTJ4SWZHNmYwcVZiaHJaRDcK",
       "endpoints": [
         "https://github.com/GalaxyRuler/Verbatim/releases/latest/download/latest.json"
       ]
