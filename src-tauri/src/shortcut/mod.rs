@@ -671,7 +671,11 @@ pub fn change_update_checks_setting(app: AppHandle, enabled: bool) -> Result<(),
 #[specta::specta]
 pub fn update_custom_words(app: AppHandle, words: Vec<String>) -> Result<(), String> {
     let mut settings = settings::get_settings(&app);
-    settings.custom_words = words;
+    crate::dictionary::replace_dictionary_phrases(
+        &mut settings,
+        crate::dictionary::current_unix_ms(),
+        words,
+    );
     settings::write_settings(&app, settings);
     Ok(())
 }

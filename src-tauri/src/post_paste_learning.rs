@@ -149,23 +149,29 @@ fn learn_from_text_snapshots(
         return Ok(());
     }
 
-    let previous_count = settings.custom_words.len();
-    let merged = crate::dictionary_learning::merge_auto_learn_candidates(
-        &settings.custom_words,
-        &candidates,
-    );
-    let learned_words = merged
-        .iter()
-        .skip(previous_count)
-        .cloned()
-        .collect::<Vec<_>>();
+    let mut learned_entries = Vec::new();
+    let now_ms = crate::dictionary::current_unix_ms();
+    for candidate in candidates {
+        if let Some(entry) = crate::dictionary::upsert_auto_learn_entry(
+            &mut settings,
+            now_ms,
+            candidate.phrase,
+            candidate.replacement_of,
+        )? {
+            learned_entries.push(entry);
+        }
+    }
 
-    if learned_words.is_empty() {
+    if learned_entries.is_empty() {
         return Ok(());
     }
 
-    settings.custom_words = merged;
     crate::settings::write_settings(app, settings);
+    let learned_words = learned_entries
+        .iter()
+        .map(|entry| entry.phrase.clone())
+        .collect::<Vec<_>>();
+    let _ = app.emit("dictionary-entries-learned", learned_entries.clone());
     let _ = app.emit("custom-words-learned", learned_words.clone());
     info!(
         "Auto-added {} corrected custom word(s): {}",

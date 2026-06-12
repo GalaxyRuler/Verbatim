@@ -3,6 +3,8 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 use strsim::levenshtein;
 
+use crate::settings::DictionaryEntry;
+
 /// Builds an n-gram string by cleaning and concatenating words
 ///
 /// Strips punctuation from each word, lowercases, and joins without spaces.
@@ -149,6 +151,79 @@ pub fn apply_custom_words(text: &str, custom_words: &[String], threshold: f64) -
         if !matched {
             result.push(words[i].to_string());
             i += 1;
+        }
+    }
+
+    result.join(" ")
+}
+
+pub fn apply_dictionary_entries(text: &str, entries: &[DictionaryEntry], threshold: f64) -> String {
+    if entries.is_empty() {
+        return text.to_string();
+    }
+
+    let replaced = apply_dictionary_replacement_rules(text, entries);
+    let phrases = entries
+        .iter()
+        .map(|entry| entry.phrase.clone())
+        .collect::<Vec<_>>();
+
+    apply_custom_words(&replaced, &phrases, threshold)
+}
+
+fn apply_dictionary_replacement_rules(text: &str, entries: &[DictionaryEntry]) -> String {
+    let mut rules = entries
+        .iter()
+        .filter_map(|entry| {
+            let replacement_of = entry.replacement_of.as_deref()?;
+            let replacement_tokens = replacement_of
+                .split_whitespace()
+                .map(str::to_string)
+                .collect::<Vec<_>>();
+            (!replacement_tokens.is_empty()).then_some((replacement_tokens, entry.phrase.as_str()))
+        })
+        .collect::<Vec<_>>();
+
+    if rules.is_empty() {
+        return text.to_string();
+    }
+
+    rules.sort_by(|left, right| right.0.len().cmp(&left.0.len()));
+
+    let words = text.split_whitespace().collect::<Vec<_>>();
+    let mut result = Vec::new();
+    let mut index = 0;
+
+    while index < words.len() {
+        let mut matched = false;
+
+        for (replacement_tokens, phrase) in &rules {
+            let rule_len = replacement_tokens.len();
+            if index + rule_len > words.len() {
+                continue;
+            }
+
+            let candidate = build_ngram(&words[index..index + rule_len]);
+            let expected = build_ngram(
+                &replacement_tokens
+                    .iter()
+                    .map(String::as_str)
+                    .collect::<Vec<_>>(),
+            );
+
+            if candidate == expected {
+                let (prefix, _) = extract_punctuation(words[index]);
+                let (_, suffix) = extract_punctuation(words[index + rule_len - 1]);
+                result.push(format!("{}{}{}", prefix, phrase, suffix));
+                index += rule_len;
+                matched = true;
+                break;
+            }
+        }
+
+        if !matched {
+            result.push(words[index].to_string());
+            index += 1;
         }
     }
 
@@ -322,6 +397,7 @@ pub fn filter_transcription_output(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::settings::{DictionaryEntry, DictionaryEntryPriority, DictionaryEntrySource};
 
     #[test]
     fn test_apply_custom_words_exact_match() {
@@ -362,10 +438,55 @@ mod tests {
     }
 
     #[test]
+    fn apply_dictionary_entries_uses_replacement_rule() {
+        let result = apply_dictionary_entries(
+            "robin joined",
+            &[dictionary_entry("Robyn", Some("robin"))],
+            0.18,
+        );
+
+        assert_eq!(result, "Robyn joined");
+    }
+
+    #[test]
+    fn apply_dictionary_entries_handles_multi_word_replacement() {
+        let result = apply_dictionary_entries(
+            "abdullah al kulaib spoke",
+            &[dictionary_entry(
+                "Abdullah al Kulaib",
+                Some("abdullah al kulaib"),
+            )],
+            0.18,
+        );
+
+        assert_eq!(result, "Abdullah al Kulaib spoke");
+    }
+
+    #[test]
+    fn apply_dictionary_entries_falls_back_to_custom_word_fuzzy_match() {
+        let result =
+            apply_dictionary_entries("charge b", &[dictionary_entry("ChargeBee", None)], 0.5);
+
+        assert_eq!(result, "ChargeBee");
+    }
+
+    #[test]
     fn test_filter_filler_words() {
         let text = "So uhm I was thinking uh about this";
         let result = filter_transcription_output(text, "en", &None);
         assert_eq!(result, "So I was thinking about this");
+    }
+
+    fn dictionary_entry(phrase: &str, replacement_of: Option<&str>) -> DictionaryEntry {
+        DictionaryEntry {
+            id: format!("dict_test_{}", phrase),
+            phrase: phrase.to_string(),
+            replacement_of: replacement_of.map(str::to_string),
+            source: DictionaryEntrySource::Manual,
+            priority: DictionaryEntryPriority::Normal,
+            created_at_ms: 1,
+            updated_at_ms: 1,
+        }
     }
 
     #[test]

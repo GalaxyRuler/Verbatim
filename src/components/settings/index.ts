@@ -19,7 +19,6 @@ export { GlobalShortcutInput } from "./GlobalShortcutInput";
 export { VerbatimKeysShortcutInput } from "./VerbatimKeysShortcutInput";
 export { ShortcutInput } from "./ShortcutInput";
 export { TranslateToEnglish } from "./TranslateToEnglish";
-export { CustomWords } from "./CustomWords";
 export { PostProcessingToggle } from "./PostProcessingToggle";
 export { PostProcessingSettingsApi } from "./PostProcessingSettingsApi";
 export { PostProcessingSettingsPrompts } from "./PostProcessingSettingsPrompts";

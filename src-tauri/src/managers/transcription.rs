@@ -1,4 +1,4 @@
-use crate::audio_toolkit::{apply_custom_words, filter_transcription_output};
+use crate::audio_toolkit::{apply_dictionary_entries, filter_transcription_output};
 use crate::managers::audio::AudioRecordingManager;
 use crate::managers::model::{EngineType, ModelManager};
 use crate::providers::{EngineProvider, TranscribeRsProvider};
@@ -462,7 +462,7 @@ impl TranscriptionManager {
             &validated_language,
             effective_translate_to_english,
             &settings.adaptive_language_shortlist,
-            &settings.custom_words,
+            &settings.dictionary_phrases(),
         );
 
         // Perform transcription with the appropriate provider.
@@ -540,18 +540,21 @@ impl TranscriptionManager {
             }
         };
 
-        // Apply word correction if custom words are configured.
-        // Skip for Whisper models since custom words are already passed as initial_prompt.
+        // Apply dictionary corrections after transcription. Dictionary phrases are also passed
+        // to Whisper as prompt context, but explicit correction mappings still belong here.
         let is_whisper = self
             .model_manager
             .get_model_info(&settings.selected_model)
             .map(|info| matches!(info.engine_type, EngineType::Whisper))
             .unwrap_or(false);
 
-        let corrected_result = if !settings.custom_words.is_empty() && !is_whisper {
-            apply_custom_words(
+        let corrected_result = if !settings.dictionary_entries.is_empty() {
+            if is_whisper {
+                debug!("Applying dictionary entries after Whisper transcription");
+            }
+            apply_dictionary_entries(
                 &result.text,
-                &settings.custom_words,
+                &settings.dictionary_entries,
                 settings.word_correction_threshold,
             )
         } else {

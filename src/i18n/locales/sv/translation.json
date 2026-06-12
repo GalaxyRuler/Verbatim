@@ -15,7 +15,8 @@
     "postProcessing": "Efterbearbetning",
     "history": "Historik",
     "debug": "Felsökning",
-    "about": "Om"
+    "about": "Om",
+    "dictionary": "Dictionary"
   },
   "onboarding": {
     "subtitle": "För att komma igång, välj en transkriptionsmodell",
@@ -595,6 +596,54 @@
           "description": "Original Handy copyright and license notice.",
           "details": "Portions of this app are derived from Handy. Original copyright: Copyright (c) 2025 CJ Pais. Handy is licensed under the MIT License; the license and copyright notice are preserved with this fork."
         }
+      }
+    },
+    "dictionary": {
+      "title": "Dictionary",
+      "description": "Manage words and phrases Verbatim should recognize.",
+      "search": "Search dictionary",
+      "add": "Add entry",
+      "save": "Save entry",
+      "cancel": "Cancel",
+      "phrase": "Word or phrase",
+      "replacementOf": "Correct when Verbatim writes",
+      "replacementPlaceholder": "robin",
+      "corrects": "Corrects: {{replacement}}",
+      "editEntry": "Edit {{phrase}}",
+      "deleteEntry": "Delete {{phrase}}",
+      "starEntry": "Star {{phrase}}",
+      "unstarEntry": "Unstar {{phrase}}",
+      "autoAdd": {
+        "label": "Auto-add corrected words",
+        "description": "When you quickly correct text Verbatim just pasted, add the corrected word or phrase to your dictionary."
+      },
+      "source": {
+        "manual": "Manual",
+        "auto_learned": "Auto-learned",
+        "imported": "Imported"
+      },
+      "priority": {
+        "normal": "Normal",
+        "starred": "Starred"
+      },
+      "counts": {
+        "total": "{{count}} entries",
+        "autoLearned": "{{count}} auto-learned",
+        "starred": "{{count}} starred"
+      },
+      "empty": "No dictionary entries yet.",
+      "noResults": "No entries match your search.",
+      "recentlyLearned": {
+        "title": "Added to dictionary",
+        "description": "Added: {{phrases}}",
+        "undo": "Undo"
+      },
+      "errors": {
+        "load": "Failed to load dictionary",
+        "add": "Failed to add dictionary entry",
+        "update": "Failed to update dictionary entry",
+        "delete": "Failed to delete dictionary entry",
+        "duplicate": "{{phrase}} is already in your dictionary"
       }
     }
   },

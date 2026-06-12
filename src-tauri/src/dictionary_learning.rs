@@ -2,11 +2,17 @@ const MAX_AUTO_LEARN_WORD_CHARS: usize = 60;
 const MAX_AUTO_LEARN_PHRASE_CHARS: usize = 120;
 const MAX_AUTO_LEARN_PHRASE_TOKENS: usize = 5;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AutoLearnCandidate {
+    pub phrase: String,
+    pub replacement_of: Option<String>,
+}
+
 pub fn infer_auto_learn_candidates(
     dictated_text: &str,
     corrected_text: &str,
     existing_words: &[String],
-) -> Vec<String> {
+) -> Vec<AutoLearnCandidate> {
     let dictated_tokens = word_tokens(dictated_text);
     let corrected_tokens = word_tokens(corrected_text);
 
@@ -23,11 +29,15 @@ pub fn infer_auto_learn_candidates(
             *covered = true;
         }
 
-        if is_existing_word(&phrase, existing_words) || is_existing_word(&phrase, &candidates) {
+        if is_existing_word(&phrase, existing_words) || is_existing_candidate(&phrase, &candidates)
+        {
             continue;
         }
 
-        candidates.push(phrase);
+        candidates.push(AutoLearnCandidate {
+            phrase,
+            replacement_of: Some(dictated_tokens[start..=end].join(" ")),
+        });
     }
 
     for (index, (dictated, corrected)) in dictated_tokens
@@ -45,13 +55,16 @@ pub fn infer_auto_learn_candidates(
 
         if is_sentence_case_cleanup(index, dictated, &candidate)
             || is_existing_word(&candidate, existing_words)
-            || is_existing_word(&candidate, &candidates)
+            || is_existing_candidate(&candidate, &candidates)
         {
             continue;
         }
 
         if is_likely_custom_dictionary_term(&candidate) {
-            candidates.push(candidate);
+            candidates.push(AutoLearnCandidate {
+                phrase: candidate,
+                replacement_of: Some(dictated.clone()),
+            });
         }
     }
 
@@ -135,14 +148,15 @@ fn push_phrase_candidate(
     phrase_candidates.push((start, end, phrase));
 }
 
+#[cfg(test)]
 pub fn merge_auto_learn_candidates(
     existing_words: &[String],
-    candidates: &[String],
+    candidates: &[AutoLearnCandidate],
 ) -> Vec<String> {
     let mut merged = existing_words.to_vec();
 
     for candidate in candidates {
-        let Some(candidate) = sanitize_custom_word_candidate(candidate) else {
+        let Some(candidate) = sanitize_custom_word_candidate(&candidate.phrase) else {
             continue;
         };
 
@@ -221,6 +235,12 @@ fn is_existing_word(candidate: &str, existing_words: &[String]) -> bool {
         .any(|word| word.eq_ignore_ascii_case(candidate))
 }
 
+fn is_existing_candidate(candidate: &str, existing_candidates: &[AutoLearnCandidate]) -> bool {
+    existing_candidates
+        .iter()
+        .any(|entry| entry.phrase.eq_ignore_ascii_case(candidate))
+}
+
 fn is_sentence_case_cleanup(index: usize, dictated: &str, corrected: &str) -> bool {
     if index != 0 || !dictated.eq_ignore_ascii_case(corrected) {
         return false;
@@ -280,7 +300,7 @@ fn is_phrase_connector(token: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{infer_auto_learn_candidates, merge_auto_learn_candidates};
+    use super::{infer_auto_learn_candidates, merge_auto_learn_candidates, AutoLearnCandidate};
 
     #[test]
     fn suggests_corrected_uncommon_proper_noun() {
@@ -290,7 +310,13 @@ mod tests {
             &[],
         );
 
-        assert_eq!(candidates, vec!["Robyn"]);
+        assert_eq!(
+            candidates,
+            vec![AutoLearnCandidate {
+                phrase: "Robyn".to_string(),
+                replacement_of: Some("robin".to_string()),
+            }]
+        );
     }
 
     #[test]
@@ -301,7 +327,13 @@ mod tests {
             &[],
         );
 
-        assert_eq!(candidates, vec!["Abdullah al Kulaib"]);
+        assert_eq!(
+            candidates,
+            vec![AutoLearnCandidate {
+                phrase: "Abdullah al Kulaib".to_string(),
+                replacement_of: Some("abdullah al kulaib".to_string()),
+            }]
+        );
     }
 
     #[test]
@@ -326,7 +358,16 @@ mod tests {
     #[test]
     fn merge_appends_new_candidates_without_case_duplicates() {
         let existing = vec!["Robyn".to_string()];
-        let candidates = vec!["robyn".to_string(), "OAuth".to_string()];
+        let candidates = vec![
+            AutoLearnCandidate {
+                phrase: "robyn".to_string(),
+                replacement_of: Some("robin".to_string()),
+            },
+            AutoLearnCandidate {
+                phrase: "OAuth".to_string(),
+                replacement_of: Some("o auth".to_string()),
+            },
+        ];
 
         let merged = merge_auto_learn_candidates(&existing, &candidates);
 

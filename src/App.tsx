@@ -14,6 +14,8 @@ import Footer from "./components/footer";
 import Onboarding, { AccessibilityOnboarding } from "./components/onboarding";
 import { Sidebar, SidebarSection, SECTIONS_CONFIG } from "./components/Sidebar";
 import { useSettings } from "./hooks/useSettings";
+import type { DictionaryEntry } from "@/bindings";
+import { useDictionaryStore } from "./stores/dictionaryStore";
 import { useSettingsStore } from "./stores/settingsStore";
 import { commands } from "@/bindings";
 import { getLanguageDirection, initializeRTL } from "@/lib/utils/rtl";
@@ -45,6 +47,9 @@ function App() {
     (state) => state.refreshOutputDevices,
   );
   const refreshSettings = useSettingsStore((state) => state.refreshSettings);
+  const setRecentlyLearnedDictionaryEntries = useDictionaryStore(
+    (state) => state.setRecentlyLearnedEntries,
+  );
   const hasCompletedPostOnboardingInit = useRef(false);
 
   useEffect(() => {
@@ -138,28 +143,31 @@ function App() {
     };
   }, [t]);
 
-  // Show feedback when post-paste dictionary learning adds corrected words.
+  // Show feedback when post-paste dictionary learning adds corrected entries.
   useEffect(() => {
-    const unlisten = listen<string[]>("custom-words-learned", (event) => {
-      if (event.payload.length === 0) return;
+    const unlisten = listen<DictionaryEntry[]>(
+      "dictionary-entries-learned",
+      (event) => {
+        if (event.payload.length === 0) return;
 
-      void refreshSettings();
-      window.dispatchEvent(
-        new CustomEvent("verbatim-custom-words-learned", {
-          detail: event.payload,
-        }),
-      );
-      toast.success(t("settings.advanced.customWords.autoAdd.learnedTitle"), {
-        description: t(
-          "settings.advanced.customWords.autoAdd.learnedDescription",
-          { words: event.payload.join(", ") },
-        ),
-      });
-    });
+        void refreshSettings();
+        setRecentlyLearnedDictionaryEntries(event.payload);
+        window.dispatchEvent(
+          new CustomEvent("verbatim-dictionary-entries-learned", {
+            detail: event.payload,
+          }),
+        );
+        toast.success(t("settings.dictionary.recentlyLearned.title"), {
+          description: t("settings.dictionary.recentlyLearned.description", {
+            phrases: event.payload.map((entry) => entry.phrase).join(", "),
+          }),
+        });
+      },
+    );
     return () => {
       unlisten.then((fn) => fn());
     };
-  }, [refreshSettings, t]);
+  }, [refreshSettings, setRecentlyLearnedDictionaryEntries, t]);
 
   // Listen for model loading failures and show a toast
   useEffect(() => {

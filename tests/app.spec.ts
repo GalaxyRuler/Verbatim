@@ -63,6 +63,7 @@ const baseSettings = {
   debug_mode: false,
   log_level: "info",
   custom_words: [],
+  dictionary_entries: [],
   model_unload_timeout: "never",
   word_correction_threshold: 0.8,
   history_limit: 100,
@@ -117,22 +118,50 @@ const installTauriMocks = async (page: Page) => {
         __TAURI_INTERNALS__: any;
         __TAURI_OS_PLUGIN_INTERNALS__: any;
         __VERBATIM_TEST_COMMANDS__: string[];
+        __VERBATIM_TEST_LEARN_ENTRIES__: (
+          entries: Array<Record<string, unknown>>,
+        ) => void;
         __VERBATIM_TEST_LEARN_WORDS__: (words: string[]) => void;
       };
       testWindow.__VERBATIM_TEST_COMMANDS__ = [];
-      testWindow.__VERBATIM_TEST_LEARN_WORDS__ = (words: string[]) => {
+      let dictionaryEntries = [
+        ...((appSettings.dictionary_entries as Array<
+          Record<string, unknown>
+        >) ?? []),
+      ];
+      let nextDictionaryId = 1;
+      const syncDictionarySettings = () => {
         appSettings = {
           ...appSettings,
-          custom_words: [...appSettings.custom_words, ...words],
+          dictionary_entries: dictionaryEntries,
+          custom_words: dictionaryEntries.map((entry) => entry.phrase),
         };
-        for (const callbackId of eventListeners.get("custom-words-learned") ??
-          []) {
+      };
+      const emitEvent = (event: string, payload: unknown) => {
+        for (const callbackId of eventListeners.get(event) ?? []) {
           callbacks.get(callbackId)?.({
-            event: "custom-words-learned",
+            event,
             id: callbackId,
-            payload: words,
+            payload,
           });
         }
+      };
+      testWindow.__VERBATIM_TEST_LEARN_ENTRIES__ = (entries) => {
+        dictionaryEntries = [...dictionaryEntries, ...entries];
+        syncDictionarySettings();
+        emitEvent("dictionary-entries-learned", entries);
+      };
+      testWindow.__VERBATIM_TEST_LEARN_WORDS__ = (words: string[]) => {
+        const entries = words.map((word) => ({
+          id: `dict_test_${nextDictionaryId++}`,
+          phrase: word,
+          replacement_of: null,
+          source: "auto_learned",
+          priority: "normal",
+          created_at_ms: 1,
+          updated_at_ms: 1,
+        }));
+        testWindow.__VERBATIM_TEST_LEARN_ENTRIES__(entries);
       };
 
       testWindow.__TAURI_OS_PLUGIN_INTERNALS__ = {
@@ -171,7 +200,70 @@ const installTauriMocks = async (page: Page) => {
           switch (cmd) {
             case "get_default_settings":
             case "get_app_settings":
+              syncDictionarySettings();
               return appSettings;
+            case "list_dictionary_entries":
+              return dictionaryEntries;
+            case "add_dictionary_entry": {
+              const input = args?.input as {
+                phrase: string;
+                replacement_of?: string | null;
+              };
+              const entry = {
+                id: `dict_test_${nextDictionaryId++}`,
+                phrase: input.phrase,
+                replacement_of: input.replacement_of ?? null,
+                source: "manual",
+                priority: "normal",
+                created_at_ms: nextDictionaryId,
+                updated_at_ms: nextDictionaryId,
+              };
+              dictionaryEntries = [...dictionaryEntries, entry];
+              syncDictionarySettings();
+              return entry;
+            }
+            case "update_dictionary_entry": {
+              const id = args?.id as string;
+              const update = args?.update as {
+                phrase?: string | null;
+                replacement_of?: string | null;
+                priority?: "normal" | "starred" | null;
+              };
+              let updated = null;
+              dictionaryEntries = dictionaryEntries.map((entry) => {
+                if (entry.id !== id) return entry;
+                updated = {
+                  ...entry,
+                  phrase: update.phrase ?? entry.phrase,
+                  replacement_of:
+                    "replacement_of" in update
+                      ? update.replacement_of
+                      : entry.replacement_of,
+                  priority: update.priority ?? entry.priority,
+                  updated_at_ms: Date.now(),
+                };
+                return updated;
+              });
+              syncDictionarySettings();
+              return updated;
+            }
+            case "delete_dictionary_entry":
+              dictionaryEntries = dictionaryEntries.filter(
+                (entry) => entry.id !== args?.id,
+              );
+              syncDictionarySettings();
+              return null;
+            case "undo_dictionary_entries": {
+              const ids = new Set(args?.ids as string[]);
+              const deleted = dictionaryEntries.filter((entry) =>
+                ids.has(entry.id as string),
+              );
+              dictionaryEntries = dictionaryEntries.filter(
+                (entry) => !ids.has(entry.id as string),
+              );
+              syncDictionarySettings();
+              return deleted;
+            }
             case "has_any_models_available":
               return true;
             case "get_available_models":
@@ -284,54 +376,120 @@ test.describe("Verbatim App", () => {
     await expect(adaptiveToggle).toBeChecked();
   });
 
-  test("custom words list refreshes after auto-learn event", async ({
-    page,
-  }) => {
+  test("dictionary section is visible from the sidebar", async ({ page }) => {
     await installTauriMocks(page);
     await page.goto("/");
 
     await expect(page.getByTitle("General")).toBeVisible();
-    await page.getByText("Advanced").click();
-    await expect(page.getByText("Custom Words")).toBeVisible();
+    await page.getByText("Dictionary").click();
     await expect(
-      page.getByRole("button", { name: "Remove Robyn" }),
-    ).toHaveCount(0);
-
-    await page.evaluate(() => {
-      const win = window as typeof window & {
-        __VERBATIM_TEST_LEARN_WORDS__: (words: string[]) => void;
-      };
-      win.__VERBATIM_TEST_LEARN_WORDS__(["Robyn"]);
-    });
-
-    await expect(
-      page.getByRole("button", { name: "Remove Robyn" }),
+      page.getByRole("heading", { name: "Dictionary" }),
     ).toBeVisible();
   });
 
-  test("custom words panel shows recently learned words inline", async ({
+  test("manual dictionary entry can be added and searched", async ({
     page,
   }) => {
     await installTauriMocks(page);
     await page.goto("/");
 
-    await expect(page.getByTitle("General")).toBeVisible();
-    await page.getByText("Advanced").click();
-    await expect(page.getByText("Custom Words")).toBeVisible();
+    await page.getByText("Dictionary").click();
+    await page.getByRole("button", { name: "Add entry" }).click();
+    await page.getByLabel("Word or phrase").fill("Abdullah al Kulaib");
+    await page.getByRole("button", { name: "Save entry" }).click();
 
+    await expect(page.getByText("Abdullah al Kulaib")).toBeVisible();
+    await page.getByLabel("Search dictionary").fill("kulaib");
+    await expect(page.getByText("Abdullah al Kulaib")).toBeVisible();
+    await expect(page.getByText("No entries match your search.")).toHaveCount(
+      0,
+    );
+  });
+
+  test("manual entry supports correction mapping and editing", async ({
+    page,
+  }) => {
+    await installTauriMocks(page);
+    await page.goto("/");
+
+    await page.getByText("Dictionary").click();
+    await page.getByRole("button", { name: "Add entry" }).click();
+    await page.getByLabel("Word or phrase").fill("Robyn");
+    await page.getByLabel("Correct when Verbatim writes").fill("robin");
+    await page.getByRole("button", { name: "Save entry" }).click();
+
+    await expect(page.getByText("Robyn")).toBeVisible();
+    await expect(page.getByText("Corrects: robin")).toBeVisible();
+
+    await page.getByRole("button", { name: "Edit Robyn" }).click();
+    await page.getByLabel("Word or phrase").fill("Robyn Smith");
+    await page.getByRole("button", { name: "Save entry" }).click();
+
+    await expect(page.getByText("Robyn Smith")).toBeVisible();
+    await expect(page.getByText("Robyn", { exact: true })).toHaveCount(0);
+  });
+
+  test("dictionary entry can be starred and deleted", async ({ page }) => {
+    await installTauriMocks(page);
+    await page.goto("/");
+
+    await page.getByText("Dictionary").click();
+    await page.getByRole("button", { name: "Add entry" }).click();
+    await page.getByLabel("Word or phrase").fill("ChargeBee");
+    await page.getByRole("button", { name: "Save entry" }).click();
+
+    await page.getByRole("button", { name: "Star ChargeBee" }).click();
+    await expect(
+      page.getByRole("button", { name: "Unstar ChargeBee" }),
+    ).toBeVisible();
+
+    await page.getByRole("button", { name: "Delete ChargeBee" }).click();
+    await expect(page.getByText("ChargeBee")).toHaveCount(0);
+  });
+
+  test("auto-learn event shows recently learned entry with undo", async ({
+    page,
+  }) => {
+    await installTauriMocks(page);
+    await page.goto("/");
+
+    await page.getByText("Dictionary").click();
     await page.evaluate(() => {
       const win = window as typeof window & {
-        __VERBATIM_TEST_LEARN_WORDS__: (words: string[]) => void;
+        __VERBATIM_TEST_LEARN_ENTRIES__: (
+          entries: Array<Record<string, unknown>>,
+        ) => void;
       };
-      win.__VERBATIM_TEST_LEARN_WORDS__(["Abdullah al Kulaib"]);
+      win.__VERBATIM_TEST_LEARN_ENTRIES__([
+        {
+          id: "dict_test_kulaib",
+          phrase: "Abdullah al Kulaib",
+          replacement_of: "abdullah al kulaib",
+          source: "auto_learned",
+          priority: "normal",
+          created_at_ms: 1,
+          updated_at_ms: 1,
+        },
+      ]);
     });
 
-    const learnedStatus = page.getByTestId("custom-words-recently-learned");
+    const learnedStatus = page.getByTestId("dictionary-recently-learned");
     await expect(learnedStatus).toBeVisible();
     await expect(learnedStatus).toContainText("Added to dictionary");
     await expect(learnedStatus).toContainText("Added: Abdullah al Kulaib");
-    await expect(
-      page.getByRole("button", { name: "Remove Abdullah al Kulaib" }),
-    ).toHaveAttribute("data-recently-learned", "true");
+
+    await learnedStatus.getByRole("button", { name: "Undo" }).click();
+    await expect(page.getByText("Abdullah al Kulaib")).toHaveCount(0);
+  });
+
+  test("advanced settings no longer owns dictionary management", async ({
+    page,
+  }) => {
+    await installTauriMocks(page);
+    await page.goto("/");
+
+    await page.getByText("Advanced").click();
+    await expect(page.getByText("Custom Words")).toHaveCount(0);
+    await expect(page.getByText("Dictionary")).toBeVisible();
   });
 });

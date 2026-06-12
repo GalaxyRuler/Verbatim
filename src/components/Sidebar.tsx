@@ -1,6 +1,14 @@
 import React from "react";
 import { useTranslation } from "react-i18next";
-import { Cog, FlaskConical, History, Info, Sparkles, Cpu } from "lucide-react";
+import {
+  BookOpen,
+  Cog,
+  FlaskConical,
+  History,
+  Info,
+  Sparkles,
+  Cpu,
+} from "lucide-react";
 import VerbatimMark from "./icons/VerbatimMark";
 import { useSettings } from "../hooks/useSettings";
 import {
@@ -12,6 +20,7 @@ import {
   PostProcessingSettings,
   ModelsSettings,
 } from "./settings";
+import { DictionarySettings } from "./dictionary";
 import verbatimLockup from "@/assets/verbatim-lockup-horizontal.svg";
 
 export type SidebarSection = keyof typeof SECTIONS_CONFIG;
@@ -42,6 +51,12 @@ export const SECTIONS_CONFIG = {
     labelKey: "sidebar.models",
     icon: Cpu,
     component: ModelsSettings,
+    enabled: () => true,
+  },
+  dictionary: {
+    labelKey: "sidebar.dictionary",
+    icon: BookOpen,
+    component: DictionarySettings,
     enabled: () => true,
   },
   advanced: {

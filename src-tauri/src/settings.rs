@@ -86,6 +86,49 @@ pub struct ShortcutBinding {
     pub current_binding: String,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum DictionaryEntrySource {
+    Manual,
+    AutoLearned,
+    Imported,
+}
+
+impl Default for DictionaryEntrySource {
+    fn default() -> Self {
+        DictionaryEntrySource::Manual
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum DictionaryEntryPriority {
+    Normal,
+    Starred,
+}
+
+impl Default for DictionaryEntryPriority {
+    fn default() -> Self {
+        DictionaryEntryPriority::Normal
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Type)]
+pub struct DictionaryEntry {
+    pub id: String,
+    pub phrase: String,
+    #[serde(default)]
+    pub replacement_of: Option<String>,
+    #[serde(default)]
+    pub source: DictionaryEntrySource,
+    #[serde(default)]
+    pub priority: DictionaryEntryPriority,
+    #[serde(default)]
+    pub created_at_ms: u64,
+    #[serde(default)]
+    pub updated_at_ms: u64,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, Type)]
 pub struct LLMPrompt {
     pub id: String,
@@ -396,6 +439,8 @@ pub struct AppSettings {
     pub log_level: LogLevel,
     #[serde(default)]
     pub custom_words: Vec<String>,
+    #[serde(default)]
+    pub dictionary_entries: Vec<DictionaryEntry>,
     #[serde(default = "default_auto_add_dictionary_words")]
     pub auto_add_dictionary_words: bool,
     #[serde(default)]
@@ -841,6 +886,10 @@ fn ensure_translation_defaults(settings: &mut AppSettings) -> bool {
     false
 }
 
+fn ensure_dictionary_defaults(settings: &mut AppSettings) -> bool {
+    crate::dictionary::sync_legacy_custom_words(settings)
+}
+
 pub fn set_translation_target_language(settings: &mut AppSettings, target_language: String) {
     let mut request = settings
         .translation_request
@@ -935,6 +984,7 @@ pub fn get_default_settings() -> AppSettings {
         debug_mode: false,
         log_level: default_log_level(),
         custom_words: Vec::new(),
+        dictionary_entries: Vec::new(),
         auto_add_dictionary_words: default_auto_add_dictionary_words(),
         model_unload_timeout: ModelUnloadTimeout::default(),
         word_correction_threshold: default_word_correction_threshold(),
@@ -996,6 +1046,11 @@ impl AppSettings {
             .iter_mut()
             .find(|provider| provider.id == provider_id)
     }
+
+    #[cfg_attr(not(feature = "transcribe-rs-engine"), allow(dead_code))]
+    pub fn dictionary_phrases(&self) -> Vec<String> {
+        crate::dictionary::dictionary_phrases(&self.dictionary_entries)
+    }
 }
 
 pub fn load_or_create_app_settings(app: &AppHandle) -> AppSettings {
@@ -1045,7 +1100,8 @@ pub fn load_or_create_app_settings(app: &AppHandle) -> AppSettings {
     let post_process_changed = ensure_post_process_defaults(&mut settings);
     let adaptive_changed = ensure_adaptive_defaults(&mut settings);
     let translation_changed = ensure_translation_defaults(&mut settings);
-    if post_process_changed || adaptive_changed || translation_changed {
+    let dictionary_changed = ensure_dictionary_defaults(&mut settings);
+    if post_process_changed || adaptive_changed || translation_changed || dictionary_changed {
         store.set("settings", serde_json::to_value(&settings).unwrap());
     }
 
@@ -1072,18 +1128,20 @@ pub fn get_settings(app: &AppHandle) -> AppSettings {
     let post_process_changed = ensure_post_process_defaults(&mut settings);
     let adaptive_changed = ensure_adaptive_defaults(&mut settings);
     let translation_changed = ensure_translation_defaults(&mut settings);
-    if post_process_changed || adaptive_changed || translation_changed {
+    let dictionary_changed = ensure_dictionary_defaults(&mut settings);
+    if post_process_changed || adaptive_changed || translation_changed || dictionary_changed {
         store.set("settings", serde_json::to_value(&settings).unwrap());
     }
 
     settings
 }
 
-pub fn write_settings(app: &AppHandle, settings: AppSettings) {
+pub fn write_settings(app: &AppHandle, mut settings: AppSettings) {
     let store = app
         .store(crate::portable::store_path(SETTINGS_STORE_PATH))
         .expect("Failed to initialize store");
 
+    crate::dictionary::sync_legacy_custom_words(&mut settings);
     store.set("settings", serde_json::to_value(&settings).unwrap());
 }
 
@@ -1132,6 +1190,31 @@ mod tests {
     fn default_settings_disable_auto_add_dictionary_words() {
         let settings = get_default_settings();
         assert!(!settings.auto_add_dictionary_words);
+    }
+
+    #[test]
+    fn default_settings_start_with_empty_dictionary_entries() {
+        let settings = get_default_settings();
+        assert!(settings.dictionary_entries.is_empty());
+    }
+
+    #[test]
+    fn default_settings_keep_empty_custom_words_for_compatibility() {
+        let settings = get_default_settings();
+        assert!(settings.custom_words.is_empty());
+    }
+
+    #[test]
+    fn dictionary_defaults_migrate_legacy_custom_words() {
+        let mut settings = get_default_settings();
+        settings.custom_words = vec!["Robyn".to_string()];
+
+        let changed = ensure_dictionary_defaults(&mut settings);
+
+        assert!(changed);
+        assert_eq!(settings.dictionary_entries.len(), 1);
+        assert_eq!(settings.dictionary_phrases(), vec!["Robyn"]);
+        assert_eq!(settings.custom_words, vec!["Robyn"]);
     }
 
     #[test]

@@ -1,0 +1,1 @@
+export { DictionarySettings } from "./DictionarySettings";

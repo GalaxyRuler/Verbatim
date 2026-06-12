@@ -7,6 +7,7 @@ pub mod audio_toolkit;
 pub mod cli;
 mod clipboard;
 mod commands;
+mod dictionary;
 mod dictionary_learning;
 mod helpers;
 mod input;
@@ -404,6 +405,11 @@ pub fn run(cli_args: CliArgs) {
             commands::adaptive::reset_adaptive_correction_memory,
             commands::adaptive::set_adaptive_correction_memory_enabled,
             commands::adaptive::reprocess_last_adaptive_entry,
+            commands::dictionary::list_dictionary_entries,
+            commands::dictionary::add_dictionary_entry,
+            commands::dictionary::update_dictionary_entry,
+            commands::dictionary::delete_dictionary_entry,
+            commands::dictionary::undo_dictionary_entries,
             commands::dictionary::learn_custom_words_from_correction,
             commands::models::get_available_models,
             commands::models::get_model_info,
