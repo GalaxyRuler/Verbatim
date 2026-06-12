@@ -1,0 +1,50 @@
+name: "Update README Release Links"
+
+on:
+  release:
+    types: [published, edited]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-readme-release
+  cancel-in-progress: true
+
+jobs:
+  update-readme-release:
+    if: github.event_name != 'release' || github.event.release.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Update README latest release block
+        run: bun scripts/update-readme-release.ts
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+      - name: Check formatting
+        run: bunx prettier --check README.md scripts/update-readme-release.ts .github/workflows/update-readme-release.yml
+
+      - name: Commit README update
+        shell: bash
+        run: |
+          if git diff --quiet -- README.md; then
+            echo "README latest release block is already current."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add README.md
+          git commit -m "docs: update latest release links"
+          git push origin HEAD:main

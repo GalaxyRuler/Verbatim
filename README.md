@@ -68,6 +68,23 @@ The process is entirely local:
 
 Download the latest Windows, macOS, and Linux installers from the [Verbatim Releases page](https://github.com/GalaxyRuler/Verbatim/releases/latest).
 
+<!-- latest-release:start -->
+
+**Latest published release:** [v0.8.4](https://github.com/GalaxyRuler/Verbatim/releases/tag/v0.8.4) (2026-06-12)
+
+| Platform             | Direct downloads                                                                                                                                                                                                      |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Windows x64          | [setup.exe](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.8.4/Verbatim_0.8.4_x64-setup.exe) · [MSI](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.8.4/Verbatim_0.8.4_x64_en-US.msi)     |
+| Windows ARM64        | [setup.exe](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.8.4/Verbatim_0.8.4_arm64-setup.exe) · [MSI](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.8.4/Verbatim_0.8.4_arm64_en-US.msi) |
+| macOS Apple Silicon  | [DMG](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.8.4/Verbatim_0.8.4_aarch64.dmg)                                                                                                                    |
+| macOS Intel          | [DMG](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.8.4/Verbatim_0.8.4_x64.dmg)                                                                                                                        |
+| Ubuntu/Debian x64    | [DEB](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.8.4/Verbatim_0.8.4_amd64.deb)                                                                                                                      |
+| Ubuntu/Debian ARM64  | [DEB](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.8.4/Verbatim_0.8.4_arm64.deb)                                                                                                                      |
+| Linux AppImage       | [x64](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.8.4/Verbatim_0.8.4_amd64.AppImage) · [ARM64](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.8.4/Verbatim_0.8.4_aarch64.AppImage)     |
+| Fedora/RHEL/openSUSE | [x64 RPM](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.8.4/Verbatim-0.8.4-1.x86_64.rpm) · [ARM64 RPM](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.8.4/Verbatim-0.8.4-1.aarch64.rpm)  |
+
+<!-- latest-release:end -->
+
 Choose the asset that matches your operating system and CPU:
 
 | Platform             | Recommended asset            | Notes                                                                               |
