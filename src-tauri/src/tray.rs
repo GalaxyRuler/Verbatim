@@ -22,7 +22,7 @@ pub enum TrayIconState {
 pub enum AppTheme {
     Dark,
     Light,
-    #[cfg_attr(not(feature = "transcribe-rs-engine"), allow(dead_code))]
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     Colored, // Pink/colored theme for Linux
 }
 

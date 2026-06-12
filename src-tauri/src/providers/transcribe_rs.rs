@@ -444,4 +444,90 @@ mod tests {
             TranslationPairSupport::EnglishOnly
         );
     }
+
+    #[test]
+    fn whisper_initial_prompt_ignores_language_shortlist() {
+        let prompt = build_whisper_initial_prompt(
+            &[],
+            &["en".to_string(), "ar".to_string(), "en".to_string()],
+        );
+
+        assert!(prompt.is_none());
+    }
+
+    #[test]
+    fn whisper_initial_prompt_preserves_custom_words() {
+        let prompt = build_whisper_initial_prompt(
+            &["Verbatim".to_string(), "Codex".to_string()],
+            &["auto".to_string()],
+        )
+        .expect("prompt should include custom words");
+
+        assert!(prompt.contains("Relevant words: Verbatim, Codex"));
+        assert!(!prompt.contains("The speech may be in these languages"));
+    }
+
+    #[test]
+    fn normalizes_chinese_language_variants_for_engine_hints() {
+        assert_eq!(normalize_language_for_engine("zh-Hans"), "zh");
+        assert_eq!(normalize_language_for_engine("zh-Hant"), "zh");
+        assert_eq!(normalize_language_for_engine("ar"), "ar");
+    }
+
+    #[test]
+    fn uses_shortlist_as_candidates_when_language_is_auto() {
+        assert_eq!(
+            transcription_language_candidates(
+                "auto",
+                &["en".to_string(), "ar".to_string(), "en".to_string()],
+            ),
+            vec!["en".to_string(), "ar".to_string()]
+        );
+    }
+
+    #[test]
+    fn forced_language_overrides_shortlist_candidates() {
+        assert_eq!(
+            transcription_language_candidates("ar", &["en".to_string()]),
+            vec!["ar".to_string()]
+        );
+    }
+
+    #[test]
+    fn whisper_auto_language_uses_native_auto_detect() {
+        assert_eq!(
+            whisper_language_hint("auto", &["en".to_string(), "ar".to_string()]),
+            None
+        );
+    }
+
+    #[test]
+    fn whisper_forced_language_uses_selected_language() {
+        assert_eq!(
+            whisper_language_hint("ar", &["en".to_string()]),
+            Some("ar".to_string())
+        );
+    }
+
+    #[test]
+    fn cohere_candidate_selection_prefers_arabic_script_for_arabic_hint() {
+        let result = select_best_language_candidate(vec![
+            (
+                "en".to_string(),
+                ::transcribe_rs::TranscriptionResult {
+                    text: "this is an unrelated English sentence".to_string(),
+                    segments: None,
+                },
+            ),
+            (
+                "ar".to_string(),
+                ::transcribe_rs::TranscriptionResult {
+                    text: "هذا نص عربي واضح".to_string(),
+                    segments: None,
+                },
+            ),
+        ]);
+
+        assert_eq!(result.text, "هذا نص عربي واضح");
+    }
 }
