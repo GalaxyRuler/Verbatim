@@ -308,4 +308,30 @@ test.describe("Verbatim App", () => {
       page.getByRole("button", { name: "Remove Robyn" }),
     ).toBeVisible();
   });
+
+  test("custom words panel shows recently learned words inline", async ({
+    page,
+  }) => {
+    await installTauriMocks(page);
+    await page.goto("/");
+
+    await expect(page.getByTitle("General")).toBeVisible();
+    await page.getByText("Advanced").click();
+    await expect(page.getByText("Custom Words")).toBeVisible();
+
+    await page.evaluate(() => {
+      const win = window as typeof window & {
+        __VERBATIM_TEST_LEARN_WORDS__: (words: string[]) => void;
+      };
+      win.__VERBATIM_TEST_LEARN_WORDS__(["Abdullah al Kulaib"]);
+    });
+
+    const learnedStatus = page.getByTestId("custom-words-recently-learned");
+    await expect(learnedStatus).toBeVisible();
+    await expect(learnedStatus).toContainText("Added to dictionary");
+    await expect(learnedStatus).toContainText("Added: Abdullah al Kulaib");
+    await expect(
+      page.getByRole("button", { name: "Remove Abdullah al Kulaib" }),
+    ).toHaveAttribute("data-recently-learned", "true");
+  });
 });

@@ -144,6 +144,11 @@ function App() {
       if (event.payload.length === 0) return;
 
       void refreshSettings();
+      window.dispatchEvent(
+        new CustomEvent("verbatim-custom-words-learned", {
+          detail: event.payload,
+        }),
+      );
       toast.success(t("settings.advanced.customWords.autoAdd.learnedTitle"), {
         description: t(
           "settings.advanced.customWords.autoAdd.learnedDescription",
