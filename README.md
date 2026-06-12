@@ -54,11 +54,6 @@ Download the latest Windows, macOS, and Linux installers from the [Verbatim Rele
 
 - [Download the latest Verbatim release](https://github.com/GalaxyRuler/Verbatim/releases/latest)
 
-**Windows x64 quick links**
-
-- [Download Verbatim for Windows](https://github.com/GalaxyRuler/Verbatim/releases/latest/download/Verbatim-Windows-x64-Setup.exe)
-- [Download Windows MSI](https://github.com/GalaxyRuler/Verbatim/releases/latest/download/Verbatim-Windows-x64.msi)
-
 1. Install the application
 2. Launch Verbatim and grant necessary system permissions (microphone, accessibility)
 3. Configure your preferred keyboard shortcuts in Settings
