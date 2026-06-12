@@ -533,6 +533,12 @@ If a workaround helps you, please [open an issue](https://github.com/GalaxyRuler
 
 The goal is to create both a useful tool and a foundation for others to build upon—a well-patterned, simple codebase that serves the community.
 
+## Contributor Attribution
+
+Verbatim keeps the upstream Handy Git history and credits intact for transparency and license compliance. Public contributor lists, badges, and future contributor files should distinguish between post-fork Verbatim contributions and upstream Handy work.
+
+Upstream Handy contributors are acknowledged in [Acknowledgments](#acknowledgments). Verbatim contributor recognition is reserved for work contributed to this repository after the Verbatim fork.
+
 ## Related Projects
 
 - **[Handy](https://github.com/cjpais/Handy)** - The original project Verbatim is forked from, by CJ Pais
@@ -553,4 +559,4 @@ Verbatim stands on the shoulders of the people who built its foundations:
 - **Parakeet** by NVIDIA for the CPU-friendly transcription models ([V2](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2), [V3](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3) on Hugging Face)
 - **Silero** for great lightweight VAD
 - **Tauri** team for the excellent Rust-based app framework
-- **Community contributors** helping make Verbatim better
+- **Verbatim community contributors** helping make this fork better after the Verbatim project started
