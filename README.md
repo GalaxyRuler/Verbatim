@@ -13,30 +13,11 @@
 [![Offline](https://img.shields.io/badge/privacy-local%20first-15803d?style=flat-square)](#why-verbatim)
 [![Updater](https://img.shields.io/badge/updates-in--app-0f766e?style=flat-square)](#download-verbatim)
 
-[![Release](https://img.shields.io/github/actions/workflow/status/GalaxyRuler/Verbatim/release.yml?branch=main&label=release&style=flat-square&logo=githubactions)](https://github.com/GalaxyRuler/Verbatim/actions/workflows/release.yml)
-[![Build](https://img.shields.io/github/actions/workflow/status/GalaxyRuler/Verbatim/build.yml?branch=main&label=build&style=flat-square&logo=githubactions)](https://github.com/GalaxyRuler/Verbatim/actions/workflows/build.yml)
-[![Tests](https://img.shields.io/github/actions/workflow/status/GalaxyRuler/Verbatim/test.yml?branch=main&label=tests&style=flat-square&logo=rust)](https://github.com/GalaxyRuler/Verbatim/actions/workflows/test.yml)
-[![Code quality](https://img.shields.io/github/actions/workflow/status/GalaxyRuler/Verbatim/code-quality.yml?branch=main&label=code%20quality&style=flat-square)](https://github.com/GalaxyRuler/Verbatim/actions/workflows/code-quality.yml)
-[![Playwright](https://img.shields.io/github/actions/workflow/status/GalaxyRuler/Verbatim/playwright.yml?branch=main&label=playwright&style=flat-square&logo=playwright)](https://github.com/GalaxyRuler/Verbatim/actions/workflows/playwright.yml)
-[![Nix check](https://img.shields.io/github/actions/workflow/status/GalaxyRuler/Verbatim/nix-check.yml?branch=main&label=nix%20check&style=flat-square&logo=nixos)](https://github.com/GalaxyRuler/Verbatim/actions/workflows/nix-check.yml)
-
 </div>
 
 Verbatim is a cross-platform desktop application that provides simple, privacy-focused speech transcription. Press a shortcut, speak, and have your words appear in any text field. This happens on your own computer without sending any information to the cloud.
 
 Verbatim is a fork of [Handy](https://github.com/cjpais/Handy) by [CJ Pais](https://github.com/cjpais), carrying its open-source foundation forward under a new identity and direction. See [Acknowledgments](#acknowledgments).
-
-## Tech Stack
-
-[![Rust](https://img.shields.io/badge/Rust-000000?style=for-the-badge&logo=rust&logoColor=white)](https://www.rust-lang.org/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![React](https://img.shields.io/badge/React-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)](https://react.dev/)
-[![Tauri](https://img.shields.io/badge/Tauri_2-FFC131?style=for-the-badge&logo=tauri&logoColor=111827)](https://tauri.app/)
-[![Bun](https://img.shields.io/badge/Bun-14151A?style=for-the-badge&logo=bun&logoColor=FBF0DF)](https://bun.sh/)
-[![Vite](https://img.shields.io/badge/Vite-646CFF?style=for-the-badge&logo=vite&logoColor=white)](https://vite.dev/)
-[![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-0EA5E9?style=for-the-badge&logo=tailwindcss&logoColor=white)](https://tailwindcss.com/)
-[![Whisper](https://img.shields.io/badge/Whisper-111827?style=for-the-badge&logo=openai&logoColor=white)](https://github.com/openai/whisper)
-[![SQLite](https://img.shields.io/badge/SQLite-07405E?style=for-the-badge&logo=sqlite&logoColor=white)](https://www.sqlite.org/)
 
 ## Why Verbatim?
 
@@ -67,6 +48,23 @@ The process is entirely local:
 ## Download Verbatim
 
 Download the latest Windows, macOS, and Linux installers from the [Verbatim Releases page](https://github.com/GalaxyRuler/Verbatim/releases/latest).
+
+<!-- latest-release:start -->
+
+**Latest published release:** [v0.8.4](https://github.com/GalaxyRuler/Verbatim/releases/tag/v0.8.4) (2026-06-12)
+
+| Platform             | Direct downloads                                                                                                                                                                                                      |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Windows x64          | [setup.exe](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.8.4/Verbatim_0.8.4_x64-setup.exe) · [MSI](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.8.4/Verbatim_0.8.4_x64_en-US.msi)     |
+| Windows ARM64        | [setup.exe](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.8.4/Verbatim_0.8.4_arm64-setup.exe) · [MSI](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.8.4/Verbatim_0.8.4_arm64_en-US.msi) |
+| macOS Apple Silicon  | [DMG](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.8.4/Verbatim_0.8.4_aarch64.dmg)                                                                                                                    |
+| macOS Intel          | [DMG](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.8.4/Verbatim_0.8.4_x64.dmg)                                                                                                                        |
+| Ubuntu/Debian x64    | [DEB](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.8.4/Verbatim_0.8.4_amd64.deb)                                                                                                                      |
+| Ubuntu/Debian ARM64  | [DEB](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.8.4/Verbatim_0.8.4_arm64.deb)                                                                                                                      |
+| Linux AppImage       | [x64](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.8.4/Verbatim_0.8.4_amd64.AppImage) · [ARM64](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.8.4/Verbatim_0.8.4_aarch64.AppImage)     |
+| Fedora/RHEL/openSUSE | [x64 RPM](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.8.4/Verbatim-0.8.4-1.x86_64.rpm) · [ARM64 RPM](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.8.4/Verbatim-0.8.4-1.aarch64.rpm)  |
+
+<!-- latest-release:end -->
 
 Choose the asset that matches your operating system and CPU:
 
