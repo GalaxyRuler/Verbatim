@@ -45,9 +45,12 @@
     },
     "linux": {
       "deb": {
-        "depends": ["libgtk-layer-shell0"]
+        "depends": ["libgtk-layer-shell0"],
+        "recommends": ["python3-pyatspi", "wl-clipboard", "wtype", "xdotool"]
       },
       "rpm": {
+        "depends": ["gtk-layer-shell"],
+        "recommends": ["python3-pyatspi", "wl-clipboard", "wtype", "xdotool"],
         "compression": {
           "type": "none"
         }
