@@ -95,6 +95,7 @@ jobs:
       target: ${{ matrix.target }}
       build-args: ${{ matrix.args }}
       sign-binaries: ${{ inputs.sign_binaries }}
+      create-updater-artifacts: true
       asset-prefix: "verbatim"
       upload-artifacts: false
       release-id: ${{ needs.create-release.outputs.release-id }}
@@ -108,6 +109,34 @@ jobs:
       - create-release
       - publish-tauri
     steps:
+      - name: Verify updater release assets
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const releaseId = Number('${{ needs.create-release.outputs.release-id }}');
+            const { data: assets } = await github.rest.repos.listReleaseAssets({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: releaseId,
+              per_page: 100,
+            });
+
+            const names = assets.map((asset) => asset.name).sort();
+            const latestJson = names.includes('latest.json');
+            const signatures = names.filter((name) => name.endsWith('.sig'));
+
+            if (!latestJson) {
+              core.setFailed(`Missing latest.json. Assets found: ${names.join(', ')}`);
+              return;
+            }
+
+            if (signatures.length === 0) {
+              core.setFailed(`Missing updater .sig assets. Assets found: ${names.join(', ')}`);
+              return;
+            }
+
+            core.info(`Found latest.json and ${signatures.length} updater signature assets.`);
+
       - name: Publish release with download guidance
         uses: actions/github-script@v7
         with:
