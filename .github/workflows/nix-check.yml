@@ -4,13 +4,17 @@
 #    artifact/step-summary evidence trail.
 # 2. Quick nix checks (bun.nix sync, flake eval) run on ANY source change
 #    so compilation-breaking edits are caught by flake eval.
-# 3. Full nix build (~25 min) only runs when nix packaging files change.
+# 3. Full nix build (~25 min) runs only when nix packaging files change,
+#    nightly, or manually.
 #
-# Setting up a Cachix binary cache would further reduce full-build times.
+# The GalaxyRuler Cachix cache is configured for pulls on every run and pushes
+# when the repository has CACHIX_AUTH_TOKEN configured.
 
 name: "nix build check"
 on:
   workflow_dispatch:
+  schedule:
+    - cron: "17 2 * * *"
   push:
     branches: [main]
     paths:
@@ -40,6 +44,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: oven-sh/setup-bun@v2
         with:
@@ -86,8 +92,12 @@ jobs:
     needs: repo-health
     runs-on: ubuntu-24.04
     continue-on-error: false
+    env:
+      CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: oven-sh/setup-bun@v2
         with:
@@ -96,6 +106,20 @@ jobs:
       - uses: cachix/install-nix-action@v30
         with:
           nix_path: nixpkgs=channel:nixos-unstable
+
+      - name: Configure GalaxyRuler Cachix cache (pull and push)
+        if: env.CACHIX_AUTH_TOKEN != ''
+        uses: cachix/cachix-action@v17
+        with:
+          name: galaxyruler
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+
+      - name: Configure GalaxyRuler Cachix cache (pull only)
+        if: env.CACHIX_AUTH_TOKEN == ''
+        uses: cachix/cachix-action@v17
+        with:
+          name: galaxyruler
+          skipPush: true
 
       - uses: DeterminateSystems/magic-nix-cache-action@565684385bcd71bad329742eefe8d12f2e765b39 # v13
 
@@ -151,26 +175,41 @@ jobs:
           cat eval_err.log
           exit 1
 
-      # Detect whether nix packaging files changed — if only source code
-      # changed, the quick checks above are sufficient.
-      # Skipped on workflow_dispatch (no base ref) — full build runs instead.
-      - name: Check if nix files changed
-        if: github.event_name == 'pull_request'
+      # Detect whether nix packaging files changed. If only source code changed,
+      # the quick checks above are sufficient. Scheduled and manual runs always
+      # execute the full build.
+      - name: Check if nix packaging files changed
+        if: github.event_name == 'pull_request' || github.event_name == 'push'
         id: nix-files
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if gh api repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files \
-            --paginate --jq '.[].filename' | \
-            grep -qE '^(flake\.(nix|lock)|\.nix/|bun\.lock|src-tauri/(Cargo\.(toml|lock)|tauri\.conf\.json|build\.rs))'; then
+          set -euo pipefail
+
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            gh api repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files \
+              --paginate --jq '.[].filename' > changed_files.txt
+          else
+            base="${{ github.event.before }}"
+            if [[ -z "$base" || "$base" =~ ^0+$ ]]; then
+              base="HEAD^"
+            fi
+            git diff --name-only "$base" "${{ github.sha }}" > changed_files.txt
+          fi
+
+          cat changed_files.txt
+
+          if grep -qE '^(flake\.(nix|lock)|\.nix/|bun\.lock|src-tauri/(Cargo\.(toml|lock)|tauri\.conf\.json|build\.rs))' changed_files.txt; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
           fi
 
       # Full build — catches runtime build errors (broken dependencies,
       # sandbox issues, compilation failures) that flake eval alone misses.
       # On PRs: only runs when nix packaging files change (~25 min with cold cache).
-      # On push to main and workflow_dispatch: always runs so every commit on
-      # main has a verified nix build before release.
+      # On push to main: also only runs when nix packaging files change.
+      # On workflow_dispatch and the nightly schedule: always runs.
       - name: Build Verbatim
-        if: steps.bun-check.outputs.outdated != 'true' && steps.eval.outputs.failed != 'true' && (steps.nix-files.outputs.changed == 'true' || github.event_name == 'workflow_dispatch' || github.event_name == 'push')
+        if: steps.bun-check.outputs.outdated != 'true' && steps.eval.outputs.failed != 'true' && (steps.nix-files.outputs.changed == 'true' || github.event_name == 'workflow_dispatch' || github.event_name == 'schedule')
         run: nix build .#verbatim -L --show-trace
