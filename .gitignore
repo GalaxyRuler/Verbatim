@@ -49,3 +49,6 @@ blob-report/
 
 # Nix build output
 result
+
+# Generated Windows installer runtime DLL staging
+src-tauri/nsis/runtime/

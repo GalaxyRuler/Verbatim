@@ -334,6 +334,16 @@ jobs:
           echo "CMAKE_CXX_COMPILER_TARGET=aarch64-pc-windows-msvc" >> $env:GITHUB_ENV
           echo "CL=/EHsc" >> $env:GITHUB_ENV
 
+      - name: Stage Visual C++ runtime DLLs (Windows x64)
+        if: contains(inputs.platform, 'windows') && !contains(inputs.target, 'aarch64')
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/stage-windows-vc-runtime.ps1 -Arch x64
+
+      - name: Stage Visual C++ runtime DLLs (Windows ARM64)
+        if: contains(inputs.platform, 'windows') && contains(inputs.target, 'aarch64')
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/stage-windows-vc-runtime.ps1 -Arch arm64
+
       - name: Install ONNX Runtime (x86_64 macOS)
         if: inputs.target == 'x86_64-apple-darwin'
         shell: bash
@@ -404,7 +414,7 @@ jobs:
           releaseName: ${{ inputs.release-id && format('v{0}', steps.get-version.outputs.version) || '' }}
           releaseId: ${{ inputs.release-id }}
           assetNamePattern: ${{ steps.patch-release-name.outputs.platform }}
-          args: ${{ inputs.build-args }}
+          args: ${{ inputs.build-args }} ${{ env.VERBATIM_WINDOWS_RUNTIME_CONFIG }}
 
       - name: Build with Tauri (unsigned)
         if: ${{ !inputs.sign-binaries }}
@@ -427,7 +437,7 @@ jobs:
           releaseName: ${{ inputs.release-id && format('v{0}', steps.get-version.outputs.version) || '' }}
           releaseId: ${{ inputs.release-id }}
           assetNamePattern: ${{ steps.patch-release-name.outputs.platform }}
-          args: ${{ inputs.build-args }}
+          args: ${{ inputs.build-args }} ${{ env.VERBATIM_WINDOWS_RUNTIME_CONFIG }}
 
       - name: Verify macOS dylib bundling
         if: inputs.target == 'x86_64-apple-darwin'
