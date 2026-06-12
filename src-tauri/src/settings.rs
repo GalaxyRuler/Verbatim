@@ -223,6 +223,7 @@ impl Default for AutoSubmitKey {
 }
 
 impl ModelUnloadTimeout {
+    #[cfg_attr(not(feature = "transcribe-rs-engine"), allow(dead_code))]
     pub fn to_minutes(self) -> Option<u64> {
         match self {
             ModelUnloadTimeout::Never => None,
@@ -236,6 +237,7 @@ impl ModelUnloadTimeout {
         }
     }
 
+    #[cfg_attr(not(feature = "transcribe-rs-engine"), allow(dead_code))]
     pub fn to_seconds(self) -> Option<u64> {
         match self {
             ModelUnloadTimeout::Never => None,

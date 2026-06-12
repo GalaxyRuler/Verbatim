@@ -63,13 +63,11 @@ pub fn is_laptop() -> Result<bool, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     #[cfg(target_os = "macos")]
     fn test_clamshell_check() {
         // This will run on macOS and should not panic
-        let result = is_clamshell();
+        let result = super::is_clamshell();
         assert!(result.is_ok());
         let _ = result.unwrap();
     }
@@ -77,7 +75,7 @@ mod tests {
     #[test]
     #[cfg(target_os = "macos")]
     fn test_is_laptop() {
-        let result = is_laptop();
+        let result = super::is_laptop();
         assert!(result.is_ok());
         if let Ok(is_laptop) = result {
             println!("Is laptop: {}", is_laptop);

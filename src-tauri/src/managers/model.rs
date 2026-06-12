@@ -887,6 +887,7 @@ impl ModelManager {
         Ok(())
     }
 
+    #[cfg_attr(not(feature = "transcribe-rs-engine"), allow(dead_code))]
     pub fn get_model_path(&self, model_id: &str) -> Result<PathBuf> {
         let model_info = self
             .get_model_info(model_id)
@@ -932,6 +933,7 @@ impl ModelManager {
         }
     }
 
+    #[cfg_attr(not(feature = "transcribe-rs-engine"), allow(dead_code))]
     pub fn get_model_asset(&self, model_id: &str) -> Result<crate::providers::ModelAsset> {
         let model_info = self
             .get_model_info(model_id)
