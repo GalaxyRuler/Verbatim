@@ -32,6 +32,7 @@ directory and CMake uses Ninja:
 ```powershell
 bun run check:backend:windows
 bun run test:backend:windows -- portable --lib
+bun run build:windows:installer
 ```
 
 To run Cargo directly from PowerShell, use the same environment:
@@ -83,6 +84,16 @@ bun run tauri build
 ```
 
 This compiles a release binary and generates platform-specific bundles for the supported release targets: `.deb` on Ubuntu x64, `.dmg` on macOS Apple Silicon, and Windows installers on Windows x64.
+
+On Windows, use the wrapper instead of plain `bun run tauri build`:
+
+```powershell
+bun run build:windows:installer
+```
+
+The wrapper sets a short `CARGO_TARGET_DIR` before Tauri invokes Cargo. This
+avoids MSBuild `FileTracker` failures in the generated Whisper/Vulkan shader
+helper when CMake creates paths near Windows' legacy path limit.
 
 ## Linux Install (from source)
 
