@@ -1004,6 +1004,7 @@ test.describe("Verbatim App", () => {
     await expect(overlay).toHaveClass(/docked-expanded/);
     await expect(overlay.locator(".bars-container")).toBeVisible();
     await expect(overlay.locator(".bar")).toHaveCount(9);
+    await expect(overlay).toHaveCSS("width", "320px");
   });
 
   test("transient overlay does not inherit docked mode when setting is off", async ({

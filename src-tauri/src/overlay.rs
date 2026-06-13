@@ -31,8 +31,8 @@ tauri_panel! {
     })
 }
 
-const OVERLAY_WIDTH: f64 = 220.0;
-const OVERLAY_HEIGHT: f64 = 36.0;
+const OVERLAY_WIDTH: f64 = 320.0;
+const OVERLAY_HEIGHT: f64 = 42.0;
 
 #[cfg(target_os = "macos")]
 const OVERLAY_TOP_OFFSET: f64 = 46.0;
@@ -254,6 +254,7 @@ pub fn create_recording_overlay(app_handle: &AppHandle) {
     .always_on_top(true)
     .skip_taskbar(true)
     .transparent(true)
+    .focusable(false)
     .focused(false)
     .visible(false);
 
@@ -264,6 +265,8 @@ pub fn create_recording_overlay(app_handle: &AppHandle) {
     #[allow(unused_variables)]
     match builder.build() {
         Ok(window) => {
+            let _ = window.set_focusable(false);
+
             #[cfg(target_os = "linux")]
             {
                 // Try to initialize GTK layer shell, ignore errors if compositor doesn't support it

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
 use crate::managers::history::HistoryManager;
@@ -48,12 +48,30 @@ pub async fn paste_last_transcript(
     }
 
     let app_for_paste = app.clone();
+    let app_for_recovery = app.clone();
+    let text_for_recovery = text.clone();
+    let (sender, receiver) = std::sync::mpsc::channel();
+
     app.run_on_main_thread(move || {
-        if let Err(err) = crate::clipboard::paste(text, app_for_paste) {
+        let result = crate::clipboard::paste(text, app_for_paste);
+        if let Err(err) = &result {
             log::error!("Failed to paste last transcript: {}", err);
         }
+        let _ = sender.send(result);
     })
     .map_err(|err| err.to_string())?;
+
+    match receiver.recv().map_err(|err| err.to_string())? {
+        Ok(()) => {}
+        Err(err) => {
+            app_for_recovery
+                .clipboard()
+                .write_text(text_for_recovery)
+                .map_err(|clipboard_err| clipboard_err.to_string())?;
+            let _ = app_for_recovery.emit("paste-error", ());
+            return Err(err);
+        }
+    }
 
     Ok(true)
 }

@@ -1,3 +1,9 @@
+#root {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .recording-overlay {
   --overlay-accent: #7aa2f7;
   --overlay-accent-soft: #2563eb33;
@@ -14,7 +20,10 @@
   border: 1px solid var(--overlay-border);
   border-radius: 18px;
   opacity: 0;
-  transition: opacity 300ms ease-out;
+  transition:
+    opacity 300ms ease-out,
+    width 160ms ease-out,
+    height 160ms ease-out;
   box-sizing: border-box;
 }
 
@@ -27,9 +36,13 @@
 }
 
 .recording-overlay.docked-expanded {
+  width: 320px;
+  height: 40px;
   display: flex;
-  justify-content: center;
-  gap: 6px;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: 20px;
   opacity: 1;
 }
 
@@ -53,6 +66,7 @@
 }
 
 .bars-container {
+  flex: 1 1 auto;
   display: flex;
   align-items: end;
   justify-content: center;
