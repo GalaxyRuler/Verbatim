@@ -20,11 +20,18 @@ use std::sync::Arc;
 use std::time::Instant;
 use tauri::Manager;
 use tauri::{AppHandle, Emitter};
+use tauri_plugin_clipboard_manager::ClipboardExt;
 
 #[derive(Clone, serde::Serialize)]
 struct RecordingErrorEvent {
     error_type: String,
     detail: Option<String>,
+}
+
+#[derive(Clone, serde::Serialize)]
+struct LanguageGuardEvent {
+    locked_language: String,
+    preview: String,
 }
 
 /// Drop guard that notifies the [`TranscriptionCoordinator`] when the
@@ -65,6 +72,52 @@ fn build_system_prompt(prompt_template: &str) -> String {
 
 fn validate_post_processed_text(transcription: &str, processed_text: &str) -> Result<(), String> {
     crate::adaptive::processor::validate_unrequested_translation(transcription, processed_text)
+}
+
+fn copy_text_to_clipboard(app: &AppHandle, text: &str, reason: &str) {
+    if let Err(err) = app.clipboard().write_text(text.to_string()) {
+        error!("Failed to copy text to clipboard after {}: {}", reason, err);
+    }
+}
+
+fn language_guard_receipt(target_verified: bool) -> crate::adaptive::types::InsertionReceipt {
+    crate::adaptive::types::InsertionReceipt {
+        attempted: false,
+        succeeded: false,
+        method: crate::adaptive::types::InsertionMethod::None,
+        target_verified,
+        error: Some("language guard blocked paste".to_string()),
+    }
+}
+
+fn language_guard_blocks(app: &AppHandle, settings: &AppSettings, final_text: &str) -> bool {
+    if settings.translate_to_english || settings.translation_enabled {
+        return false;
+    }
+
+    if !crate::adaptive::language_guard::contradicts_locked_language(
+        &settings.selected_language,
+        final_text,
+    ) {
+        return false;
+    }
+
+    warn!(
+        "Language guard blocked paste because output script contradicts locked language '{}'",
+        settings.selected_language
+    );
+    copy_text_to_clipboard(app, final_text, "language guard block");
+
+    let preview = final_text.chars().take(80).collect();
+    let _ = app.emit(
+        "language-guard-blocked",
+        LanguageGuardEvent {
+            locked_language: settings.selected_language.clone(),
+            preview,
+        },
+    );
+
+    true
 }
 
 fn accept_post_processed_text(
@@ -879,6 +932,7 @@ impl ShortcutAction for TranscribeAction {
                                     let original_context = context.clone();
                                     let private_patterns =
                                         settings.adaptive_private_app_patterns.clone();
+                                    let settings_for_guard = settings.clone();
                                     ah.run_on_main_thread(move || {
                                         let current_context =
                                             crate::adaptive::context::capture_context(
@@ -889,11 +943,27 @@ impl ShortcutAction for TranscribeAction {
                                             &current_context,
                                         );
                                         let receipt = if target_verified {
-                                            utils::paste_with_receipt(
-                                                final_text,
-                                                ah_clone.clone(),
-                                                true,
-                                            )
+                                            if language_guard_blocks(
+                                                &ah_clone,
+                                                &settings_for_guard,
+                                                &final_text,
+                                            ) {
+                                                language_guard_receipt(true)
+                                            } else {
+                                                let receipt = utils::paste_with_receipt(
+                                                    final_text.clone(),
+                                                    ah_clone.clone(),
+                                                    true,
+                                                );
+                                                if !receipt.succeeded && receipt.attempted {
+                                                    copy_text_to_clipboard(
+                                                        &ah_clone,
+                                                        &final_text,
+                                                        "adaptive paste failure",
+                                                    );
+                                                }
+                                                receipt
+                                            }
                                         } else {
                                             error!(
                                                 "Adaptive paste skipped because the foreground target changed before insertion"
@@ -962,15 +1032,28 @@ impl ShortcutAction for TranscribeAction {
                                     let ah_clone = ah.clone();
                                     let paste_time = Instant::now();
                                     let final_text = processed.final_text;
+                                    let settings_for_guard = settings.clone();
                                     ah.run_on_main_thread(move || {
-                                        match utils::paste(final_text, ah_clone.clone()) {
-                                            Ok(()) => debug!(
-                                                "Text pasted successfully in {:?}",
-                                                paste_time.elapsed()
-                                            ),
-                                            Err(e) => {
-                                                error!("Failed to paste transcription: {}", e);
-                                                let _ = ah_clone.emit("paste-error", ());
+                                        if !language_guard_blocks(
+                                            &ah_clone,
+                                            &settings_for_guard,
+                                            &final_text,
+                                        ) {
+                                            match utils::paste(final_text.clone(), ah_clone.clone())
+                                            {
+                                                Ok(()) => debug!(
+                                                    "Text pasted successfully in {:?}",
+                                                    paste_time.elapsed()
+                                                ),
+                                                Err(e) => {
+                                                    error!("Failed to paste transcription: {}", e);
+                                                    copy_text_to_clipboard(
+                                                        &ah_clone,
+                                                        &final_text,
+                                                        "paste failure",
+                                                    );
+                                                    let _ = ah_clone.emit("paste-error", ());
+                                                }
                                             }
                                         }
                                         utils::hide_recording_overlay(&ah_clone);
