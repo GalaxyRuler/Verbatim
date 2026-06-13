@@ -463,6 +463,17 @@ mod tests {
     }
 
     #[test]
+    fn apply_dictionary_entries_handles_hyphenated_name_replacement() {
+        let result = apply_dictionary_entries(
+            "Abdullah Al-Khulayb joined",
+            &[dictionary_entry("Al Kulaib", Some("Al-Khulayb"))],
+            0.18,
+        );
+
+        assert_eq!(result, "Abdullah Al Kulaib joined");
+    }
+
+    #[test]
     fn apply_dictionary_entries_falls_back_to_custom_word_fuzzy_match() {
         let result =
             apply_dictionary_entries("charge b", &[dictionary_entry("ChargeBee", None)], 0.5);

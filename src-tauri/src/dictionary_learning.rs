@@ -1,6 +1,7 @@
 const MAX_AUTO_LEARN_WORD_CHARS: usize = 60;
 const MAX_AUTO_LEARN_PHRASE_CHARS: usize = 120;
 const MAX_AUTO_LEARN_PHRASE_TOKENS: usize = 5;
+const MAX_HYPHEN_PART_DISTANCE: usize = 2;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AutoLearnCandidate {
@@ -17,7 +18,11 @@ pub fn infer_auto_learn_candidates(
     let corrected_tokens = word_tokens(corrected_text);
 
     if dictated_tokens.len() != corrected_tokens.len() {
-        return Vec::new();
+        return infer_hyphen_split_auto_learn_candidates(
+            &dictated_tokens,
+            &corrected_tokens,
+            existing_words,
+        );
     }
 
     let mut candidates = Vec::new();
@@ -69,6 +74,118 @@ pub fn infer_auto_learn_candidates(
     }
 
     candidates
+}
+
+fn infer_hyphen_split_auto_learn_candidates(
+    dictated_tokens: &[String],
+    corrected_tokens: &[String],
+    existing_words: &[String],
+) -> Vec<AutoLearnCandidate> {
+    let mut candidates = Vec::new();
+    let mut dictated_index = 0;
+    let mut corrected_index = 0;
+
+    while dictated_index < dictated_tokens.len() && corrected_index < corrected_tokens.len() {
+        let dictated = &dictated_tokens[dictated_index];
+        let corrected = &corrected_tokens[corrected_index];
+
+        if dictated.eq_ignore_ascii_case(corrected) {
+            dictated_index += 1;
+            corrected_index += 1;
+            continue;
+        }
+
+        let dictated_parts = split_hyphenated_token(dictated);
+        if dictated_parts.len() < 2 {
+            return Vec::new();
+        }
+
+        let corrected_end = corrected_index + dictated_parts.len();
+        if corrected_end > corrected_tokens.len() {
+            return Vec::new();
+        }
+
+        let corrected_parts = &corrected_tokens[corrected_index..corrected_end];
+        if !hyphen_parts_match_correction(&dictated_parts, corrected_parts) {
+            return Vec::new();
+        }
+
+        let raw_phrase = corrected_parts.join(" ");
+        let Some(phrase) = sanitize_custom_phrase_candidate(&raw_phrase) else {
+            return Vec::new();
+        };
+
+        if is_likely_custom_dictionary_phrase(&phrase)
+            && !is_existing_word(&phrase, existing_words)
+            && !is_existing_candidate(&phrase, &candidates)
+        {
+            candidates.push(AutoLearnCandidate {
+                phrase,
+                replacement_of: Some(dictated.clone()),
+            });
+        }
+
+        dictated_index += 1;
+        corrected_index = corrected_end;
+    }
+
+    if dictated_index == dictated_tokens.len() && corrected_index == corrected_tokens.len() {
+        candidates
+    } else {
+        Vec::new()
+    }
+}
+
+fn split_hyphenated_token(token: &str) -> Vec<String> {
+    token
+        .split('-')
+        .filter(|part| !part.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+fn hyphen_parts_match_correction(dictated_parts: &[String], corrected_parts: &[String]) -> bool {
+    dictated_parts.len() == corrected_parts.len()
+        && dictated_parts
+            .iter()
+            .zip(corrected_parts.iter())
+            .all(|(dictated, corrected)| tokens_are_close(dictated, corrected))
+}
+
+fn tokens_are_close(left: &str, right: &str) -> bool {
+    let left = left.to_lowercase();
+    let right = right.to_lowercase();
+
+    if left == right {
+        return true;
+    }
+
+    let max_chars = left.chars().count().max(right.chars().count());
+    if max_chars < 4 {
+        return false;
+    }
+
+    edit_distance(&left, &right) <= MAX_HYPHEN_PART_DISTANCE.min(max_chars / 3).max(1)
+}
+
+fn edit_distance(left: &str, right: &str) -> usize {
+    let right_chars = right.chars().collect::<Vec<_>>();
+    let mut costs = (0..=right_chars.len()).collect::<Vec<_>>();
+
+    for (left_index, left_char) in left.chars().enumerate() {
+        let mut previous = costs[0];
+        costs[0] = left_index + 1;
+
+        for (right_index, right_char) in right_chars.iter().enumerate() {
+            let insertion = costs[right_index + 1] + 1;
+            let deletion = costs[right_index] + 1;
+            let substitution = previous + usize::from(left_char != *right_char);
+            previous = costs[right_index + 1];
+            costs[right_index + 1] = insertion.min(deletion).min(substitution);
+        }
+    }
+
+    costs[right_chars.len()]
 }
 
 fn infer_auto_learn_phrase_candidates(
@@ -204,6 +321,10 @@ fn sanitize_custom_word_candidate(raw: &str) -> Option<String> {
         return None;
     }
 
+    if cleaned.starts_with('-') || cleaned.ends_with('-') {
+        return None;
+    }
+
     Some(cleaned)
 }
 
@@ -270,12 +391,14 @@ fn is_likely_custom_dictionary_term(candidate: &str) -> bool {
 }
 
 fn is_likely_custom_dictionary_phrase(candidate: &str) -> bool {
+    let tokens = candidate.split_whitespace().collect::<Vec<_>>();
     let notable_terms = candidate
         .split_whitespace()
         .filter(|token| !is_phrase_connector(token) && is_likely_custom_dictionary_term(token))
         .count();
 
     notable_terms >= 2
+        || matches!(tokens.as_slice(), [connector, term] if is_phrase_connector(connector) && is_likely_custom_dictionary_term(term))
 }
 
 fn is_phrase_connector(token: &str) -> bool {
@@ -334,6 +457,30 @@ mod tests {
                 replacement_of: Some("abdullah al kulaib".to_string()),
             }]
         );
+    }
+
+    #[test]
+    fn suggests_hyphenated_name_correction_as_phrase_mapping() {
+        let candidates = infer_auto_learn_candidates(
+            "my name is Abdullah Al-Khulayb",
+            "my name is Abdullah Al Kulaib",
+            &[],
+        );
+
+        assert_eq!(
+            candidates,
+            vec![AutoLearnCandidate {
+                phrase: "Al Kulaib".to_string(),
+                replacement_of: Some("Al-Khulayb".to_string()),
+            }]
+        );
+    }
+
+    #[test]
+    fn ignores_dangling_hyphen_partial_corrections() {
+        let candidates = infer_auto_learn_candidates("Abdullah Al-Kulayb", "Abdullah Al-", &[]);
+
+        assert!(candidates.is_empty());
     }
 
     #[test]
