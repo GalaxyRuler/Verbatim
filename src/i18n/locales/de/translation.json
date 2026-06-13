@@ -708,7 +708,13 @@
     "modelLoadFailed": "Modell konnte nicht geladen werden: {{model}}",
     "modelLoadFailedUnknown": "unbekanntes Modell",
     "pasteFailedTitle": "Text konnte nicht eingefügt werden",
-    "pasteFailed": "Der Text konnte nicht in die aktive Anwendung eingefügt werden."
+    "pasteFailed": "Der Text konnte nicht in die aktive Anwendung eingefügt werden.",
+    "pasteFailedCopiedHint": "The text was copied to your clipboard so you can paste it manually.",
+    "pasteFailedCopyAction": "Copy again",
+    "languageGuardTitle": "Wrong Language Detected",
+    "languageGuardDescription": "Verbatim blocked text that did not match your locked language ({{language}}). It was copied to your clipboard.",
+    "languageGuardPreview": "Preview: {{preview}}",
+    "languageGuardPasteAnyway": "Paste anyway"
   },
   "appLanguage": {
     "title": "Anwendungssprache",

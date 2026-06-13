@@ -22,6 +22,11 @@ import { getLanguageDirection, initializeRTL } from "@/lib/utils/rtl";
 
 type OnboardingStep = "accessibility" | "model" | "done";
 
+type LanguageGuardBlockedEvent = {
+  locked_language: string;
+  preview: string;
+};
+
 const renderSettingsContent = (section: SidebarSection) => {
   const ActiveComponent =
     SECTIONS_CONFIG[section]?.component || SECTIONS_CONFIG.general.component;
@@ -135,9 +140,47 @@ function App() {
   useEffect(() => {
     const unlisten = listen("paste-error", () => {
       toast.error(t("errors.pasteFailedTitle"), {
-        description: t("errors.pasteFailed"),
+        description: `${t("errors.pasteFailed")} ${t("errors.pasteFailedCopiedHint")}`,
+        action: {
+          label: t("errors.pasteFailedCopyAction"),
+          onClick: () => {
+            void commands.copyLastTranscript();
+          },
+        },
       });
     });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [t]);
+
+  // If a locked language clearly conflicts with the transcribed script, keep
+  // the text recoverable while making the recovery action explicit.
+  useEffect(() => {
+    const unlisten = listen<LanguageGuardBlockedEvent>(
+      "language-guard-blocked",
+      (event) => {
+        const preview = event.payload.preview.trim();
+        const descriptionParts = [
+          t("errors.languageGuardDescription", {
+            language: event.payload.locked_language,
+          }),
+        ];
+        if (preview.length > 0) {
+          descriptionParts.push(t("errors.languageGuardPreview", { preview }));
+        }
+
+        toast.warning(t("errors.languageGuardTitle"), {
+          description: descriptionParts.join(" "),
+          action: {
+            label: t("errors.languageGuardPasteAnyway"),
+            onClick: () => {
+              void commands.pasteLastTranscript();
+            },
+          },
+        });
+      },
+    );
     return () => {
       unlisten.then((fn) => fn());
     };

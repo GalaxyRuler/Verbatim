@@ -708,7 +708,13 @@
     "modelLoadFailed": "Зареждането на модела не бе успешно: {{model}}",
     "modelLoadFailedUnknown": "неизвестен модел",
     "pasteFailedTitle": "Неуспешно поставяне на текст",
-    "pasteFailed": "Текстът не можа да бъде поставен в активното приложение."
+    "pasteFailed": "Текстът не можа да бъде поставен в активното приложение.",
+    "pasteFailedCopiedHint": "The text was copied to your clipboard so you can paste it manually.",
+    "pasteFailedCopyAction": "Copy again",
+    "languageGuardTitle": "Wrong Language Detected",
+    "languageGuardDescription": "Verbatim blocked text that did not match your locked language ({{language}}). It was copied to your clipboard.",
+    "languageGuardPreview": "Preview: {{preview}}",
+    "languageGuardPasteAnyway": "Paste anyway"
   },
   "appLanguage": {
     "title": "Език на приложението",

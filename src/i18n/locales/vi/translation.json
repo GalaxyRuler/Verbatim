@@ -708,7 +708,13 @@
     "modelLoadFailed": "Không thể tải mô hình: {{model}}",
     "modelLoadFailedUnknown": "mô hình không xác định",
     "pasteFailedTitle": "Không thể dán văn bản",
-    "pasteFailed": "Không thể dán văn bản vào ứng dụng đang hoạt động."
+    "pasteFailed": "Không thể dán văn bản vào ứng dụng đang hoạt động.",
+    "pasteFailedCopiedHint": "The text was copied to your clipboard so you can paste it manually.",
+    "pasteFailedCopyAction": "Copy again",
+    "languageGuardTitle": "Wrong Language Detected",
+    "languageGuardDescription": "Verbatim blocked text that did not match your locked language ({{language}}). It was copied to your clipboard.",
+    "languageGuardPreview": "Preview: {{preview}}",
+    "languageGuardPasteAnyway": "Paste anyway"
   },
   "appLanguage": {
     "title": "Ngôn ngữ ứng dụng",

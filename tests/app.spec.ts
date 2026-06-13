@@ -123,6 +123,10 @@ const installTauriMocks = async (page: Page) => {
           entries: Array<Record<string, unknown>>,
         ) => void;
         __VERBATIM_TEST_LEARN_WORDS__: (words: string[]) => void;
+        __VERBATIM_TEST_EMIT_EVENT__: (
+          event: string,
+          payload?: unknown,
+        ) => void;
       };
       testWindow.__VERBATIM_TEST_COMMANDS__ = [];
       let dictionaryEntries = [
@@ -147,6 +151,7 @@ const installTauriMocks = async (page: Page) => {
           });
         }
       };
+      testWindow.__VERBATIM_TEST_EMIT_EVENT__ = emitEvent;
       testWindow.__VERBATIM_TEST_LEARN_ENTRIES__ = (entries) => {
         dictionaryEntries = [...dictionaryEntries, ...entries];
         syncDictionarySettings();
@@ -274,6 +279,9 @@ const installTauriMocks = async (page: Page) => {
               syncDictionarySettings();
               return deleted;
             }
+            case "copy_last_transcript":
+            case "paste_last_transcript":
+              return true;
             case "has_any_models_available":
               return true;
             case "get_available_models":
@@ -501,5 +509,66 @@ test.describe("Verbatim App", () => {
     await page.getByText("Advanced").click();
     await expect(page.getByText("Custom Words")).toHaveCount(0);
     await expect(page.getByText("Dictionary")).toBeVisible();
+  });
+
+  test("language guard toast can paste the last transcript anyway", async ({
+    page,
+  }) => {
+    await installTauriMocks(page);
+    await page.goto("/");
+    await expect(page.getByTitle("General")).toBeVisible();
+
+    await page.evaluate(() => {
+      const win = window as typeof window & {
+        __VERBATIM_TEST_EMIT_EVENT__: (
+          event: string,
+          payload?: unknown,
+        ) => void;
+      };
+      win.__VERBATIM_TEST_EMIT_EVENT__("language-guard-blocked", {
+        locked_language: "en",
+        preview: "مرحبا بالعالم",
+      });
+    });
+
+    await expect(page.getByText("Wrong Language Detected")).toBeVisible();
+    await page.getByRole("button", { name: "Paste anyway" }).click();
+
+    const commands = await page.evaluate(() => {
+      const win = window as typeof window & {
+        __VERBATIM_TEST_COMMANDS__: string[];
+      };
+      return win.__VERBATIM_TEST_COMMANDS__;
+    });
+    expect(commands).toContain("paste_last_transcript");
+  });
+
+  test("paste failure toast can copy the last transcript again", async ({
+    page,
+  }) => {
+    await installTauriMocks(page);
+    await page.goto("/");
+    await expect(page.getByTitle("General")).toBeVisible();
+
+    await page.evaluate(() => {
+      const win = window as typeof window & {
+        __VERBATIM_TEST_EMIT_EVENT__: (
+          event: string,
+          payload?: unknown,
+        ) => void;
+      };
+      win.__VERBATIM_TEST_EMIT_EVENT__("paste-error");
+    });
+
+    await expect(page.getByText("Failed to Paste Text")).toBeVisible();
+    await page.getByRole("button", { name: "Copy again" }).click();
+
+    const commands = await page.evaluate(() => {
+      const win = window as typeof window & {
+        __VERBATIM_TEST_COMMANDS__: string[];
+      };
+      return win.__VERBATIM_TEST_COMMANDS__;
+    });
+    expect(commands).toContain("copy_last_transcript");
   });
 });

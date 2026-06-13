@@ -708,7 +708,13 @@
     "modelLoadFailed": "Falha ao carregar o modelo: {{model}}",
     "modelLoadFailedUnknown": "modelo desconhecido",
     "pasteFailedTitle": "Falha ao colar o texto",
-    "pasteFailed": "Não foi possível colar o texto no aplicativo ativo."
+    "pasteFailed": "Não foi possível colar o texto no aplicativo ativo.",
+    "pasteFailedCopiedHint": "The text was copied to your clipboard so you can paste it manually.",
+    "pasteFailedCopyAction": "Copy again",
+    "languageGuardTitle": "Wrong Language Detected",
+    "languageGuardDescription": "Verbatim blocked text that did not match your locked language ({{language}}). It was copied to your clipboard.",
+    "languageGuardPreview": "Preview: {{preview}}",
+    "languageGuardPasteAnyway": "Paste anyway"
   },
   "appLanguage": {
     "title": "Idioma da Aplicação",

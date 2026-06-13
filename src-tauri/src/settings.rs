@@ -1205,6 +1205,18 @@ mod tests {
     }
 
     #[test]
+    fn default_settings_disable_post_processing() {
+        let settings = get_default_settings();
+        assert!(!settings.post_process_enabled);
+    }
+
+    #[test]
+    fn default_settings_use_auto_language() {
+        let settings = get_default_settings();
+        assert_eq!(settings.selected_language, "auto");
+    }
+
+    #[test]
     fn dictionary_defaults_migrate_legacy_custom_words() {
         let mut settings = get_default_settings();
         settings.custom_words = vec!["Robyn".to_string()];

@@ -137,6 +137,19 @@ fn accept_post_processed_text(
     }
 }
 
+fn is_local_post_process_provider(base_url: &str) -> bool {
+    let normalized = base_url.trim().to_ascii_lowercase();
+    normalized.starts_with("apple-intelligence://")
+        || normalized.starts_with("http://localhost")
+        || normalized.starts_with("https://localhost")
+        || normalized.starts_with("http://127.0.0.1")
+        || normalized.starts_with("https://127.0.0.1")
+}
+
+fn can_egress_post_process_text(provider_base_url: &str, api_key: &str) -> bool {
+    is_local_post_process_provider(provider_base_url) || !api_key.trim().is_empty()
+}
+
 async fn post_process_transcription(settings: &AppSettings, transcription: &str) -> Option<String> {
     let provider = match settings.active_post_process_provider().cloned() {
         Some(provider) => provider,
@@ -198,6 +211,14 @@ async fn post_process_transcription(settings: &AppSettings, transcription: &str)
         .get(&provider.id)
         .cloned()
         .unwrap_or_default();
+
+    if !can_egress_post_process_text(&provider.base_url, &api_key) {
+        warn!(
+            "Post-processing skipped for provider '{}' because remote providers require a configured API key before transcript egress",
+            provider.id
+        );
+        return None;
+    }
 
     // Disable reasoning for providers where post-processing rarely benefits from it.
     // - custom: top-level reasoning_effort (works for local OpenAI-compat servers)
@@ -653,6 +674,38 @@ mod adaptive_action_tests {
             "Please send the file today.",
         );
         assert!(validation.is_ok());
+    }
+
+    #[test]
+    fn local_post_process_providers_do_not_require_api_key() {
+        assert!(can_egress_post_process_text(
+            "http://localhost:11434/v1",
+            ""
+        ));
+        assert!(can_egress_post_process_text(
+            "https://127.0.0.1:8080/v1",
+            "   "
+        ));
+        assert!(can_egress_post_process_text(
+            "apple-intelligence://local",
+            ""
+        ));
+    }
+
+    #[test]
+    fn remote_post_process_providers_require_api_key() {
+        assert!(!can_egress_post_process_text(
+            "https://api.openai.com/v1",
+            ""
+        ));
+        assert!(!can_egress_post_process_text(
+            "https://openrouter.ai/api/v1",
+            "   "
+        ));
+        assert!(can_egress_post_process_text(
+            "https://api.openai.com/v1",
+            "sk-test"
+        ));
     }
 }
 
