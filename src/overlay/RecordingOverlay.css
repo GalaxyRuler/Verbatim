@@ -100,10 +100,10 @@
 }
 
 .language-mode-chip {
-  min-width: 42px;
-  max-width: 58px;
+  min-width: 50px;
+  max-width: 76px;
   height: 24px;
-  padding: 0 7px;
+  padding: 0 8px;
   border: 1px solid color-mix(in srgb, var(--overlay-accent) 60%, transparent);
   border-radius: 999px;
   background: color-mix(in srgb, var(--overlay-accent) 16%, transparent);

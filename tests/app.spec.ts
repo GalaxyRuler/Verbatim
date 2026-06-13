@@ -108,6 +108,17 @@ const settingRow = (page: Page, name: string) =>
     .getByText(name)
     .locator("xpath=ancestor::div[contains(@class, 'justify-between')][1]");
 
+const expectTextFits = async (page: Page, selector: string) => {
+  await expect
+    .poll(async () =>
+      page.locator(selector).evaluate((element) => {
+        const htmlElement = element as HTMLElement;
+        return htmlElement.scrollWidth <= htmlElement.clientWidth;
+      }),
+    )
+    .toBe(true);
+};
+
 const installTauriMocks = async (page: Page) => {
   await page.addInitScript(
     ({ settings, profiles, models }) => {
@@ -620,9 +631,11 @@ test.describe("Verbatim App", () => {
     });
     await expect(languageButton).toBeVisible();
     await expect(languageButton).toHaveText("Auto");
+    await expectTextFits(page, ".language-mode-chip");
 
     await languageButton.click();
     await expect(languageButton).toHaveText("FR");
+    await expectTextFits(page, ".language-mode-chip");
 
     const commands = await page.evaluate(() => {
       const win = window as typeof window & {
