@@ -21,23 +21,67 @@ import {
   type DictationLanguageSelection,
   getDictationLanguageMode,
   getDictationLanguageModeLabel,
+  getDictationLanguagePickerOptions,
   getNextDictationLanguageSelection,
   getSettingsForDictationLanguageSelection,
 } from "@/lib/dictationLanguageMode";
 import { getLanguageDirection } from "@/lib/utils/rtl";
 
 type OverlayState =
+  | "idle"
   | "recording"
+  | "silence"
   | "transcribing"
   | "processing"
+  | "inserted"
+  | "copied"
   | "paste_failed"
-  | "dictionary_learned";
+  | "mic_failed"
+  | "dictionary_learned"
+  | "cancelled";
+
+const overlayStates = new Set<OverlayState>([
+  "idle",
+  "recording",
+  "silence",
+  "transcribing",
+  "processing",
+  "inserted",
+  "copied",
+  "paste_failed",
+  "mic_failed",
+  "dictionary_learned",
+  "cancelled",
+]);
+
+const stateLabelKeys: Record<OverlayState, string> = {
+  idle: "overlay.states.idle",
+  recording: "overlay.states.recording",
+  silence: "overlay.states.silence",
+  transcribing: "overlay.transcribing",
+  processing: "overlay.processing",
+  inserted: "overlay.states.inserted",
+  copied: "overlay.states.copied",
+  paste_failed: "overlay.pasteFailed",
+  mic_failed: "overlay.states.micFailed",
+  dictionary_learned: "overlay.dictionaryLearned.title",
+  cancelled: "overlay.states.cancelled",
+};
+
+const getOverlayState = (state: unknown): OverlayState =>
+  typeof state === "string" && overlayStates.has(state as OverlayState)
+    ? (state as OverlayState)
+    : "recording";
+
+const shouldExpandForState = (state: OverlayState): boolean =>
+  state !== "idle" && state !== "recording";
 
 const RecordingOverlay: React.FC = () => {
   const { t } = useTranslation();
   const [isVisible, setIsVisible] = useState(false);
   const [isDocked, setIsDocked] = useState(false);
   const [isDockedExpanded, setIsDockedExpanded] = useState(false);
+  const [isLanguagePickerOpen, setIsLanguagePickerOpen] = useState(false);
   const [state, setState] = useState<OverlayState>("recording");
   const [recentlyLearnedEntries, setRecentlyLearnedEntries] = useState<
     DictionaryEntry[]
@@ -58,12 +102,13 @@ const RecordingOverlay: React.FC = () => {
     setIsDocked(enabled);
   };
 
-  const shouldShowDockedFeedback = async () => {
-    if (isDockedRef.current) return true;
-
+  const getDockedPillSetting = async () => {
     const result = await commands.getAppSettings();
     return result.status === "ok" && result.data.docked_pill_enabled === true;
   };
+
+  const shouldShowDockedFeedback = async () =>
+    isDockedRef.current || (await getDockedPillSetting());
 
   const refreshLanguageMode = async () => {
     const result = await commands.getAppSettings();
@@ -92,9 +137,13 @@ const RecordingOverlay: React.FC = () => {
         // Sync language from settings each time overlay is shown
         await syncLanguageFromSettings();
         await refreshLanguageMode();
-        const overlayState = event.payload as OverlayState;
-        setDockedMode(false);
-        setIsDockedExpanded(false);
+        const overlayState = getOverlayState(event.payload);
+        const dockedEnabled = await getDockedPillSetting();
+        setDockedMode(dockedEnabled);
+        setIsDockedExpanded(
+          dockedEnabled ? shouldExpandForState(overlayState) : false,
+        );
+        setIsLanguagePickerOpen(false);
         setRecentlyLearnedEntries([]);
         setState(overlayState);
         setIsVisible(true);
@@ -107,7 +156,8 @@ const RecordingOverlay: React.FC = () => {
           await refreshLanguageMode();
           setDockedMode(true);
           setIsDockedExpanded(false);
-          setState("recording");
+          setIsLanguagePickerOpen(false);
+          setState("idle");
           setIsVisible(true);
         },
       );
@@ -117,6 +167,7 @@ const RecordingOverlay: React.FC = () => {
 
         setDockedMode(true);
         setIsDockedExpanded(true);
+        setIsLanguagePickerOpen(false);
         setState("paste_failed");
         setIsVisible(true);
       });
@@ -130,8 +181,23 @@ const RecordingOverlay: React.FC = () => {
           setRecentlyLearnedEntries(event.payload);
           setDockedMode(true);
           setIsDockedExpanded(true);
+          setIsLanguagePickerOpen(false);
           setState("dictionary_learned");
           setIsVisible(true);
+        },
+      );
+
+      const unlistenStateChanged = await listen(
+        "overlay-state-changed",
+        (event) => {
+          const overlayState = getOverlayState(event.payload);
+          setIsLanguagePickerOpen(false);
+          setState(overlayState);
+
+          if (isDockedRef.current) {
+            setIsDockedExpanded(shouldExpandForState(overlayState));
+            setIsVisible(true);
+          }
         },
       );
 
@@ -139,6 +205,7 @@ const RecordingOverlay: React.FC = () => {
       const unlistenHide = await listen("hide-overlay", () => {
         setIsVisible(false);
         setIsDockedExpanded(false);
+        setIsLanguagePickerOpen(false);
       });
 
       // Listen for mic-level updates
@@ -161,6 +228,7 @@ const RecordingOverlay: React.FC = () => {
         unlistenShowDocked();
         unlistenPasteError();
         unlistenDictionaryLearned();
+        unlistenStateChanged();
         unlistenHide();
         unlistenLevel();
       };
@@ -170,11 +238,25 @@ const RecordingOverlay: React.FC = () => {
   }, []);
 
   const handleLanguageModeClick = async () => {
+    if (isDocked || isLanguagePickerOpen) {
+      setIsLanguagePickerOpen((current) => !current);
+      return;
+    }
+
     const previousSelection = languageSelection;
     const nextSelection = getSettingsForDictationLanguageSelection(
       getNextDictationLanguageSelection(languageSelection),
     );
+    await persistLanguageSelection(nextSelection, previousSelection);
+  };
+
+  const persistLanguageSelection = async (
+    selection: DictationLanguageSelection,
+    previousSelection = languageSelection,
+  ) => {
+    const nextSelection = getSettingsForDictationLanguageSelection(selection);
     setLanguageSelection(nextSelection);
+    setIsLanguagePickerOpen(false);
     const result = await commands.changeDictationLanguageModeSetting(
       nextSelection.dictationLanguageMode,
       nextSelection.selectedLanguage,
@@ -237,7 +319,78 @@ const RecordingOverlay: React.FC = () => {
     </button>
   );
 
+  const renderLanguagePicker = () => (
+    <div
+      className="language-picker-options"
+      role="menu"
+      aria-label={t("overlay.languageMode.title")}
+    >
+      {getDictationLanguagePickerOptions(languageSelection).map((option) => {
+        const isSelected =
+          option.selection.dictationLanguageMode ===
+            languageSelection.dictationLanguageMode &&
+          option.selection.selectedLanguage ===
+            languageSelection.selectedLanguage;
+
+        return (
+          <button
+            key={`${option.selection.dictationLanguageMode}-${option.selection.selectedLanguage}-${option.label}`}
+            type="button"
+            className="language-picker-option"
+            role="menuitemradio"
+            aria-checked={isSelected}
+            onClick={() => {
+              void persistLanguageSelection(option.selection);
+            }}
+          >
+            {option.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+
+  const renderStateStatus = () => (
+    <>
+      <div className="docked-status" role="status" aria-live="polite">
+        <span className="docked-status-title">{t(stateLabelKeys[state])}</span>
+      </div>
+      <div className="docked-actions">
+        {(state === "copied" || state === "paste_failed") &&
+          renderActionButton(
+            t("overlay.actions.pasteLastTranscript"),
+            commands.pasteLastTranscript,
+            <ClipboardPaste size={14} strokeWidth={2.25} />,
+          )}
+        {state !== "mic_failed" &&
+          renderActionButton(
+            t("overlay.actions.copyLastTranscript"),
+            commands.copyLastTranscript,
+            <ClipboardCopy size={14} strokeWidth={2.25} />,
+          )}
+        {renderActionButton(
+          t("overlay.actions.openSettings"),
+          showMainWindow,
+          <Settings size={14} strokeWidth={2.25} />,
+        )}
+        {(state === "silence" ||
+          state === "transcribing" ||
+          state === "processing" ||
+          state === "mic_failed") &&
+          renderActionButton(
+            t("overlay.actions.cancel"),
+            commands.cancelOperation,
+            <CancelIcon />,
+          )}
+      </div>
+    </>
+  );
+
   const renderDockedExpandedContent = () => {
+    if (isLanguagePickerOpen) {
+      return renderLanguagePicker();
+    }
+
     if (state === "dictionary_learned" && recentlyLearnedEntries.length > 0) {
       return (
         <>
@@ -295,6 +448,10 @@ const RecordingOverlay: React.FC = () => {
           </div>
         </>
       );
+    }
+
+    if (state !== "idle" && state !== "recording") {
+      return renderStateStatus();
     }
 
     return (
@@ -386,6 +543,8 @@ const RecordingOverlay: React.FC = () => {
         </button>
       ) : isDocked ? (
         renderDockedExpandedContent()
+      ) : isLanguagePickerOpen ? (
+        renderLanguagePicker()
       ) : (
         <>
           <div className="overlay-left">{getIcon()}</div>
@@ -415,6 +574,13 @@ const RecordingOverlay: React.FC = () => {
             {state === "processing" && (
               <div className="transcribing-text">{t("overlay.processing")}</div>
             )}
+            {state !== "recording" &&
+              state !== "transcribing" &&
+              state !== "processing" && (
+                <div className="transcribing-text">
+                  {t(stateLabelKeys[state])}
+                </div>
+              )}
           </div>
 
           <div className="overlay-right">

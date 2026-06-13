@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   getDictationLanguageMode,
   getDictationLanguageModeLabel,
+  getDictationLanguagePickerOptions,
   getNextDictationLanguageSelection,
   getSettingsForDictationLanguageSelection,
 } from "./dictationLanguageMode";
@@ -148,5 +149,56 @@ describe("dictation language mode", () => {
         adaptiveLanguageShortlist: ["fr", "de", "ja"],
       }),
     ).toBe("Auto");
+  });
+
+  test("builds picker options for auto, every configured language, and multilingual mode", () => {
+    expect(
+      getDictationLanguagePickerOptions({
+        dictationLanguageMode: "auto",
+        selectedLanguage: "auto",
+        adaptiveLanguageShortlist: ["fr", "de", "ja"],
+      }),
+    ).toEqual([
+      {
+        label: "Auto",
+        selection: {
+          dictationLanguageMode: "auto",
+          selectedLanguage: "auto",
+          adaptiveLanguageShortlist: ["fr", "de", "ja"],
+        },
+      },
+      {
+        label: "FR",
+        selection: {
+          dictationLanguageMode: "single",
+          selectedLanguage: "fr",
+          adaptiveLanguageShortlist: ["fr", "de", "ja"],
+        },
+      },
+      {
+        label: "DE",
+        selection: {
+          dictationLanguageMode: "single",
+          selectedLanguage: "de",
+          adaptiveLanguageShortlist: ["fr", "de", "ja"],
+        },
+      },
+      {
+        label: "JA",
+        selection: {
+          dictationLanguageMode: "single",
+          selectedLanguage: "ja",
+          adaptiveLanguageShortlist: ["fr", "de", "ja"],
+        },
+      },
+      {
+        label: "FR+2",
+        selection: {
+          dictationLanguageMode: "multilingual",
+          selectedLanguage: "auto",
+          adaptiveLanguageShortlist: ["fr", "de", "ja"],
+        },
+      },
+    ]);
   });
 });

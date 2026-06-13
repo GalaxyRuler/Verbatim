@@ -14,6 +14,11 @@ export interface DictationLanguageSelection {
   adaptiveLanguageShortlist: string[];
 }
 
+export interface DictationLanguagePickerOption {
+  label: string;
+  selection: DictationLanguageSelection;
+}
+
 const defaultShortlist = ["en", "ar"];
 
 const shortlistOrDefault = (languages?: string[] | null): string[] => {
@@ -115,4 +120,49 @@ export const getDictationLanguageModeLabel = ({
   return shortlist.length <= 2
     ? shortlist.map(upperCode).join("+")
     : `${upperCode(shortlist[0])}+${shortlist.length - 1}`;
+};
+
+export const getDictationLanguagePickerOptions = ({
+  adaptiveLanguageShortlist,
+}: DictationLanguageSelection): DictationLanguagePickerOption[] => {
+  const shortlist = shortlistOrDefault(adaptiveLanguageShortlist);
+  const autoSelection: DictationLanguageSelection = {
+    dictationLanguageMode: "auto",
+    selectedLanguage: "auto",
+    adaptiveLanguageShortlist: shortlist,
+  };
+  const languageOptions = shortlist.map((language) => {
+    const selection: DictationLanguageSelection = {
+      dictationLanguageMode: "single",
+      selectedLanguage: language,
+      adaptiveLanguageShortlist: shortlist,
+    };
+
+    return {
+      label: getDictationLanguageModeLabel(selection),
+      selection,
+    };
+  });
+
+  const options: DictationLanguagePickerOption[] = [
+    {
+      label: getDictationLanguageModeLabel(autoSelection),
+      selection: autoSelection,
+    },
+    ...languageOptions,
+  ];
+
+  if (shortlist.length > 1) {
+    const multilingualSelection: DictationLanguageSelection = {
+      dictationLanguageMode: "multilingual",
+      selectedLanguage: "auto",
+      adaptiveLanguageShortlist: shortlist,
+    };
+    options.push({
+      label: getDictationLanguageModeLabel(multilingualSelection),
+      selection: multilingualSelection,
+    });
+  }
+
+  return options;
 };

@@ -731,6 +731,15 @@
       "title": "Dictation language",
       "change": "Change dictation language"
     },
+    "states": {
+      "idle": "Ready",
+      "recording": "Recording",
+      "silence": "No speech detected",
+      "inserted": "Inserted",
+      "copied": "Copied",
+      "micFailed": "Microphone issue",
+      "cancelled": "Cancelled"
+    },
     "docked": {
       "expand": "Expand pill",
       "collapse": "Collapse pill"

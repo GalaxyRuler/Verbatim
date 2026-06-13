@@ -132,6 +132,10 @@ const installTauriMocks = async (page: Page) => {
         __TAURI_EVENT_PLUGIN_INTERNALS__: any;
         __TAURI_OS_PLUGIN_INTERNALS__: any;
         __VERBATIM_TEST_COMMANDS__: string[];
+        __VERBATIM_TEST_INVOKES__: Array<{
+          cmd: string;
+          args?: Record<string, unknown>;
+        }>;
         __VERBATIM_TEST_EMITTED_EVENTS__: string[];
         __VERBATIM_TEST_LEARN_ENTRIES__: (
           entries: Array<Record<string, unknown>>,
@@ -143,6 +147,7 @@ const installTauriMocks = async (page: Page) => {
         ) => void;
       };
       testWindow.__VERBATIM_TEST_COMMANDS__ = [];
+      testWindow.__VERBATIM_TEST_INVOKES__ = [];
       testWindow.__VERBATIM_TEST_EMITTED_EVENTS__ = [];
       let dictionaryEntries = [
         ...((appSettings.dictionary_entries as Array<
@@ -209,6 +214,7 @@ const installTauriMocks = async (page: Page) => {
         convertFileSrc: (filePath: string) => filePath,
         invoke: async (cmd: string, args?: Record<string, unknown>) => {
           testWindow.__VERBATIM_TEST_COMMANDS__.push(cmd);
+          testWindow.__VERBATIM_TEST_INVOKES__.push({ cmd, args });
           if (cmd === "plugin:event|listen") {
             const event = args?.event as string;
             const handler = args?.handler as number;
@@ -835,5 +841,154 @@ test.describe("Verbatim App", () => {
     await expect(
       page.getByRole("heading", { name: "Dictionary" }),
     ).toBeVisible();
+  });
+
+  test("expanded docked pill opens a compact language picker", async ({
+    page,
+  }) => {
+    await installTauriMocks(page);
+    await page.goto("/src/overlay/index.html");
+
+    await page.evaluate(() => {
+      const win = window as typeof window & {
+        __VERBATIM_TEST_EMIT_EVENT__: (
+          event: string,
+          payload?: unknown,
+        ) => void;
+      };
+      win.__VERBATIM_TEST_EMIT_EVENT__("show-docked-overlay");
+    });
+
+    await page.getByRole("button", { name: "Expand pill" }).click();
+    await page
+      .getByRole("button", { name: "Change dictation language" })
+      .click();
+
+    const picker = page.getByRole("menu", { name: "Dictation language" });
+    await expect(picker).toBeVisible();
+    for (const option of ["Auto", "FR", "DE", "JA", "FR+2"]) {
+      await expect(
+        picker.getByRole("menuitemradio", { name: option, exact: true }),
+      ).toBeVisible();
+    }
+
+    await picker
+      .getByRole("menuitemradio", { name: "DE", exact: true })
+      .click();
+    await expect(
+      page.getByRole("button", { name: "Change dictation language" }),
+    ).toHaveText("DE");
+
+    const invokes = await page.evaluate(() => {
+      const win = window as typeof window & {
+        __VERBATIM_TEST_INVOKES__: Array<{
+          cmd: string;
+          args?: Record<string, unknown>;
+        }>;
+      };
+      return win.__VERBATIM_TEST_INVOKES__;
+    });
+    expect(invokes).toContainEqual(
+      expect.objectContaining({
+        cmd: "change_dictation_language_mode_setting",
+        args: expect.objectContaining({
+          mode: "single",
+          selectedLanguage: "de",
+          languages: ["fr", "de", "ja"],
+        }),
+      }),
+    );
+  });
+
+  test("docked pill renders typed terminal and recovery states", async ({
+    page,
+  }) => {
+    await installTauriMocks(page);
+    await page.goto("/src/overlay/index.html");
+
+    await page.evaluate(() => {
+      const win = window as typeof window & {
+        __VERBATIM_TEST_EMIT_EVENT__: (
+          event: string,
+          payload?: unknown,
+        ) => void;
+      };
+      win.__VERBATIM_TEST_EMIT_EVENT__("show-docked-overlay");
+    });
+    await expect(page.getByTestId("recording-overlay")).toHaveClass(
+      /docked-collapsed/,
+    );
+    await page.evaluate(() => {
+      const win = window as typeof window & {
+        __VERBATIM_TEST_EMIT_EVENT__: (
+          event: string,
+          payload?: unknown,
+        ) => void;
+      };
+      win.__VERBATIM_TEST_EMIT_EVENT__("overlay-state-changed", "inserted");
+    });
+
+    const overlay = page.getByTestId("recording-overlay");
+    await expect(overlay).toHaveClass(/docked-expanded/);
+    await expect(overlay).toContainText("Inserted");
+
+    await page.evaluate(() => {
+      const win = window as typeof window & {
+        __VERBATIM_TEST_EMIT_EVENT__: (
+          event: string,
+          payload?: unknown,
+        ) => void;
+      };
+      win.__VERBATIM_TEST_EMIT_EVENT__("overlay-state-changed", "copied");
+    });
+    await expect(overlay).toContainText("Copied");
+
+    await page.evaluate(() => {
+      const win = window as typeof window & {
+        __VERBATIM_TEST_EMIT_EVENT__: (
+          event: string,
+          payload?: unknown,
+        ) => void;
+      };
+      win.__VERBATIM_TEST_EMIT_EVENT__("overlay-state-changed", "mic_failed");
+    });
+    await expect(overlay).toContainText("Microphone issue");
+    await expect(
+      page.getByRole("button", { name: "Open settings" }),
+    ).toBeVisible();
+  });
+
+  test("transient overlay does not inherit docked mode when setting is off", async ({
+    page,
+  }) => {
+    await installTauriMocks(page);
+    await page.goto("/src/overlay/index.html");
+
+    await page.evaluate(() => {
+      const win = window as typeof window & {
+        __VERBATIM_TEST_EMIT_EVENT__: (
+          event: string,
+          payload?: unknown,
+        ) => void;
+      };
+      win.__VERBATIM_TEST_EMIT_EVENT__("show-docked-overlay");
+    });
+    await expect(page.getByTestId("recording-overlay")).toHaveClass(
+      /docked-collapsed/,
+    );
+
+    await page.evaluate(() => {
+      const win = window as typeof window & {
+        __VERBATIM_TEST_EMIT_EVENT__: (
+          event: string,
+          payload?: unknown,
+        ) => void;
+      };
+      win.__VERBATIM_TEST_EMIT_EVENT__("show-overlay", "recording");
+    });
+
+    await expect(page.getByTestId("recording-overlay")).not.toHaveClass(
+      /docked-/,
+    );
   });
 });

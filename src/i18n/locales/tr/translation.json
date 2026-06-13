@@ -747,6 +747,15 @@
     "dictionaryLearned": {
       "title": "Added to dictionary"
     },
-    "pasteFailed": "Paste failed"
+    "pasteFailed": "Paste failed",
+    "states": {
+      "idle": "Ready",
+      "recording": "Recording",
+      "silence": "No speech detected",
+      "inserted": "Inserted",
+      "copied": "Copied",
+      "micFailed": "Microphone issue",
+      "cancelled": "Cancelled"
+    }
   }
 }
