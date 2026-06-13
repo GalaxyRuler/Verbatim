@@ -449,6 +449,8 @@ pub struct AppSettings {
     pub dictation_language_mode: DictationLanguageMode,
     #[serde(default = "default_overlay_position")]
     pub overlay_position: OverlayPosition,
+    #[serde(default)]
+    pub docked_pill_enabled: bool,
     #[serde(default = "default_debug_mode")]
     pub debug_mode: bool,
     #[serde(default = "default_log_level")]
@@ -998,6 +1000,7 @@ pub fn get_default_settings() -> AppSettings {
         selected_language: "auto".to_string(),
         dictation_language_mode: DictationLanguageMode::default(),
         overlay_position: default_overlay_position(),
+        docked_pill_enabled: false,
         debug_mode: false,
         log_level: default_log_level(),
         custom_words: Vec::new(),
@@ -1299,6 +1302,12 @@ mod tests {
             settings.dictation_language_mode,
             DictationLanguageMode::Auto
         );
+    }
+
+    #[test]
+    fn default_settings_keep_docked_pill_disabled() {
+        let settings = get_default_settings();
+        assert!(!settings.docked_pill_enabled);
     }
 
     #[test]

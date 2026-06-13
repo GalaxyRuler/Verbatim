@@ -23,6 +23,8 @@ type OverlayState = "recording" | "transcribing" | "processing";
 const RecordingOverlay: React.FC = () => {
   const { t } = useTranslation();
   const [isVisible, setIsVisible] = useState(false);
+  const [isDocked, setIsDocked] = useState(false);
+  const [isDockedExpanded, setIsDockedExpanded] = useState(false);
   const [state, setState] = useState<OverlayState>("recording");
   const [languageSelection, setLanguageSelection] =
     useState<DictationLanguageSelection>({
@@ -62,13 +64,28 @@ const RecordingOverlay: React.FC = () => {
         await syncLanguageFromSettings();
         await refreshLanguageMode();
         const overlayState = event.payload as OverlayState;
+        setIsDocked(false);
+        setIsDockedExpanded(false);
         setState(overlayState);
         setIsVisible(true);
       });
 
+      const unlistenShowDocked = await listen(
+        "show-docked-overlay",
+        async () => {
+          await syncLanguageFromSettings();
+          await refreshLanguageMode();
+          setIsDocked(true);
+          setIsDockedExpanded(false);
+          setState("recording");
+          setIsVisible(true);
+        },
+      );
+
       // Listen for hide-overlay event from Rust
       const unlistenHide = await listen("hide-overlay", () => {
         setIsVisible(false);
+        setIsDockedExpanded(false);
       });
 
       // Listen for mic-level updates
@@ -88,6 +105,7 @@ const RecordingOverlay: React.FC = () => {
       // Cleanup function
       return () => {
         unlistenShow();
+        unlistenShowDocked();
         unlistenHide();
         unlistenLevel();
       };
@@ -120,58 +138,106 @@ const RecordingOverlay: React.FC = () => {
     }
   };
 
+  const isDockedCollapsed = isDocked && !isDockedExpanded;
+
   return (
     <div
       dir={direction}
-      className={`recording-overlay ${isVisible ? "fade-in" : ""}`}
+      data-testid="recording-overlay"
+      className={`recording-overlay ${isVisible ? "fade-in" : ""} ${
+        isDocked
+          ? isDockedExpanded
+            ? "docked-expanded"
+            : "docked-collapsed"
+          : ""
+      }`}
+      onMouseEnter={() => {
+        if (isDockedCollapsed) {
+          setIsDockedExpanded(true);
+        }
+      }}
+      onMouseLeave={() => {
+        if (isDocked) {
+          setIsDockedExpanded(false);
+        }
+      }}
     >
-      <div className="overlay-left">{getIcon()}</div>
-
-      <div className="overlay-middle">
-        {state === "recording" && (
-          <div className="bars-container">
-            {levels.map((v, i) => (
-              <div
+      {isDockedCollapsed ? (
+        <button
+          type="button"
+          className="docked-pill-handle"
+          onClick={() => setIsDockedExpanded(true)}
+          aria-label={t("overlay.docked.expand")}
+          title={t("overlay.docked.expand")}
+        >
+          <span className="docked-waveform" aria-hidden="true">
+            {levels.slice(0, 5).map((v, i) => (
+              <span
                 key={i}
-                className="bar"
+                className="docked-waveform-bar"
                 style={{
-                  height: `${Math.min(20, 4 + Math.pow(v, 0.7) * 16)}px`, // Cap at 20px max height
-                  transition: "height 60ms ease-out, opacity 120ms ease-out",
-                  opacity: Math.max(0.2, v * 1.7), // Minimum opacity for visibility
+                  height: `${Math.min(16, 4 + Math.pow(v, 0.7) * 12)}px`,
+                  opacity: Math.max(0.35, v * 1.6),
                 }}
               />
             ))}
-          </div>
-        )}
-        {state === "transcribing" && (
-          <div className="transcribing-text">{t("overlay.transcribing")}</div>
-        )}
-        {state === "processing" && (
-          <div className="transcribing-text">{t("overlay.processing")}</div>
-        )}
-      </div>
-
-      <div className="overlay-right">
-        <button
-          type="button"
-          className="language-mode-chip"
-          onClick={handleLanguageModeClick}
-          title={t("overlay.languageMode.title")}
-          aria-label={t("overlay.languageMode.change")}
-        >
-          {getDictationLanguageModeLabel(languageSelection)}
+          </span>
+          <span className="docked-dot" aria-hidden="true" />
         </button>
-        {state === "recording" && (
-          <div
-            className="cancel-button"
-            onClick={() => {
-              commands.cancelOperation();
-            }}
-          >
-            <CancelIcon />
+      ) : (
+        <>
+          <div className="overlay-left">{getIcon()}</div>
+
+          <div className="overlay-middle">
+            {state === "recording" && (
+              <div className="bars-container">
+                {levels.map((v, i) => (
+                  <div
+                    key={i}
+                    className="bar"
+                    style={{
+                      height: `${Math.min(20, 4 + Math.pow(v, 0.7) * 16)}px`, // Cap at 20px max height
+                      transition:
+                        "height 60ms ease-out, opacity 120ms ease-out",
+                      opacity: Math.max(0.2, v * 1.7), // Minimum opacity for visibility
+                    }}
+                  />
+                ))}
+              </div>
+            )}
+            {state === "transcribing" && (
+              <div className="transcribing-text">
+                {t("overlay.transcribing")}
+              </div>
+            )}
+            {state === "processing" && (
+              <div className="transcribing-text">{t("overlay.processing")}</div>
+            )}
           </div>
-        )}
-      </div>
+
+          <div className="overlay-right">
+            <button
+              type="button"
+              className="language-mode-chip"
+              onClick={handleLanguageModeClick}
+              title={t("overlay.languageMode.title")}
+              aria-label={t("overlay.languageMode.change")}
+            >
+              {getDictationLanguageModeLabel(languageSelection)}
+            </button>
+            {state === "recording" && (
+              <div
+                className="cancel-button"
+                onClick={() => {
+                  commands.cancelOperation();
+                }}
+              >
+                <CancelIcon />
+              </div>
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 };

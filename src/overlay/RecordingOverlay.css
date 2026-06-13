@@ -1,17 +1,33 @@
 .recording-overlay {
   --overlay-accent: #7aa2f7;
   --overlay-accent-soft: #2563eb33;
+  --overlay-background: #000000cc;
+  --overlay-foreground: #ffffff;
+  --overlay-border: color-mix(in srgb, var(--overlay-accent) 18%, transparent);
   height: 36px;
   width: 220px;
   display: grid;
   grid-template-columns: auto 1fr auto;
   align-items: center;
   padding: 6px;
-  background: #000000cc;
+  background: var(--overlay-background);
+  border: 1px solid var(--overlay-border);
   border-radius: 18px;
   opacity: 0;
   transition: opacity 300ms ease-out;
   box-sizing: border-box;
+}
+
+.recording-overlay.docked-collapsed {
+  width: 56px;
+  grid-template-columns: 1fr;
+  justify-items: center;
+  padding: 5px 8px;
+  cursor: pointer;
+}
+
+.recording-overlay.docked-expanded {
+  opacity: 1;
 }
 
 .overlay-left {
@@ -57,7 +73,7 @@
 }
 
 .transcribing-text {
-  color: white;
+  color: var(--overlay-foreground);
   font-size: 12px;
   font-family:
     -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -107,7 +123,7 @@
   border: 1px solid color-mix(in srgb, var(--overlay-accent) 60%, transparent);
   border-radius: 999px;
   background: color-mix(in srgb, var(--overlay-accent) 16%, transparent);
-  color: #ffffff;
+  color: var(--overlay-foreground);
   font-family:
     -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   font-size: 11px;
@@ -130,4 +146,58 @@
 
 .language-mode-chip:active {
   transform: scale(0.95);
+}
+
+.docked-pill-handle {
+  width: 40px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--overlay-accent);
+  cursor: pointer;
+}
+
+.docked-pill-handle:hover {
+  background: var(--overlay-accent-soft);
+}
+
+.docked-waveform {
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.docked-waveform-bar {
+  width: 3px;
+  min-height: 4px;
+  max-height: 16px;
+  border-radius: 999px;
+  background: var(--overlay-accent);
+  transition:
+    height 80ms linear,
+    opacity 120ms ease-out;
+}
+
+.docked-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--overlay-accent);
+  opacity: 0.85;
+}
+
+@media (prefers-color-scheme: light) {
+  .recording-overlay {
+    --overlay-background: #fffffff2;
+    --overlay-foreground: #111827;
+    --overlay-border: color-mix(in srgb, var(--overlay-accent) 24%, #11182722);
+    box-shadow: 0 8px 20px #1118271f;
+  }
 }

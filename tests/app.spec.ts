@@ -60,6 +60,7 @@ const baseSettings = {
   translate_to_english: false,
   selected_language: "auto",
   dictation_language_mode: "auto",
+  docked_pill_enabled: false,
   overlay_position: "top-right",
   debug_mode: false,
   log_level: "info",
@@ -355,6 +356,13 @@ const installTauriMocks = async (page: Page) => {
               };
               return null;
             }
+            case "change_docked_pill_setting": {
+              appSettings = {
+                ...appSettings,
+                docked_pill_enabled: Boolean(args?.enabled),
+              };
+              return null;
+            }
             default:
               return null;
           }
@@ -644,5 +652,59 @@ test.describe("Verbatim App", () => {
       return win.__VERBATIM_TEST_COMMANDS__;
     });
     expect(commands).toContain("change_dictation_language_mode_setting");
+  });
+
+  test("advanced settings can enable docked pill mode", async ({ page }) => {
+    await installTauriMocks(page);
+    await page.goto("/");
+    await expect(page.getByTitle("General")).toBeVisible();
+
+    await page.getByTitle("Advanced").click();
+    await settingRow(page, "Docked Pill")
+      .getByRole("checkbox")
+      .check({ force: true });
+
+    const commands = await page.evaluate(() => {
+      const win = window as typeof window & {
+        __VERBATIM_TEST_COMMANDS__: string[];
+      };
+      return win.__VERBATIM_TEST_COMMANDS__;
+    });
+    expect(commands).toContain("change_docked_pill_setting");
+  });
+
+  test("recording overlay can stay docked collapsed and expand on click", async ({
+    page,
+  }) => {
+    await installTauriMocks(page);
+    await page.goto("/src/overlay/index.html");
+
+    await page.evaluate(() => {
+      const win = window as typeof window & {
+        __VERBATIM_TEST_EMIT_EVENT__: (
+          event: string,
+          payload?: unknown,
+        ) => void;
+      };
+      win.__VERBATIM_TEST_EMIT_EVENT__("show-docked-overlay");
+    });
+
+    await expect(page.getByTestId("recording-overlay")).toHaveClass(
+      /docked-collapsed/,
+    );
+    await expect(
+      page.getByRole("button", { name: "Expand pill" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Change dictation language" }),
+    ).toBeHidden();
+
+    await page.getByRole("button", { name: "Expand pill" }).click();
+    await expect(page.getByTestId("recording-overlay")).toHaveClass(
+      /docked-expanded/,
+    );
+    await expect(
+      page.getByRole("button", { name: "Change dictation language" }),
+    ).toBeVisible();
   });
 });

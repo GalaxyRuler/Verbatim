@@ -275,6 +275,13 @@ pub fn create_recording_overlay(app_handle: &AppHandle) {
             }
 
             debug!("Recording overlay window created successfully (hidden)");
+            if settings::get_settings(app_handle).docked_pill_enabled {
+                let app = app_handle.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                    show_docked_overlay(&app);
+                });
+            }
         }
         Err(e) => {
             debug!("Failed to create recording overlay window: {}", e);
@@ -322,7 +329,7 @@ pub fn create_recording_overlay(app_handle: &AppHandle) {
 fn show_overlay_state(app_handle: &AppHandle, state: &str) {
     // Check if overlay should be shown based on position setting
     let settings = settings::get_settings(app_handle);
-    if settings.overlay_position == OverlayPosition::None {
+    if settings.overlay_position == OverlayPosition::None && !settings.docked_pill_enabled {
         return;
     }
 
@@ -354,6 +361,19 @@ pub fn show_processing_overlay(app_handle: &AppHandle) {
     show_overlay_state(app_handle, "processing");
 }
 
+pub fn show_docked_overlay(app_handle: &AppHandle) {
+    update_overlay_position(app_handle);
+
+    if let Some(overlay_window) = app_handle.get_webview_window("recording_overlay") {
+        let _ = overlay_window.show();
+
+        #[cfg(target_os = "windows")]
+        force_overlay_topmost(&overlay_window);
+
+        let _ = overlay_window.emit("show-docked-overlay", ());
+    }
+}
+
 /// Updates the overlay window position based on current settings
 pub fn update_overlay_position(app_handle: &AppHandle) {
     if let Some(overlay_window) = app_handle.get_webview_window("recording_overlay") {
@@ -371,6 +391,11 @@ pub fn update_overlay_position(app_handle: &AppHandle) {
 
 /// Hides the recording overlay window with fade-out animation
 pub fn hide_recording_overlay(app_handle: &AppHandle) {
+    if settings::get_settings(app_handle).docked_pill_enabled {
+        show_docked_overlay(app_handle);
+        return;
+    }
+
     // Always hide the overlay regardless of settings - if setting was changed while recording,
     // we still want to hide it properly
     if let Some(overlay_window) = app_handle.get_webview_window("recording_overlay") {

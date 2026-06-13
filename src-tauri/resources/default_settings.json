@@ -10,5 +10,6 @@
   "push_to_talk": true,
   "selected_language": "auto",
   "dictation_language_mode": "auto",
+  "docked_pill_enabled": false,
   "adaptive_language_shortlist": ["en", "ar"]
 }

@@ -376,6 +376,10 @@
           "reprocessDone": "Latest adaptive entry reprocessed.",
           "resetDone": "Adaptive correction memory reset."
         }
+      },
+      "dockedPill": {
+        "label": "Docked Pill",
+        "description": "Keep a tiny pill available at the bottom of the current screen. Click it to expand controls."
       }
     },
     "postProcessing": {
@@ -726,6 +730,10 @@
     "languageMode": {
       "title": "Dictation language",
       "change": "Change dictation language"
+    },
+    "docked": {
+      "expand": "Expand pill",
+      "collapse": "Collapse pill"
     }
   }
 }

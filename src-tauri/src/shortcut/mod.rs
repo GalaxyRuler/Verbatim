@@ -600,6 +600,22 @@ pub fn change_overlay_position_setting(app: AppHandle, position: String) -> Resu
 
 #[tauri::command]
 #[specta::specta]
+pub fn change_docked_pill_setting(app: AppHandle, enabled: bool) -> Result<(), String> {
+    let mut settings = settings::get_settings(&app);
+    settings.docked_pill_enabled = enabled;
+    settings::write_settings(&app, settings);
+
+    if enabled {
+        crate::utils::show_docked_overlay(&app);
+    } else {
+        crate::utils::hide_recording_overlay(&app);
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
 pub fn change_debug_mode_setting(app: AppHandle, enabled: bool) -> Result<(), String> {
     let mut settings = settings::get_settings(&app);
     settings.debug_mode = enabled;
