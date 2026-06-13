@@ -722,6 +722,10 @@
   },
   "overlay": {
     "transcribing": "Đang chuyển đổi...",
-    "processing": "Đang xử lý..."
+    "processing": "Đang xử lý...",
+    "languageMode": {
+      "title": "Dictation language",
+      "change": "Change dictation language"
+    }
   }
 }

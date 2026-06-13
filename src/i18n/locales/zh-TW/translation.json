@@ -722,6 +722,10 @@
   },
   "overlay": {
     "transcribing": "正在轉錄...",
-    "processing": "處理中..."
+    "processing": "處理中...",
+    "languageMode": {
+      "title": "Dictation language",
+      "change": "Change dictation language"
+    }
   }
 }

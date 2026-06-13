@@ -59,6 +59,7 @@ const baseSettings = {
   selected_output_device: "Default",
   translate_to_english: false,
   selected_language: "auto",
+  dictation_language_mode: "auto",
   overlay_position: "top-right",
   debug_mode: false,
   log_level: "info",
@@ -91,7 +92,7 @@ const baseSettings = {
   external_script_path: null,
   custom_filler_words: null,
   adaptive_profiles_enabled: false,
-  adaptive_language_shortlist: ["en", "ar"],
+  adaptive_language_shortlist: ["fr", "de", "ja"],
   adaptive_default_profile_id: "default_clean",
   adaptive_profiles: adaptiveProfiles,
   adaptive_correction_memory_enabled: true,
@@ -319,6 +320,30 @@ const installTauriMocks = async (page: Page) => {
                 adaptive_profiles_enabled: Boolean(args?.enabled),
               };
               return null;
+            case "change_dictation_language_mode_setting": {
+              const mode = args?.mode as string;
+              const selectedLanguage = args?.selectedLanguage as
+                | string
+                | undefined;
+              const languages = (args?.languages as string[]) ?? [
+                "fr",
+                "de",
+                "ja",
+              ];
+              const languageSettings = {
+                selected_language:
+                  mode === "single"
+                    ? (selectedLanguage ?? languages[0] ?? "en")
+                    : "auto",
+                adaptive_language_shortlist: languages,
+              };
+              appSettings = {
+                ...appSettings,
+                dictation_language_mode: mode,
+                ...languageSettings,
+              };
+              return null;
+            }
             default:
               return null;
           }
@@ -497,7 +522,9 @@ test.describe("Verbatim App", () => {
     await expect(learnedStatus).toContainText("Added: Abdullah al Kulaib");
 
     await learnedStatus.getByRole("button", { name: "Undo" }).click();
-    await expect(page.getByText("Abdullah al Kulaib")).toHaveCount(0);
+    await expect(page.getByTestId("dictionary-entries-list")).not.toContainText(
+      "Abdullah al Kulaib",
+    );
   });
 
   test("advanced settings no longer owns dictionary management", async ({
@@ -570,5 +597,39 @@ test.describe("Verbatim App", () => {
       return win.__VERBATIM_TEST_COMMANDS__;
     });
     expect(commands).toContain("copy_last_transcript");
+  });
+
+  test("recording overlay shows and cycles dictation language mode", async ({
+    page,
+  }) => {
+    await installTauriMocks(page);
+    await page.goto("/src/overlay/index.html");
+
+    await page.evaluate(() => {
+      const win = window as typeof window & {
+        __VERBATIM_TEST_EMIT_EVENT__: (
+          event: string,
+          payload?: unknown,
+        ) => void;
+      };
+      win.__VERBATIM_TEST_EMIT_EVENT__("show-overlay", "recording");
+    });
+
+    const languageButton = page.getByRole("button", {
+      name: "Change dictation language",
+    });
+    await expect(languageButton).toBeVisible();
+    await expect(languageButton).toHaveText("Auto");
+
+    await languageButton.click();
+    await expect(languageButton).toHaveText("FR");
+
+    const commands = await page.evaluate(() => {
+      const win = window as typeof window & {
+        __VERBATIM_TEST_COMMANDS__: string[];
+      };
+      return win.__VERBATIM_TEST_COMMANDS__;
+    });
+    expect(commands).toContain("change_dictation_language_mode_setting");
   });
 });

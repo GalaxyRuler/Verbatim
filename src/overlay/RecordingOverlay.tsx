@@ -9,6 +9,13 @@ import {
 import "./RecordingOverlay.css";
 import { commands } from "@/bindings";
 import i18n, { syncLanguageFromSettings } from "@/i18n";
+import {
+  type DictationLanguageSelection,
+  getDictationLanguageMode,
+  getDictationLanguageModeLabel,
+  getNextDictationLanguageSelection,
+  getSettingsForDictationLanguageSelection,
+} from "@/lib/dictationLanguageMode";
 import { getLanguageDirection } from "@/lib/utils/rtl";
 
 type OverlayState = "recording" | "transcribing" | "processing";
@@ -17,9 +24,35 @@ const RecordingOverlay: React.FC = () => {
   const { t } = useTranslation();
   const [isVisible, setIsVisible] = useState(false);
   const [state, setState] = useState<OverlayState>("recording");
+  const [languageSelection, setLanguageSelection] =
+    useState<DictationLanguageSelection>({
+      dictationLanguageMode: "auto",
+      selectedLanguage: "auto",
+      adaptiveLanguageShortlist: ["en", "ar"],
+    });
   const [levels, setLevels] = useState<number[]>(Array(16).fill(0));
   const smoothedLevelsRef = useRef<number[]>(Array(16).fill(0));
   const direction = getLanguageDirection(i18n.language);
+
+  const refreshLanguageMode = async () => {
+    const result = await commands.getAppSettings();
+    if (result.status !== "ok") return;
+
+    const dictationLanguageMode = getDictationLanguageMode({
+      dictationLanguageMode: result.data.dictation_language_mode,
+      selectedLanguage: result.data.selected_language,
+      adaptiveLanguageShortlist: result.data.adaptive_language_shortlist,
+    });
+
+    setLanguageSelection(
+      getSettingsForDictationLanguageSelection({
+        dictationLanguageMode,
+        selectedLanguage: result.data.selected_language ?? "auto",
+        adaptiveLanguageShortlist:
+          result.data.adaptive_language_shortlist ?? [],
+      }),
+    );
+  };
 
   useEffect(() => {
     const setupEventListeners = async () => {
@@ -27,6 +60,7 @@ const RecordingOverlay: React.FC = () => {
       const unlistenShow = await listen("show-overlay", async (event) => {
         // Sync language from settings each time overlay is shown
         await syncLanguageFromSettings();
+        await refreshLanguageMode();
         const overlayState = event.payload as OverlayState;
         setState(overlayState);
         setIsVisible(true);
@@ -61,6 +95,22 @@ const RecordingOverlay: React.FC = () => {
 
     setupEventListeners();
   }, []);
+
+  const handleLanguageModeClick = async () => {
+    const previousSelection = languageSelection;
+    const nextSelection = getSettingsForDictationLanguageSelection(
+      getNextDictationLanguageSelection(languageSelection),
+    );
+    setLanguageSelection(nextSelection);
+    const result = await commands.changeDictationLanguageModeSetting(
+      nextSelection.dictationLanguageMode,
+      nextSelection.selectedLanguage,
+      nextSelection.adaptiveLanguageShortlist,
+    );
+    if (result.status !== "ok") {
+      setLanguageSelection(previousSelection);
+    }
+  };
 
   const getIcon = () => {
     if (state === "recording") {
@@ -102,6 +152,15 @@ const RecordingOverlay: React.FC = () => {
       </div>
 
       <div className="overlay-right">
+        <button
+          type="button"
+          className="language-mode-chip"
+          onClick={handleLanguageModeClick}
+          title={t("overlay.languageMode.title")}
+          aria-label={t("overlay.languageMode.change")}
+        >
+          {getDictationLanguageModeLabel(languageSelection)}
+        </button>
         {state === "recording" && (
           <div
             className="cancel-button"

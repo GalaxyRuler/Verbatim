@@ -722,6 +722,10 @@
   },
   "overlay": {
     "transcribing": "Transkribiere...",
-    "processing": "Verarbeite..."
+    "processing": "Verarbeite...",
+    "languageMode": {
+      "title": "Dictation language",
+      "change": "Change dictation language"
+    }
   }
 }

@@ -722,6 +722,10 @@
   },
   "overlay": {
     "transcribing": "Транскрибиране...",
-    "processing": "Обработка..."
+    "processing": "Обработка...",
+    "languageMode": {
+      "title": "Dictation language",
+      "change": "Change dictation language"
+    }
   }
 }

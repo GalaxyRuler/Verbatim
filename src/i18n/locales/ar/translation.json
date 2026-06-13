@@ -722,6 +722,10 @@
   },
   "overlay": {
     "transcribing": "...جاري التفريغ",
-    "processing": "...جاري المعالجة"
+    "processing": "...جاري المعالجة",
+    "languageMode": {
+      "title": "Dictation language",
+      "change": "Change dictation language"
+    }
   }
 }

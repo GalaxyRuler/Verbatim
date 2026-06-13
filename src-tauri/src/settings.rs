@@ -365,6 +365,20 @@ impl Default for OrtAcceleratorSetting {
     }
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum DictationLanguageMode {
+    Auto,
+    Single,
+    Multilingual,
+}
+
+impl Default for DictationLanguageMode {
+    fn default() -> Self {
+        DictationLanguageMode::Auto
+    }
+}
+
 #[derive(Clone, Serialize, Deserialize, Type)]
 #[serde(transparent)]
 pub(crate) struct SecretMap(HashMap<String, String>);
@@ -431,6 +445,8 @@ pub struct AppSettings {
     pub translation_model_id: Option<String>,
     #[serde(default = "default_selected_language")]
     pub selected_language: String,
+    #[serde(default)]
+    pub dictation_language_mode: DictationLanguageMode,
     #[serde(default = "default_overlay_position")]
     pub overlay_position: OverlayPosition,
     #[serde(default = "default_debug_mode")]
@@ -980,6 +996,7 @@ pub fn get_default_settings() -> AppSettings {
         translation_provider_id: None,
         translation_model_id: None,
         selected_language: "auto".to_string(),
+        dictation_language_mode: DictationLanguageMode::default(),
         overlay_position: default_overlay_position(),
         debug_mode: false,
         log_level: default_log_level(),
@@ -1026,6 +1043,65 @@ pub fn get_default_settings() -> AppSettings {
 }
 
 impl AppSettings {
+    pub fn apply_dictation_language_mode(
+        &mut self,
+        mode: DictationLanguageMode,
+        selected_language: Option<String>,
+        languages: Vec<String>,
+    ) -> Result<(), String> {
+        let cleaned = languages.into_iter().fold(Vec::new(), |mut acc, language| {
+            let language = language.trim().to_lowercase();
+            if !language.is_empty() && language != "auto" && !acc.contains(&language) {
+                acc.push(language);
+            }
+            acc
+        });
+
+        self.dictation_language_mode = mode;
+        match mode {
+            DictationLanguageMode::Single => {
+                let language = selected_language
+                    .as_deref()
+                    .map(str::trim)
+                    .map(str::to_lowercase)
+                    .filter(|language| !language.is_empty() && language != "auto")
+                    .or_else(|| cleaned.first().cloned());
+                let Some(language) = language else {
+                    return Err("Single-language mode requires a language".to_string());
+                };
+                let shortlist = if cleaned.is_empty() {
+                    vec![language.clone()]
+                } else {
+                    cleaned
+                };
+                if !shortlist.contains(&language) {
+                    return Err(
+                        "Single-language mode requires the selected language in the language list"
+                            .to_string(),
+                    );
+                }
+                self.selected_language = language.clone();
+                self.adaptive_language_shortlist = shortlist;
+            }
+            DictationLanguageMode::Multilingual => {
+                if cleaned.len() < 2 {
+                    return Err("Multilingual mode requires at least two languages".to_string());
+                }
+                self.selected_language = "auto".to_string();
+                self.adaptive_language_shortlist = cleaned;
+            }
+            DictationLanguageMode::Auto => {
+                self.selected_language = "auto".to_string();
+                self.adaptive_language_shortlist = if cleaned.is_empty() {
+                    default_adaptive_language_shortlist()
+                } else {
+                    cleaned
+                };
+            }
+        }
+        Ok(())
+    }
+
     pub fn active_post_process_provider(&self) -> Option<&PostProcessProvider> {
         self.post_process_providers
             .iter()
@@ -1214,6 +1290,94 @@ mod tests {
     fn default_settings_use_auto_language() {
         let settings = get_default_settings();
         assert_eq!(settings.selected_language, "auto");
+    }
+
+    #[test]
+    fn default_settings_select_auto_dictation_language_mode() {
+        let settings = get_default_settings();
+        assert_eq!(
+            settings.dictation_language_mode,
+            DictationLanguageMode::Auto
+        );
+    }
+
+    #[test]
+    fn dictation_language_mode_maps_to_language_settings() {
+        let mut settings = get_default_settings();
+
+        settings
+            .apply_dictation_language_mode(
+                DictationLanguageMode::Single,
+                Some("de".to_string()),
+                vec!["fr".to_string(), "de".to_string(), "ja".to_string()],
+            )
+            .expect("single language mode");
+        assert_eq!(
+            settings.dictation_language_mode,
+            DictationLanguageMode::Single
+        );
+        assert_eq!(settings.selected_language, "de");
+        assert_eq!(
+            settings.adaptive_language_shortlist,
+            vec!["fr".to_string(), "de".to_string(), "ja".to_string()]
+        );
+
+        settings
+            .apply_dictation_language_mode(
+                DictationLanguageMode::Multilingual,
+                None,
+                vec!["fr".to_string(), "ja".to_string()],
+            )
+            .expect("multilingual mode");
+        assert_eq!(
+            settings.dictation_language_mode,
+            DictationLanguageMode::Multilingual
+        );
+        assert_eq!(settings.selected_language, "auto");
+        assert_eq!(
+            settings.adaptive_language_shortlist,
+            vec!["fr".to_string(), "ja".to_string()]
+        );
+
+        settings
+            .apply_dictation_language_mode(
+                DictationLanguageMode::Auto,
+                None,
+                vec!["fr".to_string(), "ja".to_string()],
+            )
+            .expect("auto mode");
+        assert_eq!(
+            settings.dictation_language_mode,
+            DictationLanguageMode::Auto
+        );
+        assert_eq!(settings.selected_language, "auto");
+        assert_eq!(
+            settings.adaptive_language_shortlist,
+            vec!["fr".to_string(), "ja".to_string()]
+        );
+    }
+
+    #[test]
+    fn dictation_language_mode_rejects_invalid_language_lists() {
+        let mut settings = get_default_settings();
+
+        assert!(settings
+            .apply_dictation_language_mode(DictationLanguageMode::Single, None, vec![])
+            .is_err());
+        assert!(settings
+            .apply_dictation_language_mode(
+                DictationLanguageMode::Multilingual,
+                None,
+                vec!["fr".to_string()]
+            )
+            .is_err());
+        assert!(settings
+            .apply_dictation_language_mode(
+                DictationLanguageMode::Single,
+                Some("ja".to_string()),
+                vec!["fr".to_string()]
+            )
+            .is_err());
     }
 
     #[test]

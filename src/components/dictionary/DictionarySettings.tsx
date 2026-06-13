@@ -206,7 +206,10 @@ export const DictionarySettings: React.FC = () => {
         />
       )}
 
-      <div className="border border-mid-gray/20 rounded-lg overflow-hidden">
+      <div
+        data-testid="dictionary-entries-list"
+        className="border border-mid-gray/20 rounded-lg overflow-hidden"
+      >
         {isLoading ? (
           <div className="px-3 py-4 text-sm text-mid-gray">
             {t("common.loading")}
