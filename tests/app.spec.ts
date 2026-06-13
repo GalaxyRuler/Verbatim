@@ -132,6 +132,7 @@ const installTauriMocks = async (page: Page) => {
         __TAURI_EVENT_PLUGIN_INTERNALS__: any;
         __TAURI_OS_PLUGIN_INTERNALS__: any;
         __VERBATIM_TEST_COMMANDS__: string[];
+        __VERBATIM_TEST_EMITTED_EVENTS__: string[];
         __VERBATIM_TEST_LEARN_ENTRIES__: (
           entries: Array<Record<string, unknown>>,
         ) => void;
@@ -142,6 +143,7 @@ const installTauriMocks = async (page: Page) => {
         ) => void;
       };
       testWindow.__VERBATIM_TEST_COMMANDS__ = [];
+      testWindow.__VERBATIM_TEST_EMITTED_EVENTS__ = [];
       let dictionaryEntries = [
         ...((appSettings.dictionary_entries as Array<
           Record<string, unknown>
@@ -215,6 +217,12 @@ const installTauriMocks = async (page: Page) => {
               handler,
             ]);
             return handler;
+          }
+          if (cmd === "plugin:event|emit") {
+            const event = args?.event as string;
+            testWindow.__VERBATIM_TEST_EMITTED_EVENTS__.push(event);
+            emitEvent(event, args?.payload);
+            return null;
           }
           if (cmd === "plugin:event|unlisten") {
             const event = args?.event as string;
@@ -705,6 +713,127 @@ test.describe("Verbatim App", () => {
     );
     await expect(
       page.getByRole("button", { name: "Change dictation language" }),
+    ).toBeVisible();
+  });
+
+  test("expanded docked pill exposes recovery and settings actions", async ({
+    page,
+  }) => {
+    await installTauriMocks(page);
+    await page.goto("/src/overlay/index.html");
+
+    await page.evaluate(() => {
+      const win = window as typeof window & {
+        __VERBATIM_TEST_EMIT_EVENT__: (
+          event: string,
+          payload?: unknown,
+        ) => void;
+      };
+      win.__VERBATIM_TEST_EMIT_EVENT__("show-docked-overlay");
+    });
+
+    await page.getByRole("button", { name: "Expand pill" }).click();
+    await page.getByRole("button", { name: "Copy last transcript" }).click();
+    await page.getByRole("button", { name: "Paste last transcript" }).click();
+    await page.getByRole("button", { name: "Open settings" }).click();
+    await page.getByRole("button", { name: "Review dictionary" }).click();
+
+    const result = await page.evaluate(() => {
+      const win = window as typeof window & {
+        __VERBATIM_TEST_COMMANDS__: string[];
+        __VERBATIM_TEST_EMITTED_EVENTS__: string[];
+      };
+      return {
+        commands: win.__VERBATIM_TEST_COMMANDS__,
+        events: win.__VERBATIM_TEST_EMITTED_EVENTS__,
+      };
+    });
+    expect(result.commands).toContain("copy_last_transcript");
+    expect(result.commands).toContain("paste_last_transcript");
+    expect(result.commands).toContain("show_main_window_command");
+    expect(result.events).toContain("open-dictionary-settings");
+  });
+
+  test("docked pill shows learned dictionary entries with undo and review", async ({
+    page,
+  }) => {
+    await installTauriMocks(page);
+    await page.goto("/src/overlay/index.html");
+
+    await page.evaluate(() => {
+      const win = window as typeof window & {
+        __VERBATIM_TEST_EMIT_EVENT__: (
+          event: string,
+          payload?: unknown,
+        ) => void;
+      };
+      win.__VERBATIM_TEST_EMIT_EVENT__("show-docked-overlay");
+    });
+    await expect(page.getByTestId("recording-overlay")).toHaveClass(
+      /docked-collapsed/,
+    );
+
+    await page.evaluate(() => {
+      const win = window as typeof window & {
+        __VERBATIM_TEST_LEARN_ENTRIES__: (
+          entries: Array<Record<string, unknown>>,
+        ) => void;
+      };
+      win.__VERBATIM_TEST_LEARN_ENTRIES__([
+        {
+          id: "dict_test_kulaib",
+          phrase: "Abdullah al Kulaib",
+          replacement_of: "abdullah al kulaib",
+          source: "auto_learned",
+          priority: "normal",
+          created_at_ms: 1,
+          updated_at_ms: 1,
+        },
+      ]);
+    });
+
+    const overlay = page.getByTestId("recording-overlay");
+    await expect(overlay).toHaveClass(/docked-expanded/);
+    await expect(overlay).toContainText("Added to dictionary");
+    await expect(overlay).toContainText("Abdullah al Kulaib");
+
+    await page.getByRole("button", { name: "Review dictionary" }).click();
+    await page.getByRole("button", { name: "Undo learned word" }).click();
+
+    const result = await page.evaluate(() => {
+      const win = window as typeof window & {
+        __VERBATIM_TEST_COMMANDS__: string[];
+        __VERBATIM_TEST_EMITTED_EVENTS__: string[];
+      };
+      return {
+        commands: win.__VERBATIM_TEST_COMMANDS__,
+        events: win.__VERBATIM_TEST_EMITTED_EVENTS__,
+      };
+    });
+    expect(result.commands).toContain("undo_dictionary_entries");
+    expect(result.events).toContain("open-dictionary-settings");
+    await expect(overlay).not.toContainText("Abdullah al Kulaib");
+  });
+
+  test("main app can open dictionary settings from pill event", async ({
+    page,
+  }) => {
+    await installTauriMocks(page);
+    await page.goto("/");
+    await expect(page.getByTitle("General")).toBeVisible();
+
+    await page.evaluate(() => {
+      const win = window as typeof window & {
+        __VERBATIM_TEST_EMIT_EVENT__: (
+          event: string,
+          payload?: unknown,
+        ) => void;
+      };
+      win.__VERBATIM_TEST_EMIT_EVENT__("open-dictionary-settings");
+    });
+
+    await expect(
+      page.getByRole("heading", { name: "Dictionary" }),
     ).toBeVisible();
   });
 });

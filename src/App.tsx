@@ -212,6 +212,15 @@ function App() {
     };
   }, [refreshSettings, setRecentlyLearnedDictionaryEntries, t]);
 
+  useEffect(() => {
+    const unlisten = listen("open-dictionary-settings", () => {
+      setCurrentSection("dictionary");
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, []);
+
   // Listen for model loading failures and show a toast
   useEffect(() => {
     const unlisten = listen<ModelStateEvent>("model-state-changed", (event) => {

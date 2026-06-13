@@ -27,6 +27,9 @@
 }
 
 .recording-overlay.docked-expanded {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
   opacity: 1;
 }
 
@@ -191,6 +194,71 @@
   border-radius: 50%;
   background: var(--overlay-accent);
   opacity: 0.85;
+}
+
+.docked-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 3px;
+  min-width: 0;
+}
+
+.overlay-action-button {
+  width: 23px;
+  height: 23px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--overlay-accent) 38%, transparent);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--overlay-accent);
+  cursor: pointer;
+  flex: 0 0 auto;
+  transition:
+    background-color 150ms ease-out,
+    border-color 150ms ease-out,
+    transform 100ms ease-out;
+}
+
+.overlay-action-button:hover {
+  background: var(--overlay-accent-soft);
+  border-color: var(--overlay-accent);
+}
+
+.overlay-action-button:active {
+  transform: scale(0.94);
+}
+
+.docked-status {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  line-height: 1.05;
+  color: var(--overlay-foreground);
+  overflow: hidden;
+}
+
+.docked-status-title,
+.docked-status-detail {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.docked-status-title {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--overlay-accent);
+}
+
+.docked-status-detail {
+  font-size: 10px;
 }
 
 @media (prefers-color-scheme: light) {

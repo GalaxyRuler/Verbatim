@@ -1,13 +1,21 @@
-import { listen } from "@tauri-apps/api/event";
+import { emit, listen } from "@tauri-apps/api/event";
 import React, { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import {
+  BookOpen,
+  ClipboardCopy,
+  ClipboardPaste,
+  RotateCcw,
+  Settings,
+  Undo2,
+} from "lucide-react";
 import {
   MicrophoneIcon,
   TranscriptionIcon,
   CancelIcon,
 } from "../components/icons";
 import "./RecordingOverlay.css";
-import { commands } from "@/bindings";
+import { commands, type DictionaryEntry } from "@/bindings";
 import i18n, { syncLanguageFromSettings } from "@/i18n";
 import {
   type DictationLanguageSelection,
@@ -18,7 +26,12 @@ import {
 } from "@/lib/dictationLanguageMode";
 import { getLanguageDirection } from "@/lib/utils/rtl";
 
-type OverlayState = "recording" | "transcribing" | "processing";
+type OverlayState =
+  | "recording"
+  | "transcribing"
+  | "processing"
+  | "paste_failed"
+  | "dictionary_learned";
 
 const RecordingOverlay: React.FC = () => {
   const { t } = useTranslation();
@@ -26,6 +39,9 @@ const RecordingOverlay: React.FC = () => {
   const [isDocked, setIsDocked] = useState(false);
   const [isDockedExpanded, setIsDockedExpanded] = useState(false);
   const [state, setState] = useState<OverlayState>("recording");
+  const [recentlyLearnedEntries, setRecentlyLearnedEntries] = useState<
+    DictionaryEntry[]
+  >([]);
   const [languageSelection, setLanguageSelection] =
     useState<DictationLanguageSelection>({
       dictationLanguageMode: "auto",
@@ -34,7 +50,20 @@ const RecordingOverlay: React.FC = () => {
     });
   const [levels, setLevels] = useState<number[]>(Array(16).fill(0));
   const smoothedLevelsRef = useRef<number[]>(Array(16).fill(0));
+  const isDockedRef = useRef(false);
   const direction = getLanguageDirection(i18n.language);
+
+  const setDockedMode = (enabled: boolean) => {
+    isDockedRef.current = enabled;
+    setIsDocked(enabled);
+  };
+
+  const shouldShowDockedFeedback = async () => {
+    if (isDockedRef.current) return true;
+
+    const result = await commands.getAppSettings();
+    return result.status === "ok" && result.data.docked_pill_enabled === true;
+  };
 
   const refreshLanguageMode = async () => {
     const result = await commands.getAppSettings();
@@ -64,8 +93,9 @@ const RecordingOverlay: React.FC = () => {
         await syncLanguageFromSettings();
         await refreshLanguageMode();
         const overlayState = event.payload as OverlayState;
-        setIsDocked(false);
+        setDockedMode(false);
         setIsDockedExpanded(false);
+        setRecentlyLearnedEntries([]);
         setState(overlayState);
         setIsVisible(true);
       });
@@ -75,9 +105,32 @@ const RecordingOverlay: React.FC = () => {
         async () => {
           await syncLanguageFromSettings();
           await refreshLanguageMode();
-          setIsDocked(true);
+          setDockedMode(true);
           setIsDockedExpanded(false);
           setState("recording");
+          setIsVisible(true);
+        },
+      );
+
+      const unlistenPasteError = await listen("paste-error", async () => {
+        if (!(await shouldShowDockedFeedback())) return;
+
+        setDockedMode(true);
+        setIsDockedExpanded(true);
+        setState("paste_failed");
+        setIsVisible(true);
+      });
+
+      const unlistenDictionaryLearned = await listen<DictionaryEntry[]>(
+        "dictionary-entries-learned",
+        async (event) => {
+          if (event.payload.length === 0) return;
+          if (!(await shouldShowDockedFeedback())) return;
+
+          setRecentlyLearnedEntries(event.payload);
+          setDockedMode(true);
+          setIsDockedExpanded(true);
+          setState("dictionary_learned");
           setIsVisible(true);
         },
       );
@@ -106,6 +159,8 @@ const RecordingOverlay: React.FC = () => {
       return () => {
         unlistenShow();
         unlistenShowDocked();
+        unlistenPasteError();
+        unlistenDictionaryLearned();
         unlistenHide();
         unlistenLevel();
       };
@@ -138,7 +193,152 @@ const RecordingOverlay: React.FC = () => {
     }
   };
 
+  const showMainWindow = async () => {
+    await commands.showMainWindowCommand();
+  };
+
+  const openDictionarySettings = async () => {
+    await commands.showMainWindowCommand();
+    await emit("open-dictionary-settings");
+  };
+
+  const handleUndoLearned = async () => {
+    if (recentlyLearnedEntries.length === 0) return;
+
+    const result = await commands.undoDictionaryEntries(
+      recentlyLearnedEntries.map((entry) => entry.id),
+    );
+    if (result.status === "ok") {
+      setRecentlyLearnedEntries([]);
+      setState("recording");
+    }
+  };
+
   const isDockedCollapsed = isDocked && !isDockedExpanded;
+  const learnedPhrases = recentlyLearnedEntries
+    .map((entry) => entry.phrase)
+    .join(", ");
+
+  const renderActionButton = (
+    label: string,
+    onClick: () => unknown | Promise<unknown>,
+    icon: React.ReactNode,
+  ) => (
+    <button
+      type="button"
+      className="overlay-action-button"
+      onClick={() => {
+        void onClick();
+      }}
+      aria-label={label}
+      title={label}
+    >
+      {icon}
+    </button>
+  );
+
+  const renderDockedExpandedContent = () => {
+    if (state === "dictionary_learned" && recentlyLearnedEntries.length > 0) {
+      return (
+        <>
+          <div
+            className="docked-status"
+            role="status"
+            aria-live="polite"
+            title={learnedPhrases}
+          >
+            <span className="docked-status-title">
+              {t("overlay.dictionaryLearned.title")}
+            </span>
+            <span className="docked-status-detail">{learnedPhrases}</span>
+          </div>
+          <div className="docked-actions">
+            {renderActionButton(
+              t("overlay.actions.reviewDictionary"),
+              openDictionarySettings,
+              <BookOpen size={14} strokeWidth={2.25} />,
+            )}
+            {renderActionButton(
+              t("overlay.actions.undoLearnedWord"),
+              handleUndoLearned,
+              <Undo2 size={14} strokeWidth={2.25} />,
+            )}
+          </div>
+        </>
+      );
+    }
+
+    if (state === "paste_failed") {
+      return (
+        <>
+          <div className="docked-status" role="status" aria-live="polite">
+            <span className="docked-status-title">
+              {t("overlay.pasteFailed")}
+            </span>
+          </div>
+          <div className="docked-actions">
+            {renderActionButton(
+              t("overlay.actions.retryPaste"),
+              commands.pasteLastTranscript,
+              <RotateCcw size={14} strokeWidth={2.25} />,
+            )}
+            {renderActionButton(
+              t("overlay.actions.copyLastTranscript"),
+              commands.copyLastTranscript,
+              <ClipboardCopy size={14} strokeWidth={2.25} />,
+            )}
+            {renderActionButton(
+              t("overlay.actions.openSettings"),
+              showMainWindow,
+              <Settings size={14} strokeWidth={2.25} />,
+            )}
+          </div>
+        </>
+      );
+    }
+
+    return (
+      <>
+        <button
+          type="button"
+          className="language-mode-chip"
+          onClick={handleLanguageModeClick}
+          title={t("overlay.languageMode.title")}
+          aria-label={t("overlay.languageMode.change")}
+        >
+          {getDictationLanguageModeLabel(languageSelection)}
+        </button>
+        <div className="docked-actions">
+          {renderActionButton(
+            t("overlay.actions.copyLastTranscript"),
+            commands.copyLastTranscript,
+            <ClipboardCopy size={14} strokeWidth={2.25} />,
+          )}
+          {renderActionButton(
+            t("overlay.actions.pasteLastTranscript"),
+            commands.pasteLastTranscript,
+            <ClipboardPaste size={14} strokeWidth={2.25} />,
+          )}
+          {renderActionButton(
+            t("overlay.actions.reviewDictionary"),
+            openDictionarySettings,
+            <BookOpen size={14} strokeWidth={2.25} />,
+          )}
+          {renderActionButton(
+            t("overlay.actions.openSettings"),
+            showMainWindow,
+            <Settings size={14} strokeWidth={2.25} />,
+          )}
+          {state === "recording" &&
+            renderActionButton(
+              t("overlay.actions.cancel"),
+              commands.cancelOperation,
+              <CancelIcon />,
+            )}
+        </div>
+      </>
+    );
+  };
 
   return (
     <div
@@ -184,6 +384,8 @@ const RecordingOverlay: React.FC = () => {
           </span>
           <span className="docked-dot" aria-hidden="true" />
         </button>
+      ) : isDocked ? (
+        renderDockedExpandedContent()
       ) : (
         <>
           <div className="overlay-left">{getIcon()}</div>

@@ -734,6 +734,19 @@
     "docked": {
       "expand": "Expand pill",
       "collapse": "Collapse pill"
-    }
+    },
+    "actions": {
+      "copyLastTranscript": "Copy last transcript",
+      "pasteLastTranscript": "Paste last transcript",
+      "retryPaste": "Retry paste",
+      "reviewDictionary": "Review dictionary",
+      "openSettings": "Open settings",
+      "cancel": "Cancel recording",
+      "undoLearnedWord": "Undo learned word"
+    },
+    "dictionaryLearned": {
+      "title": "Added to dictionary"
+    },
+    "pasteFailed": "Paste failed"
   }
 }
