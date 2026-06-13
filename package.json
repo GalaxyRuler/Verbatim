@@ -17,6 +17,7 @@
     "check:backend:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/cargo-check-windows.ps1",
     "test:backend:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/cargo-test-windows.ps1",
     "build:windows:installer": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-windows-installer.ps1",
+    "build:windows:dev-installer": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-windows-dev-installer.ps1",
     "test:playwright": "playwright test",
     "test:playwright:ui": "playwright test --ui",
     "check:version": "bun scripts/check-version-consistency.ts",

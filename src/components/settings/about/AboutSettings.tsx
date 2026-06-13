@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { getVersion } from "@tauri-apps/api/app";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { SettingsGroup } from "../../ui/SettingsGroup";
 import { SettingContainer } from "../../ui/SettingContainer";
@@ -8,6 +7,7 @@ import { Button } from "../../ui/Button";
 import { AppDataDirectory } from "../AppDataDirectory";
 import { AppLanguageSelector } from "../AppLanguageSelector";
 import { LogDirectory } from "../debug";
+import { getDisplayVersion } from "@/lib/appVersion";
 
 export const AboutSettings: React.FC = () => {
   const { t } = useTranslation();
@@ -16,7 +16,7 @@ export const AboutSettings: React.FC = () => {
   useEffect(() => {
     const fetchVersion = async () => {
       try {
-        const appVersion = await getVersion();
+        const appVersion = await getDisplayVersion();
         setVersion(appVersion);
       } catch (error) {
         console.error("Failed to get app version:", error);

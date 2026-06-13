@@ -1,4 +1,6 @@
 fn main() {
+    println!("cargo:rerun-if-env-changed=VERBATIM_DEV_VERSION");
+
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     build_apple_intelligence_bridge();
 

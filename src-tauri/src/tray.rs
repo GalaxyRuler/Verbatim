@@ -133,6 +133,10 @@ pub fn tray_tooltip() -> String {
 }
 
 fn version_label() -> String {
+    if let Some(dev_version) = option_env!("VERBATIM_DEV_VERSION") {
+        return format!("Verbatim Dev v{}", dev_version);
+    }
+
     if cfg!(debug_assertions) {
         format!("Verbatim v{} (Dev)", env!("CARGO_PKG_VERSION"))
     } else {
