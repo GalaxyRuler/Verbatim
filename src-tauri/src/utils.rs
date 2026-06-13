@@ -394,7 +394,7 @@ mod tests {
     #[test]
     fn adjacent_resource_candidates_include_installed_exe_resource_layouts() {
         let exe_path =
-            PathBuf::from(r"C:\Users\Admin\AppData\Local\Programs\Verbatim\Verbatim.exe");
+            PathBuf::from(r"C:\Users\Example\AppData\Local\Programs\Verbatim\Verbatim.exe");
         let candidates = adjacent_resource_candidate_paths(
             "resources/models/silero_vad_v4.onnx",
             Some(&exe_path),
@@ -402,10 +402,10 @@ mod tests {
         );
 
         assert!(candidates.contains(&PathBuf::from(
-            r"C:\Users\Admin\AppData\Local\Programs\Verbatim\resources\models\silero_vad_v4.onnx",
+            r"C:\Users\Example\AppData\Local\Programs\Verbatim\resources\models\silero_vad_v4.onnx",
         )));
         assert!(candidates.contains(&PathBuf::from(
-            r"C:\Users\Admin\AppData\Local\Programs\Verbatim\resources\silero_vad_v4.onnx",
+            r"C:\Users\Example\AppData\Local\Programs\Verbatim\resources\silero_vad_v4.onnx",
         )));
     }
 
