@@ -391,8 +391,9 @@ mod tests {
         assert_eq!(flattened_model_resource_path("models/example.bin"), None);
     }
 
+    #[cfg(windows)]
     #[test]
-    fn adjacent_resource_candidates_include_installed_exe_resource_layouts() {
+    fn adjacent_resource_candidates_include_installed_windows_exe_resource_layouts() {
         let exe_path =
             PathBuf::from(r"C:\Users\Example\AppData\Local\Programs\Verbatim\Verbatim.exe");
         let candidates = adjacent_resource_candidate_paths(
@@ -407,6 +408,22 @@ mod tests {
         assert!(candidates.contains(&PathBuf::from(
             r"C:\Users\Example\AppData\Local\Programs\Verbatim\resources\silero_vad_v4.onnx",
         )));
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn adjacent_resource_candidates_include_installed_unix_exe_resource_layouts() {
+        let exe_path = PathBuf::from("/opt/verbatim/verbatim");
+        let candidates = adjacent_resource_candidate_paths(
+            "resources/models/silero_vad_v4.onnx",
+            Some(&exe_path),
+            None,
+        );
+
+        assert!(candidates.contains(&PathBuf::from(
+            "/opt/verbatim/resources/models/silero_vad_v4.onnx",
+        )));
+        assert!(candidates.contains(&PathBuf::from("/opt/verbatim/resources/silero_vad_v4.onnx",)));
     }
 
     #[test]
