@@ -73,8 +73,7 @@ const getOverlayState = (state: unknown): OverlayState =>
     ? (state as OverlayState)
     : "recording";
 
-const shouldExpandForState = (state: OverlayState): boolean =>
-  state !== "idle" && state !== "recording";
+const shouldExpandForState = (state: OverlayState): boolean => state !== "idle";
 
 const RecordingOverlay: React.FC = () => {
   const { t } = useTranslation();
@@ -319,6 +318,22 @@ const RecordingOverlay: React.FC = () => {
     </button>
   );
 
+  const renderRecordingBars = () => (
+    <div className="bars-container">
+      {levels.map((v, i) => (
+        <div
+          key={i}
+          className="bar"
+          style={{
+            height: `${Math.min(20, 4 + Math.pow(v, 0.7) * 16)}px`,
+            transition: "height 60ms ease-out, opacity 120ms ease-out",
+            opacity: Math.max(0.2, v * 1.7),
+          }}
+        />
+      ))}
+    </div>
+  );
+
   const renderLanguagePicker = () => (
     <div
       className="language-picker-options"
@@ -450,7 +465,29 @@ const RecordingOverlay: React.FC = () => {
       );
     }
 
-    if (state !== "idle" && state !== "recording") {
+    if (state === "recording") {
+      return (
+        <>
+          <button
+            type="button"
+            className="language-mode-chip"
+            onClick={handleLanguageModeClick}
+            title={t("overlay.languageMode.title")}
+            aria-label={t("overlay.languageMode.change")}
+          >
+            {getDictationLanguageModeLabel(languageSelection)}
+          </button>
+          {renderRecordingBars()}
+          {renderActionButton(
+            t("overlay.actions.cancel"),
+            commands.cancelOperation,
+            <CancelIcon />,
+          )}
+        </>
+      );
+    }
+
+    if (state !== "idle") {
       return renderStateStatus();
     }
 
@@ -486,12 +523,6 @@ const RecordingOverlay: React.FC = () => {
             showMainWindow,
             <Settings size={14} strokeWidth={2.25} />,
           )}
-          {state === "recording" &&
-            renderActionButton(
-              t("overlay.actions.cancel"),
-              commands.cancelOperation,
-              <CancelIcon />,
-            )}
         </div>
       </>
     );
@@ -514,7 +545,7 @@ const RecordingOverlay: React.FC = () => {
         }
       }}
       onMouseLeave={() => {
-        if (isDocked) {
+        if (isDocked && state === "idle" && !isLanguagePickerOpen) {
           setIsDockedExpanded(false);
         }
       }}
@@ -550,22 +581,7 @@ const RecordingOverlay: React.FC = () => {
           <div className="overlay-left">{getIcon()}</div>
 
           <div className="overlay-middle">
-            {state === "recording" && (
-              <div className="bars-container">
-                {levels.map((v, i) => (
-                  <div
-                    key={i}
-                    className="bar"
-                    style={{
-                      height: `${Math.min(20, 4 + Math.pow(v, 0.7) * 16)}px`, // Cap at 20px max height
-                      transition:
-                        "height 60ms ease-out, opacity 120ms ease-out",
-                      opacity: Math.max(0.2, v * 1.7), // Minimum opacity for visibility
-                    }}
-                  />
-                ))}
-              </div>
-            )}
+            {state === "recording" && renderRecordingBars()}
             {state === "transcribing" && (
               <div className="transcribing-text">
                 {t("overlay.transcribing")}

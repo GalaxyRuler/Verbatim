@@ -958,6 +958,54 @@ test.describe("Verbatim App", () => {
     ).toBeVisible();
   });
 
+  test("docked pill expands to live recording bars when recording starts", async ({
+    page,
+  }) => {
+    await installTauriMocks(page);
+    await page.goto("/src/overlay/index.html");
+
+    await page.evaluate(async () => {
+      const win = window as typeof window & {
+        __TAURI_INTERNALS__: {
+          invoke: (
+            cmd: string,
+            args?: Record<string, unknown>,
+          ) => Promise<void>;
+        };
+        __VERBATIM_TEST_EMIT_EVENT__: (
+          event: string,
+          payload?: unknown,
+        ) => void;
+      };
+      await win.__TAURI_INTERNALS__.invoke("change_docked_pill_setting", {
+        enabled: true,
+      });
+      win.__VERBATIM_TEST_EMIT_EVENT__("show-docked-overlay");
+    });
+    await expect(page.getByTestId("recording-overlay")).toHaveClass(
+      /docked-collapsed/,
+    );
+
+    await page.evaluate(() => {
+      const win = window as typeof window & {
+        __VERBATIM_TEST_EMIT_EVENT__: (
+          event: string,
+          payload?: unknown,
+        ) => void;
+      };
+      win.__VERBATIM_TEST_EMIT_EVENT__("show-overlay", "recording");
+      win.__VERBATIM_TEST_EMIT_EVENT__(
+        "mic-level",
+        [0.9, 0.7, 0.5, 0.3, 0.6, 0.8, 0.4, 0.2, 0.5],
+      );
+    });
+
+    const overlay = page.getByTestId("recording-overlay");
+    await expect(overlay).toHaveClass(/docked-expanded/);
+    await expect(overlay.locator(".bars-container")).toBeVisible();
+    await expect(overlay.locator(".bar")).toHaveCount(9);
+  });
+
   test("transient overlay does not inherit docked mode when setting is off", async ({
     page,
   }) => {
