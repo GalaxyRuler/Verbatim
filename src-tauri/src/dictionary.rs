@@ -67,10 +67,9 @@ pub fn sync_legacy_custom_words(settings: &mut AppSettings) -> bool {
     let mut changed = false;
 
     let before_len = settings.dictionary_entries.len();
-    settings.dictionary_entries.retain(|entry| {
-        entry.source != DictionaryEntrySource::AutoLearned
-            || auto_learn_phrase_is_valid(&entry.phrase)
-    });
+    settings
+        .dictionary_entries
+        .retain(|entry| sanitize_dictionary_phrase(&entry.phrase).is_some());
     if settings.dictionary_entries.len() != before_len {
         changed = true;
     }
@@ -414,6 +413,31 @@ mod tests {
         assert_eq!(settings.dictionary_entries.len(), 1);
         assert_eq!(settings.dictionary_entries[0].phrase, "Robyn");
         assert_eq!(settings.custom_words, vec!["Robyn"]);
+    }
+
+    #[test]
+    fn sync_legacy_custom_words_removes_dangling_hyphen_manual_and_imported_entries() {
+        let mut settings = get_default_settings();
+        settings.dictionary_entries = vec![
+            entry("dict_1_vow", "Vow-"),
+            DictionaryEntry {
+                source: DictionaryEntrySource::Imported,
+                ..entry("dict_2_al", "Al-")
+            },
+            entry("dict_3_jean_luc", "Jean-Luc"),
+        ];
+        settings.custom_words = vec![
+            "Vow-".to_string(),
+            "Al-".to_string(),
+            "Jean-Luc".to_string(),
+        ];
+
+        let changed = sync_legacy_custom_words(&mut settings);
+
+        assert!(changed);
+        assert_eq!(settings.dictionary_entries.len(), 1);
+        assert_eq!(settings.dictionary_entries[0].phrase, "Jean-Luc");
+        assert_eq!(settings.custom_words, vec!["Jean-Luc"]);
     }
 
     #[test]

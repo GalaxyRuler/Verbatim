@@ -962,6 +962,44 @@ test.describe("Verbatim App", () => {
     ).toBeVisible();
   });
 
+  test("docked pill surfaces language guard recovery", async ({ page }) => {
+    await installTauriMocks(page);
+    await page.goto("/src/overlay/index.html");
+
+    await page.evaluate(() => {
+      const win = window as typeof window & {
+        __VERBATIM_TEST_EMIT_EVENT__: (
+          event: string,
+          payload?: unknown,
+        ) => void;
+      };
+      win.__VERBATIM_TEST_EMIT_EVENT__("show-docked-overlay");
+    });
+    await expect(page.getByTestId("recording-overlay")).toHaveClass(
+      /docked-collapsed/,
+    );
+
+    await page.evaluate(() => {
+      const win = window as typeof window & {
+        __VERBATIM_TEST_EMIT_EVENT__: (
+          event: string,
+          payload?: unknown,
+        ) => void;
+      };
+      win.__VERBATIM_TEST_EMIT_EVENT__("language-guard-blocked", {
+        locked_language: "ar",
+        preview: "hello world",
+      });
+    });
+
+    const overlay = page.getByTestId("recording-overlay");
+    await expect(overlay).toHaveClass(/docked-expanded/);
+    await expect(overlay).toContainText("Copied");
+    await expect(
+      page.getByRole("button", { name: "Paste last transcript" }),
+    ).toBeVisible();
+  });
+
   test("docked pill expands to live recording bars when recording starts", async ({
     page,
   }) => {

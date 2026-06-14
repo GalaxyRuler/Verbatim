@@ -155,12 +155,22 @@ fn accept_post_processed_text(
 }
 
 fn is_local_post_process_provider(base_url: &str) -> bool {
-    let normalized = base_url.trim().to_ascii_lowercase();
-    normalized.starts_with("apple-intelligence://")
-        || normalized.starts_with("http://localhost")
-        || normalized.starts_with("https://localhost")
-        || normalized.starts_with("http://127.0.0.1")
-        || normalized.starts_with("https://127.0.0.1")
+    let Ok(parsed) = reqwest::Url::parse(base_url.trim()) else {
+        return false;
+    };
+
+    if parsed.scheme() == "apple-intelligence" {
+        return true;
+    }
+
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return false;
+    }
+
+    matches!(
+        parsed.host_str(),
+        Some("localhost") | Some("127.0.0.1") | Some("::1") | Some("[::1]")
+    )
 }
 
 fn can_egress_post_process_text(provider_base_url: &str, api_key: &str) -> bool {
@@ -703,6 +713,7 @@ mod adaptive_action_tests {
             "https://127.0.0.1:8080/v1",
             "   "
         ));
+        assert!(can_egress_post_process_text("http://[::1]:11434/v1", ""));
         assert!(can_egress_post_process_text(
             "apple-intelligence://local",
             ""
@@ -723,6 +734,20 @@ mod adaptive_action_tests {
             "https://api.openai.com/v1",
             "sk-test"
         ));
+    }
+
+    #[test]
+    fn localhost_lookalike_post_process_providers_require_api_key() {
+        for base_url in [
+            "http://localhost@evil.com/v1",
+            "http://localhost.evil.com/v1",
+            "https://127.0.0.1.evil.com/v1",
+        ] {
+            assert!(
+                !can_egress_post_process_text(base_url, ""),
+                "{base_url} must not be treated as a local provider"
+            );
+        }
     }
 
     #[test]

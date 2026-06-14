@@ -16,7 +16,7 @@
     "debug": "تصحيح الأخطاء",
     "about": "حول",
     "models": "النماذج",
-    "dictionary": "Dictionary"
+    "dictionary": "القاموس"
   },
   "onboarding": {
     "subtitle": "للبدء، اختر نموذج التفريغ الصوتي",
@@ -343,10 +343,10 @@
         "remove": "إزالة {{word}}",
         "duplicate": "\"{{word}}\" موجود بالفعل",
         "autoAdd": {
-          "label": "Auto-add corrected words",
-          "description": "After Verbatim pastes text, watch that same text field for a few seconds and add uncommon words you correct to the custom dictionary.",
-          "learnedTitle": "Added to dictionary",
-          "learnedDescription": "Added: {{words}}"
+          "label": "إضافة الكلمات المصححة تلقائيًا",
+          "description": "بعد أن يلصق Verbatim النص، راقب حقل النص نفسه لبضع ثوانٍ وأضف الكلمات غير الشائعة التي تصححها إلى القاموس المخصص.",
+          "learnedTitle": "أضيف إلى القاموس",
+          "learnedDescription": "تمت الإضافة: {{words}}"
         }
       },
       "adaptiveProfiles": {
@@ -603,51 +603,51 @@
       "noModelsMatch": "لا توجد نماذج مطابقة لهذا الفلتر."
     },
     "dictionary": {
-      "title": "Dictionary",
-      "description": "Manage words and phrases Verbatim should recognize.",
-      "search": "Search dictionary",
-      "add": "Add entry",
-      "save": "Save entry",
-      "cancel": "Cancel",
-      "phrase": "Word or phrase",
-      "replacementOf": "Correct when Verbatim writes",
+      "title": "القاموس",
+      "description": "إدارة الكلمات والعبارات التي يجب أن يتعرف عليها Verbatim.",
+      "search": "البحث في القاموس",
+      "add": "إضافة إدخال",
+      "save": "حفظ الإدخال",
+      "cancel": "إلغاء",
+      "phrase": "كلمة أو عبارة",
+      "replacementOf": "صحح عندما يكتب Verbatim",
       "replacementPlaceholder": "robin",
-      "corrects": "Corrects: {{replacement}}",
-      "editEntry": "Edit {{phrase}}",
-      "deleteEntry": "Delete {{phrase}}",
-      "starEntry": "Star {{phrase}}",
-      "unstarEntry": "Unstar {{phrase}}",
+      "corrects": "يصحح: {{replacement}}",
+      "editEntry": "تعديل {{phrase}}",
+      "deleteEntry": "حذف {{phrase}}",
+      "starEntry": "تمييز {{phrase}}",
+      "unstarEntry": "إلغاء تمييز {{phrase}}",
       "autoAdd": {
-        "label": "Auto-add corrected words",
-        "description": "When you quickly correct text Verbatim just pasted, add the corrected word or phrase to your dictionary."
+        "label": "إضافة الكلمات المصححة تلقائيًا",
+        "description": "عندما تصحح بسرعة نصًا لصقه Verbatim للتو، أضف الكلمة أو العبارة المصححة إلى قاموسك."
       },
       "source": {
-        "manual": "Manual",
-        "auto_learned": "Auto-learned",
-        "imported": "Imported"
+        "manual": "يدوي",
+        "auto_learned": "متعلم تلقائيًا",
+        "imported": "مستورد"
       },
       "priority": {
-        "normal": "Normal",
-        "starred": "Starred"
+        "normal": "عادي",
+        "starred": "مميز"
       },
       "counts": {
-        "total": "{{count}} entries",
-        "autoLearned": "{{count}} auto-learned",
-        "starred": "{{count}} starred"
+        "total": "{{count}} إدخالات",
+        "autoLearned": "{{count}} متعلمة تلقائيًا",
+        "starred": "{{count}} مميزة"
       },
-      "empty": "No dictionary entries yet.",
-      "noResults": "No entries match your search.",
+      "empty": "لا توجد إدخالات في القاموس بعد.",
+      "noResults": "لا توجد إدخالات تطابق بحثك.",
       "recentlyLearned": {
-        "title": "Added to dictionary",
-        "description": "Added: {{phrases}}",
-        "undo": "Undo"
+        "title": "أضيف إلى القاموس",
+        "description": "تمت الإضافة: {{phrases}}",
+        "undo": "تراجع"
       },
       "errors": {
-        "load": "Failed to load dictionary",
-        "add": "Failed to add dictionary entry",
-        "update": "Failed to update dictionary entry",
-        "delete": "Failed to delete dictionary entry",
-        "duplicate": "{{phrase}} is already in your dictionary"
+        "load": "فشل تحميل القاموس",
+        "add": "فشل إضافة إدخال القاموس",
+        "update": "فشل تحديث إدخال القاموس",
+        "delete": "فشل حذف إدخال القاموس",
+        "duplicate": "{{phrase}} موجود بالفعل في قاموسك"
       }
     }
   },
@@ -713,12 +713,12 @@
     "modelLoadFailedUnknown": "نموذج غير معروف",
     "pasteFailedTitle": "فشل لصق النص",
     "pasteFailed": "تعذر لصق النص في التطبيق النشط.",
-    "pasteFailedCopiedHint": "The text was copied to your clipboard so you can paste it manually.",
-    "pasteFailedCopyAction": "Copy again",
-    "languageGuardTitle": "Wrong Language Detected",
-    "languageGuardDescription": "Verbatim blocked text that did not match your locked language ({{language}}). It was copied to your clipboard.",
-    "languageGuardPreview": "Preview: {{preview}}",
-    "languageGuardPasteAnyway": "Paste anyway"
+    "pasteFailedCopiedHint": "تم نسخ النص إلى الحافظة حتى تتمكن من لصقه يدويًا.",
+    "pasteFailedCopyAction": "انسخ مرة أخرى",
+    "languageGuardTitle": "تم اكتشاف لغة غير متوقعة",
+    "languageGuardDescription": "منع Verbatim نصًا لا يطابق اللغة المثبتة ({{language}}). تم نسخه إلى الحافظة.",
+    "languageGuardPreview": "معاينة: {{preview}}",
+    "languageGuardPasteAnyway": "الصق على أي حال"
   },
   "appLanguage": {
     "title": "لغة التطبيق",
@@ -728,34 +728,34 @@
     "transcribing": "...جاري التفريغ",
     "processing": "...جاري المعالجة",
     "languageMode": {
-      "title": "Dictation language",
-      "change": "Change dictation language"
+      "title": "لغة الإملاء",
+      "change": "تغيير لغة الإملاء"
     },
     "docked": {
-      "expand": "Expand pill",
-      "collapse": "Collapse pill"
+      "expand": "توسيع الشريط",
+      "collapse": "طي الشريط"
     },
     "actions": {
-      "copyLastTranscript": "Copy last transcript",
-      "pasteLastTranscript": "Paste last transcript",
-      "retryPaste": "Retry paste",
-      "reviewDictionary": "Review dictionary",
-      "openSettings": "Open settings",
-      "cancel": "Cancel recording",
-      "undoLearnedWord": "Undo learned word"
+      "copyLastTranscript": "نسخ آخر تفريغ",
+      "pasteLastTranscript": "لصق آخر تفريغ",
+      "retryPaste": "إعادة محاولة اللصق",
+      "reviewDictionary": "مراجعة القاموس",
+      "openSettings": "فتح الإعدادات",
+      "cancel": "إلغاء التسجيل",
+      "undoLearnedWord": "تراجع عن الكلمة المتعلمة"
     },
     "dictionaryLearned": {
-      "title": "Added to dictionary"
+      "title": "أضيف إلى القاموس"
     },
-    "pasteFailed": "Paste failed",
+    "pasteFailed": "فشل اللصق",
     "states": {
-      "idle": "Ready",
-      "recording": "Recording",
-      "silence": "No speech detected",
-      "inserted": "Inserted",
-      "copied": "Copied",
-      "micFailed": "Microphone issue",
-      "cancelled": "Cancelled"
+      "idle": "جاهز",
+      "recording": "جاري التسجيل",
+      "silence": "لم يتم اكتشاف كلام",
+      "inserted": "تم الإدراج",
+      "copied": "تم النسخ",
+      "micFailed": "مشكلة في الميكروفون",
+      "cancelled": "تم الإلغاء"
     }
   }
 }

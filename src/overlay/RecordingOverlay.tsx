@@ -171,6 +171,19 @@ const RecordingOverlay: React.FC = () => {
         setIsVisible(true);
       });
 
+      const unlistenLanguageGuardBlocked = await listen(
+        "language-guard-blocked",
+        async () => {
+          if (!(await shouldShowDockedFeedback())) return;
+
+          setDockedMode(true);
+          setIsDockedExpanded(true);
+          setIsLanguagePickerOpen(false);
+          setState("copied");
+          setIsVisible(true);
+        },
+      );
+
       const unlistenDictionaryLearned = await listen<DictionaryEntry[]>(
         "dictionary-entries-learned",
         async (event) => {
@@ -226,6 +239,7 @@ const RecordingOverlay: React.FC = () => {
         unlistenShow();
         unlistenShowDocked();
         unlistenPasteError();
+        unlistenLanguageGuardBlocked();
         unlistenDictionaryLearned();
         unlistenStateChanged();
         unlistenHide();
