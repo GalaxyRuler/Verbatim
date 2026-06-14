@@ -21,6 +21,7 @@ import { KeyboardImplementationSelector } from "../debug/KeyboardImplementationS
 import { AccelerationSelector } from "../AccelerationSelector";
 import { LazyStreamClose } from "../LazyStreamClose";
 import { AdaptiveProfiles } from "../AdaptiveProfiles";
+import { FormattingLevel } from "../FormattingLevel";
 
 export const AdvancedSettings: React.FC = () => {
   const { t } = useTranslation();
@@ -47,6 +48,7 @@ export const AdvancedSettings: React.FC = () => {
       </SettingsGroup>
 
       <SettingsGroup title={t("settings.advanced.groups.transcription")}>
+        <FormattingLevel descriptionMode="tooltip" grouped={true} />
         <AppendTrailingSpace descriptionMode="tooltip" grouped={true} />
       </SettingsGroup>
 

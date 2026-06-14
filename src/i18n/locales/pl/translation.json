@@ -649,6 +649,16 @@
         "delete": "Failed to delete dictionary entry",
         "duplicate": "{{phrase}} is already in your dictionary"
       }
+    },
+    "formattingLevel": {
+      "title": "Smart Formatting",
+      "description": "Controls deterministic cleanup and spoken correction strength before text is inserted.",
+      "options": {
+        "none": "None",
+        "light": "Light",
+        "medium": "Medium",
+        "high": "High"
+      }
     }
   },
   "footer": {

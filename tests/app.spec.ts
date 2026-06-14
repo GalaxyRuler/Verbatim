@@ -75,6 +75,7 @@ const baseSettings = {
   auto_submit: false,
   auto_submit_key: "enter",
   post_process_enabled: false,
+  formatting_level: "light",
   post_process_provider_id: "openai",
   post_process_providers: [],
   post_process_api_keys: {},
@@ -343,6 +344,12 @@ const installTauriMocks = async (
                 experimental_enabled: Boolean(args?.enabled),
               };
               return null;
+            case "change_formatting_level_setting":
+              appSettings = {
+                ...appSettings,
+                formatting_level: args?.level as string,
+              };
+              return null;
             case "change_adaptive_profiles_enabled_setting":
               appSettings = {
                 ...appSettings,
@@ -457,6 +464,37 @@ test.describe("Verbatim App", () => {
     await expect(adaptiveToggle).not.toBeChecked();
     await adaptiveToggle.check({ force: true });
     await expect(adaptiveToggle).toBeChecked();
+  });
+
+  test("formatting level can be changed from advanced transcription settings", async ({
+    page,
+  }) => {
+    await installTauriMocks(page);
+    await page.goto("/");
+
+    await expect(page.getByTitle("General")).toBeVisible();
+    await page.getByText("Advanced").click();
+
+    const formattingRow = settingRow(page, "Smart Formatting");
+    await expect(formattingRow).toBeVisible();
+    await formattingRow.getByRole("button", { name: "Light" }).click();
+    await page.getByRole("button", { name: "Medium" }).click();
+
+    const invokes = await page.evaluate(() => {
+      const win = window as typeof window & {
+        __VERBATIM_TEST_INVOKES__: Array<{
+          cmd: string;
+          args?: Record<string, unknown>;
+        }>;
+      };
+      return win.__VERBATIM_TEST_INVOKES__;
+    });
+    expect(invokes).toContainEqual(
+      expect.objectContaining({
+        cmd: "change_formatting_level_setting",
+        args: expect.objectContaining({ level: "medium" }),
+      }),
+    );
   });
 
   test("dictionary section is visible from the sidebar", async ({ page }) => {

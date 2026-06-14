@@ -649,6 +649,16 @@
         "delete": "فشل حذف إدخال القاموس",
         "duplicate": "{{phrase}} موجود بالفعل في قاموسك"
       }
+    },
+    "formattingLevel": {
+      "title": "Smart Formatting",
+      "description": "Controls deterministic cleanup and spoken correction strength before text is inserted.",
+      "options": {
+        "none": "None",
+        "light": "Light",
+        "medium": "Medium",
+        "high": "High"
+      }
     }
   },
   "footer": {

@@ -925,4 +925,28 @@ mod tests {
         assert_eq!(entry.post_processed_text.as_deref(), Some("processed"));
         assert_eq!(entry.adaptive_profile_id.as_deref(), Some("email"));
     }
+
+    #[test]
+    fn history_entry_preserves_raw_text_and_formatted_final_text() {
+        let conn = setup_conn();
+        insert_entry(
+            &conn,
+            300,
+            "The deadline is Monday no, I mean Tuesday.",
+            Some("The deadline is Tuesday."),
+        );
+
+        let entry = HistoryManager::get_latest_entry_with_conn(&conn)
+            .expect("fetch latest entry")
+            .expect("entry exists");
+
+        assert_eq!(
+            entry.transcription_text,
+            "The deadline is Monday no, I mean Tuesday."
+        );
+        assert_eq!(
+            entry.post_processed_text.as_deref(),
+            Some("The deadline is Tuesday.")
+        );
+    }
 }

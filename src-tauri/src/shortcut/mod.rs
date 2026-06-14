@@ -967,6 +967,18 @@ pub fn change_post_process_enabled_setting(app: AppHandle, enabled: bool) -> Res
 
 #[tauri::command]
 #[specta::specta]
+pub fn change_formatting_level_setting(
+    app: AppHandle,
+    level: settings::FormattingLevel,
+) -> Result<(), String> {
+    let mut settings = settings::get_settings(&app);
+    settings.formatting_level = level;
+    settings::write_settings(&app, settings);
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
 pub fn change_experimental_enabled_setting(app: AppHandle, enabled: bool) -> Result<(), String> {
     let mut settings = settings::get_settings(&app);
     settings.experimental_enabled = enabled;

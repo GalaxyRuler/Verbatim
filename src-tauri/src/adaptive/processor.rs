@@ -283,4 +283,67 @@ mod tests {
         );
         assert!(validation.is_err());
     }
+
+    #[test]
+    fn smart_formatting_none_preserves_raw_transcript() {
+        let result = crate::adaptive::smart_formatting::format_transcript(
+            "Send it Monday no, I mean Tuesday.",
+            crate::settings::FormattingLevel::None,
+        );
+        assert_eq!(result, "Send it Monday no, I mean Tuesday.");
+    }
+
+    #[test]
+    fn smart_formatting_light_applies_no_i_mean_backtrack() {
+        let result = crate::adaptive::smart_formatting::format_transcript(
+            "The deadline is Monday no, I mean Tuesday.",
+            crate::settings::FormattingLevel::Light,
+        );
+        assert_eq!(result, "The deadline is Tuesday.");
+    }
+
+    #[test]
+    fn smart_formatting_light_applies_scratch_that_backtrack() {
+        let result = crate::adaptive::smart_formatting::format_transcript(
+            "Please send the first draft scratch that send the final version.",
+            crate::settings::FormattingLevel::Light,
+        );
+        assert_eq!(result, "send the final version.");
+    }
+
+    #[test]
+    fn smart_formatting_light_applies_actually_backtrack() {
+        let result = crate::adaptive::smart_formatting::format_transcript(
+            "The meeting is Monday actually Tuesday.",
+            crate::settings::FormattingLevel::Light,
+        );
+        assert_eq!(result, "The meeting is Tuesday.");
+    }
+
+    #[test]
+    fn smart_formatting_light_preserves_ordinary_actually_usage() {
+        let result = crate::adaptive::smart_formatting::format_transcript(
+            "This is actually important.",
+            crate::settings::FormattingLevel::Light,
+        );
+        assert_eq!(result, "This is actually important.");
+    }
+
+    #[test]
+    fn smart_formatting_light_applies_replace_command() {
+        let result = crate::adaptive::smart_formatting::format_transcript(
+            "The contact is Abdullah Al-Khulayb replace Al-Khulayb with Al Kulaib.",
+            crate::settings::FormattingLevel::Light,
+        );
+        assert_eq!(result, "The contact is Abdullah Al Kulaib.");
+    }
+
+    #[test]
+    fn smart_formatting_rejects_unrequested_translation() {
+        let result = crate::adaptive::smart_formatting::validate_formatted_output(
+            "This is English.",
+            "هذا نص عربي.",
+        );
+        assert!(result.is_err());
+    }
 }

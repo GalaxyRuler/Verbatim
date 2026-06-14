@@ -520,8 +520,28 @@ pub(crate) async fn process_transcription_output(
         final_text = converted_text;
     }
 
+    let formatted_text = crate::adaptive::smart_formatting::format_transcript(
+        &final_text,
+        settings.formatting_level,
+    );
+    if formatted_text != final_text {
+        final_text = formatted_text;
+        post_processed_text = Some(final_text.clone());
+    }
+
     if post_process {
         if let Some(processed_text) = post_process_transcription(&settings, &final_text).await {
+            if let Err(err) = validate_post_processed_text(transcription, &processed_text) {
+                warn!(
+                    "Post-processing output rejected against raw transcript: {}. Falling back to deterministic formatted transcript.",
+                    err
+                );
+                return ProcessedTranscription {
+                    final_text,
+                    post_processed_text,
+                    post_process_prompt,
+                };
+            }
             post_processed_text = Some(processed_text.clone());
             final_text = processed_text;
 
@@ -601,7 +621,15 @@ pub(crate) async fn process_adaptive_transcription_output(
         &routing.profile_id,
     );
 
-    let final_text = crate::adaptive::processor::deterministic_process(transcription, profile);
+    let final_text = if settings.formatting_level == crate::settings::FormattingLevel::None {
+        transcription.to_string()
+    } else {
+        crate::adaptive::processor::deterministic_process(transcription, profile)
+    };
+    let final_text = crate::adaptive::smart_formatting::format_transcript(
+        &final_text,
+        settings.formatting_level,
+    );
     let final_text = match crate::adaptive::processor::validate_output(
         transcription,
         &final_text,
