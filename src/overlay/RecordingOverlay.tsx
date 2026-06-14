@@ -110,6 +110,12 @@ const RecordingOverlay: React.FC = () => {
   const shouldShowDockedFeedback = async () =>
     isDockedRef.current || (await getDockedPillSetting());
 
+  useEffect(() => {
+    if (!isVisible) return;
+
+    void commands.setRecordingOverlayExpanded(!isDocked || isDockedExpanded);
+  }, [isVisible, isDocked, isDockedExpanded]);
+
   const refreshLanguageMode = async () => {
     const result = await commands.getAppSettings();
     if (result.status !== "ok") return;

@@ -724,6 +724,23 @@ test.describe("Verbatim App", () => {
       page.getByRole("button", { name: "Change dictation language" }),
     ).toBeHidden();
 
+    let overlayGeometryInvokes = await page.evaluate(() => {
+      const win = window as typeof window & {
+        __VERBATIM_TEST_INVOKES__: Array<{
+          cmd: string;
+          args?: Record<string, unknown>;
+        }>;
+      };
+      return win.__VERBATIM_TEST_INVOKES__.filter(
+        (invoke) => invoke.cmd === "set_recording_overlay_expanded",
+      );
+    });
+    expect(overlayGeometryInvokes).toContainEqual(
+      expect.objectContaining({
+        args: expect.objectContaining({ expanded: false }),
+      }),
+    );
+
     await page.getByRole("button", { name: "Expand pill" }).click();
     await expect(page.getByTestId("recording-overlay")).toHaveClass(
       /docked-expanded/,
@@ -731,6 +748,23 @@ test.describe("Verbatim App", () => {
     await expect(
       page.getByRole("button", { name: "Change dictation language" }),
     ).toBeVisible();
+
+    overlayGeometryInvokes = await page.evaluate(() => {
+      const win = window as typeof window & {
+        __VERBATIM_TEST_INVOKES__: Array<{
+          cmd: string;
+          args?: Record<string, unknown>;
+        }>;
+      };
+      return win.__VERBATIM_TEST_INVOKES__.filter(
+        (invoke) => invoke.cmd === "set_recording_overlay_expanded",
+      );
+    });
+    expect(overlayGeometryInvokes).toContainEqual(
+      expect.objectContaining({
+        args: expect.objectContaining({ expanded: true }),
+      }),
+    );
   });
 
   test("docked pill initializes visible when already enabled", async ({

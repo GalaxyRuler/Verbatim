@@ -616,6 +616,13 @@ pub fn change_docked_pill_setting(app: AppHandle, enabled: bool) -> Result<(), S
 
 #[tauri::command]
 #[specta::specta]
+pub fn set_recording_overlay_expanded(app: AppHandle, expanded: bool) -> Result<(), String> {
+    crate::utils::set_recording_overlay_expanded(&app, expanded);
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
 pub fn change_debug_mode_setting(app: AppHandle, enabled: bool) -> Result<(), String> {
     let mut settings = settings::get_settings(&app);
     settings.debug_mode = enabled;

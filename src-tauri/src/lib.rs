@@ -344,6 +344,7 @@ pub fn run(cli_args: CliArgs) {
             shortcut::change_dictation_language_mode_setting,
             shortcut::change_overlay_position_setting,
             shortcut::change_docked_pill_setting,
+            shortcut::set_recording_overlay_expanded,
             shortcut::change_debug_mode_setting,
             shortcut::change_word_correction_threshold_setting,
             shortcut::change_extra_recording_buffer_setting,
