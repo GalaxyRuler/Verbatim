@@ -104,6 +104,13 @@ const WHISPER_SAMPLE_RATE: usize = 16000;
 
 /* ──────────────────────────────────────────────────────────────── */
 
+pub(crate) struct RecordingStopResult {
+    pub(crate) samples: Vec<f32>,
+    pub(crate) captured_sample_count: usize,
+    pub(crate) observed_active_signal: bool,
+    pub(crate) diagnostic_state: MicDiagnosticState,
+}
+
 #[derive(Clone, Debug)]
 pub enum RecordingState {
     Idle,
@@ -467,7 +474,7 @@ impl AudioRecordingManager {
         Ok(())
     }
 
-    pub fn stop_recording(&self, binding_id: &str) -> Option<Vec<f32>> {
+    pub(crate) fn stop_recording(&self, binding_id: &str) -> Option<RecordingStopResult> {
         let mut state = self.state.lock().unwrap();
 
         match *state {
@@ -475,6 +482,12 @@ impl AudioRecordingManager {
                 binding_id: ref active,
             } if active == binding_id => {
                 *state = RecordingState::Idle;
+                let diagnostic_state = *self.mic_diagnostic_state.lock().unwrap();
+                let observed_active_signal = self
+                    .mic_diagnostic
+                    .lock()
+                    .unwrap()
+                    .has_observed_active_signal();
                 drop(state);
                 self.reset_mic_diagnostic();
 
@@ -514,15 +527,23 @@ impl AudioRecordingManager {
                 }
 
                 // Pad if very short
-                let s_len = samples.len();
+                let captured_sample_count = samples.len();
                 // debug!("Got {} samples", s_len);
-                if s_len < WHISPER_SAMPLE_RATE && s_len > 0 {
-                    let mut padded = samples;
-                    padded.resize(WHISPER_SAMPLE_RATE * 5 / 4, 0.0);
-                    Some(padded)
-                } else {
-                    Some(samples)
-                }
+                let samples =
+                    if captured_sample_count < WHISPER_SAMPLE_RATE && captured_sample_count > 0 {
+                        let mut padded = samples;
+                        padded.resize(WHISPER_SAMPLE_RATE * 5 / 4, 0.0);
+                        padded
+                    } else {
+                        samples
+                    };
+
+                Some(RecordingStopResult {
+                    samples,
+                    captured_sample_count,
+                    observed_active_signal,
+                    diagnostic_state,
+                })
             }
             _ => None,
         }

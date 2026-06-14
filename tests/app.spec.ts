@@ -1012,9 +1012,30 @@ test.describe("Verbatim App", () => {
           payload?: unknown,
         ) => void;
       };
+      win.__VERBATIM_TEST_EMIT_EVENT__("overlay-state-changed", "silence");
+    });
+    await expect(overlay).toContainText("No speech detected");
+    await expect(overlay).toHaveAttribute("data-state", "silence");
+    await expect(overlay.getByText("No speech detected")).toHaveCSS(
+      "color",
+      "rgb(255, 255, 255)",
+    );
+
+    await page.evaluate(() => {
+      const win = window as typeof window & {
+        __VERBATIM_TEST_EMIT_EVENT__: (
+          event: string,
+          payload?: unknown,
+        ) => void;
+      };
       win.__VERBATIM_TEST_EMIT_EVENT__("overlay-state-changed", "mic_failed");
     });
     await expect(overlay).toContainText("Microphone issue");
+    await expect(overlay).toHaveAttribute("data-state", "mic_failed");
+    await expect(overlay.getByText("Microphone issue")).toHaveCSS(
+      "color",
+      "rgb(255, 255, 255)",
+    );
     await expect(page.getByRole("button", { name: "Try again" })).toBeVisible();
     await expect(
       page.getByRole("button", { name: "Select microphone" }),

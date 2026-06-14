@@ -308,6 +308,17 @@
   color: var(--overlay-accent);
 }
 
+.recording-overlay[data-state="silence"],
+.recording-overlay[data-state="mic_failed"] {
+  --overlay-background: #000000cc;
+  --overlay-foreground: #ffffff;
+}
+
+.recording-overlay[data-state="silence"] .docked-status-title,
+.recording-overlay[data-state="mic_failed"] .docked-status-title {
+  color: var(--overlay-foreground);
+}
+
 .docked-status-detail {
   font-size: 10px;
 }

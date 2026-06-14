@@ -43,6 +43,7 @@ pub struct SilenceDiagnostic {
     config: SilenceDiagnosticConfig,
     quiet_since: Option<Duration>,
     state: MicDiagnosticState,
+    observed_active_signal: bool,
 }
 
 impl SilenceDiagnostic {
@@ -51,17 +52,25 @@ impl SilenceDiagnostic {
             config,
             quiet_since: None,
             state: MicDiagnosticState::Recording,
+            observed_active_signal: false,
         }
     }
 
     pub fn reset(&mut self) {
         self.quiet_since = None;
         self.state = MicDiagnosticState::Recording;
+        self.observed_active_signal = false;
+    }
+
+    pub fn has_observed_active_signal(&self) -> bool {
+        self.observed_active_signal
     }
 
     pub fn observe_at(&mut self, levels: &[f32], at: Duration) -> MicDiagnosticState {
         if self.has_active_signal(levels) {
-            self.reset();
+            self.quiet_since = None;
+            self.state = MicDiagnosticState::Recording;
+            self.observed_active_signal = true;
             return self.state;
         }
 
@@ -143,5 +152,20 @@ mod tests {
             diagnostic.observe_at(&[], Duration::from_secs(2)),
             MicDiagnosticState::Silence
         );
+    }
+
+    #[test]
+    fn active_observation_is_recorded_until_reset() {
+        let mut diagnostic = SilenceDiagnostic::default();
+
+        assert!(!diagnostic.has_observed_active_signal());
+        diagnostic.observe_at(&[0.0, 0.04], Duration::from_secs(1));
+        assert!(diagnostic.has_observed_active_signal());
+
+        diagnostic.observe_at(&[0.0, 0.0], Duration::from_secs(2));
+        assert!(diagnostic.has_observed_active_signal());
+
+        diagnostic.reset();
+        assert!(!diagnostic.has_observed_active_signal());
     }
 }

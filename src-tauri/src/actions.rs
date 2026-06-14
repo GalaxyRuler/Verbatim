@@ -2,7 +2,7 @@
 use crate::apple_intelligence;
 use crate::audio_feedback::{play_feedback_sound, play_feedback_sound_blocking, SoundType};
 use crate::audio_toolkit::{is_microphone_access_denied, is_no_input_device_error};
-use crate::managers::audio::AudioRecordingManager;
+use crate::managers::audio::{AudioRecordingManager, RecordingStopResult};
 use crate::managers::history::HistoryManager;
 use crate::managers::transcription::TranscriptionManager;
 use crate::settings::{get_settings, AppSettings, APPLE_INTELLIGENCE_PROVIDER_ID};
@@ -21,6 +21,11 @@ use std::time::Instant;
 use tauri::Manager;
 use tauri::{AppHandle, Emitter};
 use tauri_plugin_clipboard_manager::ClipboardExt;
+
+const WHISPER_SAMPLE_RATE: usize = 16_000;
+const MIN_USABLE_SPEECH_SAMPLES: usize = WHISPER_SAMPLE_RATE * 3 / 2;
+const MIN_UNOBSERVED_SPEECH_RMS: f32 = 0.003;
+const MIN_UNOBSERVED_SPEECH_PEAK: f32 = 0.02;
 
 #[derive(Clone, serde::Serialize)]
 struct RecordingErrorEvent {
@@ -78,6 +83,31 @@ fn copy_text_to_clipboard(app: &AppHandle, text: &str, reason: &str) {
     if let Err(err) = app.clipboard().write_text(text.to_string()) {
         error!("Failed to copy text to clipboard after {}: {}", reason, err);
     }
+}
+
+fn recording_has_usable_speech(result: &RecordingStopResult) -> bool {
+    if result.samples.is_empty() || result.captured_sample_count == 0 {
+        return false;
+    }
+
+    if result.captured_sample_count < MIN_USABLE_SPEECH_SAMPLES {
+        return false;
+    }
+
+    if result.observed_active_signal {
+        return true;
+    }
+
+    let sample_count = result.captured_sample_count.min(result.samples.len());
+    let analyzed = &result.samples[..sample_count];
+    let peak = analyzed
+        .iter()
+        .map(|sample| sample.abs())
+        .fold(0.0_f32, f32::max);
+    let rms =
+        (analyzed.iter().map(|sample| sample * sample).sum::<f32>() / analyzed.len() as f32).sqrt();
+
+    rms >= MIN_UNOBSERVED_SPEECH_RMS && peak >= MIN_UNOBSERVED_SPEECH_PEAK
 }
 
 fn language_guard_receipt(target_verified: bool) -> crate::adaptive::types::InsertionReceipt {
@@ -773,6 +803,70 @@ mod adaptive_action_tests {
             &settings, true
         ));
     }
+
+    #[test]
+    fn short_false_positive_without_active_signal_is_not_usable_speech() {
+        let result = crate::managers::audio::RecordingStopResult {
+            samples: vec![0.01; 20_000],
+            captured_sample_count: 4_000,
+            observed_active_signal: false,
+            diagnostic_state: crate::managers::mic_diagnostics::MicDiagnosticState::Recording,
+        };
+
+        assert!(!recording_has_usable_speech(&result));
+    }
+
+    #[test]
+    fn one_second_recording_is_not_usable_even_with_active_signal() {
+        let result = crate::managers::audio::RecordingStopResult {
+            samples: vec![0.01; 20_000],
+            captured_sample_count: 20_160,
+            observed_active_signal: true,
+            diagnostic_state: crate::managers::mic_diagnostics::MicDiagnosticState::Recording,
+        };
+
+        assert!(!recording_has_usable_speech(&result));
+    }
+
+    #[test]
+    fn observed_active_signal_keeps_long_enough_speech_usable() {
+        let result = crate::managers::audio::RecordingStopResult {
+            samples: vec![0.01; 24_000],
+            captured_sample_count: 24_000,
+            observed_active_signal: true,
+            diagnostic_state: crate::managers::mic_diagnostics::MicDiagnosticState::Recording,
+        };
+
+        assert!(recording_has_usable_speech(&result));
+    }
+
+    #[test]
+    fn quiet_long_buffer_without_active_signal_is_not_usable_speech() {
+        let result = crate::managers::audio::RecordingStopResult {
+            samples: vec![0.0005; 24_000],
+            captured_sample_count: 24_000,
+            observed_active_signal: false,
+            diagnostic_state: crate::managers::mic_diagnostics::MicDiagnosticState::Silence,
+        };
+
+        assert!(!recording_has_usable_speech(&result));
+    }
+
+    #[test]
+    fn energetic_buffer_without_level_observation_can_still_be_usable() {
+        let mut samples = vec![0.0; 24_000];
+        for sample in samples.iter_mut().take(24_000) {
+            *sample = 0.04;
+        }
+        let result = crate::managers::audio::RecordingStopResult {
+            samples,
+            captured_sample_count: 24_000,
+            observed_active_signal: false,
+            diagnostic_state: crate::managers::mic_diagnostics::MicDiagnosticState::Recording,
+        };
+
+        assert!(recording_has_usable_speech(&result));
+    }
 }
 
 impl ShortcutAction for TranscribeAction {
@@ -925,18 +1019,24 @@ impl ShortcutAction for TranscribeAction {
             );
 
             let stop_recording_time = Instant::now();
-            if let Some(samples) = rm.stop_recording(&binding_id) {
+            if let Some(stop_result) = rm.stop_recording(&binding_id) {
                 debug!(
-                    "Recording stopped and samples retrieved in {:?}, sample count: {}",
+                    "Recording stopped and samples retrieved in {:?}, sample count: {}, captured sample count: {}, active signal observed: {}, diagnostic state: {:?}",
                     stop_recording_time.elapsed(),
-                    samples.len()
+                    stop_result.samples.len(),
+                    stop_result.captured_sample_count,
+                    stop_result.observed_active_signal,
+                    stop_result.diagnostic_state
                 );
 
-                if samples.is_empty() {
-                    debug!("Recording produced no audio samples; skipping persistence");
+                if !recording_has_usable_speech(&stop_result) {
+                    debug!(
+                        "Recording did not contain usable speech; skipping transcription and paste"
+                    );
                     utils::hide_recording_overlay(&ah);
                     change_tray_icon(&ah, TrayIconState::Idle);
                 } else {
+                    let samples = stop_result.samples;
                     // Save WAV concurrently with transcription
                     let sample_count = samples.len();
                     let file_name = format!("verbatim-{}.wav", chrono::Utc::now().timestamp());

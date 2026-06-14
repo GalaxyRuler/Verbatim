@@ -591,6 +591,7 @@ const RecordingOverlay: React.FC = () => {
     <div
       dir={direction}
       data-testid="recording-overlay"
+      data-state={state}
       className={`recording-overlay ${isVisible ? "fade-in" : ""} ${
         isDocked
           ? isDockedExpanded
