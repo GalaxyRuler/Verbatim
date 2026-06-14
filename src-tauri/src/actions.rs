@@ -90,8 +90,25 @@ fn language_guard_receipt(target_verified: bool) -> crate::adaptive::types::Inse
     }
 }
 
+fn native_translation_allows_language_guard_bypass(
+    settings: &AppSettings,
+    model_supports_translation: bool,
+) -> bool {
+    model_supports_translation && settings.translate_to_english
+}
+
+fn selected_model_supports_translation(app: &AppHandle, settings: &AppSettings) -> bool {
+    app.try_state::<Arc<crate::managers::model::ModelManager>>()
+        .and_then(|model_manager| model_manager.get_model_info(&settings.selected_model))
+        .map(|info| info.supports_translation)
+        .unwrap_or(false)
+}
+
 fn language_guard_blocks(app: &AppHandle, settings: &AppSettings, final_text: &str) -> bool {
-    if settings.translate_to_english || settings.translation_enabled {
+    if native_translation_allows_language_guard_bypass(
+        settings,
+        selected_model_supports_translation(app, settings),
+    ) {
         return false;
     }
 
@@ -705,6 +722,30 @@ mod adaptive_action_tests {
         assert!(can_egress_post_process_text(
             "https://api.openai.com/v1",
             "sk-test"
+        ));
+    }
+
+    #[test]
+    fn unsupported_model_translation_setting_does_not_bypass_language_guard() {
+        let mut settings = crate::settings::get_default_settings();
+        settings.selected_language = "ar".to_string();
+        settings.translation_enabled = true;
+        settings.translate_to_english = true;
+
+        assert!(!native_translation_allows_language_guard_bypass(
+            &settings, false
+        ));
+    }
+
+    #[test]
+    fn supported_model_translation_setting_bypasses_language_guard() {
+        let mut settings = crate::settings::get_default_settings();
+        settings.selected_language = "ar".to_string();
+        settings.translation_enabled = true;
+        settings.translate_to_english = true;
+
+        assert!(native_translation_allows_language_guard_bypass(
+            &settings, true
         ));
     }
 }
