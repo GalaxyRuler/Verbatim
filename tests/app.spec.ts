@@ -706,6 +706,10 @@ test.describe("Verbatim App", () => {
     await expect(page.getByTestId("recording-overlay")).toHaveClass(
       /docked-collapsed/,
     );
+    await expect(page.getByTestId("recording-overlay")).toHaveCSS(
+      "width",
+      "44px",
+    );
     await expect(
       page.getByRole("button", { name: "Expand pill" }),
     ).toBeVisible();

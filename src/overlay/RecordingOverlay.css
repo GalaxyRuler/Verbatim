@@ -28,10 +28,10 @@
 }
 
 .recording-overlay.docked-collapsed {
-  width: 56px;
+  width: 44px;
   grid-template-columns: 1fr;
   justify-items: center;
-  padding: 5px 8px;
+  padding: 5px 6px;
   cursor: pointer;
 }
 
@@ -166,7 +166,7 @@
 }
 
 .docked-pill-handle {
-  width: 40px;
+  width: 30px;
   height: 24px;
   display: inline-flex;
   align-items: center;
@@ -188,11 +188,11 @@
   height: 18px;
   display: inline-flex;
   align-items: center;
-  gap: 2px;
+  gap: 1px;
 }
 
 .docked-waveform-bar {
-  width: 3px;
+  width: 2px;
   min-height: 4px;
   max-height: 16px;
   border-radius: 999px;
