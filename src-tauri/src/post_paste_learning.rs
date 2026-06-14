@@ -573,6 +573,28 @@ mod tests {
     }
 
     #[test]
+    fn extracts_sentence_punctuation_correction_from_pasted_span() {
+        let corrected = extract_corrected_inserted_text(
+            "prefix suffix",
+            "prefix meet robin. suffix",
+            "prefix meet Robyn. suffix",
+        );
+
+        assert_eq!(corrected.as_deref(), Some("meet Robyn."));
+    }
+
+    #[test]
+    fn extracts_corrected_span_when_user_deletes_inserted_words() {
+        let corrected = extract_corrected_inserted_text(
+            "prefix suffix",
+            "prefix meet with robin tomorrow suffix",
+            "prefix meet Robyn suffix",
+        );
+
+        assert_eq!(corrected.as_deref(), Some("meet Robyn"));
+    }
+
+    #[test]
     fn accepts_empty_focused_text_before_paste() {
         let snapshot = focused_text_snapshot_from_parts("target".to_string(), String::new())
             .expect("empty focused fields are valid paste targets");

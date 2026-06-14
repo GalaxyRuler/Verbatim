@@ -47,6 +47,17 @@ fn find_best_match<'a>(
     let mut best_score = f64::MAX;
 
     for (i, custom_word_nospace) in custom_words_nospace.iter().enumerate() {
+        let exact_match = candidate == custom_word_nospace;
+        if !exact_match
+            && candidate
+                .chars()
+                .count()
+                .min(custom_word_nospace.chars().count())
+                < 3
+        {
+            continue;
+        }
+
         // Skip if lengths are too different (optimization + prevents over-matching)
         // Use percentage-based check: max 25% length difference (prevents n-grams from
         // matching significantly shorter custom words, e.g., "openaigpt" vs "openai")
@@ -471,6 +482,42 @@ mod tests {
         );
 
         assert_eq!(result, "Abdullah Al Kulaib joined");
+    }
+
+    #[test]
+    fn apply_dictionary_entries_handles_spelled_letter_replacement() {
+        let result = apply_dictionary_entries(
+            "A-L-K-U-L-A-Y-B joined",
+            &[dictionary_entry("Al Kulaib", Some("A-L-K-U-L-A-Y-B"))],
+            0.18,
+        );
+
+        assert_eq!(result, "Al Kulaib joined");
+    }
+
+    #[test]
+    fn apply_dictionary_entries_preserves_sentence_punctuation() {
+        let result = apply_dictionary_entries(
+            "robin, joined.",
+            &[dictionary_entry("Robyn", Some("robin"))],
+            0.18,
+        );
+
+        assert_eq!(result, "Robyn, joined.");
+    }
+
+    #[test]
+    fn apply_dictionary_entries_does_not_overmatch_short_words() {
+        let result = apply_dictionary_entries("a test", &[dictionary_entry("AI", None)], 0.5);
+
+        assert_eq!(result, "a test");
+    }
+
+    #[test]
+    fn apply_dictionary_entries_preserves_exact_short_term_matches() {
+        let result = apply_dictionary_entries("ai test", &[dictionary_entry("AI", None)], 0.5);
+
+        assert_eq!(result, "AI test");
     }
 
     #[test]

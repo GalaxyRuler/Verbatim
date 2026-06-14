@@ -14,6 +14,12 @@ pub fn infer_auto_learn_candidates(
     corrected_text: &str,
     existing_words: &[String],
 ) -> Vec<AutoLearnCandidate> {
+    if contains_sensitive_learning_context(dictated_text)
+        || contains_sensitive_learning_context(corrected_text)
+    {
+        return Vec::new();
+    }
+
     let dictated_tokens = word_tokens(dictated_text);
     let corrected_tokens = word_tokens(corrected_text);
 
@@ -41,7 +47,7 @@ pub fn infer_auto_learn_candidates(
 
         candidates.push(AutoLearnCandidate {
             phrase,
-            replacement_of: Some(dictated_tokens[start..=end].join(" ")),
+            replacement_of: Some(sanitized_replacement_phrase(&dictated_tokens[start..=end])),
         });
     }
 
@@ -50,7 +56,7 @@ pub fn infer_auto_learn_candidates(
         .zip(corrected_tokens.iter())
         .enumerate()
     {
-        if dictated == corrected || phrase_covered_indices[index] {
+        if tokens_equivalent_for_learning(dictated, corrected) || phrase_covered_indices[index] {
             continue;
         }
 
@@ -68,7 +74,7 @@ pub fn infer_auto_learn_candidates(
         if is_likely_custom_dictionary_term(&candidate) {
             candidates.push(AutoLearnCandidate {
                 phrase: candidate,
-                replacement_of: Some(dictated.clone()),
+                replacement_of: Some(sanitized_replacement_word(dictated)),
             });
         }
     }
@@ -89,8 +95,27 @@ fn infer_split_auto_learn_candidates(
         let dictated = &dictated_tokens[dictated_index];
         let corrected = &corrected_tokens[corrected_index];
 
-        if dictated.eq_ignore_ascii_case(corrected) {
+        if tokens_equivalent_for_learning(dictated, corrected) {
             dictated_index += 1;
+            corrected_index += 1;
+            continue;
+        }
+
+        if let Some((phrase, dictated_end)) =
+            infer_joined_tokens_correction(dictated_tokens, dictated_index, corrected)
+        {
+            if !is_existing_word(&phrase, existing_words)
+                && !is_existing_candidate(&phrase, &candidates)
+            {
+                candidates.push(AutoLearnCandidate {
+                    phrase,
+                    replacement_of: Some(sanitized_replacement_phrase(
+                        &dictated_tokens[dictated_index..dictated_end],
+                    )),
+                });
+            }
+
+            dictated_index = dictated_end;
             corrected_index += 1;
             continue;
         }
@@ -106,7 +131,7 @@ fn infer_split_auto_learn_candidates(
         {
             candidates.push(AutoLearnCandidate {
                 phrase,
-                replacement_of: Some(dictated.clone()),
+                replacement_of: Some(sanitized_replacement_word(dictated)),
             });
         }
 
@@ -119,6 +144,33 @@ fn infer_split_auto_learn_candidates(
     } else {
         Vec::new()
     }
+}
+
+fn infer_joined_tokens_correction(
+    dictated_tokens: &[String],
+    dictated_index: usize,
+    corrected: &str,
+) -> Option<(String, usize)> {
+    let corrected_candidate = sanitize_custom_word_candidate(corrected)?;
+    if !is_strong_joined_custom_term(&corrected_candidate) {
+        return None;
+    }
+
+    let max_dictated_len =
+        MAX_AUTO_LEARN_PHRASE_TOKENS.min(dictated_tokens.len().saturating_sub(dictated_index));
+    let corrected_collapsed = normalize_collapsed_token_for_match(&corrected_candidate);
+
+    for dictated_len in (2..=max_dictated_len).rev() {
+        let dictated_end = dictated_index + dictated_len;
+        let dictated_collapsed =
+            collapse_tokens_for_match(&dictated_tokens[dictated_index..dictated_end]);
+
+        if collapsed_tokens_are_close(&dictated_collapsed, &corrected_collapsed) {
+            return Some((corrected_candidate, dictated_end));
+        }
+    }
+
+    None
 }
 
 fn infer_split_token_correction(
@@ -186,10 +238,7 @@ fn infer_collapsed_token_phrase_correction(
 }
 
 fn collapse_token_for_phrase_match(token: &str) -> Option<String> {
-    let collapsed = token
-        .chars()
-        .filter(|ch| ch.is_alphanumeric())
-        .collect::<String>();
+    let collapsed = normalize_collapsed_token_for_match(token);
 
     (collapsed.chars().count() >= 4).then_some(collapsed)
 }
@@ -211,8 +260,8 @@ fn hyphen_parts_match_correction(dictated_parts: &[String], corrected_parts: &[S
 }
 
 fn tokens_are_close(left: &str, right: &str) -> bool {
-    let left = left.to_lowercase();
-    let right = right.to_lowercase();
+    let left = normalize_learning_token(left).to_lowercase();
+    let right = normalize_learning_token(right).to_lowercase();
 
     if left == right {
         return true;
@@ -254,7 +303,9 @@ fn infer_auto_learn_phrase_candidates(
         .iter()
         .zip(corrected_tokens.iter())
         .enumerate()
-        .filter_map(|(index, (dictated, corrected))| (dictated != corrected).then_some(index))
+        .filter_map(|(index, (dictated, corrected))| {
+            (!tokens_equivalent_for_learning(dictated, corrected)).then_some(index)
+        })
         .collect::<Vec<_>>();
 
     if changed_indices.len() < 2 {
@@ -366,6 +417,7 @@ fn sanitize_custom_word_candidate(raw: &str) -> Option<String> {
     let cleaned: String = raw
         .trim()
         .trim_matches(|ch: char| !is_token_char(ch))
+        .trim_end_matches(is_sentence_boundary_punctuation)
         .chars()
         .filter(|ch| !matches!(ch, '<' | '>' | '"' | '\'' | '&'))
         .collect();
@@ -384,6 +436,15 @@ fn sanitize_custom_word_candidate(raw: &str) -> Option<String> {
     }
 
     Some(cleaned)
+}
+
+fn sanitized_replacement_word(raw: &str) -> String {
+    sanitize_custom_word_candidate(raw).unwrap_or_else(|| raw.to_string())
+}
+
+fn sanitized_replacement_phrase(tokens: &[String]) -> String {
+    let raw_phrase = tokens.join(" ");
+    sanitize_custom_phrase_candidate(&raw_phrase).unwrap_or(raw_phrase)
 }
 
 fn sanitize_custom_phrase_candidate(raw: &str) -> Option<String> {
@@ -405,7 +466,108 @@ fn sanitize_custom_phrase_candidate(raw: &str) -> Option<String> {
 }
 
 fn is_token_char(ch: char) -> bool {
-    ch.is_alphanumeric() || matches!(ch, '-' | '_' | '.' | '#' | '+')
+    ch.is_alphanumeric() || is_combining_mark(ch) || matches!(ch, '-' | '_' | '.' | '#' | '+')
+}
+
+fn is_sentence_boundary_punctuation(ch: char) -> bool {
+    matches!(
+        ch,
+        '.' | '!' | '?' | ':' | ';' | ',' | '。' | '،' | '؛' | '؟' | '！' | '？' | '，' | '、'
+    )
+}
+
+fn tokens_equivalent_for_learning(left: &str, right: &str) -> bool {
+    normalize_learning_token(left) == normalize_learning_token(right)
+}
+
+fn normalize_learning_token(token: &str) -> String {
+    token.chars().filter(|ch| !is_combining_mark(*ch)).collect()
+}
+
+fn collapse_tokens_for_match(tokens: &[String]) -> String {
+    tokens
+        .iter()
+        .map(|token| normalize_spoken_token_for_match(token))
+        .collect()
+}
+
+fn normalize_spoken_token_for_match(token: &str) -> String {
+    let normalized = normalize_collapsed_token_for_match(token);
+    match normalized.as_str() {
+        "eye" | "aye" => "i".to_string(),
+        "car" => "qar".to_string(),
+        _ => normalized,
+    }
+}
+
+fn normalize_collapsed_token_for_match(token: &str) -> String {
+    token
+        .chars()
+        .filter(|ch| ch.is_alphanumeric() && !is_combining_mark(*ch))
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
+fn collapsed_tokens_are_close(left: &str, right: &str) -> bool {
+    if left == right {
+        return true;
+    }
+
+    let max_chars = left.chars().count().max(right.chars().count());
+    if max_chars < 4 {
+        return false;
+    }
+
+    edit_distance(left, right) <= MAX_HYPHEN_PART_DISTANCE.min(max_chars / 3).max(1)
+}
+
+fn is_combining_mark(ch: char) -> bool {
+    matches!(
+        ch as u32,
+        0x0300..=0x036F
+            | 0x0591..=0x05BD
+            | 0x05BF
+            | 0x05C1..=0x05C2
+            | 0x05C4..=0x05C5
+            | 0x05C7
+            | 0x0610..=0x061A
+            | 0x064B..=0x065F
+            | 0x0670
+            | 0x06D6..=0x06DC
+            | 0x06DF..=0x06E4
+            | 0x06E7..=0x06E8
+            | 0x06EA..=0x06ED
+            | 0x1AB0..=0x1AFF
+            | 0x1DC0..=0x1DFF
+            | 0x20D0..=0x20FF
+            | 0xFE20..=0xFE2F
+    )
+}
+
+fn contains_sensitive_learning_context(text: &str) -> bool {
+    let tokens = word_tokens(text)
+        .into_iter()
+        .map(|token| normalize_collapsed_token_for_match(&token))
+        .collect::<Vec<_>>();
+
+    tokens.iter().enumerate().any(|(index, token)| {
+        matches!(
+            token.as_str(),
+            "password"
+                | "passcode"
+                | "credential"
+                | "credentials"
+                | "secret"
+                | "token"
+                | "ssn"
+                | "pin"
+        ) || (token == "key"
+            && index > 0
+            && matches!(tokens[index - 1].as_str(), "api" | "private" | "secret"))
+            || (token == "id"
+                && index > 0
+                && matches!(tokens[index - 1].as_str(), "national" | "medical"))
+    })
 }
 
 fn is_existing_word(candidate: &str, existing_words: &[String]) -> bool {
@@ -450,6 +612,26 @@ fn is_likely_custom_dictionary_term(candidate: &str) -> bool {
         || (has_uppercase && has_lowercase)
         || (has_uppercase && alphabetic_count >= 2)
         || (has_non_cased_alphabetic && alphabetic_count >= 2)
+}
+
+fn is_strong_joined_custom_term(candidate: &str) -> bool {
+    let mut alphabetic_index = 0;
+    let mut has_internal_uppercase = false;
+    let mut has_digit = false;
+    let mut has_term_punctuation = false;
+
+    for ch in candidate.chars() {
+        if ch.is_alphabetic() {
+            if alphabetic_index > 0 && ch.is_uppercase() {
+                has_internal_uppercase = true;
+            }
+            alphabetic_index += 1;
+        }
+        has_digit |= ch.is_ascii_digit();
+        has_term_punctuation |= matches!(ch, '-' | '_' | '.' | '#' | '+');
+    }
+
+    has_internal_uppercase || has_digit || has_term_punctuation
 }
 
 fn is_likely_custom_dictionary_phrase(candidate: &str) -> bool {
@@ -564,6 +746,119 @@ mod tests {
                 replacement_of: Some("عبدالة".to_string()),
             }]
         );
+    }
+
+    #[test]
+    fn trims_sentence_punctuation_from_learned_word_correction() {
+        let candidates = infer_auto_learn_candidates("meet robin.", "meet Robyn.", &[]);
+
+        assert_eq!(
+            candidates,
+            vec![AutoLearnCandidate {
+                phrase: "Robyn".to_string(),
+                replacement_of: Some("robin".to_string()),
+            }]
+        );
+    }
+
+    #[test]
+    fn preserves_internal_technical_punctuation_in_learned_word() {
+        let candidates = infer_auto_learn_candidates("use nodejs today", "use Node.js today", &[]);
+
+        assert_eq!(
+            candidates,
+            vec![AutoLearnCandidate {
+                phrase: "Node.js".to_string(),
+                replacement_of: Some("nodejs".to_string()),
+            }]
+        );
+    }
+
+    #[test]
+    fn suggests_collapsed_multi_token_product_name_correction() {
+        let candidates =
+            infer_auto_learn_candidates("open notebook LM today", "open NotebookLM today", &[]);
+
+        assert_eq!(
+            candidates,
+            vec![AutoLearnCandidate {
+                phrase: "NotebookLM".to_string(),
+                replacement_of: Some("notebook LM".to_string()),
+            }]
+        );
+    }
+
+    #[test]
+    fn suggests_mixed_case_product_name_from_phonetic_tokens() {
+        let candidates = infer_auto_learn_candidates("open eye car today", "open iAqar today", &[]);
+
+        assert_eq!(
+            candidates,
+            vec![AutoLearnCandidate {
+                phrase: "iAqar".to_string(),
+                replacement_of: Some("eye car".to_string()),
+            }]
+        );
+    }
+
+    #[test]
+    fn suggests_technical_token_from_split_tokens() {
+        let candidates = infer_auto_learn_candidates("use gpt 5.5", "use GPT-5.5", &[]);
+
+        assert_eq!(
+            candidates,
+            vec![AutoLearnCandidate {
+                phrase: "GPT-5.5".to_string(),
+                replacement_of: Some("gpt 5.5".to_string()),
+            }]
+        );
+    }
+
+    #[test]
+    fn ignores_common_lowercase_spelling_corrections() {
+        let candidates = infer_auto_learn_candidates("open teh file", "open the file", &[]);
+
+        assert!(candidates.is_empty());
+    }
+
+    #[test]
+    fn ignores_meaning_changes_between_common_words() {
+        let candidates = infer_auto_learn_candidates("John is late", "John was late", &[]);
+
+        assert!(candidates.is_empty());
+    }
+
+    #[test]
+    fn ignores_sensitive_password_context_corrections() {
+        let candidates =
+            infer_auto_learn_candidates("my password is abc123", "my password is ABC123", &[]);
+
+        assert!(candidates.is_empty());
+    }
+
+    #[test]
+    fn ignores_abbreviation_replacements_without_explicit_confirmation() {
+        let candidates = infer_auto_learn_candidates("Saudi Arabia", "KSA", &[]);
+
+        assert!(candidates.is_empty());
+    }
+
+    #[test]
+    fn ignores_arabic_diacritic_only_corrections() {
+        let candidates = infer_auto_learn_candidates("زر الرياض", "زر الرِّياض", &[]);
+
+        assert!(candidates.is_empty());
+    }
+
+    #[test]
+    fn ignores_distant_split_token_phrase_corrections() {
+        let candidates = infer_auto_learn_candidates(
+            "my name is A-L-K-U-L-A-Y-B",
+            "my name is Completely Different",
+            &[],
+        );
+
+        assert!(candidates.is_empty());
     }
 
     #[test]

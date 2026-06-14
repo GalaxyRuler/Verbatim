@@ -339,6 +339,14 @@ mod tests {
     }
 
     #[test]
+    fn sanitize_dictionary_phrase_allows_internal_technical_punctuation() {
+        assert_eq!(
+            sanitize_dictionary_phrase("Node.js C++ F#"),
+            Some("Node.js C++ F#".to_string())
+        );
+    }
+
+    #[test]
     fn sanitize_dictionary_phrase_rejects_dangling_hyphen_words() {
         assert_eq!(sanitize_dictionary_phrase("Vow-"), None);
         assert_eq!(sanitize_dictionary_phrase("-Vow"), None);
@@ -554,6 +562,24 @@ mod tests {
         assert!(learned.is_none());
         assert!(settings.dictionary_entries.is_empty());
         assert!(settings.custom_words.is_empty());
+    }
+
+    #[test]
+    fn upsert_auto_learn_entry_accepts_non_cased_script_words() {
+        let mut settings = get_default_settings();
+
+        let learned = upsert_auto_learn_entry(
+            &mut settings,
+            42,
+            "عبدالله".to_string(),
+            Some("عبدالة".to_string()),
+        )
+        .expect("auto learn")
+        .expect("new entry");
+
+        assert_eq!(learned.phrase, "عبدالله");
+        assert_eq!(learned.replacement_of, Some("عبدالة".to_string()));
+        assert_eq!(settings.custom_words, vec!["عبدالله"]);
     }
 
     #[test]
