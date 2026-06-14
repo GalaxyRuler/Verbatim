@@ -484,6 +484,13 @@ mod tests {
     }
 
     #[test]
+    fn ignores_dangling_hyphen_word_corrections() {
+        let candidates = infer_auto_learn_candidates("wow", "Vow-", &[]);
+
+        assert!(candidates.is_empty());
+    }
+
+    #[test]
     fn existing_multi_word_phrase_suppresses_component_words() {
         let existing = vec!["Abdullah al Kulaib".to_string()];
         let candidates = infer_auto_learn_candidates(

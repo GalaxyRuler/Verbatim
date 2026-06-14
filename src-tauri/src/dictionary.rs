@@ -65,6 +65,15 @@ pub fn dictionary_phrases(entries: &[DictionaryEntry]) -> Vec<String> {
 pub fn sync_legacy_custom_words(settings: &mut AppSettings) -> bool {
     let mut changed = false;
 
+    let before_len = settings.dictionary_entries.len();
+    settings.dictionary_entries.retain(|entry| {
+        entry.source != DictionaryEntrySource::AutoLearned
+            || auto_learn_phrase_is_valid(&entry.phrase)
+    });
+    if settings.dictionary_entries.len() != before_len {
+        changed = true;
+    }
+
     if settings.dictionary_entries.is_empty() && !settings.custom_words.is_empty() {
         let mut entries = Vec::new();
         for (index, word) in settings.custom_words.iter().enumerate() {
@@ -135,7 +144,9 @@ pub fn upsert_auto_learn_entry(
     phrase: String,
     replacement_of: Option<String>,
 ) -> Result<Option<DictionaryEntry>, String> {
-    let phrase = sanitize_dictionary_phrase(&phrase).ok_or("Dictionary entry is empty")?;
+    let Some(phrase) = sanitize_auto_learn_phrase(&phrase) else {
+        return Ok(None);
+    };
     if has_phrase(&settings.dictionary_entries, &phrase, None) {
         return Ok(None);
     }
@@ -270,6 +281,17 @@ fn sanitize_optional_phrase(raw: Option<String>) -> Option<String> {
     raw.and_then(|value| sanitize_dictionary_phrase(&value))
 }
 
+fn sanitize_auto_learn_phrase(raw: &str) -> Option<String> {
+    let phrase = sanitize_dictionary_phrase(raw)?;
+    auto_learn_phrase_is_valid(&phrase).then_some(phrase)
+}
+
+fn auto_learn_phrase_is_valid(phrase: &str) -> bool {
+    phrase
+        .split_whitespace()
+        .all(|token| !token.starts_with('-') && !token.ends_with('-'))
+}
+
 fn has_phrase(entries: &[DictionaryEntry], phrase: &str, except_id: Option<&str>) -> bool {
     let key = normalize_dictionary_key(phrase);
     entries.iter().any(|entry| {
@@ -352,6 +374,29 @@ mod tests {
     }
 
     #[test]
+    fn sync_legacy_custom_words_removes_dangling_hyphen_auto_learned_entries() {
+        let mut settings = get_default_settings();
+        settings.dictionary_entries = vec![
+            DictionaryEntry {
+                source: DictionaryEntrySource::AutoLearned,
+                ..entry("dict_1_vow", "Vow-")
+            },
+            DictionaryEntry {
+                source: DictionaryEntrySource::AutoLearned,
+                ..entry("dict_2_robyn", "Robyn")
+            },
+        ];
+        settings.custom_words = vec!["Vow-".to_string(), "Robyn".to_string()];
+
+        let changed = sync_legacy_custom_words(&mut settings);
+
+        assert!(changed);
+        assert_eq!(settings.dictionary_entries.len(), 1);
+        assert_eq!(settings.dictionary_entries[0].phrase, "Robyn");
+        assert_eq!(settings.custom_words, vec!["Robyn"]);
+    }
+
+    #[test]
     fn upsert_manual_entry_rejects_case_duplicate() {
         let mut settings = get_default_settings();
         settings.dictionary_entries = vec![entry("dict_1_robyn", "Robyn")];
@@ -425,6 +470,18 @@ mod tests {
 
         assert!(learned.is_none());
         assert_eq!(settings.dictionary_entries.len(), 1);
+    }
+
+    #[test]
+    fn upsert_auto_learn_entry_rejects_dangling_hyphen_words() {
+        let mut settings = get_default_settings();
+
+        let learned = upsert_auto_learn_entry(&mut settings, 42, "Vow-".to_string(), None)
+            .expect("auto learn should ignore dangling hyphen");
+
+        assert!(learned.is_none());
+        assert!(settings.dictionary_entries.is_empty());
+        assert!(settings.custom_words.is_empty());
     }
 
     #[test]
