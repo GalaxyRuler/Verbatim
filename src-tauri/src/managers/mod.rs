@@ -1,5 +1,6 @@
 pub mod audio;
 pub mod history;
+mod mic_diagnostics;
 pub mod model;
 mod model_catalog;
 #[cfg(feature = "transcribe-rs-engine")]

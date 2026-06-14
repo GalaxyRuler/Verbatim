@@ -5,6 +5,7 @@ import {
   BookOpen,
   ClipboardCopy,
   ClipboardPaste,
+  Mic,
   RotateCcw,
   Settings,
   Undo2,
@@ -317,6 +318,18 @@ const RecordingOverlay: React.FC = () => {
     await emit("open-dictionary-settings");
   };
 
+  const openMicrophoneSettings = async () => {
+    await commands.showMainWindowCommand();
+    await emit("open-general-settings");
+  };
+
+  const retryCurrentRecording = async () => {
+    const result = await commands.retryCurrentRecording();
+    if (result.status === "ok") {
+      setState("recording");
+    }
+  };
+
   const handleUndoLearned = async () => {
     if (recentlyLearnedEntries.length === 0) return;
 
@@ -417,11 +430,23 @@ const RecordingOverlay: React.FC = () => {
             commands.copyLastTranscript,
             <ClipboardCopy size={14} strokeWidth={2.25} />,
           )}
-        {renderActionButton(
-          t("overlay.actions.openSettings"),
-          showMainWindow,
-          <Settings size={14} strokeWidth={2.25} />,
-        )}
+        {state === "mic_failed" &&
+          renderActionButton(
+            t("overlay.actions.tryAgain"),
+            retryCurrentRecording,
+            <RotateCcw size={14} strokeWidth={2.25} />,
+          )}
+        {state === "mic_failed"
+          ? renderActionButton(
+              t("overlay.actions.selectMicrophone"),
+              openMicrophoneSettings,
+              <Mic size={14} strokeWidth={2.25} />,
+            )
+          : renderActionButton(
+              t("overlay.actions.openSettings"),
+              showMainWindow,
+              <Settings size={14} strokeWidth={2.25} />,
+            )}
         {(state === "silence" ||
           state === "transcribing" ||
           state === "processing" ||

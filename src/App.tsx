@@ -221,6 +221,15 @@ function App() {
     };
   }, []);
 
+  useEffect(() => {
+    const unlisten = listen("open-general-settings", () => {
+      setCurrentSection("general");
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, []);
+
   // Listen for model loading failures and show a toast
   useEffect(() => {
     const unlisten = listen<ModelStateEvent>("model-state-changed", (event) => {

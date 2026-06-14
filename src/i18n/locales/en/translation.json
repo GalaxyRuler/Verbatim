@@ -751,7 +751,9 @@
       "reviewDictionary": "Review dictionary",
       "openSettings": "Open settings",
       "cancel": "Cancel recording",
-      "undoLearnedWord": "Undo learned word"
+      "undoLearnedWord": "Undo learned word",
+      "tryAgain": "Try again",
+      "selectMicrophone": "Select microphone"
     },
     "dictionaryLearned": {
       "title": "Added to dictionary"

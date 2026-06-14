@@ -452,3 +452,11 @@ pub fn emit_levels(app_handle: &AppHandle, levels: &Vec<f32>) {
         let _ = overlay_window.emit("mic-level", levels);
     }
 }
+
+pub fn emit_overlay_state_changed(app_handle: &AppHandle, state: &str) {
+    let _ = app_handle.emit("overlay-state-changed", state);
+
+    if let Some(overlay_window) = app_handle.get_webview_window("recording_overlay") {
+        let _ = overlay_window.emit("overlay-state-changed", state);
+    }
+}

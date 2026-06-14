@@ -1015,9 +1015,43 @@ test.describe("Verbatim App", () => {
       win.__VERBATIM_TEST_EMIT_EVENT__("overlay-state-changed", "mic_failed");
     });
     await expect(overlay).toContainText("Microphone issue");
+    await expect(page.getByRole("button", { name: "Try again" })).toBeVisible();
     await expect(
-      page.getByRole("button", { name: "Open settings" }),
+      page.getByRole("button", { name: "Select microphone" }),
     ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Cancel recording" }),
+    ).toBeVisible();
+
+    await page.getByRole("button", { name: "Try again" }).click();
+    await expect(
+      page.getByRole("button", { name: "Change dictation language" }),
+    ).toBeVisible();
+    await expect(page.getByRole("button", { name: "Try again" })).toBeHidden();
+    await page.evaluate(() => {
+      const win = window as typeof window & {
+        __VERBATIM_TEST_EMIT_EVENT__: (
+          event: string,
+          payload?: unknown,
+        ) => void;
+      };
+      win.__VERBATIM_TEST_EMIT_EVENT__("overlay-state-changed", "mic_failed");
+    });
+    await page.getByRole("button", { name: "Select microphone" }).click();
+
+    const result = await page.evaluate(() => {
+      const win = window as typeof window & {
+        __VERBATIM_TEST_COMMANDS__: string[];
+        __VERBATIM_TEST_EMITTED_EVENTS__: string[];
+      };
+      return {
+        commands: win.__VERBATIM_TEST_COMMANDS__,
+        events: win.__VERBATIM_TEST_EMITTED_EVENTS__,
+      };
+    });
+    expect(result.commands).toContain("retry_current_recording");
+    expect(result.commands).toContain("show_main_window_command");
+    expect(result.events).toContain("open-general-settings");
   });
 
   test("docked pill surfaces language guard recovery", async ({ page }) => {

@@ -742,7 +742,9 @@
       "reviewDictionary": "مراجعة القاموس",
       "openSettings": "فتح الإعدادات",
       "cancel": "إلغاء التسجيل",
-      "undoLearnedWord": "تراجع عن الكلمة المتعلمة"
+      "undoLearnedWord": "تراجع عن الكلمة المتعلمة",
+      "tryAgain": "Try again",
+      "selectMicrophone": "Select microphone"
     },
     "dictionaryLearned": {
       "title": "أضيف إلى القاموس"
