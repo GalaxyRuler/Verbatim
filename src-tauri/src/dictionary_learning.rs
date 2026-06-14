@@ -18,7 +18,7 @@ pub fn infer_auto_learn_candidates(
     let corrected_tokens = word_tokens(corrected_text);
 
     if dictated_tokens.len() != corrected_tokens.len() {
-        return infer_hyphen_split_auto_learn_candidates(
+        return infer_split_auto_learn_candidates(
             &dictated_tokens,
             &corrected_tokens,
             existing_words,
@@ -76,7 +76,7 @@ pub fn infer_auto_learn_candidates(
     candidates
 }
 
-fn infer_hyphen_split_auto_learn_candidates(
+fn infer_split_auto_learn_candidates(
     dictated_tokens: &[String],
     corrected_tokens: &[String],
     existing_words: &[String],
@@ -95,28 +95,13 @@ fn infer_hyphen_split_auto_learn_candidates(
             continue;
         }
 
-        let dictated_parts = split_hyphenated_token(dictated);
-        if dictated_parts.len() < 2 {
-            return Vec::new();
-        }
-
-        let corrected_end = corrected_index + dictated_parts.len();
-        if corrected_end > corrected_tokens.len() {
-            return Vec::new();
-        }
-
-        let corrected_parts = &corrected_tokens[corrected_index..corrected_end];
-        if !hyphen_parts_match_correction(&dictated_parts, corrected_parts) {
-            return Vec::new();
-        }
-
-        let raw_phrase = corrected_parts.join(" ");
-        let Some(phrase) = sanitize_custom_phrase_candidate(&raw_phrase) else {
+        let Some((phrase, corrected_end)) =
+            infer_split_token_correction(dictated, corrected_tokens, corrected_index)
+        else {
             return Vec::new();
         };
 
-        if is_likely_custom_dictionary_phrase(&phrase)
-            && !is_existing_word(&phrase, existing_words)
+        if !is_existing_word(&phrase, existing_words)
             && !is_existing_candidate(&phrase, &candidates)
         {
             candidates.push(AutoLearnCandidate {
@@ -134,6 +119,79 @@ fn infer_hyphen_split_auto_learn_candidates(
     } else {
         Vec::new()
     }
+}
+
+fn infer_split_token_correction(
+    dictated: &str,
+    corrected_tokens: &[String],
+    corrected_index: usize,
+) -> Option<(String, usize)> {
+    infer_hyphen_part_correction(dictated, corrected_tokens, corrected_index).or_else(|| {
+        infer_collapsed_token_phrase_correction(dictated, corrected_tokens, corrected_index)
+    })
+}
+
+fn infer_hyphen_part_correction(
+    dictated: &str,
+    corrected_tokens: &[String],
+    corrected_index: usize,
+) -> Option<(String, usize)> {
+    let dictated_parts = split_hyphenated_token(dictated);
+    if dictated_parts.len() < 2 {
+        return None;
+    }
+
+    let corrected_end = corrected_index + dictated_parts.len();
+    if corrected_end > corrected_tokens.len() {
+        return None;
+    }
+
+    let corrected_parts = &corrected_tokens[corrected_index..corrected_end];
+    if !hyphen_parts_match_correction(&dictated_parts, corrected_parts) {
+        return None;
+    }
+
+    let raw_phrase = corrected_parts.join(" ");
+    let phrase = sanitize_custom_phrase_candidate(&raw_phrase)?;
+    is_likely_custom_dictionary_phrase(&phrase).then_some((phrase, corrected_end))
+}
+
+fn infer_collapsed_token_phrase_correction(
+    dictated: &str,
+    corrected_tokens: &[String],
+    corrected_index: usize,
+) -> Option<(String, usize)> {
+    let dictated_collapsed = collapse_token_for_phrase_match(dictated)?;
+    let max_corrected_len =
+        MAX_AUTO_LEARN_PHRASE_TOKENS.min(corrected_tokens.len().saturating_sub(corrected_index));
+
+    for corrected_len in (2..=max_corrected_len).rev() {
+        let corrected_end = corrected_index + corrected_len;
+        let corrected_parts = &corrected_tokens[corrected_index..corrected_end];
+        let raw_phrase = corrected_parts.join(" ");
+        let Some(phrase) = sanitize_custom_phrase_candidate(&raw_phrase) else {
+            continue;
+        };
+        if !is_likely_custom_dictionary_phrase(&phrase) {
+            continue;
+        }
+
+        let corrected_collapsed = corrected_parts.join("");
+        if tokens_are_close(&dictated_collapsed, &corrected_collapsed) {
+            return Some((phrase, corrected_end));
+        }
+    }
+
+    None
+}
+
+fn collapse_token_for_phrase_match(token: &str) -> Option<String> {
+    let collapsed = token
+        .chars()
+        .filter(|ch| ch.is_alphanumeric())
+        .collect::<String>();
+
+    (collapsed.chars().count() >= 4).then_some(collapsed)
 }
 
 fn split_hyphenated_token(token: &str) -> Vec<String> {
@@ -379,6 +437,9 @@ fn is_likely_custom_dictionary_term(candidate: &str) -> bool {
     let has_digit = candidate.chars().any(|ch| ch.is_ascii_digit());
     let has_uppercase = candidate.chars().any(char::is_uppercase);
     let has_lowercase = candidate.chars().any(char::is_lowercase);
+    let has_non_cased_alphabetic = candidate
+        .chars()
+        .any(|ch| ch.is_alphabetic() && !ch.is_uppercase() && !ch.is_lowercase());
     let has_term_punctuation = candidate
         .chars()
         .any(|ch| matches!(ch, '-' | '_' | '.' | '#' | '+'));
@@ -388,6 +449,7 @@ fn is_likely_custom_dictionary_term(candidate: &str) -> bool {
         || (has_digit && alphabetic_count > 0)
         || (has_uppercase && has_lowercase)
         || (has_uppercase && alphabetic_count >= 2)
+        || (has_non_cased_alphabetic && alphabetic_count >= 2)
 }
 
 fn is_likely_custom_dictionary_phrase(candidate: &str) -> bool {
@@ -472,6 +534,34 @@ mod tests {
             vec![AutoLearnCandidate {
                 phrase: "Al Kulaib".to_string(),
                 replacement_of: Some("Al-Khulayb".to_string()),
+            }]
+        );
+    }
+
+    #[test]
+    fn suggests_spelled_hyphenated_name_correction_as_phrase_mapping() {
+        let candidates =
+            infer_auto_learn_candidates("my name is A-L-K-U-L-A-Y-B", "my name is Al Kulaib", &[]);
+
+        assert_eq!(
+            candidates,
+            vec![AutoLearnCandidate {
+                phrase: "Al Kulaib".to_string(),
+                replacement_of: Some("A-L-K-U-L-A-Y-B".to_string()),
+            }]
+        );
+    }
+
+    #[test]
+    fn suggests_non_cased_script_word_correction() {
+        let candidates =
+            infer_auto_learn_candidates("قابلت عبدالة اليوم", "قابلت عبدالله اليوم", &[]);
+
+        assert_eq!(
+            candidates,
+            vec![AutoLearnCandidate {
+                phrase: "عبدالله".to_string(),
+                replacement_of: Some("عبدالة".to_string()),
             }]
         );
     }
