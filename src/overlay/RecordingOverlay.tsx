@@ -94,6 +94,7 @@ const RecordingOverlay: React.FC = () => {
   const [levels, setLevels] = useState<number[]>(Array(16).fill(0));
   const smoothedLevelsRef = useRef<number[]>(Array(16).fill(0));
   const isDockedRef = useRef(false);
+  const hasReceivedOverlayEventRef = useRef(false);
   const direction = getLanguageDirection(i18n.language);
 
   const setDockedMode = (enabled: boolean) => {
@@ -133,6 +134,7 @@ const RecordingOverlay: React.FC = () => {
     const setupEventListeners = async () => {
       // Listen for show-overlay event from Rust
       const unlistenShow = await listen("show-overlay", async (event) => {
+        hasReceivedOverlayEventRef.current = true;
         // Sync language from settings each time overlay is shown
         await syncLanguageFromSettings();
         await refreshLanguageMode();
@@ -151,6 +153,7 @@ const RecordingOverlay: React.FC = () => {
       const unlistenShowDocked = await listen(
         "show-docked-overlay",
         async () => {
+          hasReceivedOverlayEventRef.current = true;
           await syncLanguageFromSettings();
           await refreshLanguageMode();
           setDockedMode(true);
@@ -233,6 +236,17 @@ const RecordingOverlay: React.FC = () => {
         smoothedLevelsRef.current = smoothed;
         setLevels(smoothed.slice(0, 9));
       });
+
+      const dockedEnabled = await getDockedPillSetting();
+      if (dockedEnabled && !hasReceivedOverlayEventRef.current) {
+        await syncLanguageFromSettings();
+        await refreshLanguageMode();
+        setDockedMode(true);
+        setIsDockedExpanded(false);
+        setIsLanguagePickerOpen(false);
+        setState("idle");
+        setIsVisible(true);
+      }
 
       // Cleanup function
       return () => {

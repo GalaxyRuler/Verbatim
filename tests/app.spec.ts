@@ -120,7 +120,10 @@ const expectTextFits = async (page: Page, selector: string) => {
     .toBe(true);
 };
 
-const installTauriMocks = async (page: Page) => {
+const installTauriMocks = async (
+  page: Page,
+  settingsOverrides: Partial<typeof baseSettings> = {},
+) => {
   await page.addInitScript(
     ({ settings, profiles, models }) => {
       let appSettings = { ...settings };
@@ -398,7 +401,11 @@ const installTauriMocks = async (page: Page) => {
         },
       };
     },
-    { settings: baseSettings, profiles: adaptiveProfiles, models },
+    {
+      settings: { ...baseSettings, ...settingsOverrides },
+      profiles: adaptiveProfiles,
+      models,
+    },
   );
 };
 
@@ -723,6 +730,23 @@ test.describe("Verbatim App", () => {
     );
     await expect(
       page.getByRole("button", { name: "Change dictation language" }),
+    ).toBeVisible();
+  });
+
+  test("docked pill initializes visible when already enabled", async ({
+    page,
+  }) => {
+    await installTauriMocks(page, {
+      docked_pill_enabled: true,
+      overlay_position: "bottom",
+    });
+    await page.goto("/src/overlay/index.html");
+
+    const overlay = page.getByTestId("recording-overlay");
+    await expect(overlay).toHaveClass(/fade-in/);
+    await expect(overlay).toHaveClass(/docked-collapsed/);
+    await expect(
+      page.getByRole("button", { name: "Expand pill" }),
     ).toBeVisible();
   });
 
