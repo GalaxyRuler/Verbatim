@@ -21,6 +21,7 @@ pub fn sanitize_dictionary_phrase(raw: &str) -> Option<String> {
     if cleaned.is_empty()
         || cleaned.chars().count() > MAX_DICTIONARY_PHRASE_CHARS
         || !cleaned.chars().any(char::is_alphabetic)
+        || !dictionary_phrase_has_valid_token_boundaries(&cleaned)
     {
         return None;
     }
@@ -287,6 +288,10 @@ fn sanitize_auto_learn_phrase(raw: &str) -> Option<String> {
 }
 
 fn auto_learn_phrase_is_valid(phrase: &str) -> bool {
+    dictionary_phrase_has_valid_token_boundaries(phrase)
+}
+
+fn dictionary_phrase_has_valid_token_boundaries(phrase: &str) -> bool {
     phrase
         .split_whitespace()
         .all(|token| !token.starts_with('-') && !token.ends_with('-'))
@@ -324,6 +329,21 @@ mod tests {
             sanitize_dictionary_phrase("<Robyn&>"),
             Some("Robyn".to_string())
         );
+    }
+
+    #[test]
+    fn sanitize_dictionary_phrase_allows_internal_hyphen_names() {
+        assert_eq!(
+            sanitize_dictionary_phrase("Jean-Luc Picard"),
+            Some("Jean-Luc Picard".to_string())
+        );
+    }
+
+    #[test]
+    fn sanitize_dictionary_phrase_rejects_dangling_hyphen_words() {
+        assert_eq!(sanitize_dictionary_phrase("Vow-"), None);
+        assert_eq!(sanitize_dictionary_phrase("-Vow"), None);
+        assert_eq!(sanitize_dictionary_phrase("Robyn -"), None);
     }
 
     #[test]
@@ -397,6 +417,23 @@ mod tests {
     }
 
     #[test]
+    fn sync_legacy_custom_words_rejects_dangling_hyphen_legacy_words_as_manual() {
+        let mut settings = get_default_settings();
+        settings.custom_words = vec!["Vow-".to_string(), "Robyn".to_string()];
+
+        let changed = sync_legacy_custom_words(&mut settings);
+
+        assert!(changed);
+        assert_eq!(settings.dictionary_entries.len(), 1);
+        assert_eq!(settings.dictionary_entries[0].phrase, "Robyn");
+        assert_eq!(
+            settings.dictionary_entries[0].source,
+            DictionaryEntrySource::Manual
+        );
+        assert_eq!(settings.custom_words, vec!["Robyn"]);
+    }
+
+    #[test]
     fn upsert_manual_entry_rejects_case_duplicate() {
         let mut settings = get_default_settings();
         settings.dictionary_entries = vec![entry("dict_1_robyn", "Robyn")];
@@ -404,6 +441,17 @@ mod tests {
         let result = upsert_manual_entry(&mut settings, 42, "robyn".to_string(), None);
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn upsert_manual_entry_rejects_dangling_hyphen_words() {
+        let mut settings = get_default_settings();
+
+        let result = upsert_manual_entry(&mut settings, 42, "Vow-".to_string(), None);
+
+        assert!(result.is_err());
+        assert!(settings.dictionary_entries.is_empty());
+        assert!(settings.custom_words.is_empty());
     }
 
     #[test]
