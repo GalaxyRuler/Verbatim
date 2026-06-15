@@ -7,4 +7,5 @@ pub mod profile;
 pub mod routing;
 pub mod session;
 pub mod smart_formatting;
+pub mod text_direction;
 pub mod types;

@@ -578,6 +578,16 @@ fn skipped_wrong_target_receipt() -> crate::adaptive::types::InsertionReceipt {
     }
 }
 
+fn prepare_adaptive_paste_text(
+    final_text: &str,
+    context: &crate::adaptive::types::CapturedContext,
+) -> String {
+    crate::adaptive::text_direction::stabilize_ltr_email_paste_text(
+        final_text,
+        &context.target_kind,
+    )
+}
+
 pub(crate) async fn process_adaptive_transcription_output(
     settings: &AppSettings,
     transcription: &str,
@@ -711,6 +721,19 @@ mod adaptive_action_tests {
         assert_eq!(
             receipt.error.as_deref(),
             Some("target changed before insertion")
+        );
+    }
+
+    #[test]
+    fn adaptive_email_paste_text_gets_ltr_direction_marks() {
+        let mut context = context_with_fingerprint(Some("outlook.exe|rctrl_renwnd32"));
+        context.target_kind = TargetKind::Email;
+
+        let result = prepare_adaptive_paste_text("Dear James,\n\nHow did you come?", &context);
+
+        assert_eq!(
+            result,
+            "\u{200E}Dear James,\u{200E}\n\n\u{200E}How did you come?\u{200E}"
         );
     }
 
@@ -1195,15 +1218,19 @@ impl ShortcutAction for TranscribeAction {
                                             ) {
                                                 language_guard_receipt(true)
                                             } else {
+                                                let paste_text = prepare_adaptive_paste_text(
+                                                    &final_text,
+                                                    &original_context,
+                                                );
                                                 let receipt = utils::paste_with_receipt(
-                                                    final_text.clone(),
+                                                    paste_text.clone(),
                                                     ah_clone.clone(),
                                                     true,
                                                 );
                                                 if !receipt.succeeded && receipt.attempted {
                                                     copy_text_to_clipboard(
                                                         &ah_clone,
-                                                        &final_text,
+                                                        &paste_text,
                                                         "adaptive paste failure",
                                                     );
                                                 }

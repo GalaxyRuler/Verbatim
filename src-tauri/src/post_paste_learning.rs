@@ -139,8 +139,10 @@ fn learn_from_text_snapshots(
     };
 
     let mut settings = crate::settings::get_settings(app);
+    let inserted_text = strip_paste_direction_marks(inserted_text);
+    let corrected_text = strip_paste_direction_marks(&corrected_text);
     let candidates = crate::dictionary_learning::infer_auto_learn_candidates(
-        inserted_text,
+        &inserted_text,
         &corrected_text,
         &settings.custom_words,
     );
@@ -229,12 +231,33 @@ pub fn extract_corrected_inserted_text(
     }
 
     let corrected: String = after_edit_chars[prefix_len..corrected_end].iter().collect();
-    let corrected = corrected.trim();
+    let corrected = strip_paste_direction_marks(corrected.trim());
     if corrected.is_empty() {
         return None;
     }
 
-    Some(corrected.to_string())
+    Some(corrected)
+}
+
+fn strip_paste_direction_marks(text: &str) -> String {
+    text.chars()
+        .filter(|ch| {
+            !matches!(
+                ch,
+                '\u{200E}'
+                    | '\u{200F}'
+                    | '\u{202A}'
+                    | '\u{202B}'
+                    | '\u{202C}'
+                    | '\u{202D}'
+                    | '\u{202E}'
+                    | '\u{2066}'
+                    | '\u{2067}'
+                    | '\u{2068}'
+                    | '\u{2069}'
+            )
+        })
+        .collect()
 }
 
 fn common_prefix_len(left: &[char], right: &[char]) -> usize {
@@ -612,6 +635,17 @@ mod tests {
         );
 
         assert_eq!(corrected.as_deref(), Some("meet with Robyn tomorrow"));
+    }
+
+    #[test]
+    fn strips_direction_marks_from_corrected_pasted_span() {
+        let corrected = extract_corrected_inserted_text(
+            "",
+            "\u{200E}Dear James,\u{200E}",
+            "\u{200E}Dear Jaymes,\u{200E}",
+        );
+
+        assert_eq!(corrected.as_deref(), Some("Dear Jaymes,"));
     }
 
     #[test]
