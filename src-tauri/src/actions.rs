@@ -23,7 +23,8 @@ use tauri::{AppHandle, Emitter};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
 const WHISPER_SAMPLE_RATE: usize = 16_000;
-const MIN_USABLE_SPEECH_SAMPLES: usize = WHISPER_SAMPLE_RATE * 3 / 2;
+const MIN_OBSERVED_ACTIVE_SIGNAL_SAMPLES: usize = WHISPER_SAMPLE_RATE * 3 / 10;
+const MIN_UNOBSERVED_USABLE_SPEECH_SAMPLES: usize = WHISPER_SAMPLE_RATE * 3 / 2;
 const MIN_UNOBSERVED_SPEECH_RMS: f32 = 0.003;
 const MIN_UNOBSERVED_SPEECH_PEAK: f32 = 0.02;
 
@@ -90,12 +91,12 @@ fn recording_has_usable_speech(result: &RecordingStopResult) -> bool {
         return false;
     }
 
-    if result.captured_sample_count < MIN_USABLE_SPEECH_SAMPLES {
-        return false;
+    if result.observed_active_signal {
+        return result.captured_sample_count >= MIN_OBSERVED_ACTIVE_SIGNAL_SAMPLES;
     }
 
-    if result.observed_active_signal {
-        return true;
+    if result.captured_sample_count < MIN_UNOBSERVED_USABLE_SPEECH_SAMPLES {
+        return false;
     }
 
     let sample_count = result.captured_sample_count.min(result.samples.len());
@@ -845,15 +846,27 @@ mod adaptive_action_tests {
     }
 
     #[test]
-    fn one_second_recording_is_not_usable_even_with_active_signal() {
+    fn very_short_tap_is_not_usable_even_with_active_signal() {
         let result = crate::managers::audio::RecordingStopResult {
             samples: vec![0.01; 20_000],
-            captured_sample_count: 20_160,
+            captured_sample_count: 3_200,
             observed_active_signal: true,
             diagnostic_state: crate::managers::mic_diagnostics::MicDiagnosticState::Recording,
         };
 
         assert!(!recording_has_usable_speech(&result));
+    }
+
+    #[test]
+    fn short_recording_with_active_signal_is_usable_speech() {
+        let result = crate::managers::audio::RecordingStopResult {
+            samples: vec![0.01; 20_000],
+            captured_sample_count: 8_000,
+            observed_active_signal: true,
+            diagnostic_state: crate::managers::mic_diagnostics::MicDiagnosticState::Recording,
+        };
+
+        assert!(recording_has_usable_speech(&result));
     }
 
     #[test]
