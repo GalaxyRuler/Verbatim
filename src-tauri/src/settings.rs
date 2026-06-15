@@ -1474,7 +1474,7 @@ mod tests {
         settings
             .post_process_provider_mut("custom")
             .unwrap()
-            .base_url = "http://100.126.225.101:1234".to_string();
+            .base_url = "http://192.0.2.10:1234".to_string();
         settings
             .post_process_provider_mut("lm_studio")
             .unwrap()
@@ -1490,7 +1490,7 @@ mod tests {
 
         assert_eq!(
             settings.post_process_provider("custom").unwrap().base_url,
-            "http://100.126.225.101:1234/v1"
+            "http://192.0.2.10:1234/v1"
         );
         assert_eq!(
             settings

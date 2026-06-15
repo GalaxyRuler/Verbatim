@@ -6,6 +6,13 @@ use crate::managers::{
 use std::sync::Arc;
 use tauri::{AppHandle, State};
 
+fn should_retry_post_process(
+    stored_post_process_requested: bool,
+    live_post_process_enabled: bool,
+) -> bool {
+    stored_post_process_requested && live_post_process_enabled
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn get_history_entries(
@@ -93,8 +100,10 @@ pub async fn retry_history_entry_transcription(
         return Err("Recording contains no speech".to_string());
     }
 
-    let processed =
-        process_transcription_output(&app, &transcription, entry.post_process_requested).await;
+    let settings = crate::settings::get_settings(&app);
+    let retry_post_process =
+        should_retry_post_process(entry.post_process_requested, settings.post_process_enabled);
+    let processed = process_transcription_output(&app, &transcription, retry_post_process).await;
     history_manager
         .update_transcription(
             id,
@@ -151,4 +160,17 @@ pub async fn update_recording_retention_period(
         .map_err(|e| e.to_string())?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn retry_post_processing_requires_stored_request_and_live_toggle() {
+        assert!(should_retry_post_process(true, true));
+        assert!(!should_retry_post_process(true, false));
+        assert!(!should_retry_post_process(false, true));
+        assert!(!should_retry_post_process(false, false));
+    }
 }

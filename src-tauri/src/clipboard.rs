@@ -4,7 +4,7 @@ use crate::input::{self, EnigoState};
 use crate::settings::TypingTool;
 use crate::settings::{get_settings, AutoSubmitKey, ClipboardHandling, PasteMethod};
 use enigo::{Direction, Enigo, Key, Keyboard};
-use log::info;
+use log::{info, warn};
 use std::process::Command;
 use std::time::Duration;
 use tauri::{AppHandle, Manager};
@@ -12,6 +12,245 @@ use tauri_plugin_clipboard_manager::ClipboardExt;
 
 #[cfg(target_os = "linux")]
 use crate::utils::{is_kde_wayland, is_wayland};
+
+enum ClipboardSnapshot {
+    Native {
+        native: NativeClipboardSnapshot,
+        fallback_text: Option<String>,
+    },
+    TextFallback(Option<String>),
+}
+
+impl ClipboardSnapshot {
+    fn capture(app_handle: &AppHandle) -> Self {
+        let fallback_text = app_handle
+            .clipboard()
+            .read_text()
+            .ok()
+            .filter(|text| !text.is_empty());
+
+        match NativeClipboardSnapshot::capture() {
+            Ok(native) => Self::Native {
+                native,
+                fallback_text,
+            },
+            Err(_) => Self::TextFallback(fallback_text),
+        }
+    }
+
+    fn restore(&self, app_handle: &AppHandle) {
+        match self {
+            Self::Native {
+                native,
+                fallback_text,
+            } => {
+                if let Err(err) = native.restore() {
+                    warn!("Failed to restore native clipboard snapshot: {}", err);
+                    if let Some(text) = fallback_text {
+                        restore_text_clipboard(app_handle, text);
+                    }
+                }
+            }
+            Self::TextFallback(Some(text)) => restore_text_clipboard(app_handle, text),
+            Self::TextFallback(None) => {}
+        }
+    }
+
+    #[cfg(test)]
+    fn fallback_text_for_restore(&self) -> Option<&str> {
+        match self {
+            Self::Native { fallback_text, .. } => fallback_text.as_deref(),
+            Self::TextFallback(text) => text.as_deref(),
+        }
+    }
+
+    #[cfg(test)]
+    fn native_for_test() -> Self {
+        Self::Native {
+            native: NativeClipboardSnapshot::for_test(),
+            fallback_text: None,
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+#[derive(Clone, Debug)]
+struct NativeClipboardSnapshot {
+    formats: Vec<ClipboardFormatData>,
+}
+
+#[cfg(target_os = "windows")]
+#[derive(Clone, Debug)]
+struct ClipboardFormatData {
+    format: u32,
+    bytes: Vec<u8>,
+}
+
+#[cfg(target_os = "windows")]
+impl NativeClipboardSnapshot {
+    fn capture() -> Result<Self, String> {
+        use windows::Win32::Foundation::HGLOBAL;
+        use windows::Win32::System::DataExchange::{
+            EnumClipboardFormats, GetClipboardData, OpenClipboard,
+        };
+        use windows::Win32::System::Memory::{GlobalLock, GlobalSize, GlobalUnlock};
+
+        struct ClipboardGuard;
+
+        impl Drop for ClipboardGuard {
+            fn drop(&mut self) {
+                unsafe {
+                    let _ = windows::Win32::System::DataExchange::CloseClipboard();
+                }
+            }
+        }
+
+        unsafe {
+            OpenClipboard(None).map_err(|err| format!("open clipboard: {}", err))?;
+            let _guard = ClipboardGuard;
+            let mut formats = Vec::new();
+            let mut format = 0;
+
+            loop {
+                format = EnumClipboardFormats(format);
+                if format == 0 {
+                    break;
+                }
+
+                let handle = match GetClipboardData(format) {
+                    Ok(handle) if !handle.0.is_null() => handle,
+                    _ => continue,
+                };
+                let hglobal = HGLOBAL(handle.0);
+                let size = GlobalSize(hglobal);
+                if size == 0 {
+                    continue;
+                }
+
+                let locked = GlobalLock(hglobal);
+                if locked.is_null() {
+                    continue;
+                }
+
+                let bytes = std::slice::from_raw_parts(locked.cast::<u8>(), size).to_vec();
+                let _ = GlobalUnlock(hglobal);
+                formats.push(ClipboardFormatData { format, bytes });
+            }
+
+            if formats.is_empty() {
+                Err("no memory-backed clipboard formats captured".to_string())
+            } else {
+                Ok(Self { formats })
+            }
+        }
+    }
+
+    fn restore(&self) -> Result<(), String> {
+        use windows::Win32::Foundation::{GlobalFree, HANDLE};
+        use windows::Win32::System::DataExchange::{
+            EmptyClipboard, OpenClipboard, SetClipboardData,
+        };
+        use windows::Win32::System::Memory::{
+            GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE,
+        };
+
+        if self.formats.is_empty() {
+            return Err("native clipboard snapshot is empty".to_string());
+        }
+
+        struct ClipboardGuard;
+
+        impl Drop for ClipboardGuard {
+            fn drop(&mut self) {
+                unsafe {
+                    let _ = windows::Win32::System::DataExchange::CloseClipboard();
+                }
+            }
+        }
+
+        unsafe {
+            OpenClipboard(None).map_err(|err| format!("open clipboard: {}", err))?;
+            let _guard = ClipboardGuard;
+            EmptyClipboard().map_err(|err| format!("empty clipboard: {}", err))?;
+
+            for format in &self.formats {
+                let hglobal = GlobalAlloc(GMEM_MOVEABLE, format.bytes.len())
+                    .map_err(|err| format!("allocate clipboard memory: {}", err))?;
+                let locked = GlobalLock(hglobal);
+                if locked.is_null() {
+                    let _ = GlobalFree(Some(hglobal));
+                    return Err("lock clipboard memory".to_string());
+                }
+
+                std::ptr::copy_nonoverlapping(
+                    format.bytes.as_ptr(),
+                    locked.cast::<u8>(),
+                    format.bytes.len(),
+                );
+                let _ = GlobalUnlock(hglobal);
+
+                if let Err(err) = SetClipboardData(format.format, Some(HANDLE(hglobal.0))) {
+                    let _ = GlobalFree(Some(hglobal));
+                    return Err(format!("set clipboard data: {}", err));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    #[cfg(test)]
+    fn for_test() -> Self {
+        Self {
+            formats: vec![ClipboardFormatData {
+                format: 13,
+                bytes: b"test\0".to_vec(),
+            }],
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+#[derive(Clone, Debug)]
+struct NativeClipboardSnapshot;
+
+#[cfg(not(target_os = "windows"))]
+impl NativeClipboardSnapshot {
+    fn capture() -> Result<Self, String> {
+        Err("native clipboard snapshots are not supported on this platform".to_string())
+    }
+
+    fn restore(&self) -> Result<(), String> {
+        Err("native clipboard snapshots are not supported on this platform".to_string())
+    }
+
+    #[cfg(test)]
+    fn for_test() -> Self {
+        Self
+    }
+}
+
+fn write_text_clipboard(app_handle: &AppHandle, text: &str) -> Result<(), String> {
+    let clipboard = app_handle.clipboard();
+
+    #[cfg(target_os = "linux")]
+    {
+        if is_wayland() && is_wl_copy_available() {
+            info!("Using wl-copy for clipboard write on Wayland");
+            return write_clipboard_via_wl_copy(text);
+        }
+    }
+
+    clipboard
+        .write_text(text)
+        .map_err(|e| format!("Failed to write to clipboard: {}", e))
+}
+
+fn restore_text_clipboard(app_handle: &AppHandle, text: &str) {
+    if let Err(err) = write_text_clipboard(app_handle, text) {
+        warn!("Failed to restore text clipboard fallback: {}", err);
+    }
+}
 
 /// Pastes text using the clipboard: saves current content, writes text, sends paste keystroke, restores clipboard.
 fn paste_via_clipboard(
@@ -21,27 +260,10 @@ fn paste_via_clipboard(
     paste_method: &PasteMethod,
     paste_delay_ms: u64,
 ) -> Result<(), String> {
-    let clipboard = app_handle.clipboard();
-    let clipboard_content = clipboard.read_text().unwrap_or_default();
+    let clipboard_snapshot = ClipboardSnapshot::capture(app_handle);
 
     // Write text to clipboard first
-    // On Wayland, prefer wl-copy for better compatibility (especially with umlauts)
-    #[cfg(target_os = "linux")]
-    let write_result = if is_wayland() && is_wl_copy_available() {
-        info!("Using wl-copy for clipboard write on Wayland");
-        write_clipboard_via_wl_copy(text)
-    } else {
-        clipboard
-            .write_text(text)
-            .map_err(|e| format!("Failed to write to clipboard: {}", e))
-    };
-
-    #[cfg(not(target_os = "linux"))]
-    let write_result = clipboard
-        .write_text(text)
-        .map_err(|e| format!("Failed to write to clipboard: {}", e));
-
-    write_result?;
+    write_text_clipboard(app_handle, text)?;
 
     std::thread::sleep(Duration::from_millis(paste_delay_ms));
 
@@ -64,17 +286,8 @@ fn paste_via_clipboard(
 
     std::thread::sleep(std::time::Duration::from_millis(50));
 
-    // Restore original clipboard content
-    // On Wayland, prefer wl-copy for better compatibility
-    #[cfg(target_os = "linux")]
-    if is_wayland() && is_wl_copy_available() {
-        let _ = write_clipboard_via_wl_copy(&clipboard_content);
-    } else {
-        let _ = clipboard.write_text(&clipboard_content);
-    }
-
-    #[cfg(not(target_os = "linux"))]
-    let _ = clipboard.write_text(&clipboard_content);
+    // Restore original clipboard content, including non-text formats where supported.
+    clipboard_snapshot.restore(app_handle);
 
     Ok(())
 }
@@ -789,5 +1002,12 @@ mod tests {
         assert!(receipt.attempted);
         assert!(!receipt.succeeded);
         assert_eq!(receipt.error.as_deref(), Some("failed"));
+    }
+
+    #[test]
+    fn native_clipboard_snapshot_does_not_restore_empty_text_placeholder() {
+        let snapshot = ClipboardSnapshot::native_for_test();
+
+        assert_eq!(snapshot.fallback_text_for_restore(), None);
     }
 }

@@ -39,6 +39,13 @@ fn validate_selected_language(selected_language: &str, supported_languages: &[St
     }
 }
 
+fn transcription_result_log_message(final_result: &str) -> String {
+    format!(
+        "Transcription result ready ({} chars)",
+        final_result.chars().count()
+    )
+}
+
 fn build_transcription_request(
     audio: Vec<f32>,
     selected_language: &str,
@@ -565,7 +572,7 @@ impl TranscriptionManager {
         if final_result.is_empty() {
             info!("Transcription result is empty");
         } else {
-            info!("Transcription result: {}", final_result);
+            info!("{}", transcription_result_log_message(&final_result));
         }
 
         self.maybe_unload_immediately("transcription");
@@ -817,5 +824,15 @@ mod tests {
             apply_local_text_transforms("please use email signature".to_string(), &settings, false);
 
         assert_eq!(result, "please use Regards,\nAbdullah");
+    }
+
+    #[test]
+    fn transcription_result_log_message_does_not_include_transcript_text() {
+        let transcript = "Private dictated sentence with a customer name";
+        let message = transcription_result_log_message(transcript);
+
+        assert!(!message.contains(transcript));
+        assert!(message.contains("ready"));
+        assert!(message.contains("46 chars"));
     }
 }
