@@ -66,6 +66,7 @@ const baseSettings = {
   log_level: "info",
   custom_words: [],
   dictionary_entries: [],
+  snippets: [],
   model_unload_timeout: "never",
   word_correction_threshold: 0.8,
   history_limit: 100,
@@ -158,12 +159,22 @@ const installTauriMocks = async (
           Record<string, unknown>
         >) ?? []),
       ];
+      let snippetEntries = [
+        ...((appSettings.snippets as Array<Record<string, unknown>>) ?? []),
+      ];
       let nextDictionaryId = 1;
+      let nextSnippetId = 1;
       const syncDictionarySettings = () => {
         appSettings = {
           ...appSettings,
           dictionary_entries: dictionaryEntries,
           custom_words: dictionaryEntries.map((entry) => entry.phrase),
+        };
+      };
+      const syncSnippetSettings = () => {
+        appSettings = {
+          ...appSettings,
+          snippets: snippetEntries,
         };
       };
       const emitEvent = (event: string, payload: unknown) => {
@@ -247,6 +258,7 @@ const installTauriMocks = async (
             case "get_default_settings":
             case "get_app_settings":
               syncDictionarySettings();
+              syncSnippetSettings();
               return appSettings;
             case "list_dictionary_entries":
               return dictionaryEntries;
@@ -310,6 +322,50 @@ const installTauriMocks = async (
               syncDictionarySettings();
               return deleted;
             }
+            case "list_snippet_entries":
+              return snippetEntries;
+            case "add_snippet_entry": {
+              const input = args?.input as {
+                trigger: string;
+                content: string;
+              };
+              const entry = {
+                id: `snippet_test_${nextSnippetId++}`,
+                trigger: input.trigger,
+                content: input.content,
+                created_at_ms: nextSnippetId,
+                updated_at_ms: nextSnippetId,
+              };
+              snippetEntries = [...snippetEntries, entry];
+              syncSnippetSettings();
+              return entry;
+            }
+            case "update_snippet_entry": {
+              const id = args?.id as string;
+              const update = args?.update as {
+                trigger?: string | null;
+                content?: string | null;
+              };
+              let updated = null;
+              snippetEntries = snippetEntries.map((entry) => {
+                if (entry.id !== id) return entry;
+                updated = {
+                  ...entry,
+                  trigger: update.trigger ?? entry.trigger,
+                  content: update.content ?? entry.content,
+                  updated_at_ms: Date.now(),
+                };
+                return updated;
+              });
+              syncSnippetSettings();
+              return updated;
+            }
+            case "delete_snippet_entry":
+              snippetEntries = snippetEntries.filter(
+                (entry) => entry.id !== args?.id,
+              );
+              syncSnippetSettings();
+              return null;
             case "copy_last_transcript":
             case "paste_last_transcript":
               return true;
@@ -506,6 +562,47 @@ test.describe("Verbatim App", () => {
     await expect(
       page.getByRole("heading", { name: "Dictionary" }),
     ).toBeVisible();
+  });
+
+  test("snippets section is visible from the sidebar", async ({ page }) => {
+    await installTauriMocks(page);
+    await page.goto("/");
+
+    await page.getByText("Snippets").click();
+    await expect(page.getByRole("heading", { name: "Snippets" })).toBeVisible();
+  });
+
+  test("snippet entry can be added, searched, edited, and deleted", async ({
+    page,
+  }) => {
+    await installTauriMocks(page);
+    await page.goto("/");
+
+    await page.getByText("Snippets").click();
+    await page.getByRole("button", { name: "Add snippet" }).click();
+    await page.getByLabel("Trigger phrase").fill("email signature");
+    await page.getByLabel("Snippet content").fill("Regards,\nAbdullah");
+    await page.getByRole("button", { name: "Save snippet" }).click();
+
+    await expect(page.getByText("email signature")).toBeVisible();
+    await expect(page.getByText("Regards, Abdullah")).toBeVisible();
+    await page.getByLabel("Search snippets").fill("signature");
+    await expect(page.getByText("email signature")).toBeVisible();
+
+    await page.getByRole("button", { name: "Edit email signature" }).click();
+    await page.getByLabel("Trigger phrase").fill("formal email signature");
+    await page.getByLabel("Snippet content").fill("Sincerely,\nAbdullah");
+    await page.getByRole("button", { name: "Save snippet" }).click();
+
+    await expect(page.getByText("formal email signature")).toBeVisible();
+    await expect(
+      page.getByText("email signature", { exact: true }),
+    ).toHaveCount(0);
+
+    await page
+      .getByRole("button", { name: "Delete formal email signature" })
+      .click();
+    await expect(page.getByText("formal email signature")).toHaveCount(0);
   });
 
   test("manual dictionary entry can be added and searched", async ({

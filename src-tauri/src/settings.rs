@@ -479,6 +479,8 @@ pub struct AppSettings {
     #[serde(default = "default_auto_add_dictionary_words")]
     pub auto_add_dictionary_words: bool,
     #[serde(default)]
+    pub snippets: Vec<crate::snippets::SnippetEntry>,
+    #[serde(default)]
     pub model_unload_timeout: ModelUnloadTimeout,
     #[serde(default = "default_word_correction_threshold")]
     pub word_correction_threshold: f64,
@@ -1020,6 +1022,10 @@ fn ensure_dictionary_defaults(settings: &mut AppSettings) -> bool {
     crate::dictionary::sync_legacy_custom_words(settings)
 }
 
+fn ensure_snippet_defaults(settings: &mut AppSettings) -> bool {
+    crate::snippets::sync_snippets(settings)
+}
+
 pub fn set_translation_target_language(settings: &mut AppSettings, target_language: String) {
     let mut request = settings
         .translation_request
@@ -1119,6 +1125,7 @@ pub fn get_default_settings() -> AppSettings {
         dictionary_entries: Vec::new(),
         dictionary_auto_learn_suppressed: Vec::new(),
         auto_add_dictionary_words: default_auto_add_dictionary_words(),
+        snippets: Vec::new(),
         model_unload_timeout: ModelUnloadTimeout::default(),
         word_correction_threshold: default_word_correction_threshold(),
         history_limit: default_history_limit(),
@@ -1294,7 +1301,13 @@ pub fn load_or_create_app_settings(app: &AppHandle) -> AppSettings {
     let adaptive_changed = ensure_adaptive_defaults(&mut settings);
     let translation_changed = ensure_translation_defaults(&mut settings);
     let dictionary_changed = ensure_dictionary_defaults(&mut settings);
-    if post_process_changed || adaptive_changed || translation_changed || dictionary_changed {
+    let snippet_changed = ensure_snippet_defaults(&mut settings);
+    if post_process_changed
+        || adaptive_changed
+        || translation_changed
+        || dictionary_changed
+        || snippet_changed
+    {
         store.set("settings", serde_json::to_value(&settings).unwrap());
     }
 
@@ -1322,7 +1335,13 @@ pub fn get_settings(app: &AppHandle) -> AppSettings {
     let adaptive_changed = ensure_adaptive_defaults(&mut settings);
     let translation_changed = ensure_translation_defaults(&mut settings);
     let dictionary_changed = ensure_dictionary_defaults(&mut settings);
-    if post_process_changed || adaptive_changed || translation_changed || dictionary_changed {
+    let snippet_changed = ensure_snippet_defaults(&mut settings);
+    if post_process_changed
+        || adaptive_changed
+        || translation_changed
+        || dictionary_changed
+        || snippet_changed
+    {
         store.set("settings", serde_json::to_value(&settings).unwrap());
     }
 
@@ -1335,6 +1354,7 @@ pub fn write_settings(app: &AppHandle, mut settings: AppSettings) {
         .expect("Failed to initialize store");
 
     crate::dictionary::sync_legacy_custom_words(&mut settings);
+    crate::snippets::sync_snippets(&mut settings);
     store.set("settings", serde_json::to_value(&settings).unwrap());
 }
 
@@ -1395,6 +1415,12 @@ mod tests {
     fn default_settings_start_with_empty_dictionary_auto_learn_suppression() {
         let settings = get_default_settings();
         assert!(settings.dictionary_auto_learn_suppressed.is_empty());
+    }
+
+    #[test]
+    fn default_settings_start_with_empty_snippets() {
+        let settings = get_default_settings();
+        assert!(settings.snippets.is_empty());
     }
 
     #[test]
@@ -1622,6 +1648,23 @@ mod tests {
         assert_eq!(settings.dictionary_entries.len(), 1);
         assert_eq!(settings.dictionary_phrases(), vec!["Robyn"]);
         assert_eq!(settings.custom_words, vec!["Robyn"]);
+    }
+
+    #[test]
+    fn snippet_defaults_normalize_stored_entries() {
+        let mut settings = get_default_settings();
+        settings.snippets = vec![crate::snippets::SnippetEntry {
+            id: "snippet_1_email".to_string(),
+            trigger: "  email   signature  ".to_string(),
+            content: "Signature".to_string(),
+            created_at_ms: 1,
+            updated_at_ms: 1,
+        }];
+
+        let changed = ensure_snippet_defaults(&mut settings);
+
+        assert!(changed);
+        assert_eq!(settings.snippets[0].trigger, "email signature");
     }
 
     #[test]

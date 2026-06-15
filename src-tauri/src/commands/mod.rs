@@ -3,6 +3,7 @@ pub mod audio;
 pub mod dictionary;
 pub mod history;
 pub mod models;
+pub mod snippets;
 pub mod transcript;
 pub mod transcription;
 

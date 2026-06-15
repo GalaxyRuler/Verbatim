@@ -20,6 +20,7 @@ pub mod providers;
 mod settings;
 mod shortcut;
 mod signal_handle;
+mod snippets;
 mod transcription_coordinator;
 mod tray;
 mod tray_i18n;
@@ -415,6 +416,10 @@ pub fn run(cli_args: CliArgs) {
             commands::dictionary::delete_dictionary_entry,
             commands::dictionary::undo_dictionary_entries,
             commands::dictionary::learn_custom_words_from_correction,
+            commands::snippets::list_snippet_entries,
+            commands::snippets::add_snippet_entry,
+            commands::snippets::update_snippet_entry,
+            commands::snippets::delete_snippet_entry,
             commands::models::get_available_models,
             commands::models::get_model_info,
             commands::models::download_model,

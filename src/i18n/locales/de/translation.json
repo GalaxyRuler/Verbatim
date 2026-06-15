@@ -16,7 +16,8 @@
     "history": "Verlauf",
     "debug": "Debug",
     "about": "Info",
-    "dictionary": "Dictionary"
+    "dictionary": "Dictionary",
+    "snippets": "Snippets"
   },
   "onboarding": {
     "subtitle": "Wähle ein Transkriptionsmodell, um loszulegen",
@@ -658,6 +659,31 @@
         "light": "Light",
         "medium": "Medium",
         "high": "High"
+      }
+    },
+    "snippets": {
+      "title": "Snippets",
+      "description": "Expand local trigger phrases into saved text.",
+      "search": "Search snippets",
+      "add": "Add snippet",
+      "save": "Save snippet",
+      "cancel": "Cancel",
+      "trigger": "Trigger phrase",
+      "content": "Snippet content",
+      "editEntry": "Edit {{trigger}}",
+      "deleteEntry": "Delete {{trigger}}",
+      "counts": {
+        "total": "{{count}} snippets",
+        "multiline": "{{count}} multiline"
+      },
+      "empty": "No snippets yet.",
+      "noResults": "No snippets match your search.",
+      "errors": {
+        "load": "Failed to load snippets",
+        "add": "Failed to add snippet",
+        "update": "Failed to update snippet",
+        "delete": "Failed to delete snippet",
+        "duplicate": "{{trigger}} is already a snippet trigger"
       }
     }
   },

@@ -3,7 +3,7 @@ use crate::managers::audio::AudioRecordingManager;
 use crate::managers::model::{EngineType, ModelManager};
 use crate::providers::{EngineProvider, TranscribeRsProvider};
 use crate::settings::{
-    get_settings, ModelUnloadTimeout, OrtAcceleratorSetting, WhisperAcceleratorSetting,
+    get_settings, AppSettings, ModelUnloadTimeout, OrtAcceleratorSetting, WhisperAcceleratorSetting,
 };
 use anyhow::Result;
 use log::{debug, error, info, warn};
@@ -548,25 +548,7 @@ impl TranscriptionManager {
             .map(|info| matches!(info.engine_type, EngineType::Whisper))
             .unwrap_or(false);
 
-        let corrected_result = if !settings.dictionary_entries.is_empty() {
-            if is_whisper {
-                debug!("Applying dictionary entries after Whisper transcription");
-            }
-            apply_dictionary_entries(
-                &result.text,
-                &settings.dictionary_entries,
-                settings.word_correction_threshold,
-            )
-        } else {
-            result.text
-        };
-
-        // Filter out filler words and hallucinations
-        let filtered_result = filter_transcription_output(
-            &corrected_result,
-            &settings.app_language,
-            &settings.custom_filler_words,
-        );
+        let final_result = apply_local_text_transforms(result.text, &settings, is_whisper);
 
         let et = std::time::Instant::now();
         let translation_note = if effective_translate_to_english {
@@ -580,8 +562,6 @@ impl TranscriptionManager {
             translation_note
         );
 
-        let final_result = filtered_result;
-
         if final_result.is_empty() {
             info!("Transcription result is empty");
         } else {
@@ -591,6 +571,37 @@ impl TranscriptionManager {
         self.maybe_unload_immediately("transcription");
 
         Ok(final_result)
+    }
+}
+
+fn apply_local_text_transforms(
+    raw_text: String,
+    settings: &AppSettings,
+    is_whisper: bool,
+) -> String {
+    let corrected_result = if !settings.dictionary_entries.is_empty() {
+        if is_whisper {
+            debug!("Applying dictionary entries after Whisper transcription");
+        }
+        apply_dictionary_entries(
+            &raw_text,
+            &settings.dictionary_entries,
+            settings.word_correction_threshold,
+        )
+    } else {
+        raw_text
+    };
+
+    let filtered_result = filter_transcription_output(
+        &corrected_result,
+        &settings.app_language,
+        &settings.custom_filler_words,
+    );
+
+    if settings.snippets.is_empty() {
+        filtered_result
+    } else {
+        crate::snippets::expand_snippets(&filtered_result, &settings.snippets)
     }
 }
 
@@ -788,5 +799,23 @@ mod tests {
 
         let translation = request.translation.expect("translation should be present");
         assert_eq!(translation.target_language, "en");
+    }
+
+    #[test]
+    fn local_text_transforms_expand_snippets_after_filtering_dictated_text() {
+        let mut settings = crate::settings::get_default_settings();
+        settings.custom_filler_words = Some(vec!["please use".to_string()]);
+        settings.snippets = vec![crate::snippets::SnippetEntry {
+            id: "snippet_1_email".to_string(),
+            trigger: "email signature".to_string(),
+            content: "please use Regards,\nAbdullah".to_string(),
+            created_at_ms: 1,
+            updated_at_ms: 1,
+        }];
+
+        let result =
+            apply_local_text_transforms("please use email signature".to_string(), &settings, false);
+
+        assert_eq!(result, "please use Regards,\nAbdullah");
     }
 }
