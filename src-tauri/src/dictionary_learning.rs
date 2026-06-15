@@ -525,6 +525,13 @@ fn is_combining_mark(ch: char) -> bool {
     matches!(
         ch as u32,
         0x0300..=0x036F
+            | 0x0900..=0x0903
+            | 0x093A
+            | 0x093C
+            | 0x0941..=0x0948
+            | 0x094D
+            | 0x0951..=0x0957
+            | 0x0962..=0x0963
             | 0x0591..=0x05BD
             | 0x05BF
             | 0x05C1..=0x05C2
@@ -668,6 +675,442 @@ fn is_phrase_connector(token: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{infer_auto_learn_candidates, merge_auto_learn_candidates, AutoLearnCandidate};
+
+    #[test]
+    fn auto_learn_candidate_matrix_covers_realistic_scenarios() {
+        struct Scenario {
+            name: &'static str,
+            dictated: &'static str,
+            corrected: &'static str,
+            existing: &'static [&'static str],
+            expected_phrases: &'static [&'static str],
+        }
+
+        let scenarios = [
+            Scenario {
+                name: "proper noun correction",
+                dictated: "meet with robin tomorrow",
+                corrected: "meet with Robyn tomorrow",
+                existing: &[],
+                expected_phrases: &["Robyn"],
+            },
+            Scenario {
+                name: "proper noun with sentence punctuation",
+                dictated: "meet robin.",
+                corrected: "meet Robyn.",
+                existing: &[],
+                expected_phrases: &["Robyn"],
+            },
+            Scenario {
+                name: "proper noun already exists",
+                dictated: "meet with robin tomorrow",
+                corrected: "meet with Robyn tomorrow",
+                existing: &["Robyn"],
+                expected_phrases: &[],
+            },
+            Scenario {
+                name: "multi word name",
+                dictated: "my name is abdullah al kulaib",
+                corrected: "my name is Abdullah al Kulaib",
+                existing: &[],
+                expected_phrases: &["Abdullah al Kulaib"],
+            },
+            Scenario {
+                name: "multi word name already exists",
+                dictated: "my name is abdullah al kulaib",
+                corrected: "my name is Abdullah al Kulaib",
+                existing: &["Abdullah al Kulaib"],
+                expected_phrases: &[],
+            },
+            Scenario {
+                name: "hyphenated name to spaced phrase",
+                dictated: "my name is Abdullah Al-Khulayb",
+                corrected: "my name is Abdullah Al Kulaib",
+                existing: &[],
+                expected_phrases: &["Al Kulaib"],
+            },
+            Scenario {
+                name: "spelled hyphenated name to spaced phrase",
+                dictated: "my name is A-L-K-U-L-A-Y-B",
+                corrected: "my name is Al Kulaib",
+                existing: &[],
+                expected_phrases: &["Al Kulaib"],
+            },
+            Scenario {
+                name: "connector phrase keeps notable token",
+                dictated: "talk to al kulayb",
+                corrected: "talk to al Kulaib",
+                existing: &[],
+                expected_phrases: &["Kulaib"],
+            },
+            Scenario {
+                name: "arabic non cased word",
+                dictated: "قابلت عبدالة اليوم",
+                corrected: "قابلت عبدالله اليوم",
+                existing: &[],
+                expected_phrases: &["عبدالله"],
+            },
+            Scenario {
+                name: "devanagari non cased word",
+                dictated: "say namaste now",
+                corrected: "say नमस्ते now",
+                existing: &[],
+                expected_phrases: &["नमस्ते"],
+            },
+            Scenario {
+                name: "cjk non cased word",
+                dictated: "visit tokyo today",
+                corrected: "visit 東京 today",
+                existing: &[],
+                expected_phrases: &["東京"],
+            },
+            Scenario {
+                name: "node dot js technical punctuation",
+                dictated: "use nodejs today",
+                corrected: "use Node.js today",
+                existing: &[],
+                expected_phrases: &["Node.js"],
+            },
+            Scenario {
+                name: "notebook lm collapsed product",
+                dictated: "open notebook LM today",
+                corrected: "open NotebookLM today",
+                existing: &[],
+                expected_phrases: &["NotebookLM"],
+            },
+            Scenario {
+                name: "iAqar phonetic product",
+                dictated: "open eye car today",
+                corrected: "open iAqar today",
+                existing: &[],
+                expected_phrases: &["iAqar"],
+            },
+            Scenario {
+                name: "gpt version technical token",
+                dictated: "use gpt 5.5",
+                corrected: "use GPT-5.5",
+                existing: &[],
+                expected_phrases: &["GPT-5.5"],
+            },
+            Scenario {
+                name: "c plus plus token",
+                dictated: "use cplusplus today",
+                corrected: "use C++ today",
+                existing: &[],
+                expected_phrases: &["C++"],
+            },
+            Scenario {
+                name: "f sharp token",
+                dictated: "use fsharp today",
+                corrected: "use F# today",
+                existing: &[],
+                expected_phrases: &["F#"],
+            },
+            Scenario {
+                name: "oauth collapsed token",
+                dictated: "enable o auth",
+                corrected: "enable OAuth",
+                existing: &[],
+                expected_phrases: &["OAuth"],
+            },
+            Scenario {
+                name: "aws s3 collapsed token",
+                dictated: "open aws s3",
+                corrected: "open AWS_S3",
+                existing: &[],
+                expected_phrases: &["AWS_S3"],
+            },
+            Scenario {
+                name: "github mixed case",
+                dictated: "open github",
+                corrected: "open GitHub",
+                existing: &[],
+                expected_phrases: &["GitHub"],
+            },
+            Scenario {
+                name: "chatgpt collapsed product",
+                dictated: "open chat gpt",
+                corrected: "open ChatGPT",
+                existing: &[],
+                expected_phrases: &["ChatGPT"],
+            },
+            Scenario {
+                name: "claude code collapsed product",
+                dictated: "open claude code",
+                corrected: "open ClaudeCode",
+                existing: &[],
+                expected_phrases: &["ClaudeCode"],
+            },
+            Scenario {
+                name: "powershell collapsed product",
+                dictated: "open power shell",
+                corrected: "open PowerShell",
+                existing: &[],
+                expected_phrases: &["PowerShell"],
+            },
+            Scenario {
+                name: "ffmpeg mixed case",
+                dictated: "run ffmpeg",
+                corrected: "run FFmpeg",
+                existing: &[],
+                expected_phrases: &["FFmpeg"],
+            },
+            Scenario {
+                name: "youtube collapsed product",
+                dictated: "open you tube",
+                corrected: "open YouTube",
+                existing: &[],
+                expected_phrases: &["YouTube"],
+            },
+            Scenario {
+                name: "iphone phonetic product",
+                dictated: "use eye phone",
+                corrected: "use iPhone",
+                existing: &[],
+                expected_phrases: &["iPhone"],
+            },
+            Scenario {
+                name: "qwen model token",
+                dictated: "load qwen3",
+                corrected: "load Qwen3",
+                existing: &[],
+                expected_phrases: &["Qwen3"],
+            },
+            Scenario {
+                name: "llama dot cpp token",
+                dictated: "use llamacpp",
+                corrected: "use Llama.cpp",
+                existing: &[],
+                expected_phrases: &["Llama.cpp"],
+            },
+            Scenario {
+                name: "rust analyzer lowercase hyphen token",
+                dictated: "run rustanalyzer",
+                corrected: "run rust-analyzer",
+                existing: &[],
+                expected_phrases: &["rust-analyzer"],
+            },
+            Scenario {
+                name: "z dot ai token",
+                dictated: "try zai",
+                corrected: "try Z.AI",
+                existing: &[],
+                expected_phrases: &["Z.AI"],
+            },
+            Scenario {
+                name: "verbatim brand away from first word",
+                dictated: "open verbatim now",
+                corrected: "open Verbatim now",
+                existing: &[],
+                expected_phrases: &["Verbatim"],
+            },
+            Scenario {
+                name: "claude proper noun",
+                dictated: "ask clod now",
+                corrected: "ask Claude now",
+                existing: &[],
+                expected_phrases: &["Claude"],
+            },
+            Scenario {
+                name: "raycast proper noun",
+                dictated: "open raycast",
+                corrected: "open Raycast",
+                existing: &[],
+                expected_phrases: &["Raycast"],
+            },
+            Scenario {
+                name: "k8s token",
+                dictated: "deploy kates",
+                corrected: "deploy K8s",
+                existing: &[],
+                expected_phrases: &["K8s"],
+            },
+            Scenario {
+                name: "wifi hyphenated token",
+                dictated: "join wifi",
+                corrected: "join Wi-Fi",
+                existing: &[],
+                expected_phrases: &["Wi-Fi"],
+            },
+            Scenario {
+                name: "typescript mixed case",
+                dictated: "write typescript",
+                corrected: "write TypeScript",
+                existing: &[],
+                expected_phrases: &["TypeScript"],
+            },
+            Scenario {
+                name: "pytorch mixed case",
+                dictated: "use pytorch",
+                corrected: "use PyTorch",
+                existing: &[],
+                expected_phrases: &["PyTorch"],
+            },
+            Scenario {
+                name: "numpy mixed case",
+                dictated: "import numpy",
+                corrected: "import NumPy",
+                existing: &[],
+                expected_phrases: &["NumPy"],
+            },
+            Scenario {
+                name: "graphql mixed case",
+                dictated: "query graphql",
+                corrected: "query GraphQL",
+                existing: &[],
+                expected_phrases: &["GraphQL"],
+            },
+            Scenario {
+                name: "openai collapsed product",
+                dictated: "use open ai",
+                corrected: "use OpenAI",
+                existing: &[],
+                expected_phrases: &["OpenAI"],
+            },
+            Scenario {
+                name: "sentence capitalization ignored",
+                dictated: "hello world",
+                corrected: "Hello world",
+                existing: &[],
+                expected_phrases: &[],
+            },
+            Scenario {
+                name: "common spelling correction ignored",
+                dictated: "open teh file",
+                corrected: "open the file",
+                existing: &[],
+                expected_phrases: &[],
+            },
+            Scenario {
+                name: "meaning change ignored",
+                dictated: "John is late",
+                corrected: "John was late",
+                existing: &[],
+                expected_phrases: &[],
+            },
+            Scenario {
+                name: "password context ignored",
+                dictated: "my password is abc123",
+                corrected: "my password is ABC123",
+                existing: &[],
+                expected_phrases: &[],
+            },
+            Scenario {
+                name: "api key context ignored",
+                dictated: "my API key is abc123",
+                corrected: "my API key is ABC123",
+                existing: &[],
+                expected_phrases: &[],
+            },
+            Scenario {
+                name: "token context ignored",
+                dictated: "the token is abc123",
+                corrected: "the token is ABC123",
+                existing: &[],
+                expected_phrases: &[],
+            },
+            Scenario {
+                name: "private key context ignored",
+                dictated: "the private key is abc123",
+                corrected: "the private key is ABC123",
+                existing: &[],
+                expected_phrases: &[],
+            },
+            Scenario {
+                name: "medical id context ignored",
+                dictated: "medical id abc123",
+                corrected: "medical ID ABC123",
+                existing: &[],
+                expected_phrases: &[],
+            },
+            Scenario {
+                name: "pin context ignored",
+                dictated: "my pin is r2",
+                corrected: "my PIN is R2",
+                existing: &[],
+                expected_phrases: &[],
+            },
+            Scenario {
+                name: "abbreviation replacement ignored",
+                dictated: "Saudi Arabia",
+                corrected: "KSA",
+                existing: &[],
+                expected_phrases: &[],
+            },
+            Scenario {
+                name: "diacritic only correction ignored",
+                dictated: "زر الرياض",
+                corrected: "زر الرِّياض",
+                existing: &[],
+                expected_phrases: &[],
+            },
+            Scenario {
+                name: "distant split phrase ignored",
+                dictated: "my name is A-L-K-U-L-A-Y-B",
+                corrected: "my name is Completely Different",
+                existing: &[],
+                expected_phrases: &[],
+            },
+            Scenario {
+                name: "dangling hyphen phrase ignored",
+                dictated: "Abdullah Al-Kulayb",
+                corrected: "Abdullah Al-",
+                existing: &[],
+                expected_phrases: &[],
+            },
+            Scenario {
+                name: "dangling hyphen word ignored",
+                dictated: "wow",
+                corrected: "Vow-",
+                existing: &[],
+                expected_phrases: &[],
+            },
+            Scenario {
+                name: "plain punctuation cleanup ignored",
+                dictated: "hello",
+                corrected: "hello.",
+                existing: &[],
+                expected_phrases: &[],
+            },
+            Scenario {
+                name: "numeric formatting ignored",
+                dictated: "twenty five",
+                corrected: "25",
+                existing: &[],
+                expected_phrases: &[],
+            },
+            Scenario {
+                name: "long candidate ignored",
+                dictated: "use longterm",
+                corrected:
+                    "use SupercalifragilisticexpialidociousSupercalifragilisticexpialidocious",
+                existing: &[],
+                expected_phrases: &[],
+            },
+        ];
+
+        assert!(scenarios.len() >= 50);
+
+        for scenario in scenarios {
+            let existing = scenario
+                .existing
+                .iter()
+                .map(|word| word.to_string())
+                .collect::<Vec<_>>();
+            let phrases =
+                infer_auto_learn_candidates(scenario.dictated, scenario.corrected, &existing)
+                    .into_iter()
+                    .map(|candidate| candidate.phrase)
+                    .collect::<Vec<_>>();
+            let expected = scenario
+                .expected_phrases
+                .iter()
+                .map(|phrase| phrase.to_string())
+                .collect::<Vec<_>>();
+
+            assert_eq!(phrases, expected, "{}", scenario.name);
+        }
+    }
 
     #[test]
     fn suggests_corrected_uncommon_proper_noun() {

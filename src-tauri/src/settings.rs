@@ -474,6 +474,8 @@ pub struct AppSettings {
     pub custom_words: Vec<String>,
     #[serde(default)]
     pub dictionary_entries: Vec<DictionaryEntry>,
+    #[serde(default)]
+    pub dictionary_auto_learn_suppressed: Vec<String>,
     #[serde(default = "default_auto_add_dictionary_words")]
     pub auto_add_dictionary_words: bool,
     #[serde(default)]
@@ -718,6 +720,30 @@ fn default_post_process_providers() -> Vec<PostProcessProvider> {
             models_endpoint: Some("/models".to_string()),
             supports_structured_output: true,
         },
+        PostProcessProvider {
+            id: "lm_studio".to_string(),
+            label: "LM Studio".to_string(),
+            base_url: "http://localhost:1234/v1".to_string(),
+            allow_base_url_edit: true,
+            models_endpoint: Some("/models".to_string()),
+            supports_structured_output: false,
+        },
+        PostProcessProvider {
+            id: "ollama".to_string(),
+            label: "Ollama".to_string(),
+            base_url: "http://localhost:11434/v1".to_string(),
+            allow_base_url_edit: true,
+            models_endpoint: Some("/models".to_string()),
+            supports_structured_output: false,
+        },
+        PostProcessProvider {
+            id: "vllm".to_string(),
+            label: "vLLM".to_string(),
+            base_url: "http://localhost:8000/v1".to_string(),
+            allow_base_url_edit: true,
+            models_endpoint: Some("/models".to_string()),
+            supports_structured_output: false,
+        },
     ];
 
     // Note: We always include Apple Intelligence on macOS ARM64 without checking availability
@@ -774,6 +800,25 @@ fn default_model_for_provider(provider_id: &str) -> String {
     String::new()
 }
 
+pub fn is_local_post_process_base_url(base_url: &str) -> bool {
+    let Ok(parsed) = reqwest::Url::parse(base_url.trim()) else {
+        return false;
+    };
+
+    if parsed.scheme() == "apple-intelligence" {
+        return true;
+    }
+
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return false;
+    }
+
+    matches!(
+        parsed.host_str(),
+        Some("localhost") | Some("127.0.0.1") | Some("::1") | Some("[::1]")
+    )
+}
+
 fn default_post_process_models() -> HashMap<String, String> {
     let mut map = HashMap::new();
     for provider in default_post_process_providers() {
@@ -820,6 +865,10 @@ fn ensure_post_process_defaults(settings: &mut AppSettings) -> bool {
                         provider.supports_structured_output
                     );
                     existing.supports_structured_output = provider.supports_structured_output;
+                    changed = true;
+                }
+                if existing.allow_base_url_edit != provider.allow_base_url_edit {
+                    existing.allow_base_url_edit = provider.allow_base_url_edit;
                     changed = true;
                 }
             }
@@ -1022,6 +1071,7 @@ pub fn get_default_settings() -> AppSettings {
         log_level: default_log_level(),
         custom_words: Vec::new(),
         dictionary_entries: Vec::new(),
+        dictionary_auto_learn_suppressed: Vec::new(),
         auto_add_dictionary_words: default_auto_add_dictionary_words(),
         model_unload_timeout: ModelUnloadTimeout::default(),
         word_correction_threshold: default_word_correction_threshold(),
@@ -1296,6 +1346,12 @@ mod tests {
     }
 
     #[test]
+    fn default_settings_start_with_empty_dictionary_auto_learn_suppression() {
+        let settings = get_default_settings();
+        assert!(settings.dictionary_auto_learn_suppressed.is_empty());
+    }
+
+    #[test]
     fn default_settings_keep_empty_custom_words_for_compatibility() {
         let settings = get_default_settings();
         assert!(settings.custom_words.is_empty());
@@ -1305,6 +1361,60 @@ mod tests {
     fn default_settings_disable_post_processing() {
         let settings = get_default_settings();
         assert!(!settings.post_process_enabled);
+    }
+
+    #[test]
+    fn default_post_process_providers_include_local_openai_compatible_servers() {
+        let providers = default_post_process_providers();
+
+        let lm_studio = providers
+            .iter()
+            .find(|provider| provider.id == "lm_studio")
+            .expect("LM Studio provider");
+        assert_eq!(lm_studio.base_url, "http://localhost:1234/v1");
+        assert!(lm_studio.allow_base_url_edit);
+        assert_eq!(lm_studio.models_endpoint.as_deref(), Some("/models"));
+        assert!(!lm_studio.supports_structured_output);
+
+        let ollama = providers
+            .iter()
+            .find(|provider| provider.id == "ollama")
+            .expect("Ollama provider");
+        assert_eq!(ollama.base_url, "http://localhost:11434/v1");
+        assert!(ollama.allow_base_url_edit);
+        assert_eq!(ollama.models_endpoint.as_deref(), Some("/models"));
+        assert!(!ollama.supports_structured_output);
+
+        let vllm = providers
+            .iter()
+            .find(|provider| provider.id == "vllm")
+            .expect("vLLM provider");
+        assert_eq!(vllm.base_url, "http://localhost:8000/v1");
+        assert!(vllm.allow_base_url_edit);
+        assert_eq!(vllm.models_endpoint.as_deref(), Some("/models"));
+        assert!(!vllm.supports_structured_output);
+    }
+
+    #[test]
+    fn local_post_process_base_url_detection_accepts_local_presets_only() {
+        assert!(is_local_post_process_base_url("http://localhost:1234/v1"));
+        assert!(is_local_post_process_base_url("http://localhost:11434/v1"));
+        assert!(is_local_post_process_base_url("http://localhost:8000/v1"));
+        assert!(is_local_post_process_base_url("https://127.0.0.1:8080/v1"));
+        assert!(is_local_post_process_base_url("http://[::1]:11434/v1"));
+        assert!(is_local_post_process_base_url("apple-intelligence://local"));
+
+        for base_url in [
+            "http://localhost.evil.com/v1",
+            "http://localhost@evil.com/v1",
+            "https://127.0.0.1.evil.com/v1",
+            "https://api.openai.com/v1",
+        ] {
+            assert!(
+                !is_local_post_process_base_url(base_url),
+                "{base_url} must not be treated as a local provider"
+            );
+        }
     }
 
     #[test]

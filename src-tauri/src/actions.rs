@@ -186,22 +186,7 @@ fn accept_post_processed_text(
 }
 
 fn is_local_post_process_provider(base_url: &str) -> bool {
-    let Ok(parsed) = reqwest::Url::parse(base_url.trim()) else {
-        return false;
-    };
-
-    if parsed.scheme() == "apple-intelligence" {
-        return true;
-    }
-
-    if !matches!(parsed.scheme(), "http" | "https") {
-        return false;
-    }
-
-    matches!(
-        parsed.host_str(),
-        Some("localhost") | Some("127.0.0.1") | Some("::1") | Some("[::1]")
-    )
+    crate::settings::is_local_post_process_base_url(base_url)
 }
 
 fn can_egress_post_process_text(provider_base_url: &str, api_key: &str) -> bool {

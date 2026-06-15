@@ -66,6 +66,8 @@ pub fn dictionary_phrases(entries: &[DictionaryEntry]) -> Vec<String> {
 pub fn sync_legacy_custom_words(settings: &mut AppSettings) -> bool {
     let mut changed = false;
 
+    changed |= sync_auto_learn_suppression_keys(settings);
+
     let before_len = settings.dictionary_entries.len();
     settings
         .dictionary_entries
@@ -122,6 +124,8 @@ pub fn upsert_manual_entry(
         return Err(format!("{} is already in your dictionary", phrase));
     }
 
+    unsuppress_auto_learn_phrase(settings, &phrase);
+
     let entry = DictionaryEntry {
         id: make_dictionary_entry_id(now_ms, &phrase),
         phrase,
@@ -148,6 +152,9 @@ pub fn upsert_auto_learn_entry(
         return Ok(None);
     };
     if has_phrase(&settings.dictionary_entries, &phrase, None) {
+        return Ok(None);
+    }
+    if auto_learn_phrase_is_suppressed(settings, &phrase) {
         return Ok(None);
     }
 
@@ -187,23 +194,33 @@ pub fn update_entry(
         }
     }
 
-    let entry = &mut settings.dictionary_entries[index];
+    let phrase_to_unsuppress;
+    let updated = {
+        let entry = &mut settings.dictionary_entries[index];
 
-    if let Some(next_phrase) = phrase {
-        entry.phrase =
-            sanitize_dictionary_phrase(&next_phrase).ok_or("Dictionary entry is empty")?;
+        if let Some(next_phrase) = phrase {
+            entry.phrase =
+                sanitize_dictionary_phrase(&next_phrase).ok_or("Dictionary entry is empty")?;
+            phrase_to_unsuppress = Some(entry.phrase.clone());
+        } else {
+            phrase_to_unsuppress = None;
+        }
+
+        if let Some(next_replacement) = replacement_of {
+            entry.replacement_of = sanitize_optional_phrase(next_replacement);
+        }
+
+        if let Some(next_priority) = priority {
+            entry.priority = next_priority;
+        }
+
+        entry.updated_at_ms = now_ms;
+        entry.clone()
+    };
+
+    if let Some(phrase) = phrase_to_unsuppress {
+        unsuppress_auto_learn_phrase(settings, &phrase);
     }
-
-    if let Some(next_replacement) = replacement_of {
-        entry.replacement_of = sanitize_optional_phrase(next_replacement);
-    }
-
-    if let Some(next_priority) = priority {
-        entry.priority = next_priority;
-    }
-
-    entry.updated_at_ms = now_ms;
-    let updated = entry.clone();
     sync_legacy_custom_words(settings);
 
     Ok(updated)
@@ -221,6 +238,10 @@ pub fn delete_entries(settings: &mut AppSettings, ids: &[String]) -> Vec<Diction
     });
 
     if !deleted.is_empty() {
+        for entry in &deleted {
+            suppress_auto_learn_phrase(settings, &entry.phrase);
+        }
+        settings.custom_words = dictionary_phrases(&settings.dictionary_entries);
         sync_legacy_custom_words(settings);
     }
 
@@ -252,9 +273,11 @@ pub fn replace_dictionary_phrases(
 
     for phrase in desired_phrases {
         if has_phrase(&settings.dictionary_entries, &phrase, None) {
+            unsuppress_auto_learn_phrase(settings, &phrase);
             continue;
         }
 
+        unsuppress_auto_learn_phrase(settings, &phrase);
         settings.dictionary_entries.push(DictionaryEntry {
             id: make_dictionary_entry_id(now_ms, &phrase),
             phrase,
@@ -288,6 +311,65 @@ fn sanitize_auto_learn_phrase(raw: &str) -> Option<String> {
 
 fn auto_learn_phrase_is_valid(phrase: &str) -> bool {
     dictionary_phrase_has_valid_token_boundaries(phrase)
+}
+
+fn sync_auto_learn_suppression_keys(settings: &mut AppSettings) -> bool {
+    let mut changed = false;
+    let mut normalized = Vec::new();
+
+    for phrase in &settings.dictionary_auto_learn_suppressed {
+        let key = normalize_dictionary_key(phrase);
+        if key.is_empty() {
+            changed = true;
+            continue;
+        }
+
+        if !normalized.contains(&key) {
+            normalized.push(key);
+        } else {
+            changed = true;
+        }
+    }
+
+    if settings.dictionary_auto_learn_suppressed != normalized {
+        settings.dictionary_auto_learn_suppressed = normalized;
+        changed = true;
+    }
+
+    changed
+}
+
+fn auto_learn_phrase_is_suppressed(settings: &AppSettings, phrase: &str) -> bool {
+    let key = normalize_dictionary_key(phrase);
+    !key.is_empty()
+        && settings
+            .dictionary_auto_learn_suppressed
+            .iter()
+            .any(|suppressed| suppressed == &key)
+}
+
+fn suppress_auto_learn_phrase(settings: &mut AppSettings, phrase: &str) -> bool {
+    let key = normalize_dictionary_key(phrase);
+    if key.is_empty() || settings.dictionary_auto_learn_suppressed.contains(&key) {
+        return false;
+    }
+
+    settings.dictionary_auto_learn_suppressed.push(key);
+    true
+}
+
+fn unsuppress_auto_learn_phrase(settings: &mut AppSettings, phrase: &str) -> bool {
+    let key = normalize_dictionary_key(phrase);
+    if key.is_empty() {
+        return false;
+    }
+
+    let before_len = settings.dictionary_auto_learn_suppressed.len();
+    settings
+        .dictionary_auto_learn_suppressed
+        .retain(|suppressed| suppressed != &key);
+
+    settings.dictionary_auto_learn_suppressed.len() != before_len
 }
 
 fn dictionary_phrase_has_valid_token_boundaries(phrase: &str) -> bool {
@@ -550,6 +632,71 @@ mod tests {
 
         assert!(learned.is_none());
         assert_eq!(settings.dictionary_entries.len(), 1);
+    }
+
+    #[test]
+    fn deleted_entry_is_not_auto_learned_again() {
+        let mut settings = get_default_settings();
+        let learned = upsert_auto_learn_entry(
+            &mut settings,
+            42,
+            "Gibbeteen".to_string(),
+            Some("gibberish".to_string()),
+        )
+        .expect("auto learn")
+        .expect("new entry");
+
+        let deleted = delete_entries(&mut settings, &[learned.id]);
+        assert_eq!(deleted.len(), 1);
+        assert!(settings.dictionary_entries.is_empty());
+        assert_eq!(settings.dictionary_auto_learn_suppressed, vec!["gibbeteen"]);
+
+        let learned_again = upsert_auto_learn_entry(
+            &mut settings,
+            43,
+            "Gibbeteen".to_string(),
+            Some("gibberish".to_string()),
+        )
+        .expect("auto learn");
+
+        assert!(learned_again.is_none());
+        assert!(settings.dictionary_entries.is_empty());
+        assert!(settings.custom_words.is_empty());
+    }
+
+    #[test]
+    fn manual_entry_clears_deleted_auto_learn_suppression() {
+        let mut settings = get_default_settings();
+        settings
+            .dictionary_auto_learn_suppressed
+            .push("gibbeteen".to_string());
+
+        let manual = upsert_manual_entry(&mut settings, 42, "Gibbeteen".to_string(), None)
+            .expect("manual add should override previous suppression");
+
+        assert_eq!(manual.phrase, "Gibbeteen");
+        assert!(settings.dictionary_auto_learn_suppressed.is_empty());
+        assert_eq!(settings.custom_words, vec!["Gibbeteen"]);
+    }
+
+    #[test]
+    fn replaced_dictionary_phrases_clear_matching_auto_learn_suppression() {
+        let mut settings = get_default_settings();
+        settings
+            .dictionary_auto_learn_suppressed
+            .extend(["robyn".to_string(), "gibbeteen".to_string()]);
+
+        replace_dictionary_phrases(
+            &mut settings,
+            42,
+            vec!["Robyn".to_string(), "Abdullah al Kulaib".to_string()],
+        );
+
+        assert_eq!(settings.dictionary_auto_learn_suppressed, vec!["gibbeteen"]);
+        assert_eq!(
+            settings.custom_words,
+            vec!["Robyn".to_string(), "Abdullah al Kulaib".to_string()]
+        );
     }
 
     #[test]
