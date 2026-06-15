@@ -184,11 +184,21 @@ fn replace_last_case_insensitive(input: &str, target: &str, replacement: &str) -
 }
 
 fn normalize_spacing(input: &str) -> String {
+    input
+        .lines()
+        .map(normalize_line_spacing)
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim()
+        .to_string()
+}
+
+fn normalize_line_spacing(input: &str) -> String {
     let mut output = input.split_whitespace().collect::<Vec<_>>().join(" ");
     for punctuation in [",", ".", "?", "!", ":", ";"] {
         output = output.replace(&format!(" {punctuation}"), punctuation);
     }
-    output.trim().to_string()
+    output
 }
 
 fn remove_simple_fillers(input: &str) -> String {

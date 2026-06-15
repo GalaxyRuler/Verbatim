@@ -830,6 +830,33 @@ fn default_post_process_models() -> HashMap<String, String> {
     map
 }
 
+fn known_openai_compatible_port(provider_id: &str, port: Option<u16>) -> bool {
+    matches!(provider_id, "lm_studio" | "ollama" | "vllm")
+        || matches!(port, Some(1234 | 11434 | 8000))
+}
+
+fn normalize_known_openai_compatible_base_url(provider_id: &str, base_url: &str) -> Option<String> {
+    let Ok(mut parsed) = reqwest::Url::parse(base_url.trim()) else {
+        return None;
+    };
+
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return None;
+    }
+
+    if !known_openai_compatible_port(provider_id, parsed.port_or_known_default()) {
+        return None;
+    }
+
+    let path = parsed.path().trim_end_matches('/');
+    if !path.is_empty() && path != "/" {
+        return None;
+    }
+
+    parsed.set_path("/v1");
+    Some(parsed.to_string().trim_end_matches('/').to_string())
+}
+
 fn default_post_process_prompts() -> Vec<LLMPrompt> {
     vec![LLMPrompt {
         id: "default_improve_transcriptions".to_string(),
@@ -871,6 +898,10 @@ fn ensure_post_process_defaults(settings: &mut AppSettings) -> bool {
                     existing.allow_base_url_edit = provider.allow_base_url_edit;
                     changed = true;
                 }
+                if existing.models_endpoint != provider.models_endpoint {
+                    existing.models_endpoint = provider.models_endpoint.clone();
+                    changed = true;
+                }
             }
             None => {
                 // Provider doesn't exist, add it
@@ -898,6 +929,21 @@ fn ensure_post_process_defaults(settings: &mut AppSettings) -> bool {
                 settings
                     .post_process_models
                     .insert(provider.id.clone(), default_model);
+                changed = true;
+            }
+        }
+    }
+
+    for provider in settings.post_process_providers.iter_mut() {
+        if let Some(normalized) =
+            normalize_known_openai_compatible_base_url(&provider.id, &provider.base_url)
+        {
+            if normalized != provider.base_url {
+                debug!(
+                    "Normalizing post-process provider '{}' base URL from '{}' to '{}'",
+                    provider.id, provider.base_url, normalized
+                );
+                provider.base_url = normalized;
                 changed = true;
             }
         }
@@ -1393,6 +1439,48 @@ mod tests {
         assert!(vllm.allow_base_url_edit);
         assert_eq!(vllm.models_endpoint.as_deref(), Some("/models"));
         assert!(!vllm.supports_structured_output);
+    }
+
+    #[test]
+    fn post_process_defaults_normalize_known_openai_compatible_base_urls() {
+        let mut settings = get_default_settings();
+
+        settings
+            .post_process_provider_mut("custom")
+            .unwrap()
+            .base_url = "http://100.126.225.101:1234".to_string();
+        settings
+            .post_process_provider_mut("lm_studio")
+            .unwrap()
+            .base_url = "http://localhost:1234/".to_string();
+        settings
+            .post_process_provider_mut("ollama")
+            .unwrap()
+            .base_url = "http://localhost:11434".to_string();
+        settings.post_process_provider_mut("vllm").unwrap().base_url =
+            "http://localhost:8000".to_string();
+
+        assert!(ensure_post_process_defaults(&mut settings));
+
+        assert_eq!(
+            settings.post_process_provider("custom").unwrap().base_url,
+            "http://100.126.225.101:1234/v1"
+        );
+        assert_eq!(
+            settings
+                .post_process_provider("lm_studio")
+                .unwrap()
+                .base_url,
+            "http://localhost:1234/v1"
+        );
+        assert_eq!(
+            settings.post_process_provider("ollama").unwrap().base_url,
+            "http://localhost:11434/v1"
+        );
+        assert_eq!(
+            settings.post_process_provider("vllm").unwrap().base_url,
+            "http://localhost:8000/v1"
+        );
     }
 
     #[test]

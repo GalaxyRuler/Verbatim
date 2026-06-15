@@ -15,8 +15,12 @@ pub fn classify_target(
     let process = process_name.unwrap_or_default().to_lowercase();
     let title = window_title.unwrap_or_default().to_lowercase();
     let class = window_class.unwrap_or_default().to_lowercase();
+    let is_new_outlook_host = matches!(process.as_str(), "olk.exe" | "olkbg.exe")
+        || (process.contains("msedgewebview2") && title.contains("outlook"));
 
     if process.contains("outlook")
+        || is_new_outlook_host
+        || title.contains("outlook")
         || title.contains("gmail")
         || title.contains("mail")
         || title.contains("message")
@@ -223,6 +227,26 @@ mod tests {
             Some("rctrl_renwnd32"),
         );
         assert_eq!(kind, TargetKind::Email);
+    }
+
+    #[test]
+    fn classifies_new_outlook_hosts_as_email() {
+        assert_eq!(
+            classify_target(
+                Some("olk.exe"),
+                Some("Inbox - abdullah.alkulaib@pmbsr.gov.sa - Outlook"),
+                Some("Chrome_WidgetWin_1")
+            ),
+            TargetKind::Email
+        );
+        assert_eq!(
+            classify_target(
+                Some("msedgewebview2.exe"),
+                Some("Inbox - abdullah.alkulaib@pmbsr.gov.sa - Outlook"),
+                Some("Chrome_WidgetWin_1")
+            ),
+            TargetKind::Email
+        );
     }
 
     #[test]

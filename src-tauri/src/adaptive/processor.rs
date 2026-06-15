@@ -294,6 +294,16 @@ mod tests {
     }
 
     #[test]
+    fn smart_formatting_light_preserves_email_paragraph_breaks() {
+        let email = "Dear James,\n\nI have received your file.\n\nSincerely,\nAbdullah.";
+        let result = crate::adaptive::smart_formatting::format_transcript(
+            email,
+            crate::settings::FormattingLevel::Light,
+        );
+        assert_eq!(result, email);
+    }
+
+    #[test]
     fn smart_formatting_light_applies_no_i_mean_backtrack() {
         let result = crate::adaptive::smart_formatting::format_transcript(
             "The deadline is Monday no, I mean Tuesday.",
