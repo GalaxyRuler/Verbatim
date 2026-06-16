@@ -657,6 +657,30 @@ test.describe("Verbatim App", () => {
     );
   });
 
+  test("formatting level explains each cleanup strength", async ({ page }) => {
+    await installTauriMocks(page);
+    await page.goto("/");
+
+    await expect(page.getByTitle("General")).toBeVisible();
+    await page.getByText("Advanced").click();
+
+    const formattingRow = settingRow(page, "Smart Formatting");
+    await expect(formattingRow).toBeVisible();
+    await expect(
+      formattingRow.getByText("Safe spacing and spoken corrections."),
+    ).toBeVisible();
+
+    await formattingRow.getByRole("button", { name: "Light" }).click();
+    await expect(
+      page.getByText("Adds filler removal and spoken punctuation."),
+    ).toBeVisible();
+
+    await page.getByRole("button", { name: "Medium" }).click();
+    await expect(
+      formattingRow.getByText("Adds filler removal and spoken punctuation."),
+    ).toBeVisible();
+  });
+
   test("dictionary section is visible from the sidebar", async ({ page }) => {
     await installTauriMocks(page);
     await page.goto("/");
@@ -723,6 +747,36 @@ test.describe("Verbatim App", () => {
       }),
     );
     await expect(page.getByRole("button", { name: "Disable" })).toBeVisible();
+  });
+
+  test("post-processing shows an explicit API or local engine choice", async ({
+    page,
+  }) => {
+    await installTauriMocks(page, { post_process_enabled: true });
+    await page.goto("/");
+
+    await expect(page.getByTitle("General")).toBeVisible();
+    await page.getByTitle("Post Process").click();
+
+    await expect(page.getByText("Processing Engine")).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "API provider" }),
+    ).toHaveAttribute("aria-pressed", "true");
+    await expect(
+      page.getByRole("button", { name: "Local model" }),
+    ).toHaveAttribute("aria-pressed", "false");
+    await expect(page.getByRole("heading", { name: "Provider" })).toBeVisible();
+
+    await page.getByRole("button", { name: "Download" }).click();
+    await page.getByRole("button", { name: "Select", exact: true }).click();
+    await page.getByRole("button", { name: "Local model" }).click();
+
+    await expect(
+      page.getByRole("button", { name: "Local model" }),
+    ).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByRole("heading", { name: "Provider" })).toHaveCount(
+      0,
+    );
   });
 
   test("snippet entry can be added, searched, edited, and deleted", async ({

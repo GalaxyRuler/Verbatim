@@ -443,6 +443,16 @@
           "refreshModels": "Refresh models"
         }
       },
+      "engine": {
+        "title": "Processing Engine",
+        "description": "Choose whether post-processing uses a configured API provider or a managed local model on this device.",
+        "api": "API provider",
+        "local": "Local model",
+        "apiActive": "API mode uses only the selected provider and model.",
+        "localActive": "Local mode uses only the managed model on this device. API fallback is off.",
+        "localUnavailable": "Download and select a local model before switching to Local mode.",
+        "modeTitle": "Mode"
+      },
       "localModel": {
         "groupTitle": "Local Model",
         "title": "Managed Local Model",
@@ -705,6 +715,12 @@
         "light": "Light",
         "medium": "Medium",
         "high": "High"
+      },
+      "optionDescriptions": {
+        "none": "Raw transcript with no cleanup.",
+        "light": "Safe spacing and spoken corrections.",
+        "medium": "Adds filler removal and spoken punctuation.",
+        "high": "Also removes repeated adjacent words."
       }
     }
   },

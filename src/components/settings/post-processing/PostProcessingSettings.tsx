@@ -708,8 +708,29 @@ PostProcessingSettingsPrompts.displayName = "PostProcessingSettingsPrompts";
 
 export const PostProcessingSettings: React.FC = () => {
   const { t } = useTranslation();
-  const { getSetting } = useSettings();
+  const { getSetting, settings, refreshSettings } = useSettings();
   const postProcessingEnabled = getSetting("post_process_enabled") || false;
+  const localLlmEnabled = settings?.local_llm?.enabled ?? false;
+  const hasSelectedLocalModel = !!settings?.local_llm?.selected_model_id;
+  const [engineError, setEngineError] = useState<string | null>(null);
+  const [isEngineUpdating, setIsEngineUpdating] = useState(false);
+
+  const handleEngineSelect = async (engine: "api" | "local") => {
+    const enableLocal = engine === "local";
+    if (enableLocal === localLlmEnabled) return;
+
+    setIsEngineUpdating(true);
+    setEngineError(null);
+    try {
+      const result = await commands.setLocalLlmEnabled(enableLocal);
+      if (result.status === "error") {
+        setEngineError(result.error);
+      }
+      await refreshSettings();
+    } finally {
+      setIsEngineUpdating(false);
+    }
+  };
 
   return (
     <div className="max-w-3xl w-full mx-auto space-y-6">
@@ -721,9 +742,61 @@ export const PostProcessingSettings: React.FC = () => {
         />
       </SettingsGroup>
 
-      <SettingsGroup title={t("settings.postProcessing.api.title")}>
-        <PostProcessingSettingsApi />
-      </SettingsGroup>
+      {postProcessingEnabled && (
+        <SettingsGroup title={t("settings.postProcessing.engine.title")}>
+          <SettingContainer
+            title={t("settings.postProcessing.engine.modeTitle")}
+            description={t("settings.postProcessing.engine.description")}
+            descriptionMode="tooltip"
+            layout="stacked"
+            grouped={true}
+          >
+            <div className="space-y-2">
+              <div className="grid grid-cols-2 gap-2">
+                <Button
+                  variant={localLlmEnabled ? "secondary" : "primary"}
+                  size="md"
+                  aria-pressed={!localLlmEnabled}
+                  disabled={isEngineUpdating}
+                  onClick={() => handleEngineSelect("api")}
+                >
+                  {t("settings.postProcessing.engine.api")}
+                </Button>
+                <Button
+                  variant={localLlmEnabled ? "primary" : "secondary"}
+                  size="md"
+                  aria-pressed={localLlmEnabled}
+                  disabled={isEngineUpdating || !hasSelectedLocalModel}
+                  onClick={() => handleEngineSelect("local")}
+                >
+                  {t("settings.postProcessing.engine.local")}
+                </Button>
+              </div>
+              <p className="text-xs leading-snug text-mid-gray">
+                {localLlmEnabled
+                  ? t("settings.postProcessing.engine.localActive")
+                  : t("settings.postProcessing.engine.apiActive")}
+              </p>
+              {!hasSelectedLocalModel && (
+                <p className="text-xs leading-snug text-mid-gray">
+                  {t("settings.postProcessing.engine.localUnavailable")}
+                </p>
+              )}
+              {engineError && (
+                <Alert variant="error" contained>
+                  {engineError}
+                </Alert>
+              )}
+            </div>
+          </SettingContainer>
+        </SettingsGroup>
+      )}
+
+      {!localLlmEnabled && (
+        <SettingsGroup title={t("settings.postProcessing.api.title")}>
+          <PostProcessingSettingsApi />
+        </SettingsGroup>
+      )}
 
       {postProcessingEnabled && (
         <SettingsGroup

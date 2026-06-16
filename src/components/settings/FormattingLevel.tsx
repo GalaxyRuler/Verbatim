@@ -16,12 +16,34 @@ export const FormattingLevel: React.FC<FormattingLevelProps> = React.memo(
     const { getSetting, updateSetting, isUpdating } = useSettings();
     const value = getSetting("formatting_level") || "light";
 
-    const options: Array<{ value: FormattingLevelValue; label: string }> = [
-      { value: "none", label: t("settings.formattingLevel.options.none") },
-      { value: "light", label: t("settings.formattingLevel.options.light") },
-      { value: "medium", label: t("settings.formattingLevel.options.medium") },
-      { value: "high", label: t("settings.formattingLevel.options.high") },
+    const options: Array<{
+      value: FormattingLevelValue;
+      label: string;
+      description: string;
+    }> = [
+      {
+        value: "none",
+        label: t("settings.formattingLevel.options.none"),
+        description: t("settings.formattingLevel.optionDescriptions.none"),
+      },
+      {
+        value: "light",
+        label: t("settings.formattingLevel.options.light"),
+        description: t("settings.formattingLevel.optionDescriptions.light"),
+      },
+      {
+        value: "medium",
+        label: t("settings.formattingLevel.options.medium"),
+        description: t("settings.formattingLevel.optionDescriptions.medium"),
+      },
+      {
+        value: "high",
+        label: t("settings.formattingLevel.options.high"),
+        description: t("settings.formattingLevel.optionDescriptions.high"),
+      },
     ];
+    const selectedDescription =
+      options.find((option) => option.value === value)?.description ?? "";
 
     return (
       <SettingContainer
@@ -31,15 +53,22 @@ export const FormattingLevel: React.FC<FormattingLevelProps> = React.memo(
         layout="horizontal"
         grouped={grouped}
       >
-        <Dropdown
-          selectedValue={value}
-          options={options}
-          onSelect={(level) =>
-            updateSetting("formatting_level", level as FormattingLevelValue)
-          }
-          disabled={isUpdating("formatting_level")}
-          className="min-w-[220px]"
-        />
+        <div className="min-w-[220px] max-w-[260px]">
+          <Dropdown
+            selectedValue={value}
+            options={options}
+            onSelect={(level) =>
+              updateSetting("formatting_level", level as FormattingLevelValue)
+            }
+            disabled={isUpdating("formatting_level")}
+            className="w-full"
+          />
+          {selectedDescription && (
+            <p className="mt-1 text-xs leading-snug text-mid-gray">
+              {selectedDescription}
+            </p>
+          )}
+        </div>
       </SettingContainer>
     );
   },

@@ -462,6 +462,16 @@
           "fallback": "Fallback",
           "default": "Default"
         }
+      },
+      "engine": {
+        "title": "Processing Engine",
+        "description": "Choose whether post-processing uses a configured API provider or a managed local model on this device.",
+        "api": "API provider",
+        "local": "Local model",
+        "apiActive": "API mode uses only the selected provider and model.",
+        "localActive": "Local mode uses only the managed model on this device. API fallback is off.",
+        "localUnavailable": "Download and select a local model before switching to Local mode.",
+        "modeTitle": "Mode"
       }
     },
     "history": {
@@ -680,6 +690,12 @@
         "light": "خفيف",
         "medium": "متوسط",
         "high": "عالٍ"
+      },
+      "optionDescriptions": {
+        "none": "النص الخام بدون أي تنظيف.",
+        "light": "تصحيح آمن للمسافات والتصحيحات المنطوقة.",
+        "medium": "يضيف إزالة كلمات الحشو وعلامات الترقيم المنطوقة.",
+        "high": "يزيل أيضًا الكلمات المتجاورة المكررة."
       }
     },
     "snippets": {

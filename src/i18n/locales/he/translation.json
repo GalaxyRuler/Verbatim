@@ -484,6 +484,16 @@
           "fallback": "Fallback",
           "default": "Default"
         }
+      },
+      "engine": {
+        "title": "Processing Engine",
+        "description": "Choose whether post-processing uses a configured API provider or a managed local model on this device.",
+        "api": "API provider",
+        "local": "Local model",
+        "apiActive": "API mode uses only the selected provider and model.",
+        "localActive": "Local mode uses only the managed model on this device. API fallback is off.",
+        "localUnavailable": "Download and select a local model before switching to Local mode.",
+        "modeTitle": "Mode"
       }
     },
     "history": {
@@ -680,6 +690,12 @@
         "light": "קל",
         "medium": "בינוני",
         "high": "גבוה"
+      },
+      "optionDescriptions": {
+        "none": "תמלול גולמי ללא ניקוי.",
+        "light": "ריווח בטוח ותיקוני דיבור.",
+        "medium": "מוסיף הסרת מילות מילוי ופיסוק מדובר.",
+        "high": "מסיר גם מילים סמוכות שחוזרות על עצמן."
       }
     },
     "snippets": {

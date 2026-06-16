@@ -224,6 +224,10 @@ fn should_run_requested_post_processing(requested: bool, settings: &AppSettings)
     requested && settings.post_process_enabled
 }
 
+fn should_attempt_api_post_processing(settings: &AppSettings) -> bool {
+    !settings.local_llm.enabled
+}
+
 async fn post_process_with_managed_local_llm(
     app: &AppHandle,
     settings: &AppSettings,
@@ -301,6 +305,11 @@ async fn post_process_transcription(
         post_process_with_managed_local_llm(app, settings, transcription).await
     {
         return Some(processed_text);
+    }
+
+    if !should_attempt_api_post_processing(settings) {
+        debug!("Post-processing skipped API provider because local model mode is active");
+        return None;
     }
 
     let provider = match settings.active_post_process_provider().cloned() {
@@ -1022,6 +1031,17 @@ mod adaptive_action_tests {
         settings.post_process_enabled = true;
         assert!(should_run_requested_post_processing(true, &settings));
         assert!(!should_run_requested_post_processing(false, &settings));
+    }
+
+    #[test]
+    fn local_post_processing_mode_does_not_attempt_api_fallback() {
+        let mut settings = crate::settings::get_default_settings();
+
+        settings.local_llm.enabled = false;
+        assert!(should_attempt_api_post_processing(&settings));
+
+        settings.local_llm.enabled = true;
+        assert!(!should_attempt_api_post_processing(&settings));
     }
 
     #[test]
