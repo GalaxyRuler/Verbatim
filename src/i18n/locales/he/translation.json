@@ -16,8 +16,8 @@
     "history": "היסטוריה",
     "debug": "ניפוי שגיאות",
     "about": "אודות",
-    "dictionary": "Dictionary",
-    "snippets": "Snippets"
+    "dictionary": "מילון",
+    "snippets": "קטעים"
   },
   "onboarding": {
     "subtitle": "כדי להתחיל, בחר מודל תמלול",
@@ -338,11 +338,11 @@
         "descriptionUnsupported": "המודל {{model}} לא תומך בתרגום."
       },
       "translation": {
-        "label": "Translation",
-        "description": "Translate dictated output when the selected model or provider supports it.",
-        "descriptionUnsupported": "{{model}} does not support native translation. Text translation requires a translation provider.",
-        "targetLanguage": "Target language",
-        "targetLanguageDescription": "Choose the language for translated output."
+        "label": "תרגום",
+        "description": "תרגם את פלט ההכתבה כשהמודל או הספק הנבחרים תומכים בכך.",
+        "descriptionUnsupported": "{{model}} לא תומך בתרגום מובנה. תרגום טקסט דורש ספק תרגום.",
+        "targetLanguage": "שפת יעד",
+        "targetLanguageDescription": "בחר את השפה שאליה יתורגם הפלט."
       },
       "modelUnload": {
         "title": "פרוק מודל",
@@ -366,43 +366,43 @@
         "remove": "הסר את {{word}}",
         "duplicate": "\"{{word}}\" כבר קיימת",
         "autoAdd": {
-          "label": "Auto-add corrected words",
-          "description": "After Verbatim pastes text, watch that same text field for a few seconds and add uncommon words you correct to the custom dictionary.",
-          "learnedTitle": "Added to dictionary",
-          "learnedDescription": "Added: {{words}}"
+          "label": "הוסף מילים מתוקנות אוטומטית",
+          "description": "אחרי ש-Verbatim מדביק טקסט, עקוב אחר אותו שדה טקסט לכמה שניות והוסף למילון המותאם מילים נדירות שתיקנת.",
+          "learnedTitle": "נוסף למילון",
+          "learnedDescription": "נוסף: {{words}}"
         }
       },
       "adaptiveProfiles": {
         "enabled": {
-          "label": "Adaptive Profiles",
-          "description": "Route each dictation through a context-aware profile for email, notes, code, chat, or raw output."
+          "label": "פרופילים מסתגלים",
+          "description": "נתב כל הכתבה דרך פרופיל מודע-הקשר עבור דוא\"ל, הערות, קוד, צ'אט או פלט גולמי."
         },
         "defaultProfile": {
-          "title": "Default Profile",
-          "description": "Fallback profile when Verbatim cannot identify the foreground app or language mix confidently.",
-          "placeholder": "Select a profile"
+          "title": "פרופיל ברירת מחדל",
+          "description": "פרופיל גיבוי כש-Verbatim לא מזהה בביטחון את היישום הקדמי או את שילוב השפות.",
+          "placeholder": "בחר פרופיל"
         },
         "languages": {
-          "title": "Language Shortlist",
-          "description": "Comma-separated language codes used for adaptive language hints, such as en, ar, fr, es.",
+          "title": "רשימת שפות מקוצרת",
+          "description": "קודי שפה מופרדים בפסיקים המשמשים לרמזי שפה מסתגלים, כגון en, ar, fr, es.",
           "placeholder": "en, ar"
         },
         "correctionMemory": {
-          "label": "Correction Memory",
-          "description": "Allow future corrections to bias profile choices for similar apps and contexts."
+          "label": "זיכרון תיקונים",
+          "description": "אפשר לתיקונים עתידיים להשפיע על בחירת פרופיל עבור יישומים והקשרים דומים."
         },
         "actions": {
-          "title": "Adaptive Actions",
-          "description": "Reprocess the latest adaptive history item or clear learned correction preferences.",
-          "reprocess": "Reprocess Last",
-          "reset": "Reset Memory",
-          "reprocessDone": "Latest adaptive entry reprocessed.",
-          "resetDone": "Adaptive correction memory reset."
+          "title": "פעולות מסתגלות",
+          "description": "עבד מחדש את פריט ההיסטוריה המסתגל האחרון או נקה העדפות תיקון שנלמדו.",
+          "reprocess": "עבד מחדש את האחרון",
+          "reset": "אפס זיכרון",
+          "reprocessDone": "הרשומה המסתגלת האחרונה עובדה מחדש.",
+          "resetDone": "זיכרון התיקונים המסתגלים אופס."
         }
       },
       "dockedPill": {
-        "label": "Docked Pill",
-        "description": "Keep a tiny pill available at the bottom of the current screen. Click it to expand controls."
+        "label": "גלולה מעוגנת",
+        "description": "השאר גלולה קטנה זמינה בתחתית המסך הנוכחי. לחץ עליה כדי להרחיב את הפקדים."
       }
     },
     "postProcessing": {
@@ -423,7 +423,7 @@
           "unavailable": "Apple Intelligence לא זמין במכשיר הזה. נדרש Mac עם Apple Silicon שמריץ macOS Tahoe (26.0) ומעלה, עם Apple Intelligence מופעל בהגדרות המערכת."
         },
         "baseUrl": {
-          "title": "Base URL",
+          "title": "כתובת בסיס",
           "description": "כתובת ה-API הבסיסית עבור הספק הנבחר. רק ספק מותאם אישית ניתן לעריכה.",
           "placeholder": "https://api.openai.com/v1"
         },
@@ -479,13 +479,13 @@
       "retranscribeError": "תמלול מחדש נכשל. נסה שוב.",
       "transcribing": "מתמלל...",
       "transcriptionFailed": "התמלול נכשל. אפשר לתמלל מחדש באמצעות אייקון הניסיון החוזר.",
-      "learnCorrection": "Learn dictionary correction",
-      "correctedText": "Corrected transcription",
-      "applyCorrection": "Add learned words",
-      "cancelCorrection": "Cancel correction",
-      "dictionaryLearned": "Added to custom words: {{words}}",
-      "dictionaryNoCandidates": "No new custom words found in that correction.",
-      "dictionaryLearnError": "Failed to learn custom words. Please try again."
+      "learnCorrection": "למד תיקון למילון",
+      "correctedText": "תמלול מתוקן",
+      "applyCorrection": "הוסף מילים שנלמדו",
+      "cancelCorrection": "בטל תיקון",
+      "dictionaryLearned": "נוסף למילים המותאמות: {{words}}",
+      "dictionaryNoCandidates": "לא נמצאו מילים מותאמות חדשות בתיקון הזה.",
+      "dictionaryLearnError": "למידת המילים המותאמות נכשלה. נסה שוב."
     },
     "debug": {
       "title": "ניפוי שגיאות",
@@ -604,86 +604,86 @@
       }
     },
     "dictionary": {
-      "title": "Dictionary",
-      "description": "Manage words and phrases Verbatim should recognize.",
-      "search": "Search dictionary",
-      "add": "Add entry",
-      "save": "Save entry",
-      "cancel": "Cancel",
-      "phrase": "Word or phrase",
-      "replacementOf": "Correct when Verbatim writes",
+      "title": "מילון",
+      "description": "נהל מילים וביטויים ש-Verbatim צריך לזהות.",
+      "search": "חפש במילון",
+      "add": "הוסף רשומה",
+      "save": "שמור רשומה",
+      "cancel": "ביטול",
+      "phrase": "מילה או ביטוי",
+      "replacementOf": "תקן כאשר Verbatim כותב",
       "replacementPlaceholder": "robin",
-      "corrects": "Corrects: {{replacement}}",
-      "editEntry": "Edit {{phrase}}",
-      "deleteEntry": "Delete {{phrase}}",
-      "starEntry": "Star {{phrase}}",
-      "unstarEntry": "Unstar {{phrase}}",
+      "corrects": "מתקן: {{replacement}}",
+      "editEntry": "ערוך את {{phrase}}",
+      "deleteEntry": "מחק את {{phrase}}",
+      "starEntry": "סמן בכוכב את {{phrase}}",
+      "unstarEntry": "הסר כוכב מ-{{phrase}}",
       "autoAdd": {
-        "label": "Auto-add corrected words",
-        "description": "When you quickly correct text Verbatim just pasted, add the corrected word or phrase to your dictionary."
+        "label": "הוסף מילים מתוקנות אוטומטית",
+        "description": "כאשר אתה מתקן במהירות טקסט ש-Verbatim הדביק זה עתה, הוסף את המילה או הביטוי המתוקנים למילון שלך."
       },
       "source": {
-        "manual": "Manual",
-        "auto_learned": "Auto-learned",
-        "imported": "Imported"
+        "manual": "ידני",
+        "auto_learned": "נלמד אוטומטית",
+        "imported": "מיובא"
       },
       "priority": {
-        "normal": "Normal",
-        "starred": "Starred"
+        "normal": "רגיל",
+        "starred": "מסומן בכוכב"
       },
       "counts": {
-        "total": "{{count}} entries",
-        "autoLearned": "{{count}} auto-learned",
-        "starred": "{{count}} starred"
+        "total": "{{count}} רשומות",
+        "autoLearned": "{{count}} נלמדו אוטומטית",
+        "starred": "{{count}} מסומנות בכוכב"
       },
-      "empty": "No dictionary entries yet.",
-      "noResults": "No entries match your search.",
+      "empty": "אין עדיין רשומות במילון.",
+      "noResults": "אין רשומות שתואמות לחיפוש שלך.",
       "recentlyLearned": {
-        "title": "Added to dictionary",
-        "description": "Added: {{phrases}}",
-        "undo": "Undo"
+        "title": "נוסף למילון",
+        "description": "נוסף: {{phrases}}",
+        "undo": "בטל"
       },
       "errors": {
-        "load": "Failed to load dictionary",
-        "add": "Failed to add dictionary entry",
-        "update": "Failed to update dictionary entry",
-        "delete": "Failed to delete dictionary entry",
-        "duplicate": "{{phrase}} is already in your dictionary"
+        "load": "טעינת המילון נכשלה",
+        "add": "הוספת רשומת מילון נכשלה",
+        "update": "עדכון רשומת מילון נכשל",
+        "delete": "מחיקת רשומת מילון נכשלה",
+        "duplicate": "{{phrase}} כבר קיים במילון שלך"
       }
     },
     "formattingLevel": {
-      "title": "Smart Formatting",
-      "description": "Controls deterministic cleanup and spoken correction strength before text is inserted.",
+      "title": "עיצוב חכם",
+      "description": "שולט בעוצמת הניקוי הדטרמיניסטי והתיקון המדובר לפני הכנסת הטקסט.",
       "options": {
-        "none": "None",
-        "light": "Light",
-        "medium": "Medium",
-        "high": "High"
+        "none": "ללא",
+        "light": "קל",
+        "medium": "בינוני",
+        "high": "גבוה"
       }
     },
     "snippets": {
-      "title": "Snippets",
-      "description": "Expand local trigger phrases into saved text.",
-      "search": "Search snippets",
-      "add": "Add snippet",
-      "save": "Save snippet",
-      "cancel": "Cancel",
-      "trigger": "Trigger phrase",
-      "content": "Snippet content",
-      "editEntry": "Edit {{trigger}}",
-      "deleteEntry": "Delete {{trigger}}",
+      "title": "קטעים",
+      "description": "הרחב ביטויי טריגר מקומיים לטקסט שמור.",
+      "search": "חפש קטעים",
+      "add": "הוסף קטע",
+      "save": "שמור קטע",
+      "cancel": "ביטול",
+      "trigger": "ביטוי טריגר",
+      "content": "תוכן הקטע",
+      "editEntry": "ערוך את {{trigger}}",
+      "deleteEntry": "מחק את {{trigger}}",
       "counts": {
-        "total": "{{count}} snippets",
-        "multiline": "{{count}} multiline"
+        "total": "{{count}} קטעים",
+        "multiline": "{{count}} רב-שורתיים"
       },
-      "empty": "No snippets yet.",
-      "noResults": "No snippets match your search.",
+      "empty": "אין עדיין קטעים.",
+      "noResults": "אין קטעים שתואמים לחיפוש שלך.",
       "errors": {
-        "load": "Failed to load snippets",
-        "add": "Failed to add snippet",
-        "update": "Failed to update snippet",
-        "delete": "Failed to delete snippet",
-        "duplicate": "{{trigger}} is already a snippet trigger"
+        "load": "טעינת הקטעים נכשלה",
+        "add": "הוספת הקטע נכשלה",
+        "update": "עדכון הקטע נכשל",
+        "delete": "מחיקת הקטע נכשלה",
+        "duplicate": "{{trigger}} כבר משמש כביטוי טריגר לקטע"
       }
     }
   },
@@ -749,12 +749,12 @@
     "modelLoadFailedUnknown": "מודל לא ידוע",
     "pasteFailedTitle": "ההדבקה נכשלה",
     "pasteFailed": "לא ניתן היה להדביק את הטקסט ביישום הפעיל.",
-    "pasteFailedCopiedHint": "The text was copied to your clipboard so you can paste it manually.",
-    "pasteFailedCopyAction": "Copy again",
-    "languageGuardTitle": "Wrong Language Detected",
-    "languageGuardDescription": "Verbatim blocked text that did not match your locked language ({{language}}). It was copied to your clipboard.",
-    "languageGuardPreview": "Preview: {{preview}}",
-    "languageGuardPasteAnyway": "Paste anyway"
+    "pasteFailedCopiedHint": "הטקסט הועתק ללוח כדי שתוכל להדביק אותו ידנית.",
+    "pasteFailedCopyAction": "העתק שוב",
+    "languageGuardTitle": "זוהתה שפה לא צפויה",
+    "languageGuardDescription": "Verbatim חסם טקסט שלא תאם לשפה הנעולה שלך ({{language}}). הוא הועתק ללוח.",
+    "languageGuardPreview": "תצוגה מקדימה: {{preview}}",
+    "languageGuardPasteAnyway": "הדבק בכל זאת"
   },
   "appLanguage": {
     "title": "שפת האפליקציה",
@@ -764,36 +764,36 @@
     "transcribing": "מתמלל...",
     "processing": "מעבד...",
     "languageMode": {
-      "title": "Dictation language",
-      "change": "Change dictation language"
+      "title": "שפת הכתבה",
+      "change": "שנה את שפת ההכתבה"
     },
     "docked": {
-      "expand": "Expand pill",
-      "collapse": "Collapse pill"
+      "expand": "הרחב גלולה",
+      "collapse": "כווץ גלולה"
     },
     "actions": {
-      "copyLastTranscript": "Copy last transcript",
-      "pasteLastTranscript": "Paste last transcript",
-      "retryPaste": "Retry paste",
-      "reviewDictionary": "Review dictionary",
-      "openSettings": "Open settings",
-      "cancel": "Cancel recording",
-      "undoLearnedWord": "Undo learned word",
-      "tryAgain": "Try again",
-      "selectMicrophone": "Select microphone"
+      "copyLastTranscript": "העתק תמלול אחרון",
+      "pasteLastTranscript": "הדבק תמלול אחרון",
+      "retryPaste": "נסה להדביק שוב",
+      "reviewDictionary": "סקור מילון",
+      "openSettings": "פתח הגדרות",
+      "cancel": "בטל הקלטה",
+      "undoLearnedWord": "בטל מילה שנלמדה",
+      "tryAgain": "נסה שוב",
+      "selectMicrophone": "בחר מיקרופון"
     },
     "dictionaryLearned": {
-      "title": "Added to dictionary"
+      "title": "נוסף למילון"
     },
-    "pasteFailed": "Paste failed",
+    "pasteFailed": "ההדבקה נכשלה",
     "states": {
-      "idle": "Ready",
-      "recording": "Recording",
-      "silence": "No speech detected",
-      "inserted": "Inserted",
-      "copied": "Copied",
-      "micFailed": "Microphone issue",
-      "cancelled": "Cancelled"
+      "idle": "מוכן",
+      "recording": "מקליט",
+      "silence": "לא זוהה דיבור",
+      "inserted": "הוכנס",
+      "copied": "הועתק",
+      "micFailed": "בעיה במיקרופון",
+      "cancelled": "בוטל"
     }
   }
 }

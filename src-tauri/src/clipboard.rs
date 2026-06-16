@@ -29,7 +29,7 @@ impl ClipboardSnapshot {
             .ok()
             .filter(|text| !text.is_empty());
 
-        match NativeClipboardSnapshot::capture() {
+        match NativeClipboardSnapshot::capture(app_handle) {
             Ok(native) => Self::Native {
                 native,
                 fallback_text,
@@ -44,7 +44,7 @@ impl ClipboardSnapshot {
                 native,
                 fallback_text,
             } => {
-                if let Err(err) = native.restore() {
+                if let Err(err) = native.restore(app_handle) {
                     warn!("Failed to restore native clipboard snapshot: {}", err);
                     if let Some(text) = fallback_text {
                         restore_text_clipboard(app_handle, text);
@@ -226,7 +226,7 @@ impl NativeClipboardRestoreOps for WinClipboardRestoreOps {
 
 #[cfg(target_os = "windows")]
 impl NativeClipboardSnapshot {
-    fn capture() -> Result<Self, String> {
+    fn capture(_app_handle: &AppHandle) -> Result<Self, String> {
         use windows::Win32::Foundation::HGLOBAL;
         use windows::Win32::System::DataExchange::{
             EnumClipboardFormats, GetClipboardData, OpenClipboard,
@@ -283,7 +283,7 @@ impl NativeClipboardSnapshot {
         }
     }
 
-    fn restore(&self) -> Result<(), String> {
+    fn restore(&self, _app_handle: &AppHandle) -> Result<(), String> {
         let mut ops = WinClipboardRestoreOps { opened: false };
         restore_native_clipboard_snapshot_with_ops(&self.formats, &mut ops)
     }
@@ -299,18 +299,115 @@ impl NativeClipboardSnapshot {
     }
 }
 
+#[cfg(any(test, not(target_os = "windows")))]
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum DesktopClipboardPayload {
+    Image {
+        rgba: Vec<u8>,
+        width: u32,
+        height: u32,
+    },
+    Text(String),
+}
+
+#[cfg(any(test, not(target_os = "windows")))]
+trait DesktopClipboardOps {
+    fn read_image_payload(&self) -> Result<DesktopClipboardPayload, String>;
+    fn read_text_payload(&self) -> Result<DesktopClipboardPayload, String>;
+    fn write_image_payload(&mut self, rgba: &[u8], width: u32, height: u32) -> Result<(), String>;
+    fn write_text_payload(&mut self, text: &str) -> Result<(), String>;
+}
+
+#[cfg(any(test, not(target_os = "windows")))]
+fn capture_desktop_clipboard_payload<O: DesktopClipboardOps>(
+    ops: &O,
+) -> Result<DesktopClipboardPayload, String> {
+    if let Ok(image) = ops.read_image_payload() {
+        return Ok(image);
+    }
+
+    match ops.read_text_payload()? {
+        DesktopClipboardPayload::Text(text) if !text.is_empty() => {
+            Ok(DesktopClipboardPayload::Text(text))
+        }
+        DesktopClipboardPayload::Text(_) => Err("desktop clipboard text is empty".to_string()),
+        image @ DesktopClipboardPayload::Image { .. } => Ok(image),
+    }
+}
+
+#[cfg(any(test, not(target_os = "windows")))]
+fn restore_desktop_clipboard_payload<O: DesktopClipboardOps>(
+    payload: &DesktopClipboardPayload,
+    ops: &mut O,
+) -> Result<(), String> {
+    match payload {
+        DesktopClipboardPayload::Image {
+            rgba,
+            width,
+            height,
+        } => ops.write_image_payload(rgba, *width, *height),
+        DesktopClipboardPayload::Text(text) => ops.write_text_payload(text),
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+struct PluginDesktopClipboardOps<'a> {
+    app_handle: &'a AppHandle,
+}
+
+#[cfg(not(target_os = "windows"))]
+impl DesktopClipboardOps for PluginDesktopClipboardOps<'_> {
+    fn read_image_payload(&self) -> Result<DesktopClipboardPayload, String> {
+        let image = self
+            .app_handle
+            .clipboard()
+            .read_image()
+            .map_err(|err| format!("read clipboard image: {}", err))?;
+        Ok(DesktopClipboardPayload::Image {
+            rgba: image.rgba().to_vec(),
+            width: image.width(),
+            height: image.height(),
+        })
+    }
+
+    fn read_text_payload(&self) -> Result<DesktopClipboardPayload, String> {
+        let text = self
+            .app_handle
+            .clipboard()
+            .read_text()
+            .map_err(|err| format!("read clipboard text: {}", err))?;
+        Ok(DesktopClipboardPayload::Text(text))
+    }
+
+    fn write_image_payload(&mut self, rgba: &[u8], width: u32, height: u32) -> Result<(), String> {
+        let image = tauri::image::Image::new_owned(rgba.to_vec(), width, height);
+        self.app_handle
+            .clipboard()
+            .write_image(&image)
+            .map_err(|err| format!("write clipboard image: {}", err))
+    }
+
+    fn write_text_payload(&mut self, text: &str) -> Result<(), String> {
+        write_text_clipboard(self.app_handle, text)
+    }
+}
+
 #[cfg(not(target_os = "windows"))]
 #[derive(Clone, Debug)]
-struct NativeClipboardSnapshot;
+struct NativeClipboardSnapshot {
+    payload: DesktopClipboardPayload,
+}
 
 #[cfg(not(target_os = "windows"))]
 impl NativeClipboardSnapshot {
-    fn capture() -> Result<Self, String> {
-        Err("native clipboard snapshots are not supported on this platform".to_string())
+    fn capture(app_handle: &AppHandle) -> Result<Self, String> {
+        let ops = PluginDesktopClipboardOps { app_handle };
+        capture_desktop_clipboard_payload(&ops).map(|payload| Self { payload })
     }
 
-    fn restore(&self) -> Result<(), String> {
-        Err("native clipboard snapshots are not supported on this platform".to_string())
+    fn restore(&self, app_handle: &AppHandle) -> Result<(), String> {
+        let mut ops = PluginDesktopClipboardOps { app_handle };
+        restore_desktop_clipboard_payload(&self.payload, &mut ops)
     }
 
     #[cfg(test)]
@@ -1189,5 +1286,88 @@ mod tests {
         assert!(ops.opened_and_emptied);
         assert_eq!(ops.set_attempts, vec![13, 15]);
         assert_eq!(ops.freed_handles, vec![1]);
+    }
+
+    #[derive(Default)]
+    struct FakeDesktopClipboardOps {
+        image: Option<(Vec<u8>, u32, u32)>,
+        text: Option<String>,
+        writes: Vec<&'static str>,
+    }
+
+    impl DesktopClipboardOps for FakeDesktopClipboardOps {
+        fn read_image_payload(&self) -> Result<DesktopClipboardPayload, String> {
+            let Some((rgba, width, height)) = &self.image else {
+                return Err("no image".to_string());
+            };
+            Ok(DesktopClipboardPayload::Image {
+                rgba: rgba.clone(),
+                width: *width,
+                height: *height,
+            })
+        }
+
+        fn read_text_payload(&self) -> Result<DesktopClipboardPayload, String> {
+            let Some(text) = &self.text else {
+                return Err("no text".to_string());
+            };
+            Ok(DesktopClipboardPayload::Text(text.clone()))
+        }
+
+        fn write_image_payload(
+            &mut self,
+            _rgba: &[u8],
+            _width: u32,
+            _height: u32,
+        ) -> Result<(), String> {
+            self.writes.push("image");
+            Ok(())
+        }
+
+        fn write_text_payload(&mut self, _text: &str) -> Result<(), String> {
+            self.writes.push("text");
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn desktop_clipboard_capture_prefers_image_payload_over_text() {
+        let ops = FakeDesktopClipboardOps {
+            image: Some((vec![255, 0, 0, 255], 1, 1)),
+            text: Some("fallback text".to_string()),
+            writes: Vec::new(),
+        };
+
+        let snapshot = capture_desktop_clipboard_payload(&ops).unwrap();
+
+        assert_eq!(
+            snapshot,
+            DesktopClipboardPayload::Image {
+                rgba: vec![255, 0, 0, 255],
+                width: 1,
+                height: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn desktop_clipboard_restore_uses_captured_payload_type() {
+        let mut ops = FakeDesktopClipboardOps::default();
+        restore_desktop_clipboard_payload(
+            &DesktopClipboardPayload::Image {
+                rgba: vec![255, 0, 0, 255],
+                width: 1,
+                height: 1,
+            },
+            &mut ops,
+        )
+        .unwrap();
+        restore_desktop_clipboard_payload(
+            &DesktopClipboardPayload::Text("hello".to_string()),
+            &mut ops,
+        )
+        .unwrap();
+
+        assert_eq!(ops.writes, vec!["image", "text"]);
     }
 }

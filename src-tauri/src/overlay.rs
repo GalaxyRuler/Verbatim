@@ -144,23 +144,12 @@ fn get_monitor_with_cursor(app_handle: &AppHandle) -> Option<tauri::Monitor> {
     if let Some(mouse_location) = input::get_cursor_position(app_handle) {
         if let Ok(monitors) = app_handle.available_monitors() {
             for monitor in monitors {
-                // Tauri's monitor position/size are physical pixels, but enigo
-                // may return logical coordinates (confirmed on macOS via
-                // NSEvent::mouseLocation; on Windows, GetCursorPos behavior
-                // depends on the process DPI-awareness context). Dividing by
-                // scale_factor normalizes to logical, which is safe regardless:
-                // if enigo returns logical it matches directly, and if it returns
-                // physical on a scale=1 monitor the division is a no-op.
-                let scale = monitor.scale_factor();
-                let pos = PhysicalPosition::new(
-                    (monitor.position().x as f64 / scale) as i32,
-                    (monitor.position().y as f64 / scale) as i32,
-                );
-                let size = PhysicalSize::new(
-                    (monitor.size().width as f64 / scale) as u32,
-                    (monitor.size().height as f64 / scale) as u32,
-                );
-                if is_mouse_within_monitor(mouse_location, &pos, &size) {
+                if is_mouse_within_monitor_coordinate_spaces(
+                    mouse_location,
+                    &monitor.position(),
+                    &monitor.size(),
+                    monitor.scale_factor(),
+                ) {
                     return Some(monitor);
                 }
             }
@@ -168,6 +157,31 @@ fn get_monitor_with_cursor(app_handle: &AppHandle) -> Option<tauri::Monitor> {
     }
 
     app_handle.primary_monitor().ok().flatten()
+}
+
+fn is_mouse_within_monitor_coordinate_spaces(
+    mouse_pos: (i32, i32),
+    physical_monitor_pos: &PhysicalPosition<i32>,
+    physical_monitor_size: &PhysicalSize<u32>,
+    scale_factor: f64,
+) -> bool {
+    if is_mouse_within_monitor(mouse_pos, physical_monitor_pos, physical_monitor_size) {
+        return true;
+    }
+
+    if scale_factor <= 0.0 {
+        return false;
+    }
+
+    let logical_pos = PhysicalPosition::new(
+        (physical_monitor_pos.x as f64 / scale_factor).round() as i32,
+        (physical_monitor_pos.y as f64 / scale_factor).round() as i32,
+    );
+    let logical_size = PhysicalSize::new(
+        (physical_monitor_size.width as f64 / scale_factor).round() as u32,
+        (physical_monitor_size.height as f64 / scale_factor).round() as u32,
+    );
+    is_mouse_within_monitor(mouse_pos, &logical_pos, &logical_size)
 }
 
 fn is_mouse_within_monitor(
@@ -458,5 +472,49 @@ pub fn emit_overlay_state_changed(app_handle: &AppHandle, state: &str) {
 
     if let Some(overlay_window) = app_handle.get_webview_window("recording_overlay") {
         let _ = overlay_window.emit("overlay-state-changed", state);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn monitor_hit_accepts_physical_cursor_coordinates_on_scaled_monitor() {
+        let monitor_pos = PhysicalPosition::new(3840, 0);
+        let monitor_size = PhysicalSize::new(3840, 2160);
+
+        assert!(is_mouse_within_monitor_coordinate_spaces(
+            (5000, 1000),
+            &monitor_pos,
+            &monitor_size,
+            2.0,
+        ));
+    }
+
+    #[test]
+    fn monitor_hit_accepts_logical_cursor_coordinates_on_scaled_monitor() {
+        let monitor_pos = PhysicalPosition::new(3840, 0);
+        let monitor_size = PhysicalSize::new(3840, 2160);
+
+        assert!(is_mouse_within_monitor_coordinate_spaces(
+            (2500, 500),
+            &monitor_pos,
+            &monitor_size,
+            2.0,
+        ));
+    }
+
+    #[test]
+    fn monitor_hit_rejects_cursor_outside_both_coordinate_spaces() {
+        let monitor_pos = PhysicalPosition::new(3840, 0);
+        let monitor_size = PhysicalSize::new(3840, 2160);
+
+        assert!(!is_mouse_within_monitor_coordinate_spaces(
+            (100, 100),
+            &monitor_pos,
+            &monitor_size,
+            2.0,
+        ));
     }
 }
