@@ -12,6 +12,7 @@ mod dictionary_learning;
 mod helpers;
 mod input;
 mod llm_client;
+pub mod local_llm;
 mod managers;
 mod overlay;
 pub mod portable;

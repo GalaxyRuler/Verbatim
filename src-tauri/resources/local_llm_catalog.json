@@ -1,0 +1,30 @@
+[
+  {
+    "id": "qwen3-1_7b-q4_k_m",
+    "label": "Qwen3 1.7B Q4_K_M",
+    "filename": "Qwen3-1.7B-Q4_K_M.gguf",
+    "url": "asset:post-processing/Qwen3-1.7B-Q4_K_M.gguf",
+    "sha256": null,
+    "sizeMb": 1280,
+    "quantization": "Q4_K_M",
+    "contextWindow": 32768,
+    "recommendedRole": "default",
+    "supportedLanguageNotes": "Small multilingual instruction model for private local transcript cleanup.",
+    "licenseLabel": "Apache-2.0",
+    "runtime": "llama.cpp"
+  },
+  {
+    "id": "smollm2-1_7b-instruct-q4_k_m",
+    "label": "SmolLM2 1.7B Instruct Q4_K_M",
+    "filename": "SmolLM2-1.7B-Instruct-Q4_K_M.gguf",
+    "url": "asset:post-processing/SmolLM2-1.7B-Instruct-Q4_K_M.gguf",
+    "sha256": null,
+    "sizeMb": 1060,
+    "quantization": "Q4_K_M",
+    "contextWindow": 8192,
+    "recommendedRole": "fallback",
+    "supportedLanguageNotes": "Compact on-device instruction model fallback; quality must pass Verbatim fixtures before UI exposure.",
+    "licenseLabel": "Apache-2.0",
+    "runtime": "llama.cpp"
+  }
+]

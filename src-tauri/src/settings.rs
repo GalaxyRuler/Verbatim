@@ -515,6 +515,8 @@ pub struct AppSettings {
     #[serde(default)]
     pub post_process_selected_prompt_id: Option<String>,
     #[serde(default)]
+    pub local_llm: crate::local_llm::LocalLlmSettings,
+    #[serde(default)]
     pub mute_while_recording: bool,
     #[serde(default)]
     pub append_trailing_space: bool,
@@ -1144,6 +1146,7 @@ pub fn get_default_settings() -> AppSettings {
         post_process_models: default_post_process_models(),
         post_process_prompts: default_post_process_prompts(),
         post_process_selected_prompt_id: None,
+        local_llm: crate::local_llm::LocalLlmSettings::default(),
         mute_while_recording: true,
         append_trailing_space: false,
         app_language: default_app_language(),
@@ -1542,6 +1545,17 @@ mod tests {
     fn default_settings_disable_post_processing() {
         let settings = get_default_settings();
         assert!(!settings.post_process_enabled);
+    }
+
+    #[test]
+    fn default_settings_do_not_enable_managed_local_llm() {
+        let settings = get_default_settings();
+
+        assert!(!settings.local_llm.enabled);
+        assert_eq!(settings.local_llm.runtime_mode, "managed");
+        assert_eq!(settings.local_llm.runtime_host, "127.0.0.1");
+        assert_eq!(settings.local_llm.runtime_port, 0);
+        assert_eq!(settings.local_llm.max_output_tokens, 512);
     }
 
     #[test]
