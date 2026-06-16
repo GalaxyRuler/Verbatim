@@ -46,6 +46,10 @@ pub fn sanitize_snippet_content(raw: &str) -> Option<String> {
 }
 
 pub fn make_snippet_entry_id(now_ms: u64, trigger: &str) -> String {
+    make_snippet_entry_id_base(now_ms, trigger)
+}
+
+fn make_snippet_entry_id_base(now_ms: u64, trigger: &str) -> String {
     let mut slug = String::new();
     let mut last_was_separator = false;
 
@@ -69,6 +73,22 @@ pub fn make_snippet_entry_id(now_ms: u64, trigger: &str) -> String {
     format!("snippet_{}_{}", now_ms, slug)
 }
 
+fn make_unique_snippet_entry_id(now_ms: u64, trigger: &str, entries: &[SnippetEntry]) -> String {
+    let base = make_snippet_entry_id(now_ms, trigger);
+    if entries.iter().all(|entry| entry.id != base) {
+        return base;
+    }
+
+    for suffix in 2.. {
+        let candidate = format!("{base}-{suffix}");
+        if entries.iter().all(|entry| entry.id != candidate) {
+            return candidate;
+        }
+    }
+
+    unreachable!("unbounded snippet id suffix search should always return")
+}
+
 pub fn current_unix_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -90,7 +110,7 @@ pub fn upsert_snippet_entry(
     }
 
     let entry = SnippetEntry {
-        id: make_snippet_entry_id(now_ms, &trigger),
+        id: make_unique_snippet_entry_id(now_ms, &trigger, &settings.snippets),
         trigger,
         content,
         created_at_ms: now_ms,
@@ -174,6 +194,14 @@ pub fn sync_snippets(settings: &mut AppSettings) -> bool {
             continue;
         }
 
+        if entry.id.trim().is_empty() || cleaned.iter().any(|existing| existing.id == entry.id) {
+            let id_timestamp = if entry.created_at_ms > 0 {
+                entry.created_at_ms
+            } else {
+                entry.updated_at_ms
+            };
+            entry.id = make_unique_snippet_entry_id(id_timestamp, &trigger, &cleaned);
+        }
         entry.trigger = trigger;
         entry.content = content;
         cleaned.push(entry);
@@ -341,6 +369,30 @@ mod tests {
     }
 
     #[test]
+    fn upsert_snippet_entry_avoids_same_millisecond_slug_collisions() {
+        let mut settings = get_default_settings();
+
+        let first = upsert_snippet_entry(
+            &mut settings,
+            42,
+            "email signature".to_string(),
+            "Regards".to_string(),
+        )
+        .expect("first snippet should be added");
+        let second = upsert_snippet_entry(
+            &mut settings,
+            42,
+            "email-signature".to_string(),
+            "Best".to_string(),
+        )
+        .expect("second snippet should be added");
+
+        assert_ne!(first.id, second.id);
+        assert_eq!(first.id, "snippet_42_email-signature");
+        assert_eq!(second.id, "snippet_42_email-signature-2");
+    }
+
+    #[test]
     fn update_snippet_entry_updates_trigger_and_content() {
         let mut settings = get_default_settings();
         settings.snippets = vec![entry("snippet_1_signature", "signature", "Old")];
@@ -397,6 +449,21 @@ mod tests {
             settings.snippets,
             vec![entry("snippet_1_email", "email signature", "Signature")]
         );
+    }
+
+    #[test]
+    fn sync_snippets_repairs_duplicate_entry_ids() {
+        let mut settings = get_default_settings();
+        settings.snippets = vec![
+            entry("snippet_1_signature", "signature", "Signature"),
+            entry("snippet_1_signature", "address", "Address"),
+        ];
+
+        let changed = sync_snippets(&mut settings);
+
+        assert!(changed);
+        assert_eq!(settings.snippets[0].id, "snippet_1_signature");
+        assert_eq!(settings.snippets[1].id, "snippet_1_address");
     }
 
     fn entry(id: &str, trigger: &str, content: &str) -> SnippetEntry {

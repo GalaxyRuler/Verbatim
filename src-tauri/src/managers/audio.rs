@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 use tauri::Manager;
 
 const STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
+const SELECTED_MICROPHONE_UNAVAILABLE_PREFIX: &str = "Selected microphone unavailable";
 
 fn set_mute(mute: bool) {
     // Expected behavior:
@@ -123,6 +124,18 @@ pub enum MicrophoneMode {
     OnDemand,
 }
 
+pub fn selected_microphone_unavailable_error(device_name: &str) -> anyhow::Error {
+    anyhow::anyhow!("{SELECTED_MICROPHONE_UNAVAILABLE_PREFIX}: {device_name}")
+}
+
+pub fn is_selected_microphone_unavailable_error(message: &str) -> bool {
+    message.starts_with(SELECTED_MICROPHONE_UNAVAILABLE_PREFIX)
+}
+
+fn is_default_microphone_selection(device_name: &str) -> bool {
+    device_name.eq_ignore_ascii_case("default")
+}
+
 /* ──────────────────────────────────────────────────────────────── */
 
 fn create_audio_recorder(
@@ -226,7 +239,10 @@ impl AudioRecordingManager {
 
     /* ---------- helper methods --------------------------------------------- */
 
-    fn get_effective_microphone_device(&self, settings: &AppSettings) -> Option<cpal::Device> {
+    fn get_effective_microphone_device(
+        &self,
+        settings: &AppSettings,
+    ) -> Result<Option<cpal::Device>, anyhow::Error> {
         // Check if we're in clamshell mode and have a clamshell microphone configured
         let use_clamshell_mic = if let Ok(is_clamshell) = clamshell::is_clamshell() {
             is_clamshell && settings.clamshell_microphone.is_some()
@@ -235,20 +251,34 @@ impl AudioRecordingManager {
         };
 
         let device_name = if use_clamshell_mic {
-            settings.clamshell_microphone.as_ref().unwrap()
+            settings.clamshell_microphone.as_ref().map(String::as_str)
         } else {
-            settings.selected_microphone.as_ref()?
+            settings.selected_microphone.as_deref()
         };
+
+        let Some(device_name) = device_name else {
+            return Ok(None);
+        };
+        if is_default_microphone_selection(device_name) {
+            return Ok(None);
+        }
 
         // Find the device by name
         match list_input_devices() {
-            Ok(devices) => devices
-                .into_iter()
-                .find(|d| d.name == *device_name)
-                .map(|d| d.device),
+            Ok(devices) => {
+                if let Some(device) = devices
+                    .into_iter()
+                    .find(|d| d.name == device_name)
+                    .map(|d| d.device)
+                {
+                    Ok(Some(device))
+                } else {
+                    Err(selected_microphone_unavailable_error(device_name))
+                }
+            }
             Err(e) => {
                 debug!("Failed to list devices, using default: {}", e);
-                None
+                Ok(None)
             }
         }
     }
@@ -345,7 +375,7 @@ impl AudioRecordingManager {
 
         // Get the selected device from settings, considering clamshell mode
         let settings = get_settings(&self.app_handle);
-        let selected_device = self.get_effective_microphone_device(&settings);
+        let selected_device = self.get_effective_microphone_device(&settings)?;
 
         // Pre-flight check: if no device was selected/configured AND no devices
         // exist at all, fail early with a clear error instead of letting cpal
@@ -612,5 +642,25 @@ impl AudioRecordingManager {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn selected_microphone_unavailable_error_names_missing_device() {
+        let error = selected_microphone_unavailable_error("OBSBOT Tiny");
+
+        assert!(is_selected_microphone_unavailable_error(&error.to_string()));
+        assert!(error.to_string().contains("OBSBOT Tiny"));
+    }
+
+    #[test]
+    fn default_microphone_selection_is_not_treated_as_missing_device() {
+        assert!(is_default_microphone_selection("default"));
+        assert!(is_default_microphone_selection("Default"));
+        assert!(!is_default_microphone_selection("Default Array Microphone"));
     }
 }

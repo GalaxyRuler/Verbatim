@@ -9,6 +9,8 @@ static NO_I_MEAN_RE: Lazy<Regex> =
 static ACTUALLY_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)\bactually\b[,\s]*").unwrap());
 static REPLACE_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"(?is)\breplace\s+(.+?)\s+with\s+(.+?)([.!?])?\s*$").unwrap());
+static SPOKEN_PUNCTUATION_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"(?i)\b(question\s+mark|exclamation\s+mark|comma|period)\b").unwrap());
 
 pub fn format_transcript(raw: &str, level: FormattingLevel) -> String {
     if level == FormattingLevel::None {
@@ -253,11 +255,96 @@ fn remove_simple_fillers(input: &str) -> String {
 }
 
 fn normalize_spoken_punctuation(input: &str) -> String {
+    let mut output = String::with_capacity(input.len());
+    let mut cursor = 0;
+
+    for matched in SPOKEN_PUNCTUATION_RE.find_iter(input) {
+        let phrase = matched.as_str().to_ascii_lowercase();
+        let Some(symbol) = spoken_punctuation_symbol(&phrase) else {
+            continue;
+        };
+        if !should_convert_spoken_punctuation(input, matched.start(), matched.end(), &phrase) {
+            continue;
+        }
+
+        output.push_str(&input[cursor..matched.start()]);
+        while output.chars().next_back().is_some_and(char::is_whitespace) {
+            output.pop();
+        }
+        output.push(symbol);
+        cursor = matched.end();
+    }
+
+    output.push_str(&input[cursor..]);
+    output
+}
+
+fn spoken_punctuation_symbol(phrase: &str) -> Option<char> {
+    match phrase {
+        "period" => Some('.'),
+        "comma" => Some(','),
+        "question mark" => Some('?'),
+        "exclamation mark" => Some('!'),
+        _ => None,
+    }
+}
+
+fn should_convert_spoken_punctuation(input: &str, start: usize, end: usize, phrase: &str) -> bool {
+    let before = input[..start].trim_end();
+    if before.is_empty() {
+        return false;
+    }
+
+    let after = input[end..].trim_start();
+    let previous = previous_word(before);
+    if is_protected_literal_punctuation_phrase(previous.as_deref(), phrase) {
+        return false;
+    }
+
+    if phrase == "comma" {
+        return !after.is_empty();
+    }
+
+    after.is_empty() || after.starts_with(['.', ',', '?', '!', ':', ';'])
+}
+
+fn previous_word(input: &str) -> Option<String> {
     input
-        .replace(" period", ".")
-        .replace(" comma", ",")
-        .replace(" question mark", "?")
-        .replace(" exclamation mark", "!")
+        .split_whitespace()
+        .last()
+        .map(|word| {
+            word.trim_matches(|ch: char| ch.is_ascii_punctuation())
+                .to_ascii_lowercase()
+        })
+        .filter(|word| !word.is_empty())
+}
+
+fn is_protected_literal_punctuation_phrase(previous_word: Option<&str>, phrase: &str) -> bool {
+    let Some(previous_word) = previous_word else {
+        return false;
+    };
+
+    match phrase {
+        "period" => matches!(
+            previous_word,
+            "accounting"
+                | "billing"
+                | "class"
+                | "grace"
+                | "historical"
+                | "notice"
+                | "pay"
+                | "probationary"
+                | "reporting"
+                | "trial"
+                | "waiting"
+        ),
+        "comma" => matches!(previous_word, "decimal" | "oxford" | "serial"),
+        "question mark" | "exclamation mark" => {
+            matches!(previous_word, "a" | "an" | "the" | "literal")
+        }
+        _ => false,
+    }
 }
 
 fn collapse_adjacent_duplicate_words(input: &str) -> String {
@@ -297,5 +384,23 @@ mod tests {
         let result = format_transcript(raw, FormattingLevel::Light);
 
         assert_eq!(result, raw);
+    }
+
+    #[test]
+    fn spoken_punctuation_keeps_common_literal_period_phrases() {
+        let raw = "Please confirm the grace period";
+
+        let result = format_transcript(raw, FormattingLevel::Medium);
+
+        assert_eq!(result, raw);
+    }
+
+    #[test]
+    fn spoken_punctuation_converts_standalone_dictation_commands() {
+        let raw = "hello comma world period";
+
+        let result = format_transcript(raw, FormattingLevel::Medium);
+
+        assert_eq!(result, "hello, world.");
     }
 }

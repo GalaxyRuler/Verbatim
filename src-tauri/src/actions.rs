@@ -2,7 +2,9 @@
 use crate::apple_intelligence;
 use crate::audio_feedback::{play_feedback_sound, play_feedback_sound_blocking, SoundType};
 use crate::audio_toolkit::{is_microphone_access_denied, is_no_input_device_error};
-use crate::managers::audio::{AudioRecordingManager, RecordingStopResult};
+use crate::managers::audio::{
+    is_selected_microphone_unavailable_error, AudioRecordingManager, RecordingStopResult,
+};
 use crate::managers::history::HistoryManager;
 use crate::managers::transcription::TranscriptionManager;
 use crate::settings::{get_settings, AppSettings, APPLE_INTELLIGENCE_PROVIDER_ID};
@@ -202,6 +204,10 @@ fn is_local_post_process_provider(base_url: &str) -> bool {
 
 fn can_egress_post_process_text(provider_base_url: &str, api_key: &str) -> bool {
     is_local_post_process_provider(provider_base_url) || !api_key.trim().is_empty()
+}
+
+fn should_run_requested_post_processing(requested: bool, settings: &AppSettings) -> bool {
+    requested && settings.post_process_enabled
 }
 
 async fn post_process_transcription(settings: &AppSettings, transcription: &str) -> Option<String> {
@@ -841,6 +847,18 @@ mod adaptive_action_tests {
     }
 
     #[test]
+    fn disabled_post_processing_setting_blocks_requested_post_process_paths() {
+        let mut settings = crate::settings::get_default_settings();
+        settings.post_process_enabled = false;
+
+        assert!(!should_run_requested_post_processing(true, &settings));
+
+        settings.post_process_enabled = true;
+        assert!(should_run_requested_post_processing(true, &settings));
+        assert!(!should_run_requested_post_processing(false, &settings));
+    }
+
+    #[test]
     fn unsupported_model_translation_setting_does_not_bypass_language_guard() {
         let mut settings = crate::settings::get_default_settings();
         settings.selected_language = "ar".to_string();
@@ -1040,6 +1058,8 @@ impl ShortcutAction for TranscribeAction {
                     "microphone_permission_denied"
                 } else if is_no_input_device_error(&err) {
                     "no_input_device"
+                } else if is_selected_microphone_unavailable_error(&err) {
+                    "selected_microphone_unavailable"
                 } else {
                     "unknown"
                 };
@@ -1158,6 +1178,8 @@ impl ShortcutAction for TranscribeAction {
                             );
 
                             let settings = get_settings(&ah);
+                            let effective_post_process =
+                                should_run_requested_post_processing(post_process, &settings);
                             let adaptive_context = if settings.adaptive_profiles_enabled {
                                 ah.try_state::<crate::adaptive::session::ActiveDictationContext>()
                                     .and_then(|store| store.take(&binding_id))
@@ -1165,7 +1187,7 @@ impl ShortcutAction for TranscribeAction {
                                 None
                             };
 
-                            if post_process || adaptive_context.is_some() {
+                            if effective_post_process || adaptive_context.is_some() {
                                 show_processing_overlay(&ah);
                             }
 
@@ -1196,7 +1218,7 @@ impl ShortcutAction for TranscribeAction {
                                     match hm.save_entry_with_metadata(
                                         file_name,
                                         transcription,
-                                        post_process,
+                                        effective_post_process,
                                         processed.post_processed_text.clone(),
                                         processed.post_process_prompt.clone(),
                                         metadata,
@@ -1305,16 +1327,19 @@ impl ShortcutAction for TranscribeAction {
                                     });
                                 }
                             } else {
-                                let processed =
-                                    process_transcription_output(&ah, &transcription, post_process)
-                                        .await;
+                                let processed = process_transcription_output(
+                                    &ah,
+                                    &transcription,
+                                    effective_post_process,
+                                )
+                                .await;
 
                                 // Save to history if WAV was saved
                                 if wav_saved {
                                     if let Err(err) = hm.save_entry(
                                         file_name,
                                         transcription,
-                                        post_process,
+                                        effective_post_process,
                                         processed.post_processed_text.clone(),
                                         processed.post_process_prompt.clone(),
                                     ) {

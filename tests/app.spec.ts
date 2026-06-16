@@ -1248,6 +1248,67 @@ test.describe("Verbatim App", () => {
     ).toBeVisible();
   });
 
+  test("docked pill keeps language guard recovery after docked reset", async ({
+    page,
+  }) => {
+    await installTauriMocks(page, {
+      docked_pill_enabled: true,
+      overlay_position: "bottom",
+    });
+    await page.goto("/src/overlay/index.html");
+
+    await page.evaluate(() => {
+      const win = window as typeof window & {
+        __VERBATIM_TEST_EMIT_EVENT__: (
+          event: string,
+          payload?: unknown,
+        ) => void;
+      };
+      win.__VERBATIM_TEST_EMIT_EVENT__("show-docked-overlay");
+      win.__VERBATIM_TEST_EMIT_EVENT__("language-guard-blocked", {
+        locked_language: "ar",
+        preview: "hello world",
+      });
+      win.__VERBATIM_TEST_EMIT_EVENT__("show-docked-overlay");
+    });
+
+    const overlay = page.getByTestId("recording-overlay");
+    await expect(overlay).toHaveClass(/docked-expanded/);
+    await expect(overlay).toHaveAttribute("data-state", "copied");
+    await expect(
+      page.getByRole("button", { name: "Paste last transcript" }),
+    ).toBeVisible();
+  });
+
+  test("docked pill keeps paste failure recovery after docked reset", async ({
+    page,
+  }) => {
+    await installTauriMocks(page, {
+      docked_pill_enabled: true,
+      overlay_position: "bottom",
+    });
+    await page.goto("/src/overlay/index.html");
+
+    await page.evaluate(() => {
+      const win = window as typeof window & {
+        __VERBATIM_TEST_EMIT_EVENT__: (
+          event: string,
+          payload?: unknown,
+        ) => void;
+      };
+      win.__VERBATIM_TEST_EMIT_EVENT__("show-docked-overlay");
+      win.__VERBATIM_TEST_EMIT_EVENT__("paste-error");
+      win.__VERBATIM_TEST_EMIT_EVENT__("show-docked-overlay");
+    });
+
+    const overlay = page.getByTestId("recording-overlay");
+    await expect(overlay).toHaveClass(/docked-expanded/);
+    await expect(overlay).toHaveAttribute("data-state", "paste_failed");
+    await expect(
+      page.getByRole("button", { name: "Retry paste" }),
+    ).toBeVisible();
+  });
+
   test("docked pill expands to live recording bars when recording starts", async ({
     page,
   }) => {

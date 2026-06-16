@@ -95,8 +95,19 @@ const RecordingOverlay: React.FC = () => {
   const [levels, setLevels] = useState<number[]>(Array(16).fill(0));
   const smoothedLevelsRef = useRef<number[]>(Array(16).fill(0));
   const isDockedRef = useRef(false);
+  const stateRef = useRef<OverlayState>("recording");
   const hasReceivedOverlayEventRef = useRef(false);
   const direction = getLanguageDirection(i18n.language);
+
+  const setOverlayState = (nextState: OverlayState) => {
+    stateRef.current = nextState;
+    setState(nextState);
+  };
+
+  const isStickyRecoveryState = (nextState: OverlayState) =>
+    nextState === "copied" ||
+    nextState === "paste_failed" ||
+    nextState === "dictionary_learned";
 
   const setDockedMode = (enabled: boolean) => {
     isDockedRef.current = enabled;
@@ -153,7 +164,7 @@ const RecordingOverlay: React.FC = () => {
         );
         setIsLanguagePickerOpen(false);
         setRecentlyLearnedEntries([]);
-        setState(overlayState);
+        setOverlayState(overlayState);
         setIsVisible(true);
       });
 
@@ -164,32 +175,39 @@ const RecordingOverlay: React.FC = () => {
           await syncLanguageFromSettings();
           await refreshLanguageMode();
           setDockedMode(true);
+          if (isStickyRecoveryState(stateRef.current)) {
+            setIsDockedExpanded(true);
+            setIsVisible(true);
+            return;
+          }
           setIsDockedExpanded(false);
           setIsLanguagePickerOpen(false);
-          setState("idle");
+          setOverlayState("idle");
           setIsVisible(true);
         },
       );
 
       const unlistenPasteError = await listen("paste-error", async () => {
+        stateRef.current = "paste_failed";
         if (!(await shouldShowDockedFeedback())) return;
 
         setDockedMode(true);
         setIsDockedExpanded(true);
         setIsLanguagePickerOpen(false);
-        setState("paste_failed");
+        setOverlayState("paste_failed");
         setIsVisible(true);
       });
 
       const unlistenLanguageGuardBlocked = await listen(
         "language-guard-blocked",
         async () => {
+          stateRef.current = "copied";
           if (!(await shouldShowDockedFeedback())) return;
 
           setDockedMode(true);
           setIsDockedExpanded(true);
           setIsLanguagePickerOpen(false);
-          setState("copied");
+          setOverlayState("copied");
           setIsVisible(true);
         },
       );
@@ -198,13 +216,14 @@ const RecordingOverlay: React.FC = () => {
         "dictionary-entries-learned",
         async (event) => {
           if (event.payload.length === 0) return;
+          stateRef.current = "dictionary_learned";
           if (!(await shouldShowDockedFeedback())) return;
 
           setRecentlyLearnedEntries(event.payload);
           setDockedMode(true);
           setIsDockedExpanded(true);
           setIsLanguagePickerOpen(false);
-          setState("dictionary_learned");
+          setOverlayState("dictionary_learned");
           setIsVisible(true);
         },
       );
@@ -214,7 +233,7 @@ const RecordingOverlay: React.FC = () => {
         (event) => {
           const overlayState = getOverlayState(event.payload);
           setIsLanguagePickerOpen(false);
-          setState(overlayState);
+          setOverlayState(overlayState);
 
           if (isDockedRef.current) {
             setIsDockedExpanded(shouldExpandForState(overlayState));
@@ -251,7 +270,7 @@ const RecordingOverlay: React.FC = () => {
         setDockedMode(true);
         setIsDockedExpanded(false);
         setIsLanguagePickerOpen(false);
-        setState("idle");
+        setOverlayState("idle");
         setIsVisible(true);
       }
 
@@ -326,7 +345,7 @@ const RecordingOverlay: React.FC = () => {
   const retryCurrentRecording = async () => {
     const result = await commands.retryCurrentRecording();
     if (result.status === "ok") {
-      setState("recording");
+      setOverlayState("recording");
     }
   };
 
@@ -338,7 +357,7 @@ const RecordingOverlay: React.FC = () => {
     );
     if (result.status === "ok") {
       setRecentlyLearnedEntries([]);
-      setState("recording");
+      setOverlayState("recording");
     }
   };
 
