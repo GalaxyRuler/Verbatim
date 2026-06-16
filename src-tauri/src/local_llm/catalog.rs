@@ -102,10 +102,11 @@ mod tests {
 
         let qwen = models
             .get("qwen3-1_7b-q4_k_m")
-            .expect("qwen default exists");
+            .expect("qwen candidate exists");
         assert_eq!(qwen.quantization, "Q4_K_M");
         assert_eq!(qwen.size_mb, 1280);
         assert_eq!(qwen.runtime, "llama.cpp");
+        assert_eq!(qwen.recommended_role, "experimental");
         assert!(qwen.supported_language_notes.contains("multilingual"));
         assert!(qwen.license_label.contains("Apache"));
     }
@@ -120,5 +121,18 @@ mod tests {
         let url = smol.url.as_deref().expect("model has URL");
         assert!(url.starts_with("https://verbatim-assets.galaxyruler.space/"));
         assert!(url.ends_with("/SmolLM2-1.7B-Instruct-Q4_K_M.gguf"));
+    }
+
+    #[test]
+    fn catalog_does_not_recommend_unverified_models_as_default() {
+        let models = load_builtin_local_llm_models().expect("catalog parses");
+
+        for model in models.values() {
+            assert_ne!(
+                model.recommended_role, "default",
+                "{} must pass local evaluation before becoming default",
+                model.id
+            );
+        }
     }
 }

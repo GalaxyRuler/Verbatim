@@ -8,8 +8,8 @@
     "sizeMb": 1280,
     "quantization": "Q4_K_M",
     "contextWindow": 32768,
-    "recommendedRole": "default",
-    "supportedLanguageNotes": "Small multilingual instruction model for private local transcript cleanup.",
+    "recommendedRole": "experimental",
+    "supportedLanguageNotes": "Small multilingual instruction model candidate; must pass Verbatim evaluation fixtures before UI exposure as a default.",
     "licenseLabel": "Apache-2.0",
     "runtime": "llama.cpp"
   },
