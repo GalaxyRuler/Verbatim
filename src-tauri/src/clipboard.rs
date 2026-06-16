@@ -92,6 +92,41 @@ struct ClipboardFormatData {
 }
 
 #[cfg(target_os = "windows")]
+fn is_memory_backed_clipboard_format(format: u32) -> bool {
+    const CF_TEXT: u32 = 1;
+    const CF_SYLK: u32 = 4;
+    const CF_DIF: u32 = 5;
+    const CF_TIFF: u32 = 6;
+    const CF_OEMTEXT: u32 = 7;
+    const CF_DIB: u32 = 8;
+    const CF_PENDATA: u32 = 10;
+    const CF_RIFF: u32 = 11;
+    const CF_WAVE: u32 = 12;
+    const CF_UNICODETEXT: u32 = 13;
+    const CF_HDROP: u32 = 15;
+    const CF_LOCALE: u32 = 16;
+    const CF_DIBV5: u32 = 17;
+    const REGISTERED_FORMAT_START: u32 = 0xC000;
+
+    matches!(
+        format,
+        CF_TEXT
+            | CF_SYLK
+            | CF_DIF
+            | CF_TIFF
+            | CF_OEMTEXT
+            | CF_DIB
+            | CF_PENDATA
+            | CF_RIFF
+            | CF_WAVE
+            | CF_UNICODETEXT
+            | CF_HDROP
+            | CF_LOCALE
+            | CF_DIBV5
+    ) || format >= REGISTERED_FORMAT_START
+}
+
+#[cfg(target_os = "windows")]
 trait NativeClipboardRestoreOps {
     type Handle: Copy;
 
@@ -295,6 +330,9 @@ impl NativeClipboardSnapshot {
                 if format == 0 {
                     break;
                 }
+                if !is_memory_backed_clipboard_format(format) {
+                    continue;
+                }
 
                 let handle = match GetClipboardData(format) {
                     Ok(handle) if !handle.0.is_null() => handle,
@@ -351,6 +389,7 @@ impl NativeClipboardSnapshot {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(target_os = "windows", allow(dead_code))]
 enum DesktopClipboardPayload {
     Image {
         rgba: Vec<u8>,
@@ -360,6 +399,7 @@ enum DesktopClipboardPayload {
     Text(String),
 }
 
+#[cfg_attr(target_os = "windows", allow(dead_code))]
 trait DesktopClipboardOps {
     fn read_image_payload(&self) -> Result<DesktopClipboardPayload, String>;
     fn read_text_payload(&self) -> Result<DesktopClipboardPayload, String>;
@@ -367,6 +407,7 @@ trait DesktopClipboardOps {
     fn write_text_payload(&mut self, text: &str) -> Result<(), String>;
 }
 
+#[cfg_attr(target_os = "windows", allow(dead_code))]
 fn capture_desktop_clipboard_payload<O: DesktopClipboardOps>(
     ops: &O,
 ) -> Result<DesktopClipboardPayload, String> {
@@ -1300,6 +1341,24 @@ mod tests {
                 bytes: b"files".to_vec(),
             },
         ]
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn native_snapshot_only_reads_memory_backed_formats() {
+        assert!(is_memory_backed_clipboard_format(1));
+        assert!(is_memory_backed_clipboard_format(13));
+        assert!(is_memory_backed_clipboard_format(15));
+        assert!(is_memory_backed_clipboard_format(17));
+        assert!(is_memory_backed_clipboard_format(0xC000));
+        assert!(is_memory_backed_clipboard_format(0xC123));
+
+        assert!(!is_memory_backed_clipboard_format(2));
+        assert!(!is_memory_backed_clipboard_format(3));
+        assert!(!is_memory_backed_clipboard_format(9));
+        assert!(!is_memory_backed_clipboard_format(14));
+        assert!(!is_memory_backed_clipboard_format(0x0200));
+        assert!(!is_memory_backed_clipboard_format(0x0300));
     }
 
     #[cfg(target_os = "windows")]

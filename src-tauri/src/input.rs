@@ -112,6 +112,30 @@ pub fn send_paste_shift_insert(enigo: &mut Enigo) -> Result<(), String> {
     Ok(())
 }
 
+/// Sets left-to-right reading order in Windows rich edit controls.
+#[cfg(target_os = "windows")]
+pub fn send_ltr_reading_order(enigo: &mut Enigo) -> Result<(), String> {
+    const VK_LSHIFT: u32 = 0xA0;
+
+    enigo
+        .key(Key::Control, enigo::Direction::Press)
+        .map_err(|e| format!("Failed to press Control key: {}", e))?;
+    enigo
+        .key(Key::Other(VK_LSHIFT), enigo::Direction::Press)
+        .map_err(|e| format!("Failed to press Left Shift key: {}", e))?;
+
+    std::thread::sleep(std::time::Duration::from_millis(20));
+
+    enigo
+        .key(Key::Other(VK_LSHIFT), enigo::Direction::Release)
+        .map_err(|e| format!("Failed to release Left Shift key: {}", e))?;
+    enigo
+        .key(Key::Control, enigo::Direction::Release)
+        .map_err(|e| format!("Failed to release Control key: {}", e))?;
+
+    Ok(())
+}
+
 /// Pastes text directly using the enigo text method.
 /// This tries to use system input methods if possible, otherwise simulates keystrokes one by one.
 pub fn paste_text_direct(enigo: &mut Enigo, text: &str) -> Result<(), String> {

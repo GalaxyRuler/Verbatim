@@ -599,10 +599,40 @@ fn prepare_adaptive_paste_text(
     final_text: &str,
     context: &crate::adaptive::types::CapturedContext,
 ) -> String {
-    crate::adaptive::text_direction::stabilize_ltr_email_paste_text(
+    crate::adaptive::text_direction::stabilize_ltr_paste_text(final_text, &context.target_kind)
+}
+
+#[cfg(target_os = "windows")]
+fn force_ltr_input_direction_before_paste(
+    app: &AppHandle,
+    final_text: &str,
+    context: &crate::adaptive::types::CapturedContext,
+) {
+    if !crate::adaptive::text_direction::should_stabilize_ltr_paste_text(
         final_text,
         &context.target_kind,
-    )
+    ) {
+        return;
+    }
+
+    let Some(enigo_state) = app.try_state::<crate::input::EnigoState>() else {
+        return;
+    };
+    let Ok(mut enigo) = enigo_state.0.lock() else {
+        warn!("Failed to lock Enigo before setting LTR reading order");
+        return;
+    };
+    if let Err(err) = crate::input::send_ltr_reading_order(&mut enigo) {
+        warn!("Failed to set LTR reading order before paste: {}", err);
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn force_ltr_input_direction_before_paste(
+    _app: &AppHandle,
+    _final_text: &str,
+    _context: &crate::adaptive::types::CapturedContext,
+) {
 }
 
 pub(crate) async fn process_adaptive_transcription_output(
@@ -752,6 +782,16 @@ mod adaptive_action_tests {
             result,
             "\u{200E}Dear James,\u{200E}\n\n\u{200E}How did you come?\u{200E}"
         );
+    }
+
+    #[test]
+    fn adaptive_notes_paste_text_gets_ltr_direction_marks() {
+        let mut context = context_with_fingerprint(Some("notepad.exe|notepad"));
+        context.target_kind = TargetKind::Notes;
+
+        let result = prepare_adaptive_paste_text("I like simple notes.", &context);
+
+        assert_eq!(result, "\u{200E}I like simple notes.\u{200E}");
     }
 
     #[test]
@@ -1266,6 +1306,11 @@ impl ShortcutAction for TranscribeAction {
                                                 language_guard_receipt(true)
                                             } else {
                                                 let paste_text = prepare_adaptive_paste_text(
+                                                    &final_text,
+                                                    &original_context,
+                                                );
+                                                force_ltr_input_direction_before_paste(
+                                                    &ah_clone,
                                                     &final_text,
                                                     &original_context,
                                                 );
