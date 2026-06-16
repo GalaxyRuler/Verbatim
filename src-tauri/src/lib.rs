@@ -33,6 +33,7 @@ use specta_typescript::{BigIntExportBehavior, Typescript};
 use tauri_specta::{collect_commands, collect_events, Builder};
 
 use env_filter::Builder as EnvFilterBuilder;
+use local_llm::download::LocalLlmManager;
 use managers::audio::AudioRecordingManager;
 use managers::history::HistoryManager;
 use managers::model::ModelManager;
@@ -162,6 +163,8 @@ fn initialize_core_logic(app_handle: &AppHandle) {
     );
     let history_manager =
         Arc::new(HistoryManager::new(app_handle).expect("Failed to initialize history manager"));
+    let local_llm_manager =
+        Arc::new(LocalLlmManager::new(app_handle).expect("Failed to initialize local LLM manager"));
 
     // Apply accelerator preferences before any model loads
     managers::transcription::apply_accelerator_settings(app_handle);
@@ -171,6 +174,7 @@ fn initialize_core_logic(app_handle: &AppHandle) {
     app_handle.manage(model_manager.clone());
     app_handle.manage(transcription_manager.clone());
     app_handle.manage(history_manager.clone());
+    app_handle.manage(local_llm_manager.clone());
     app_handle.manage(adaptive::session::ActiveDictationContext::default());
 
     // Note: Shortcuts are NOT initialized here.
@@ -421,6 +425,12 @@ pub fn run(cli_args: CliArgs) {
             commands::snippets::add_snippet_entry,
             commands::snippets::update_snippet_entry,
             commands::snippets::delete_snippet_entry,
+            commands::local_llm::list_local_llm_models,
+            commands::local_llm::download_local_llm_model,
+            commands::local_llm::cancel_local_llm_download,
+            commands::local_llm::delete_local_llm_model,
+            commands::local_llm::select_local_llm_model,
+            commands::local_llm::set_local_llm_enabled,
             commands::models::get_available_models,
             commands::models::get_model_info,
             commands::models::download_model,

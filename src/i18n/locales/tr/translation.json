@@ -463,6 +463,27 @@
         "cancel": "İptal",
         "selectToEdit": "Ayrıntılarını görüntülemek ve düzenlemek için yukarıdan bir prompt seçin.",
         "createFirst": "İlk son işlem prompt'unuzu oluşturmak için yukarıdaki “Yeni Prompt Oluştur” seçeneğine tıklayın."
+      },
+      "localModel": {
+        "groupTitle": "Local Model",
+        "title": "Managed Local Model",
+        "description": "Download and run an experimental CPU-only post-processing model on this device.",
+        "caveat": "Local cleanup is experimental. Verbatim keeps raw dictation recoverable and falls back safely if the model is slow, unavailable, or changes the language.",
+        "enable": "Enable",
+        "disable": "Disable",
+        "enableUnavailable": "Download and select a local model before enabling managed local cleanup.",
+        "loading": "Loading local models...",
+        "selected": "Selected",
+        "download": "Download",
+        "cancel": "Cancel",
+        "select": "Select",
+        "delete": "Delete",
+        "modelDetails": "{{size}} MB · {{quantization}} · {{license}}",
+        "roles": {
+          "experimental": "Experimental",
+          "fallback": "Fallback",
+          "default": "Default"
+        }
       }
     },
     "history": {

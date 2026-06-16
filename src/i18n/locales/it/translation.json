@@ -463,6 +463,27 @@
         "cancel": "Annulla",
         "selectToEdit": "Scegli un prompt qui sopra per visualizzare o modificare i dettagli.",
         "createFirst": "Clicca 'Crea un nuovo prompt' qui sopra per creare il tuo primo prompt di post-elaborazione."
+      },
+      "localModel": {
+        "groupTitle": "Local Model",
+        "title": "Managed Local Model",
+        "description": "Download and run an experimental CPU-only post-processing model on this device.",
+        "caveat": "Local cleanup is experimental. Verbatim keeps raw dictation recoverable and falls back safely if the model is slow, unavailable, or changes the language.",
+        "enable": "Enable",
+        "disable": "Disable",
+        "enableUnavailable": "Download and select a local model before enabling managed local cleanup.",
+        "loading": "Loading local models...",
+        "selected": "Selected",
+        "download": "Download",
+        "cancel": "Cancel",
+        "select": "Select",
+        "delete": "Delete",
+        "modelDetails": "{{size}} MB · {{quantization}} · {{license}}",
+        "roles": {
+          "experimental": "Experimental",
+          "fallback": "Fallback",
+          "default": "Default"
+        }
       }
     },
     "history": {

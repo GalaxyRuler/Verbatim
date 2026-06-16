@@ -45,6 +45,26 @@ const models = [
   },
 ];
 
+const localLlmModels = [
+  {
+    id: "qwen2_5-0_5b-instruct-q4_k_m",
+    label: "Qwen2.5 0.5B Instruct Q4_K_M",
+    filename: "qwen2.5-0.5b-instruct-q4_k_m.gguf",
+    url: "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf",
+    sha256: "74a4da8c9fdbcd15bd1f6d01d621410d31c6fc00986f5eb687824e7b93d7a9db",
+    size_mb: 469,
+    quantization: "Q4_K_M",
+    context_window: 32768,
+    recommended_role: "experimental",
+    supported_language_notes: "Tiny CPU fallback candidate.",
+    license_label: "Apache-2.0",
+    runtime: "llama.cpp",
+    is_downloaded: false,
+    is_downloading: false,
+    partial_size: 0,
+  },
+];
+
 const baseSettings = {
   bindings: {},
   push_to_talk: false,
@@ -83,6 +103,15 @@ const baseSettings = {
   post_process_models: {},
   post_process_prompts: [],
   post_process_selected_prompt_id: null,
+  local_llm: {
+    enabled: false,
+    selected_model_id: "",
+    runtime_mode: "managed",
+    runtime_host: "127.0.0.1",
+    runtime_port: 0,
+    unload_timeout_secs: 300,
+    max_output_tokens: 512,
+  },
   mute_while_recording: false,
   append_trailing_space: false,
   app_language: "en",
@@ -127,7 +156,7 @@ const installTauriMocks = async (
   settingsOverrides: Partial<typeof baseSettings> = {},
 ) => {
   await page.addInitScript(
-    ({ settings, profiles, models }) => {
+    ({ settings, profiles, models, localPostProcessingModels }) => {
       let appSettings = { ...settings };
       const callbacks = new Map<number, (payload?: unknown) => void>();
       const eventListeners = new Map<string, number[]>();
@@ -161,6 +190,10 @@ const installTauriMocks = async (
       ];
       let snippetEntries = [
         ...((appSettings.snippets as Array<Record<string, unknown>>) ?? []),
+      ];
+      let localModels = [
+        ...((localPostProcessingModels as Array<Record<string, unknown>>) ??
+          []),
       ];
       let nextDictionaryId = 1;
       let nextSnippetId = 1;
@@ -369,6 +402,70 @@ const installTauriMocks = async (
             case "copy_last_transcript":
             case "paste_last_transcript":
               return true;
+            case "list_local_llm_models":
+              return localModels;
+            case "download_local_llm_model": {
+              const modelId = args?.modelId as string;
+              localModels = localModels.map((model) =>
+                model.id === modelId
+                  ? {
+                      ...model,
+                      is_downloaded: true,
+                      is_downloading: false,
+                      partial_size: 0,
+                    }
+                  : model,
+              );
+              emitEvent("local-llm-model-changed", modelId);
+              return null;
+            }
+            case "cancel_local_llm_download":
+              return null;
+            case "delete_local_llm_model": {
+              const modelId = args?.modelId as string;
+              localModels = localModels.map((model) =>
+                model.id === modelId
+                  ? {
+                      ...model,
+                      is_downloaded: false,
+                      is_downloading: false,
+                      partial_size: 0,
+                    }
+                  : model,
+              );
+              if (appSettings.local_llm.selected_model_id === modelId) {
+                appSettings = {
+                  ...appSettings,
+                  local_llm: {
+                    ...appSettings.local_llm,
+                    enabled: false,
+                    selected_model_id: "",
+                  },
+                };
+              }
+              emitEvent("local-llm-model-changed", modelId);
+              return null;
+            }
+            case "select_local_llm_model": {
+              const modelId = args?.modelId as string;
+              appSettings = {
+                ...appSettings,
+                local_llm: {
+                  ...appSettings.local_llm,
+                  selected_model_id: modelId,
+                },
+              };
+              return null;
+            }
+            case "set_local_llm_enabled":
+              appSettings = {
+                ...appSettings,
+                local_llm: {
+                  ...appSettings.local_llm,
+                  enabled: Boolean(args?.enabled),
+                },
+              };
+              return null;
             case "has_any_models_available":
               return true;
             case "get_available_models":
@@ -404,6 +501,12 @@ const installTauriMocks = async (
               appSettings = {
                 ...appSettings,
                 formatting_level: args?.level as string,
+              };
+              return null;
+            case "change_post_process_enabled_setting":
+              appSettings = {
+                ...appSettings,
+                post_process_enabled: Boolean(args?.enabled),
               };
               return null;
             case "change_adaptive_profiles_enabled_setting":
@@ -468,6 +571,7 @@ const installTauriMocks = async (
       settings: { ...baseSettings, ...settingsOverrides },
       profiles: adaptiveProfiles,
       models,
+      localPostProcessingModels: localLlmModels,
     },
   );
 };
@@ -570,6 +674,55 @@ test.describe("Verbatim App", () => {
 
     await page.getByText("Snippets").click();
     await expect(page.getByRole("heading", { name: "Snippets" })).toBeVisible();
+  });
+
+  test("local post-processing model panel is hidden when post-processing is disabled", async ({
+    page,
+  }) => {
+    await installTauriMocks(page);
+    await page.goto("/");
+
+    await expect(page.getByTitle("General")).toBeVisible();
+    await expect(page.getByTitle("Post Process")).toHaveCount(0);
+    await expect(page.getByText("Managed Local Model")).toHaveCount(0);
+  });
+
+  test("local post-processing model can be downloaded selected and enabled", async ({
+    page,
+  }) => {
+    await installTauriMocks(page, { post_process_enabled: true });
+    await page.goto("/");
+
+    await expect(page.getByTitle("General")).toBeVisible();
+    await page.getByTitle("Post Process").click();
+    await page.getByRole("button", { name: "Download" }).click();
+    await page.getByRole("button", { name: "Select", exact: true }).click();
+    await page.getByRole("button", { name: "Enable" }).click();
+
+    const result = await page.evaluate(() => {
+      const win = window as typeof window & {
+        __VERBATIM_TEST_COMMANDS__: string[];
+        __VERBATIM_TEST_INVOKES__: Array<{
+          cmd: string;
+          args?: Record<string, unknown>;
+        }>;
+      };
+      return {
+        commands: win.__VERBATIM_TEST_COMMANDS__,
+        invokes: win.__VERBATIM_TEST_INVOKES__,
+      };
+    });
+
+    expect(result.commands).toContain("download_local_llm_model");
+    expect(result.commands).toContain("select_local_llm_model");
+    expect(result.commands).toContain("set_local_llm_enabled");
+    expect(result.invokes).toContainEqual(
+      expect.objectContaining({
+        cmd: "set_local_llm_enabled",
+        args: { enabled: true },
+      }),
+    );
+    await expect(page.getByRole("button", { name: "Disable" })).toBeVisible();
   });
 
   test("snippet entry can be added, searched, edited, and deleted", async ({

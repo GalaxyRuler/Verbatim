@@ -112,15 +112,16 @@ mod tests {
     }
 
     #[test]
-    fn asset_urls_resolve_to_configured_asset_host() {
+    fn catalog_includes_tiny_experimental_candidate() {
         let models = load_builtin_local_llm_models().expect("catalog parses");
-        let smol = models
-            .get("smollm2-1_7b-instruct-q4_k_m")
-            .expect("smol fallback exists");
+        let tiny = models
+            .get("qwen2_5-0_5b-instruct-q4_k_m")
+            .expect("tiny qwen fallback exists");
 
-        let url = smol.url.as_deref().expect("model has URL");
-        assert!(url.starts_with("https://verbatim-assets.galaxyruler.space/"));
-        assert!(url.ends_with("/SmolLM2-1.7B-Instruct-Q4_K_M.gguf"));
+        let url = tiny.url.as_deref().expect("model has URL");
+        assert!(url.starts_with("https://huggingface.co/"));
+        assert_eq!(tiny.size_mb, 469);
+        assert_eq!(tiny.recommended_role, "experimental");
     }
 
     #[test]
@@ -131,6 +132,27 @@ mod tests {
             assert_ne!(
                 model.recommended_role, "default",
                 "{} must pass local evaluation before becoming default",
+                model.id
+            );
+        }
+    }
+
+    #[test]
+    fn downloadable_catalog_models_have_https_urls_and_sha256() {
+        let models = load_builtin_local_llm_models().expect("catalog parses");
+
+        for model in models.values() {
+            let url = model.url.as_deref().expect("downloadable model URL");
+            assert!(
+                url.starts_with("https://"),
+                "{} must use HTTPS for downloads",
+                model.id
+            );
+            let sha256 = model.sha256.as_deref().expect("download checksum");
+            assert_eq!(sha256.len(), 64, "{} SHA-256 length", model.id);
+            assert!(
+                sha256.chars().all(|ch| ch.is_ascii_hexdigit()),
+                "{} SHA-256 must be hexadecimal",
                 model.id
             );
         }

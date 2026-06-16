@@ -186,6 +186,20 @@ fn accept_post_processed_text(
     processed_text: String,
     provider_id: &str,
 ) -> Option<String> {
+    if provider_id == crate::local_llm::runtime::VERBATIM_LOCAL_PROVIDER_ID {
+        let evaluation = crate::local_llm::evaluation::evaluate_post_processing_output(
+            transcription,
+            &processed_text,
+        );
+        if !evaluation.passed {
+            warn!(
+                "Managed local post-processing output rejected for provider '{}': {:?}. Falling back to raw transcript.",
+                provider_id, evaluation.issues
+            );
+            return None;
+        }
+    }
+
     match validate_post_processed_text(transcription, &processed_text) {
         Ok(()) => Some(processed_text),
         Err(err) => {
@@ -210,7 +224,85 @@ fn should_run_requested_post_processing(requested: bool, settings: &AppSettings)
     requested && settings.post_process_enabled
 }
 
-async fn post_process_transcription(settings: &AppSettings, transcription: &str) -> Option<String> {
+async fn post_process_with_managed_local_llm(
+    app: &AppHandle,
+    settings: &AppSettings,
+    transcription: &str,
+) -> Option<String> {
+    if !settings.local_llm.enabled {
+        return None;
+    }
+
+    let Some(manager) = app.try_state::<Arc<crate::local_llm::download::LocalLlmManager>>() else {
+        debug!("Managed local post-processing skipped because local LLM manager is unavailable");
+        return None;
+    };
+
+    let endpoint = match manager.ensure_runtime(&settings.local_llm).await {
+        Ok(endpoint) => endpoint,
+        Err(err) => {
+            warn!(
+                "Managed local post-processing skipped because runtime is unavailable: {}",
+                err
+            );
+            return None;
+        }
+    };
+
+    debug!(
+        "Starting managed local post-processing with model '{}'",
+        endpoint.model_id
+    );
+
+    match crate::llm_client::send_chat_completion_with_schema(
+        &endpoint.provider,
+        String::new(),
+        &endpoint.model,
+        transcription.to_string(),
+        Some(crate::local_llm::runtime::local_post_processing_system_prompt()),
+        None,
+        None,
+        None,
+    )
+    .await
+    {
+        Ok(Some(content)) => {
+            let content = strip_invisible_chars(&content);
+            debug!(
+                "Managed local post-processing succeeded. Output length: {} chars",
+                content.len()
+            );
+            accept_post_processed_text(
+                transcription,
+                content,
+                crate::local_llm::runtime::VERBATIM_LOCAL_PROVIDER_ID,
+            )
+        }
+        Ok(None) => {
+            warn!("Managed local post-processing returned no content");
+            None
+        }
+        Err(err) => {
+            warn!(
+                "Managed local post-processing failed: {}. Falling back to configured provider or raw transcript.",
+                err
+            );
+            None
+        }
+    }
+}
+
+async fn post_process_transcription(
+    app: &AppHandle,
+    settings: &AppSettings,
+    transcription: &str,
+) -> Option<String> {
+    if let Some(processed_text) =
+        post_process_with_managed_local_llm(app, settings, transcription).await
+    {
+        return Some(processed_text);
+    }
+
     let provider = match settings.active_post_process_provider().cloned() {
         Some(provider) => provider,
         None => {
@@ -533,7 +625,8 @@ pub(crate) async fn process_transcription_output(
     }
 
     if post_process {
-        if let Some(processed_text) = post_process_transcription(&settings, &final_text).await {
+        if let Some(processed_text) = post_process_transcription(app, &settings, &final_text).await
+        {
             if let Err(err) = validate_post_processed_text(transcription, &processed_text) {
                 warn!(
                     "Post-processing output rejected against raw transcript: {}. Falling back to deterministic formatted transcript.",
@@ -825,6 +918,39 @@ mod adaptive_action_tests {
             "Please send the file today.",
         );
         assert!(validation.is_ok());
+    }
+
+    #[test]
+    fn managed_local_post_processing_rejects_script_loss() {
+        let accepted = accept_post_processed_text(
+            "meeting at two pm بخصوص التقرير النهائي",
+            "Meeting at 2 PM regarding the final report.".to_string(),
+            crate::local_llm::runtime::VERBATIM_LOCAL_PROVIDER_ID,
+        );
+
+        assert!(accepted.is_none());
+    }
+
+    #[test]
+    fn managed_local_post_processing_rejects_excessive_expansion() {
+        let accepted = accept_post_processed_text(
+            "send the invoice",
+            "send the invoice ".repeat(80),
+            crate::local_llm::runtime::VERBATIM_LOCAL_PROVIDER_ID,
+        );
+
+        assert!(accepted.is_none());
+    }
+
+    #[test]
+    fn managed_local_post_processing_rejects_short_source_term_loss() {
+        let accepted = accept_post_processed_text(
+            "email signature",
+            "Regards,\nAbdullah".to_string(),
+            crate::local_llm::runtime::VERBATIM_LOCAL_PROVIDER_ID,
+        );
+
+        assert!(accepted.is_none());
     }
 
     #[test]

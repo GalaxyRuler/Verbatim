@@ -7,6 +7,7 @@ pub enum LocalLlmEvaluationIssue {
     LostHebrewScript,
     LostCyrillicScript,
     LostCjkScript,
+    LostSourceTerms,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -53,6 +54,10 @@ pub fn evaluate_post_processing_output(input: &str, output: &str) -> LocalLlmOut
         if contains_script(input, script) && !contains_script(output, script) {
             issues.push(lost_script_issue(script));
         }
+    }
+
+    if loses_required_source_terms(input, output) {
+        issues.push(LocalLlmEvaluationIssue::LostSourceTerms);
     }
 
     LocalLlmOutputEvaluation {
@@ -104,6 +109,88 @@ fn contains_script(text: &str, script: ScriptKind) -> bool {
     })
 }
 
+fn loses_required_source_terms(input: &str, output: &str) -> bool {
+    let input_terms = required_source_terms(input);
+    if input_terms.is_empty() || input_terms.len() > 8 {
+        return false;
+    }
+
+    let output_terms = normalized_terms(output);
+    input_terms.iter().any(|term| !output_terms.contains(term))
+}
+
+fn required_source_terms(text: &str) -> std::collections::HashSet<String> {
+    normalized_terms(text)
+        .into_iter()
+        .filter(|term| term.chars().count() >= 3 && !ignored_source_term(term))
+        .collect()
+}
+
+fn normalized_terms(text: &str) -> std::collections::HashSet<String> {
+    let mut terms = std::collections::HashSet::new();
+    let mut current = String::new();
+
+    for ch in text.chars() {
+        if ch.is_alphanumeric() {
+            current.extend(ch.to_lowercase());
+        } else if !current.is_empty() {
+            terms.insert(normalize_term(&current));
+            current.clear();
+        }
+    }
+
+    if !current.is_empty() {
+        terms.insert(normalize_term(&current));
+    }
+
+    terms
+}
+
+fn normalize_term(term: &str) -> String {
+    term.chars()
+        .filter(|ch| !is_combining_mark(*ch))
+        .map(|ch| match ch {
+            'إ' | 'أ' | 'آ' | 'ٱ' => 'ا',
+            'ى' => 'ي',
+            'ة' => 'ه',
+            other => other,
+        })
+        .collect()
+}
+
+fn is_combining_mark(ch: char) -> bool {
+    matches!(
+        ch,
+        '\u{0300}'..='\u{036F}'
+            | '\u{0610}'..='\u{061A}'
+            | '\u{064B}'..='\u{065F}'
+            | '\u{0670}'
+            | '\u{06D6}'..='\u{06DC}'
+            | '\u{06DF}'..='\u{06E4}'
+            | '\u{06E7}'..='\u{06E8}'
+            | '\u{06EA}'..='\u{06ED}'
+    )
+}
+
+fn ignored_source_term(term: &str) -> bool {
+    matches!(
+        term,
+        "and"
+            | "are"
+            | "but"
+            | "comma"
+            | "dash"
+            | "dot"
+            | "mark"
+            | "new"
+            | "paragraph"
+            | "period"
+            | "question"
+            | "the"
+            | "to"
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -142,5 +229,13 @@ mod tests {
         let evaluation = evaluate_post_processing_output("hello comma خالد", "Hello, خالد.");
 
         assert!(evaluation.passed);
+    }
+
+    #[test]
+    fn rejects_short_output_that_drops_source_terms() {
+        let evaluation = evaluate_post_processing_output("email signature", "Regards,\nAbdullah");
+
+        assert!(!evaluation.passed);
+        assert!(evaluation.has_issue(LocalLlmEvaluationIssue::LostSourceTerms));
     }
 }

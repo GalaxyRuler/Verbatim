@@ -2,6 +2,7 @@ pub mod adaptive;
 pub mod audio;
 pub mod dictionary;
 pub mod history;
+pub mod local_llm;
 pub mod models;
 pub mod snippets;
 pub mod transcript;

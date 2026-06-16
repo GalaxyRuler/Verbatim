@@ -22,6 +22,7 @@
     "test:playwright:ui": "playwright test --ui",
     "check:version": "bun scripts/check-version-consistency.ts",
     "check:translations": "bun scripts/check-translations.ts",
+    "evaluate:local-post-processing": "bun scripts/evaluate-local-post-processing.ts",
     "update:readme-release": "bun scripts/update-readme-release.ts",
     "check:readme-release": "bun scripts/update-readme-release.ts --check",
     "postinstall": "bun scripts/check-nix-deps.ts"

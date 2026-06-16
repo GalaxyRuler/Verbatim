@@ -1,4 +1,5 @@
 pub mod catalog;
+pub mod download;
 pub mod evaluation;
 pub mod runtime;
 
@@ -65,5 +66,101 @@ mod tests {
         assert!(args.windows(2).any(|pair| pair == ["--port", "18080"]));
         assert!(args.windows(2).any(|pair| pair == ["--reasoning", "off"]));
         assert!(!args.iter().any(|arg| arg == "0.0.0.0"));
+    }
+
+    #[test]
+    fn list_models_for_dir_reports_downloaded_and_partial_state() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let model_path = temp_dir.path().join("Qwen3-1.7B-Q4_K_M.gguf");
+        let partial_path = temp_dir
+            .path()
+            .join("SmolLM2-1.7B-Instruct-Q4_K_M.gguf.partial");
+
+        std::fs::write(&model_path, b"complete").expect("complete model");
+        std::fs::write(&partial_path, b"partial").expect("partial model");
+
+        let models = crate::local_llm::download::list_models_for_dir(temp_dir.path())
+            .expect("models with status");
+        let qwen = models
+            .iter()
+            .find(|model| model.id == "qwen3-1_7b-q4_k_m")
+            .expect("qwen model");
+        let smol = models
+            .iter()
+            .find(|model| model.id == "smollm2-1_7b-instruct-q4_k_m")
+            .expect("smol model");
+
+        assert!(qwen.is_downloaded);
+        assert_eq!(qwen.partial_size, 0);
+        assert!(!smol.is_downloaded);
+        assert_eq!(smol.partial_size, 7);
+    }
+
+    #[test]
+    fn checksum_mismatch_deletes_partial_local_llm_file() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let partial_path = temp_dir.path().join("model.gguf.partial");
+        std::fs::write(&partial_path, b"bad model").expect("partial");
+
+        let result = crate::local_llm::download::verify_sha256(
+            &partial_path,
+            Some("0000000000000000000000000000000000000000000000000000000000000000"),
+            "bad-model",
+        );
+
+        assert!(result.is_err());
+        assert!(!partial_path.exists());
+    }
+
+    #[test]
+    fn delete_model_from_dir_removes_complete_and_partial_files() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let model = crate::local_llm::catalog::load_builtin_local_llm_models()
+            .expect("catalog")
+            .remove("qwen3-1_7b-q4_k_m")
+            .expect("qwen");
+        let model_path = crate::local_llm::download::model_path(temp_dir.path(), &model);
+        let partial_path = crate::local_llm::download::partial_path(temp_dir.path(), &model);
+
+        std::fs::write(&model_path, b"complete").expect("complete");
+        std::fs::write(&partial_path, b"partial").expect("partial");
+
+        crate::local_llm::download::delete_model_from_dir(temp_dir.path(), &model).expect("delete");
+
+        assert!(!model_path.exists());
+        assert!(!partial_path.exists());
+    }
+
+    #[test]
+    fn selected_runtime_model_requires_downloaded_artifact() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let mut settings = LocalLlmSettings::default();
+        settings.enabled = true;
+        settings.selected_model_id = "qwen3-1_7b-q4_k_m".to_string();
+
+        let missing = crate::local_llm::download::selected_downloaded_model_for_runtime(
+            temp_dir.path(),
+            &settings,
+        )
+        .expect("selection check");
+
+        assert!(missing.is_none());
+
+        let model = crate::local_llm::catalog::load_builtin_local_llm_models()
+            .expect("catalog")
+            .remove("qwen3-1_7b-q4_k_m")
+            .expect("qwen");
+        let model_path = crate::local_llm::download::model_path(temp_dir.path(), &model);
+        std::fs::write(&model_path, b"complete").expect("complete model");
+
+        let selected = crate::local_llm::download::selected_downloaded_model_for_runtime(
+            temp_dir.path(),
+            &settings,
+        )
+        .expect("selection check")
+        .expect("downloaded model");
+
+        assert_eq!(selected.0.id, "qwen3-1_7b-q4_k_m");
+        assert_eq!(selected.1, model_path);
     }
 }

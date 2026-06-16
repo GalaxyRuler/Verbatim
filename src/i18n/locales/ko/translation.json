@@ -463,6 +463,27 @@
         "cancel": "취소",
         "selectToEdit": "세부 정보를 보고 편집하려면 위에서 프롬프트를 선택하세요.",
         "createFirst": "첫 번째 후처리 프롬프트를 만들려면 위의 '새 프롬프트 만들기'를 클릭하세요."
+      },
+      "localModel": {
+        "groupTitle": "Local Model",
+        "title": "Managed Local Model",
+        "description": "Download and run an experimental CPU-only post-processing model on this device.",
+        "caveat": "Local cleanup is experimental. Verbatim keeps raw dictation recoverable and falls back safely if the model is slow, unavailable, or changes the language.",
+        "enable": "Enable",
+        "disable": "Disable",
+        "enableUnavailable": "Download and select a local model before enabling managed local cleanup.",
+        "loading": "Loading local models...",
+        "selected": "Selected",
+        "download": "Download",
+        "cancel": "Cancel",
+        "select": "Select",
+        "delete": "Delete",
+        "modelDetails": "{{size}} MB · {{quantization}} · {{license}}",
+        "roles": {
+          "experimental": "Experimental",
+          "fallback": "Fallback",
+          "default": "Default"
+        }
       }
     },
     "history": {
