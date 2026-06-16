@@ -4,6 +4,8 @@ use serde::{Deserialize, Deserializer, Serialize};
 use specta::Type;
 use std::collections::HashMap;
 use std::fmt;
+use std::fs;
+use std::path::{Path, PathBuf};
 use tauri::AppHandle;
 use tauri_plugin_store::StoreExt;
 
@@ -1264,6 +1266,104 @@ fn existing_settings_log_message(settings: &AppSettings) -> String {
     )
 }
 
+fn recover_settings_from_unparseable_value(settings_value: &serde_json::Value) -> AppSettings {
+    let default_settings = get_default_settings();
+    let default_value = match serde_json::to_value(&default_settings) {
+        Ok(value) => value,
+        Err(_) => return default_settings,
+    };
+    let Some(source) = settings_value.as_object() else {
+        return default_settings;
+    };
+
+    let mut merged_value = default_value.clone();
+    let Some(merged_object) = merged_value.as_object_mut() else {
+        return default_settings;
+    };
+
+    for (key, value) in source {
+        let mut candidate = default_value.clone();
+        if let Some(candidate_object) = candidate.as_object_mut() {
+            candidate_object.insert(key.clone(), value.clone());
+        }
+
+        if serde_json::from_value::<AppSettings>(candidate).is_ok() {
+            merged_object.insert(key.clone(), value.clone());
+        }
+    }
+
+    serde_json::from_value::<AppSettings>(merged_value).unwrap_or(default_settings)
+}
+
+fn settings_store_file_path(app: &AppHandle) -> Result<PathBuf, String> {
+    let store_path = crate::portable::store_path(SETTINGS_STORE_PATH);
+    if store_path.is_absolute() {
+        return Ok(store_path);
+    }
+
+    crate::portable::resolve_app_data(app, SETTINGS_STORE_PATH)
+        .map_err(|err| format!("resolve settings store path: {err}"))
+}
+
+fn settings_backup_directory(app: &AppHandle) -> Result<PathBuf, String> {
+    let settings_path = settings_store_file_path(app)?;
+    settings_path
+        .parent()
+        .map(Path::to_path_buf)
+        .ok_or_else(|| "settings store path has no parent directory".to_string())
+}
+
+fn backup_settings_value_to_dir(
+    backup_dir: &Path,
+    settings_value: &serde_json::Value,
+) -> Result<PathBuf, String> {
+    fs::create_dir_all(backup_dir)
+        .map_err(|err| format!("create settings backup directory: {err}"))?;
+    let timestamp = chrono::Utc::now().format("%Y%m%d%H%M%S%3f");
+    let backup_path = backup_dir.join(format!("settings_store.parse-error.{timestamp}.json"));
+    let contents = serde_json::to_string_pretty(settings_value)
+        .map_err(|err| format!("serialize settings backup: {err}"))?;
+    fs::write(&backup_path, contents).map_err(|err| format!("write settings backup: {err}"))?;
+    Ok(backup_path)
+}
+
+fn backup_unparseable_settings(app: &AppHandle, settings_value: &serde_json::Value) {
+    match settings_backup_directory(app)
+        .and_then(|dir| backup_settings_value_to_dir(&dir, settings_value))
+    {
+        Ok(path) => warn!(
+            "Backed up unparseable settings before recovery to {}",
+            path.display()
+        ),
+        Err(err) => warn!("Failed to back up unparseable settings: {}", err),
+    }
+}
+
+fn recover_unparseable_settings(
+    app: &AppHandle,
+    settings_value: &serde_json::Value,
+    error: &serde_json::Error,
+) -> AppSettings {
+    warn!("Failed to parse settings: {}", error);
+    backup_unparseable_settings(app, settings_value);
+    recover_settings_from_unparseable_value(settings_value)
+}
+
+fn ensure_binding_defaults(settings: &mut AppSettings) -> bool {
+    let default_settings = get_default_settings();
+    let mut changed = false;
+
+    for (key, value) in default_settings.bindings {
+        if !settings.bindings.contains_key(&key) {
+            debug!("Adding missing binding: {}", key);
+            settings.bindings.insert(key, value);
+            changed = true;
+        }
+    }
+
+    changed
+}
+
 pub fn load_or_create_app_settings(app: &AppHandle) -> AppSettings {
     // Initialize store
     let store = app
@@ -1272,20 +1372,10 @@ pub fn load_or_create_app_settings(app: &AppHandle) -> AppSettings {
 
     let mut settings = if let Some(settings_value) = store.get("settings") {
         // Parse the entire settings object
-        match serde_json::from_value::<AppSettings>(settings_value) {
+        match serde_json::from_value::<AppSettings>(settings_value.clone()) {
             Ok(mut settings) => {
                 debug!("{}", existing_settings_log_message(&settings));
-                let default_settings = get_default_settings();
-                let mut updated = false;
-
-                // Merge default bindings into existing settings
-                for (key, value) in default_settings.bindings {
-                    if !settings.bindings.contains_key(&key) {
-                        debug!("Adding missing binding: {}", key);
-                        settings.bindings.insert(key, value);
-                        updated = true;
-                    }
-                }
+                let updated = ensure_binding_defaults(&mut settings);
 
                 if updated {
                     debug!("Settings updated with new bindings");
@@ -1295,11 +1385,12 @@ pub fn load_or_create_app_settings(app: &AppHandle) -> AppSettings {
                 settings
             }
             Err(e) => {
-                warn!("Failed to parse settings: {}", e);
-                // Fall back to default settings if parsing fails
-                let default_settings = get_default_settings();
-                store.set("settings", serde_json::to_value(&default_settings).unwrap());
-                default_settings
+                let recovered_settings = recover_unparseable_settings(app, &settings_value, &e);
+                store.set(
+                    "settings",
+                    serde_json::to_value(&recovered_settings).unwrap(),
+                );
+                recovered_settings
             }
         }
     } else {
@@ -1308,12 +1399,14 @@ pub fn load_or_create_app_settings(app: &AppHandle) -> AppSettings {
         default_settings
     };
 
+    let binding_changed = ensure_binding_defaults(&mut settings);
     let post_process_changed = ensure_post_process_defaults(&mut settings);
     let adaptive_changed = ensure_adaptive_defaults(&mut settings);
     let translation_changed = ensure_translation_defaults(&mut settings);
     let dictionary_changed = ensure_dictionary_defaults(&mut settings);
     let snippet_changed = ensure_snippet_defaults(&mut settings);
-    if post_process_changed
+    if binding_changed
+        || post_process_changed
         || adaptive_changed
         || translation_changed
         || dictionary_changed
@@ -1331,10 +1424,13 @@ pub fn get_settings(app: &AppHandle) -> AppSettings {
         .expect("Failed to initialize store");
 
     let mut settings = if let Some(settings_value) = store.get("settings") {
-        serde_json::from_value::<AppSettings>(settings_value).unwrap_or_else(|_| {
-            let default_settings = get_default_settings();
-            store.set("settings", serde_json::to_value(&default_settings).unwrap());
-            default_settings
+        serde_json::from_value::<AppSettings>(settings_value.clone()).unwrap_or_else(|err| {
+            let recovered_settings = recover_unparseable_settings(app, &settings_value, &err);
+            store.set(
+                "settings",
+                serde_json::to_value(&recovered_settings).unwrap(),
+            );
+            recovered_settings
         })
     } else {
         let default_settings = get_default_settings();
@@ -1342,12 +1438,14 @@ pub fn get_settings(app: &AppHandle) -> AppSettings {
         default_settings
     };
 
+    let binding_changed = ensure_binding_defaults(&mut settings);
     let post_process_changed = ensure_post_process_defaults(&mut settings);
     let adaptive_changed = ensure_adaptive_defaults(&mut settings);
     let translation_changed = ensure_translation_defaults(&mut settings);
     let dictionary_changed = ensure_dictionary_defaults(&mut settings);
     let snippet_changed = ensure_snippet_defaults(&mut settings);
-    if post_process_changed
+    if binding_changed
+        || post_process_changed
         || adaptive_changed
         || translation_changed
         || dictionary_changed
@@ -1461,6 +1559,81 @@ mod tests {
 
         assert!(message.contains("Found existing settings"));
         assert!(!message.contains("ConfidentialWord"));
+    }
+
+    #[test]
+    fn parse_failure_recovery_preserves_valid_user_fields() {
+        let mut settings_value = serde_json::to_value(get_default_settings()).unwrap();
+        let object = settings_value.as_object_mut().unwrap();
+        object.insert("log_level".to_string(), serde_json::json!("verbose"));
+        object.insert("custom_words".to_string(), serde_json::json!(["Robyn"]));
+        object.insert(
+            "dictionary_entries".to_string(),
+            serde_json::json!([
+                {
+                    "id": "dict_1_robyn",
+                    "phrase": "Robyn",
+                    "source": "manual",
+                    "priority": "normal",
+                    "created_at_ms": 1,
+                    "updated_at_ms": 1
+                }
+            ]),
+        );
+        object.insert(
+            "snippets".to_string(),
+            serde_json::json!([
+                {
+                    "id": "snippet_1_email",
+                    "trigger": "email signature",
+                    "content": "Regards,\nAbdullah",
+                    "created_at_ms": 1,
+                    "updated_at_ms": 1
+                }
+            ]),
+        );
+        object.insert(
+            "post_process_api_keys".to_string(),
+            serde_json::json!({"openai": "dummy-api-key"}),
+        );
+
+        assert!(serde_json::from_value::<AppSettings>(settings_value.clone()).is_err());
+
+        let recovered = recover_settings_from_unparseable_value(&settings_value);
+
+        assert_eq!(recovered.log_level, LogLevel::Info);
+        assert_eq!(recovered.custom_words, vec!["Robyn"]);
+        assert_eq!(recovered.dictionary_entries[0].phrase, "Robyn");
+        assert_eq!(recovered.snippets[0].trigger, "email signature");
+        assert_eq!(
+            recovered
+                .post_process_api_keys
+                .get("openai")
+                .map(String::as_str),
+            Some("dummy-api-key")
+        );
+    }
+
+    #[test]
+    fn settings_parse_failure_backup_writes_recoverable_json() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let settings_value = serde_json::json!({
+            "log_level": "verbose",
+            "custom_words": ["Robyn"]
+        });
+
+        let backup_path =
+            backup_settings_value_to_dir(temp_dir.path(), &settings_value).expect("backup path");
+
+        assert!(backup_path.exists());
+        assert!(backup_path
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .starts_with("settings_store.parse-error."));
+        let restored: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(backup_path).unwrap()).unwrap();
+        assert_eq!(restored, settings_value);
     }
 
     #[test]

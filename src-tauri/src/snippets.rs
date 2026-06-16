@@ -6,6 +6,11 @@ use crate::settings::AppSettings;
 
 pub const MAX_SNIPPET_TRIGGER_CHARS: usize = 120;
 pub const MAX_SNIPPET_CONTENT_CHARS: usize = 12_000;
+const MIN_SNIPPET_TRIGGER_ALNUM_CHARS: usize = 2;
+const RESERVED_SINGLE_WORD_TRIGGERS: &[&str] = &[
+    "a", "an", "and", "as", "at", "be", "by", "for", "from", "i", "if", "in", "is", "it", "of",
+    "on", "or", "so", "the", "to", "we", "you",
+];
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Type)]
 pub struct SnippetEntry {
@@ -22,6 +27,9 @@ pub fn sanitize_snippet_trigger(raw: &str) -> Option<String> {
     let trigger = normalize_trigger(raw);
     if trigger.is_empty()
         || trigger.chars().count() > MAX_SNIPPET_TRIGGER_CHARS
+        || trigger.chars().filter(|ch| ch.is_alphanumeric()).count()
+            < MIN_SNIPPET_TRIGGER_ALNUM_CHARS
+        || is_reserved_single_word_trigger(&trigger)
         || !trigger.chars().any(char::is_alphanumeric)
         || trigger.chars().any(|ch| ch.is_control())
     {
@@ -267,6 +275,11 @@ fn find_trigger_spans(text: &str, trigger: &str) -> Vec<(usize, usize)> {
         return Vec::new();
     }
 
+    let trigger_words = trigger.split_whitespace().collect::<Vec<_>>();
+    if trigger_words.len() > 1 {
+        return find_multi_word_trigger_spans(text, &trigger_words);
+    }
+
     text.char_indices()
         .filter_map(|(start, _)| {
             let end = start.checked_add(trigger.len())?;
@@ -282,6 +295,53 @@ fn find_trigger_spans(text: &str, trigger: &str) -> Vec<(usize, usize)> {
             }
         })
         .collect()
+}
+
+fn find_multi_word_trigger_spans(text: &str, trigger_words: &[&str]) -> Vec<(usize, usize)> {
+    text.char_indices()
+        .filter_map(|(start, _)| {
+            let mut cursor = word_match_end_at(text, start, trigger_words[0])?;
+
+            for word in trigger_words.iter().skip(1) {
+                cursor = consume_snippet_word_separator(text, cursor)?;
+                cursor = word_match_end_at(text, cursor, word)?;
+            }
+
+            if has_trigger_boundaries(text, start, cursor) {
+                Some((start, cursor))
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn word_match_end_at(text: &str, start: usize, word: &str) -> Option<usize> {
+    let end = start.checked_add(word.len())?;
+    if end > text.len() || !text.is_char_boundary(end) {
+        return None;
+    }
+
+    let candidate = &text[start..end];
+    trigger_matches(candidate, word).then_some(end)
+}
+
+fn consume_snippet_word_separator(text: &str, start: usize) -> Option<usize> {
+    let mut cursor = start;
+    while cursor < text.len() {
+        let ch = text[cursor..].chars().next()?;
+        if ch.is_whitespace() || is_snippet_phrase_separator(ch) {
+            cursor += ch.len_utf8();
+        } else {
+            break;
+        }
+    }
+
+    (cursor > start).then_some(cursor)
+}
+
+fn is_snippet_phrase_separator(ch: char) -> bool {
+    matches!(ch, ',' | '،' | ';' | '؛' | ':' | '-' | '–' | '—')
 }
 
 fn trigger_matches(candidate: &str, trigger: &str) -> bool {
@@ -305,6 +365,15 @@ fn normalize_trigger_key(raw: &str) -> String {
         .to_lowercase()
 }
 
+fn is_reserved_single_word_trigger(trigger: &str) -> bool {
+    if trigger.split_whitespace().count() != 1 {
+        return false;
+    }
+
+    let lower = trigger.to_lowercase();
+    RESERVED_SINGLE_WORD_TRIGGERS.contains(&lower.as_str())
+}
+
 fn has_trigger(entries: &[SnippetEntry], trigger: &str, except_id: Option<&str>) -> bool {
     let key = normalize_trigger_key(trigger);
     entries.iter().any(|entry| {
@@ -315,8 +384,8 @@ fn has_trigger(entries: &[SnippetEntry], trigger: &str, except_id: Option<&str>)
 #[cfg(test)]
 mod tests {
     use super::{
-        delete_snippet_entries, expand_snippets, sync_snippets, update_snippet_entry,
-        upsert_snippet_entry, SnippetEntry,
+        delete_snippet_entries, expand_snippets, sanitize_snippet_trigger, sync_snippets,
+        update_snippet_entry, upsert_snippet_entry, SnippetEntry,
     };
     use crate::settings::get_default_settings;
 
@@ -341,12 +410,48 @@ mod tests {
     }
 
     #[test]
+    fn expand_snippets_matches_multi_word_trigger_across_stt_punctuation() {
+        let entries = vec![entry("email", "email signature", "Regards,\nAbdullah")];
+
+        assert_eq!(
+            expand_snippets("please use email, signature today", &entries),
+            "please use Regards,\nAbdullah today"
+        );
+        assert_eq!(
+            expand_snippets("please use email - signature today", &entries),
+            "please use Regards,\nAbdullah today"
+        );
+    }
+
+    #[test]
     fn expand_snippets_does_not_replace_inside_words() {
         let entries = vec![entry("sig", "sig", "SIGNATURE")];
 
         assert_eq!(
             expand_snippets("signature sig assign", &entries),
             "signature SIGNATURE assign"
+        );
+    }
+
+    #[test]
+    fn expand_snippets_does_not_cross_sentence_punctuation() {
+        let entries = vec![entry("email", "email signature", "Regards,\nAbdullah")];
+
+        assert_eq!(
+            expand_snippets("send email. signature follows", &entries),
+            "send email. signature follows"
+        );
+    }
+
+    #[test]
+    fn sanitize_snippet_trigger_rejects_too_short_or_reserved_words() {
+        assert_eq!(sanitize_snippet_trigger("a"), None);
+        assert_eq!(sanitize_snippet_trigger("I"), None);
+        assert_eq!(sanitize_snippet_trigger("the"), None);
+        assert_eq!(sanitize_snippet_trigger("AI"), Some("AI".to_string()));
+        assert_eq!(
+            sanitize_snippet_trigger("email signature"),
+            Some("email signature".to_string())
         );
     }
 

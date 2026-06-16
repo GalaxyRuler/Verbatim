@@ -1295,6 +1295,10 @@ impl ShortcutAction for TranscribeAction {
                                                 "Text pasted successfully in {:?}",
                                                 paste_time.elapsed()
                                             );
+                                            utils::emit_overlay_state_changed(
+                                                &ah_clone,
+                                                "inserted",
+                                            );
                                         } else {
                                             error!(
                                                 "Failed to paste transcription: {:?}",
@@ -1363,10 +1367,15 @@ impl ShortcutAction for TranscribeAction {
                                         ) {
                                             match utils::paste(final_text.clone(), ah_clone.clone())
                                             {
-                                                Ok(()) => debug!(
-                                                    "Text pasted successfully in {:?}",
-                                                    paste_time.elapsed()
-                                                ),
+                                                Ok(()) => {
+                                                    debug!(
+                                                        "Text pasted successfully in {:?}",
+                                                        paste_time.elapsed()
+                                                    );
+                                                    utils::emit_overlay_state_changed(
+                                                        &ah_clone, "inserted",
+                                                    );
+                                                }
                                                 Err(e) => {
                                                     error!("Failed to paste transcription: {}", e);
                                                     copy_text_to_clipboard(

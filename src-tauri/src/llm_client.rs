@@ -154,10 +154,7 @@ async fn read_json_response(
         .unwrap_or_else(|_| "Failed to read response".to_string());
 
     if !status.is_success() {
-        return Err(format!(
-            "{} failed with status {}: {}",
-            failure_context, status, text
-        ));
+        return Err(format!("{} failed with status {}", failure_context, status));
     }
 
     serde_json::from_str(&text)
@@ -378,6 +375,49 @@ mod tests {
         stream
             .write_all(response.as_bytes())
             .expect("write response");
+    }
+
+    fn respond_json_status(stream: &mut std::net::TcpStream, status: &str, body: &str) {
+        let response = format!(
+            "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        stream
+            .write_all(response.as_bytes())
+            .expect("write response");
+    }
+
+    #[tokio::test]
+    async fn chat_completion_http_failure_does_not_return_response_body() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
+        let addr = listener.local_addr().expect("local addr");
+
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("request");
+            assert_eq!(read_request_path(&mut stream), "/v1/chat/completions");
+            respond_json_status(
+                &mut stream,
+                "400 Bad Request",
+                r#"{"error":{"message":"Pineapple Lighthouse 17.B3 transcript echoed"}}"#,
+            );
+        });
+
+        let error = send_chat_completion(
+            &provider(format!("http://{}/v1", addr)),
+            String::new(),
+            "test-model",
+            "Pineapple Lighthouse 17.B3".to_string(),
+            None,
+            None,
+        )
+        .await
+        .expect_err("http failure should be returned");
+
+        assert!(error.contains("status 400 Bad Request"));
+        assert!(!error.contains("Pineapple"));
+        assert!(!error.contains("transcript echoed"));
+        server.join().expect("server thread");
     }
 
     #[tokio::test]

@@ -12,6 +12,86 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/). Version
 
 ---
 
+## [0.8.8] — 2026
+
+### Added
+
+- Local snippets for expanding saved phrases into longer reusable text.
+- Local post-processing provider presets for LM Studio, Ollama, and vLLM.
+- Side-by-side development build support for local testing without replacing the published app.
+
+### Fixed
+
+- Transcript privacy hardening: debug logs now record transcript length, not transcript content.
+- Settings debug output now reports counts and redacts provider API keys.
+- Invalid settings recovery now backs up the raw settings object and preserves valid user fields when possible.
+- Clipboard restoration now preserves bitmap-only image payloads on Windows where possible and reports restore failures.
+- Snippet triggers now tolerate common STT separators inside multi-word triggers.
+- Too-short or high-risk stopword snippet triggers are rejected.
+
+---
+
+## [0.8.7] — 2026
+
+### Added
+
+- Mic diagnostics for silence, dead input, and short no-speech captures.
+- Pill states for recording, silence, transcription, processing, paste failure, copied recovery, dictionary learning, and microphone failure.
+
+### Fixed
+
+- Short silent shortcut taps no longer paste hallucinated text.
+- No-speech and microphone issue pill text now uses high-contrast foreground color.
+- Selected-microphone availability issues are surfaced instead of silently falling back.
+
+---
+
+## [0.8.6] — 2026
+
+### Added
+
+- Docked pill mode with compact idle state and expanded action state.
+- Pill language chip and language picker workflow.
+- Recovery actions for copying and pasting the last transcript.
+
+### Fixed
+
+- Docked pill hitbox now collapses to the visible idle pill size.
+- Paste-last-transcript recovery now works from the pill.
+- Verbatim waveform/dots mark is used consistently in the pill.
+
+---
+
+## [0.8.5] — 2026
+
+### Added
+
+- Conservative language guard for locked-language contradictions.
+- Paste failure recovery that keeps the final transcript recoverable on the clipboard.
+- Remote LLM egress guard so remote post-processing requires a configured API key before transcript text leaves the device.
+
+### Fixed
+
+- Translation is treated as opt-in behavior instead of an accidental post-processing side effect.
+- Language guard is bypassed only for explicit translation requests supported by the selected model.
+
+---
+
+## [0.8.4] — 2026
+
+### Added
+
+- Verbatim rebrand across app identifiers, package names, binary names, docs, workflows, and release surfaces.
+- Verbatim asset CDN paths for bundled and downloadable model resources.
+- User-friendly release links and updater metadata for direct app updates.
+
+### Changed
+
+- Project is detached from the original upstream fork path for independent Verbatim development.
+- GitHub Actions release matrix focuses on Windows, macOS Apple Silicon, and Ubuntu.
+
+---
+
 ## [0.8.3] — 2025
 
 ### Added
@@ -87,6 +167,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/). Version
 
 This project is a fork of [Handy](https://github.com/cjpais/Handy) by [CJ Pais](https://github.com/cjpais). For the complete upstream changelog see the [upstream releases page](https://github.com/cjpais/Handy/releases).
 
-[Unreleased]: https://github.com/GalaxyRuler/Verbatim/compare/v0.8.3...HEAD
-[0.8.3]: https://github.com/cjpais/Handy/releases/tag/v0.8.3
-[0.8.2]: https://github.com/cjpais/Handy/releases/tag/v0.8.2
+[Unreleased]: https://github.com/GalaxyRuler/Verbatim/compare/v0.8.8...HEAD
+[0.8.8]: https://github.com/GalaxyRuler/Verbatim/compare/v0.8.7...v0.8.8
+[0.8.7]: https://github.com/GalaxyRuler/Verbatim/compare/v0.8.6...v0.8.7
+[0.8.6]: https://github.com/GalaxyRuler/Verbatim/compare/v0.8.5...v0.8.6
+[0.8.5]: https://github.com/GalaxyRuler/Verbatim/compare/v0.8.4...v0.8.5
+[0.8.4]: https://github.com/GalaxyRuler/Verbatim/compare/v0.8.3...v0.8.4
+[0.8.3]: https://github.com/GalaxyRuler/Verbatim/releases/tag/v0.8.3
+[0.8.2]: https://github.com/GalaxyRuler/Verbatim/releases/tag/v0.8.2

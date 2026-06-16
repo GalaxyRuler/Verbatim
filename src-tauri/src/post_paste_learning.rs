@@ -175,13 +175,14 @@ fn learn_from_text_snapshots(
         .collect::<Vec<_>>();
     let _ = app.emit("dictionary-entries-learned", learned_entries.clone());
     let _ = app.emit("custom-words-learned", learned_words.clone());
-    info!(
-        "Auto-added {} corrected custom word(s): {}",
-        learned_words.len(),
-        learned_words.join(", ")
-    );
+    info!("{}", auto_learn_log_message(learned_words.len()));
 
     Ok(())
+}
+
+fn auto_learn_log_message(count: usize) -> String {
+    let noun = if count == 1 { "entry" } else { "entries" };
+    format!("Auto-added {count} corrected dictionary {noun}")
 }
 
 pub fn extract_corrected_inserted_text(
@@ -579,7 +580,7 @@ mod windows_focused_text {
 #[cfg(test)]
 mod tests {
     use super::{
-        extract_corrected_inserted_text, focused_text_snapshot_from_parts,
+        auto_learn_log_message, extract_corrected_inserted_text, focused_text_snapshot_from_parts,
         POST_PASTE_LEARNING_WINDOW,
     };
     use std::time::Duration;
@@ -673,6 +674,14 @@ mod tests {
     #[test]
     fn correction_window_allows_human_edit_latency() {
         assert!(POST_PASTE_LEARNING_WINDOW >= Duration::from_secs(6));
+    }
+
+    #[test]
+    fn auto_learn_log_message_does_not_include_learned_phrase() {
+        let message = auto_learn_log_message(1);
+
+        assert!(message.contains("Auto-added 1"));
+        assert!(!message.contains("Robyn"));
     }
 
     #[cfg(any(target_os = "macos", target_os = "linux"))]
