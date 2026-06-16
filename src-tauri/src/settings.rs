@@ -619,7 +619,7 @@ fn default_debug_mode() -> bool {
 }
 
 fn default_log_level() -> LogLevel {
-    LogLevel::Debug
+    LogLevel::Info
 }
 
 fn default_word_correction_threshold() -> f64 {
@@ -1253,6 +1253,17 @@ impl AppSettings {
     }
 }
 
+fn existing_settings_log_message(settings: &AppSettings) -> String {
+    format!(
+        "Found existing settings ({} bindings, {} dictionary entries, {} custom words, {} snippets, {} post-process providers)",
+        settings.bindings.len(),
+        settings.dictionary_entries.len(),
+        settings.custom_words.len(),
+        settings.snippets.len(),
+        settings.post_process_providers.len()
+    )
+}
+
 pub fn load_or_create_app_settings(app: &AppHandle) -> AppSettings {
     // Initialize store
     let store = app
@@ -1263,7 +1274,7 @@ pub fn load_or_create_app_settings(app: &AppHandle) -> AppSettings {
         // Parse the entire settings object
         match serde_json::from_value::<AppSettings>(settings_value) {
             Ok(mut settings) => {
-                debug!("Found existing settings: {:?}", settings);
+                debug!("{}", existing_settings_log_message(&settings));
                 let default_settings = get_default_settings();
                 let mut updated = false;
 
@@ -1433,6 +1444,23 @@ mod tests {
     fn default_settings_disable_post_processing() {
         let settings = get_default_settings();
         assert!(!settings.post_process_enabled);
+    }
+
+    #[test]
+    fn default_settings_use_info_log_level() {
+        let settings = get_default_settings();
+        assert_eq!(settings.log_level, LogLevel::Info);
+    }
+
+    #[test]
+    fn existing_settings_log_message_does_not_include_user_content() {
+        let mut settings = get_default_settings();
+        settings.custom_words.push("ConfidentialWord".to_string());
+
+        let message = existing_settings_log_message(&settings);
+
+        assert!(message.contains("Found existing settings"));
+        assert!(!message.contains("ConfidentialWord"));
     }
 
     #[test]

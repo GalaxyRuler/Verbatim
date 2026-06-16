@@ -111,6 +111,17 @@ fn recording_has_usable_speech(result: &RecordingStopResult) -> bool {
     rms >= MIN_UNOBSERVED_SPEECH_RMS && peak >= MIN_UNOBSERVED_SPEECH_PEAK
 }
 
+fn transcription_completed_log_message(
+    elapsed: std::time::Duration,
+    transcription: &str,
+) -> String {
+    format!(
+        "Transcription completed in {}ms ({} chars)",
+        elapsed.as_millis(),
+        transcription.chars().count()
+    )
+}
+
 fn language_guard_receipt(target_verified: bool) -> crate::adaptive::types::InsertionReceipt {
     crate::adaptive::types::InsertionReceipt {
         attempted: false,
@@ -771,6 +782,18 @@ mod adaptive_action_tests {
     }
 
     #[test]
+    fn transcription_completed_log_message_does_not_include_transcript_text() {
+        let transcript = "Confidential dictated sentence.";
+        let message =
+            transcription_completed_log_message(std::time::Duration::from_millis(123), transcript);
+
+        assert!(message.contains("123ms"));
+        assert!(message.contains("31 chars"));
+        assert!(!message.contains(transcript));
+        assert!(!message.contains("Confidential"));
+    }
+
+    #[test]
     fn local_post_process_providers_do_not_require_api_key() {
         assert!(can_egress_post_process_text(
             "http://localhost:11434/v1",
@@ -1127,9 +1150,11 @@ impl ShortcutAction for TranscribeAction {
                     match transcription_result {
                         Ok(transcription) => {
                             debug!(
-                                "Transcription completed in {:?}: '{}'",
-                                transcription_time.elapsed(),
-                                transcription
+                                "{}",
+                                transcription_completed_log_message(
+                                    transcription_time.elapsed(),
+                                    &transcription
+                                )
                             );
 
                             let settings = get_settings(&ah);

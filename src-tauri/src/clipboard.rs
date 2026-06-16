@@ -87,6 +87,144 @@ struct ClipboardFormatData {
 }
 
 #[cfg(target_os = "windows")]
+trait NativeClipboardRestoreOps {
+    type Handle: Copy;
+
+    fn allocate_format(&mut self, format: &ClipboardFormatData) -> Result<Self::Handle, String>;
+    fn open_and_empty(&mut self) -> Result<(), String>;
+    fn set_format(&mut self, format: u32, handle: Self::Handle) -> Result<(), String>;
+    fn free_handle(&mut self, handle: Self::Handle);
+}
+
+#[cfg(target_os = "windows")]
+fn restore_native_clipboard_snapshot_with_ops<O: NativeClipboardRestoreOps>(
+    formats: &[ClipboardFormatData],
+    ops: &mut O,
+) -> Result<(), String> {
+    if formats.is_empty() {
+        return Err("native clipboard snapshot is empty".to_string());
+    }
+
+    let mut prepared = Vec::with_capacity(formats.len());
+    for format in formats {
+        match ops.allocate_format(format) {
+            Ok(handle) => prepared.push((format.format, handle)),
+            Err(err) => {
+                for (_, handle) in prepared {
+                    ops.free_handle(handle);
+                }
+                return Err(format!(
+                    "prepare clipboard format {} before clearing clipboard: {}",
+                    format.format, err
+                ));
+            }
+        }
+    }
+
+    if let Err(err) = ops.open_and_empty() {
+        for (_, handle) in prepared {
+            ops.free_handle(handle);
+        }
+        return Err(err);
+    }
+
+    let format_count = prepared.len();
+    let mut failures = Vec::new();
+    for (format, handle) in prepared {
+        if let Err(err) = ops.set_format(format, handle) {
+            ops.free_handle(handle);
+            failures.push(format!("format {format}: {err}"));
+        }
+    }
+
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "set clipboard data failed for {} of {} formats: {}",
+            failures.len(),
+            format_count,
+            failures.join("; ")
+        ))
+    }
+}
+
+#[cfg(target_os = "windows")]
+struct WinClipboardRestoreOps {
+    opened: bool,
+}
+
+#[cfg(target_os = "windows")]
+impl Drop for WinClipboardRestoreOps {
+    fn drop(&mut self) {
+        if self.opened {
+            unsafe {
+                let _ = windows::Win32::System::DataExchange::CloseClipboard();
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+impl NativeClipboardRestoreOps for WinClipboardRestoreOps {
+    type Handle = windows::Win32::Foundation::HGLOBAL;
+
+    fn allocate_format(&mut self, format: &ClipboardFormatData) -> Result<Self::Handle, String> {
+        use windows::Win32::Foundation::GlobalFree;
+        use windows::Win32::System::Memory::{
+            GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE,
+        };
+
+        unsafe {
+            let hglobal = GlobalAlloc(GMEM_MOVEABLE, format.bytes.len())
+                .map_err(|err| format!("allocate clipboard memory: {}", err))?;
+            let locked = GlobalLock(hglobal);
+            if locked.is_null() {
+                let _ = GlobalFree(Some(hglobal));
+                return Err("lock clipboard memory".to_string());
+            }
+
+            std::ptr::copy_nonoverlapping(
+                format.bytes.as_ptr(),
+                locked.cast::<u8>(),
+                format.bytes.len(),
+            );
+            let _ = GlobalUnlock(hglobal);
+            Ok(hglobal)
+        }
+    }
+
+    fn open_and_empty(&mut self) -> Result<(), String> {
+        use windows::Win32::System::DataExchange::{EmptyClipboard, OpenClipboard};
+
+        unsafe {
+            OpenClipboard(None).map_err(|err| format!("open clipboard: {}", err))?;
+            self.opened = true;
+            EmptyClipboard().map_err(|err| format!("empty clipboard: {}", err))
+        }
+    }
+
+    fn set_format(&mut self, format: u32, handle: Self::Handle) -> Result<(), String> {
+        use windows::Win32::Foundation::HANDLE;
+        use windows::Win32::System::DataExchange::SetClipboardData;
+
+        unsafe {
+            SetClipboardData(format, Some(HANDLE(handle.0)))
+                .map(|_| ())
+                .map_err(|err| format!("set clipboard data: {}", err))
+        }
+    }
+
+    fn free_handle(&mut self, handle: Self::Handle) {
+        use windows::Win32::Foundation::GlobalFree;
+
+        unsafe {
+            let _ = GlobalFree(Some(handle));
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
 impl NativeClipboardSnapshot {
     fn capture() -> Result<Self, String> {
         use windows::Win32::Foundation::HGLOBAL;
@@ -146,57 +284,8 @@ impl NativeClipboardSnapshot {
     }
 
     fn restore(&self) -> Result<(), String> {
-        use windows::Win32::Foundation::{GlobalFree, HANDLE};
-        use windows::Win32::System::DataExchange::{
-            EmptyClipboard, OpenClipboard, SetClipboardData,
-        };
-        use windows::Win32::System::Memory::{
-            GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE,
-        };
-
-        if self.formats.is_empty() {
-            return Err("native clipboard snapshot is empty".to_string());
-        }
-
-        struct ClipboardGuard;
-
-        impl Drop for ClipboardGuard {
-            fn drop(&mut self) {
-                unsafe {
-                    let _ = windows::Win32::System::DataExchange::CloseClipboard();
-                }
-            }
-        }
-
-        unsafe {
-            OpenClipboard(None).map_err(|err| format!("open clipboard: {}", err))?;
-            let _guard = ClipboardGuard;
-            EmptyClipboard().map_err(|err| format!("empty clipboard: {}", err))?;
-
-            for format in &self.formats {
-                let hglobal = GlobalAlloc(GMEM_MOVEABLE, format.bytes.len())
-                    .map_err(|err| format!("allocate clipboard memory: {}", err))?;
-                let locked = GlobalLock(hglobal);
-                if locked.is_null() {
-                    let _ = GlobalFree(Some(hglobal));
-                    return Err("lock clipboard memory".to_string());
-                }
-
-                std::ptr::copy_nonoverlapping(
-                    format.bytes.as_ptr(),
-                    locked.cast::<u8>(),
-                    format.bytes.len(),
-                );
-                let _ = GlobalUnlock(hglobal);
-
-                if let Err(err) = SetClipboardData(format.format, Some(HANDLE(hglobal.0))) {
-                    let _ = GlobalFree(Some(hglobal));
-                    return Err(format!("set clipboard data: {}", err));
-                }
-            }
-        }
-
-        Ok(())
+        let mut ops = WinClipboardRestoreOps { opened: false };
+        restore_native_clipboard_snapshot_with_ops(&self.formats, &mut ops)
     }
 
     #[cfg(test)]
@@ -1009,5 +1098,96 @@ mod tests {
         let snapshot = ClipboardSnapshot::native_for_test();
 
         assert_eq!(snapshot.fallback_text_for_restore(), None);
+    }
+
+    #[cfg(target_os = "windows")]
+    #[derive(Default)]
+    struct FakeNativeRestoreOps {
+        fail_allocate_format: Option<u32>,
+        fail_set_format: Option<u32>,
+        opened_and_emptied: bool,
+        next_handle: usize,
+        set_attempts: Vec<u32>,
+        freed_handles: Vec<usize>,
+    }
+
+    #[cfg(target_os = "windows")]
+    impl NativeClipboardRestoreOps for FakeNativeRestoreOps {
+        type Handle = usize;
+
+        fn allocate_format(
+            &mut self,
+            format: &ClipboardFormatData,
+        ) -> Result<Self::Handle, String> {
+            if self.fail_allocate_format == Some(format.format) {
+                return Err(format!("allocate {}", format.format));
+            }
+
+            self.next_handle += 1;
+            Ok(self.next_handle)
+        }
+
+        fn open_and_empty(&mut self) -> Result<(), String> {
+            self.opened_and_emptied = true;
+            Ok(())
+        }
+
+        fn set_format(&mut self, format: u32, handle: Self::Handle) -> Result<(), String> {
+            self.set_attempts.push(format);
+            if self.fail_set_format == Some(format) {
+                return Err(format!("set {format} via {handle}"));
+            }
+            Ok(())
+        }
+
+        fn free_handle(&mut self, handle: Self::Handle) {
+            self.freed_handles.push(handle);
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    fn test_formats() -> Vec<ClipboardFormatData> {
+        vec![
+            ClipboardFormatData {
+                format: 13,
+                bytes: b"text\0".to_vec(),
+            },
+            ClipboardFormatData {
+                format: 15,
+                bytes: b"files".to_vec(),
+            },
+        ]
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn native_restore_does_not_empty_clipboard_when_preparation_fails() {
+        let mut ops = FakeNativeRestoreOps {
+            fail_allocate_format: Some(15),
+            ..FakeNativeRestoreOps::default()
+        };
+
+        let result = restore_native_clipboard_snapshot_with_ops(&test_formats(), &mut ops);
+
+        assert!(result.is_err());
+        assert!(!ops.opened_and_emptied);
+        assert_eq!(ops.freed_handles, vec![1]);
+        assert!(ops.set_attempts.is_empty());
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn native_restore_attempts_remaining_formats_after_set_failure() {
+        let mut ops = FakeNativeRestoreOps {
+            fail_set_format: Some(13),
+            ..FakeNativeRestoreOps::default()
+        };
+
+        let result = restore_native_clipboard_snapshot_with_ops(&test_formats(), &mut ops);
+
+        assert!(result.is_err());
+        assert!(ops.opened_and_emptied);
+        assert_eq!(ops.set_attempts, vec![13, 15]);
+        assert_eq!(ops.freed_handles, vec![1]);
     }
 }

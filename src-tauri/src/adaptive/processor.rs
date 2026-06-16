@@ -313,12 +313,13 @@ mod tests {
     }
 
     #[test]
-    fn smart_formatting_light_applies_scratch_that_backtrack() {
+    fn smart_formatting_light_rejects_destructive_scratch_that_backtrack() {
+        let raw = "Please send the first draft scratch that send the final version.";
         let result = crate::adaptive::smart_formatting::format_transcript(
-            "Please send the first draft scratch that send the final version.",
+            raw,
             crate::settings::FormattingLevel::Light,
         );
-        assert_eq!(result, "send the final version.");
+        assert_eq!(result, raw);
     }
 
     #[test]

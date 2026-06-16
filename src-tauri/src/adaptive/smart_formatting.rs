@@ -1,6 +1,6 @@
 use crate::settings::FormattingLevel;
 use once_cell::sync::Lazy;
-use regex::Regex;
+use regex::{Regex, RegexBuilder};
 
 static SCRATCH_THAT_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"(?i)\b(?:scratch\s+that|forget\s+that)\b[,\s]*").unwrap());
@@ -35,7 +35,31 @@ pub fn format_transcript(raw: &str, level: FormattingLevel) -> String {
 }
 
 pub fn validate_formatted_output(raw: &str, output: &str) -> Result<(), String> {
-    crate::adaptive::processor::validate_unrequested_translation(raw, output)
+    crate::adaptive::processor::validate_unrequested_translation(raw, output)?;
+    validate_non_destructive_formatting(raw, output)
+}
+
+fn validate_non_destructive_formatting(raw: &str, output: &str) -> Result<(), String> {
+    let raw_tokens = meaningful_token_count(raw);
+    if raw_tokens < 6 {
+        return Ok(());
+    }
+
+    let output_tokens = meaningful_token_count(output);
+    if output_tokens * 100 < raw_tokens * 45 {
+        return Err(format!(
+            "formatted output removed too much text: {output_tokens}/{raw_tokens} tokens"
+        ));
+    }
+
+    Ok(())
+}
+
+fn meaningful_token_count(input: &str) -> usize {
+    input
+        .split_whitespace()
+        .filter(|token| token.chars().any(|ch| ch.is_alphanumeric()))
+        .count()
 }
 
 fn apply_backtrack(input: &str) -> String {
@@ -168,19 +192,33 @@ fn apply_replace_command(input: &str) -> Option<String> {
 }
 
 fn replace_last_case_insensitive(input: &str, target: &str, replacement: &str) -> Option<String> {
-    let lower_input = input.to_lowercase();
-    let lower_target = target.to_lowercase();
-    let start = lower_input.rfind(&lower_target)?;
-    let end = start + lower_target.len();
-    if !input.is_char_boundary(start) || !input.is_char_boundary(end) {
-        return None;
-    }
+    let target_re = RegexBuilder::new(&regex::escape(target))
+        .case_insensitive(true)
+        .build()
+        .ok()?;
+    let matched = target_re
+        .find_iter(input)
+        .filter(|candidate| is_whole_term_match(input, candidate.start(), candidate.end()))
+        .last()?;
+    let start = matched.start();
+    let end = matched.end();
 
     let mut output = String::new();
     output.push_str(&input[..start]);
     output.push_str(replacement);
     output.push_str(&input[end..]);
     Some(output)
+}
+
+fn is_whole_term_match(input: &str, start: usize, end: usize) -> bool {
+    let before = input[..start].chars().next_back();
+    let after = input[end..].chars().next();
+    is_term_boundary(before) && is_term_boundary(after)
+}
+
+fn is_term_boundary(ch: Option<char>) -> bool {
+    ch.map(|ch| !ch.is_alphanumeric() && ch != '_' && ch != '-')
+        .unwrap_or(true)
 }
 
 fn normalize_spacing(input: &str) -> String {
@@ -237,4 +275,27 @@ fn collapse_adjacent_duplicate_words(input: &str) -> String {
         }
     }
     output.join(" ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn light_formatting_rejects_destructive_scratch_that_output() {
+        let raw = "Please send the first draft scratch that send the final version.";
+
+        let result = format_transcript(raw, FormattingLevel::Light);
+
+        assert_eq!(result, raw);
+    }
+
+    #[test]
+    fn replace_command_requires_whole_term_match() {
+        let raw = "The code is catalog replace cat with dog.";
+
+        let result = format_transcript(raw, FormattingLevel::Light);
+
+        assert_eq!(result, raw);
+    }
 }
