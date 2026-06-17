@@ -16,7 +16,8 @@
     "history": "Historia",
     "debug": "Debugowanie",
     "about": "O programie",
-    "dictionary": "Dictionary"
+    "dictionary": "Dictionary",
+    "snippets": "Snippets"
   },
   "onboarding": {
     "subtitle": "Aby rozpocząć, wybierz model transkrypcji",
@@ -195,13 +196,34 @@
           "transcribe_with_post_process": {
             "name": "Skrót postprocessingu",
             "description": "Opcjonalnie: Dedykowany skrót klawiszowy, który zawsze stosuje postprocessing AI do transkrypcji."
+          },
+          "transform_polish": {
+            "name": "Polish selected text",
+            "description": "Use the configured post-processing provider to polish selected text without changing its meaning."
+          },
+          "transform_make_concise": {
+            "name": "Make selected text concise",
+            "description": "Use the configured post-processing provider to shorten selected text while preserving key details."
+          },
+          "transform_turn_into_list": {
+            "name": "Turn selected text into a list",
+            "description": "Use the configured post-processing provider to reshape selected text into a clear list."
+          },
+          "transform_translate": {
+            "name": "Translate selected text",
+            "description": "Use the configured post-processing provider to translate selected text to your translation target, or English if none is set."
+          },
+          "transform_prompt_engineer": {
+            "name": "Prompt-engineer selected text",
+            "description": "Use the configured post-processing provider to rewrite selected text as a clearer prompt."
           }
         },
         "errors": {
           "restore": "Nie udało się przywrócić oryginalnego skrótu",
           "set": "Nie udało się ustawić skrótu: {{error}}",
           "reset": "Nie udało się zresetować skrótu do wartości domyślnej"
-        }
+        },
+        "unassigned": "Unassigned"
       },
       "language": {
         "title": "Język",
@@ -214,6 +236,10 @@
       "pushToTalk": {
         "label": "Push To Talk",
         "description": "Przytrzymaj, aby nagrywać, puść, aby zatrzymać"
+      },
+      "transformSelectedText": {
+        "title": "Transform Selected Text",
+        "description": "Assign optional shortcuts that transform selected text in the current app using your configured local or remote post-processing provider."
       }
     },
     "sound": {
@@ -376,6 +402,14 @@
           "label": "Adaptive Profiles",
           "description": "Route each dictation through a context-aware profile for email, notes, code, chat, or raw output."
         },
+        "contextAwareness": {
+          "label": "Context Awareness",
+          "description": "Allow Verbatim to use app and window metadata for adaptive routing. Window titles are not saved to history."
+        },
+        "nearbyText": {
+          "label": "Nearby Text",
+          "description": "Reserved for future opt-in nearby-text hints. It stays off unless context awareness is enabled."
+        },
         "defaultProfile": {
           "title": "Default Profile",
           "description": "Fallback profile when Verbatim cannot identify the foreground app or language mix confidently.",
@@ -398,6 +432,10 @@
           "reprocessDone": "Latest adaptive entry reprocessed.",
           "resetDone": "Adaptive correction memory reset."
         }
+      },
+      "dockedPill": {
+        "label": "Docked Pill",
+        "description": "Keep a tiny pill available at the bottom of the current screen. Click it to expand controls."
       }
     },
     "postProcessing": {
@@ -458,6 +496,37 @@
         "cancel": "Anuluj",
         "selectToEdit": "Wybierz prompt powyżej, aby zobaczyć i edytować jego szczegóły.",
         "createFirst": "Kliknij 'Utwórz nowy prompt' powyżej, aby utworzyć pierwszy prompt postprocessingu."
+      },
+      "localModel": {
+        "groupTitle": "Local Model",
+        "title": "Managed Local Model",
+        "description": "Download and run an experimental CPU-only post-processing model on this device.",
+        "caveat": "Local cleanup is experimental. Verbatim keeps raw dictation recoverable and falls back safely if the model is slow, unavailable, or changes the language.",
+        "enable": "Enable",
+        "disable": "Disable",
+        "enableUnavailable": "Download and select a local model before enabling managed local cleanup.",
+        "loading": "Loading local models...",
+        "selected": "Selected",
+        "download": "Download",
+        "cancel": "Cancel",
+        "select": "Select",
+        "delete": "Delete",
+        "modelDetails": "{{size}} MB · {{quantization}} · {{license}}",
+        "roles": {
+          "experimental": "Experimental",
+          "fallback": "Fallback",
+          "default": "Default"
+        }
+      },
+      "engine": {
+        "title": "Processing Engine",
+        "description": "Choose whether post-processing uses a configured API provider or a managed local model on this device.",
+        "api": "API provider",
+        "local": "Local model",
+        "apiActive": "API mode uses only the selected provider and model.",
+        "localActive": "Local mode uses only the managed model on this device. API fallback is off.",
+        "localUnavailable": "Download and select a local model before switching to Local mode.",
+        "modeTitle": "Mode"
       }
     },
     "history": {
@@ -645,6 +714,47 @@
         "delete": "Failed to delete dictionary entry",
         "duplicate": "{{phrase}} is already in your dictionary"
       }
+    },
+    "formattingLevel": {
+      "title": "Smart Formatting",
+      "description": "Controls deterministic cleanup and spoken correction strength before text is inserted.",
+      "options": {
+        "none": "None",
+        "light": "Light",
+        "medium": "Medium",
+        "high": "High"
+      },
+      "optionDescriptions": {
+        "none": "Raw transcript with no cleanup.",
+        "light": "Safe spacing and spoken corrections.",
+        "medium": "Adds filler removal and spoken punctuation.",
+        "high": "Also removes repeated adjacent words."
+      }
+    },
+    "snippets": {
+      "title": "Snippets",
+      "description": "Expand local trigger phrases into saved text.",
+      "search": "Search snippets",
+      "add": "Add snippet",
+      "save": "Save snippet",
+      "cancel": "Cancel",
+      "trigger": "Trigger phrase",
+      "content": "Snippet content",
+      "editEntry": "Edit {{trigger}}",
+      "deleteEntry": "Delete {{trigger}}",
+      "counts": {
+        "total": "{{count}} snippets",
+        "multiline": "{{count}} multiline"
+      },
+      "empty": "No snippets yet.",
+      "noResults": "No snippets match your search.",
+      "errors": {
+        "load": "Failed to load snippets",
+        "add": "Failed to add snippet",
+        "update": "Failed to update snippet",
+        "delete": "Failed to delete snippet",
+        "duplicate": "{{trigger}} is already a snippet trigger"
+      }
     }
   },
   "footer": {
@@ -708,7 +818,15 @@
     "modelLoadFailed": "Nie udało się załadować modelu: {{model}}",
     "modelLoadFailedUnknown": "nieznany model",
     "pasteFailedTitle": "Nie udało się wkleić tekstu",
-    "pasteFailed": "Nie można było wkleić tekstu do aktywnej aplikacji."
+    "pasteFailed": "Nie można było wkleić tekstu do aktywnej aplikacji.",
+    "pasteFailedCopiedHint": "The text was copied to your clipboard so you can paste it manually.",
+    "pasteFailedCopyAction": "Copy again",
+    "languageGuardTitle": "Wrong Language Detected",
+    "languageGuardDescription": "Verbatim blocked text that did not match your locked language ({{language}}). It was copied to your clipboard.",
+    "languageGuardPreview": "Preview: {{preview}}",
+    "languageGuardPasteAnyway": "Paste anyway",
+    "transformRecoveryCopiedTitle": "Transform Result Copied",
+    "transformRecoveryCopiedDescription": "The selected text was transformed, but Verbatim could not replace it in the active app. The result was copied to your clipboard."
   },
   "appLanguage": {
     "title": "Język aplikacji",
@@ -716,6 +834,40 @@
   },
   "overlay": {
     "transcribing": "Transkrypcja...",
-    "processing": "Przetwarzanie..."
+    "processing": "Przetwarzanie...",
+    "languageMode": {
+      "title": "Dictation language",
+      "change": "Change dictation language"
+    },
+    "docked": {
+      "expand": "Expand pill",
+      "collapse": "Collapse pill"
+    },
+    "actions": {
+      "copyLastTranscript": "Copy last transcript",
+      "pasteLastTranscript": "Paste last transcript",
+      "retryPaste": "Retry paste",
+      "reviewDictionary": "Review dictionary",
+      "openSettings": "Open settings",
+      "cancel": "Cancel recording",
+      "undoLearnedWord": "Undo learned word",
+      "tryAgain": "Try again",
+      "selectMicrophone": "Select microphone",
+      "copyTransformResult": "Copy transform result"
+    },
+    "dictionaryLearned": {
+      "title": "Added to dictionary"
+    },
+    "pasteFailed": "Paste failed",
+    "states": {
+      "idle": "Ready",
+      "recording": "Recording",
+      "silence": "No speech detected",
+      "inserted": "Inserted",
+      "copied": "Copied",
+      "micFailed": "Microphone issue",
+      "cancelled": "Cancelled",
+      "transformCopied": "Transform copied"
+    }
   }
 }

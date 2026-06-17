@@ -16,7 +16,8 @@
     "debug": "تصحيح الأخطاء",
     "about": "حول",
     "models": "النماذج",
-    "dictionary": "Dictionary"
+    "dictionary": "القاموس",
+    "snippets": "المقتطفات"
   },
   "onboarding": {
     "subtitle": "للبدء، اختر نموذج التفريغ الصوتي",
@@ -173,13 +174,34 @@
           "transcribe_with_post_process": {
             "name": "مفتاح المعالجة اللاحقة",
             "description": "اختياري: مفتاح اختصار مخصص يطبق دائماً المعالجة اللاحقة بالذكاء الاصطناعي على التفريغ الصوتي."
+          },
+          "transform_polish": {
+            "name": "Polish selected text",
+            "description": "Use the configured post-processing provider to polish selected text without changing its meaning."
+          },
+          "transform_make_concise": {
+            "name": "Make selected text concise",
+            "description": "Use the configured post-processing provider to shorten selected text while preserving key details."
+          },
+          "transform_turn_into_list": {
+            "name": "Turn selected text into a list",
+            "description": "Use the configured post-processing provider to reshape selected text into a clear list."
+          },
+          "transform_translate": {
+            "name": "Translate selected text",
+            "description": "Use the configured post-processing provider to translate selected text to your translation target, or English if none is set."
+          },
+          "transform_prompt_engineer": {
+            "name": "Prompt-engineer selected text",
+            "description": "Use the configured post-processing provider to rewrite selected text as a clearer prompt."
           }
         },
         "errors": {
           "restore": "فشل استعادة الاختصار الأصلي",
           "set": "فشل تعيين الاختصار: {{error}}",
           "reset": "فشل إعادة تعيين الاختصار إلى قيمته الأصلية"
-        }
+        },
+        "unassigned": "Unassigned"
       },
       "language": {
         "title": "اللغة",
@@ -192,6 +214,10 @@
       "pushToTalk": {
         "label": "اضغط للتحدث",
         "description": "استمر في الضغط للتسجيل، واترك للتوقف"
+      },
+      "transformSelectedText": {
+        "title": "Transform Selected Text",
+        "description": "Assign optional shortcuts that transform selected text in the current app using your configured local or remote post-processing provider."
       }
     },
     "sound": {
@@ -315,11 +341,11 @@
         "descriptionUnsupported": ".الترجمة غير مدعومة من قبل نموذج {{model}}"
       },
       "translation": {
-        "label": "Translation",
-        "description": "Translate dictated output when the selected model or provider supports it.",
-        "descriptionUnsupported": "{{model}} does not support native translation. Text translation requires a translation provider.",
-        "targetLanguage": "Target language",
-        "targetLanguageDescription": "Choose the language for translated output."
+        "label": "الترجمة",
+        "description": "ترجم مخرجات الإملاء عندما يدعم النموذج أو المزود المحدد ذلك.",
+        "descriptionUnsupported": "{{model}} لا يدعم الترجمة الأصلية. تتطلب ترجمة النص مزود ترجمة.",
+        "targetLanguage": "لغة الهدف",
+        "targetLanguageDescription": "اختر اللغة التي ستُترجم إليها المخرجات."
       },
       "modelUnload": {
         "title": "إلغاء تحميل النموذج",
@@ -343,39 +369,51 @@
         "remove": "إزالة {{word}}",
         "duplicate": "\"{{word}}\" موجود بالفعل",
         "autoAdd": {
-          "label": "Auto-add corrected words",
-          "description": "After Verbatim pastes text, watch that same text field for a few seconds and add uncommon words you correct to the custom dictionary.",
-          "learnedTitle": "Added to dictionary",
-          "learnedDescription": "Added: {{words}}"
+          "label": "إضافة الكلمات المصححة تلقائيًا",
+          "description": "بعد أن يلصق Verbatim النص، راقب حقل النص نفسه لبضع ثوانٍ وأضف الكلمات غير الشائعة التي تصححها إلى القاموس المخصص.",
+          "learnedTitle": "أضيف إلى القاموس",
+          "learnedDescription": "تمت الإضافة: {{words}}"
         }
       },
       "adaptiveProfiles": {
         "enabled": {
-          "label": "Adaptive Profiles",
-          "description": "Route each dictation through a context-aware profile for email, notes, code, chat, or raw output."
+          "label": "الملفات التكيفية",
+          "description": "مرّر كل إملاء عبر ملف يراعي السياق للبريد والملاحظات والبرمجة والدردشة أو الإخراج الخام."
+        },
+        "contextAwareness": {
+          "label": "الوعي بالسياق",
+          "description": "اسمح لـ Verbatim باستخدام بيانات التطبيق والنافذة لتوجيه الملفات التكيفية. لا تحفظ عناوين النوافذ في السجل."
+        },
+        "nearbyText": {
+          "label": "النص القريب",
+          "description": "محجوز لتلميحات النص القريب المستقبلية التي تتطلب موافقة صريحة. يبقى متوقفا ما لم يتم تفعيل الوعي بالسياق."
         },
         "defaultProfile": {
-          "title": "Default Profile",
-          "description": "Fallback profile when Verbatim cannot identify the foreground app or language mix confidently.",
-          "placeholder": "Select a profile"
+          "title": "الملف الافتراضي",
+          "description": "ملف احتياطي عندما لا يستطيع Verbatim تحديد التطبيق الأمامي أو مزيج اللغة بثقة.",
+          "placeholder": "اختر ملفًا"
         },
         "languages": {
-          "title": "Language Shortlist",
-          "description": "Comma-separated language codes used for adaptive language hints, such as en, ar, fr, es.",
+          "title": "قائمة اللغات المختصرة",
+          "description": "رموز لغات مفصولة بفواصل تُستخدم لتلميحات اللغة التكيفية، مثل en و ar و fr و es.",
           "placeholder": "en, ar"
         },
         "correctionMemory": {
-          "label": "Correction Memory",
-          "description": "Allow future corrections to bias profile choices for similar apps and contexts."
+          "label": "ذاكرة التصحيحات",
+          "description": "اسمح للتصحيحات المستقبلية بتوجيه اختيار الملفات للتطبيقات والسياقات المشابهة."
         },
         "actions": {
-          "title": "Adaptive Actions",
-          "description": "Reprocess the latest adaptive history item or clear learned correction preferences.",
-          "reprocess": "Reprocess Last",
-          "reset": "Reset Memory",
-          "reprocessDone": "Latest adaptive entry reprocessed.",
-          "resetDone": "Adaptive correction memory reset."
+          "title": "الإجراءات التكيفية",
+          "description": "أعد معالجة أحدث عنصر تكيفي في السجل أو امسح تفضيلات التصحيح المتعلمة.",
+          "reprocess": "إعادة معالجة الأخير",
+          "reset": "إعادة ضبط الذاكرة",
+          "reprocessDone": "تمت إعادة معالجة أحدث إدخال تكيفي.",
+          "resetDone": "تمت إعادة ضبط ذاكرة التصحيحات التكيفية."
         }
+      },
+      "dockedPill": {
+        "label": "الشريط المثبت",
+        "description": "أبقِ شريطًا صغيرًا متاحًا أسفل الشاشة الحالية. انقر عليه لتوسيع عناصر التحكم."
       }
     },
     "postProcessing": {
@@ -436,6 +474,37 @@
         "cancel": "إلغاء",
         "selectToEdit": ".اختر مطالبة أعلاه لعرض وتعديل تفاصيلها",
         "createFirst": ".انقر على 'إنشاء مطالبة جديدة' أعلاه لإنشاء أول مطالبة معالجة لاحقة لك"
+      },
+      "localModel": {
+        "groupTitle": "Local Model",
+        "title": "Managed Local Model",
+        "description": "Download and run an experimental CPU-only post-processing model on this device.",
+        "caveat": "Local cleanup is experimental. Verbatim keeps raw dictation recoverable and falls back safely if the model is slow, unavailable, or changes the language.",
+        "enable": "Enable",
+        "disable": "Disable",
+        "enableUnavailable": "Download and select a local model before enabling managed local cleanup.",
+        "loading": "Loading local models...",
+        "selected": "Selected",
+        "download": "Download",
+        "cancel": "Cancel",
+        "select": "Select",
+        "delete": "Delete",
+        "modelDetails": "{{size}} MB · {{quantization}} · {{license}}",
+        "roles": {
+          "experimental": "Experimental",
+          "fallback": "Fallback",
+          "default": "Default"
+        }
+      },
+      "engine": {
+        "title": "Processing Engine",
+        "description": "Choose whether post-processing uses a configured API provider or a managed local model on this device.",
+        "api": "API provider",
+        "local": "Local model",
+        "apiActive": "API mode uses only the selected provider and model.",
+        "localActive": "Local mode uses only the managed model on this device. API fallback is off.",
+        "localUnavailable": "Download and select a local model before switching to Local mode.",
+        "modeTitle": "Mode"
       }
     },
     "history": {
@@ -452,13 +521,13 @@
       "retranscribeError": "فشلت إعادة النسخ. يرجى المحاولة مرة أخرى.",
       "transcribing": "جارٍ النسخ...",
       "transcriptionFailed": "فشل النسخ. يمكنك إعادة النسخ باستخدام أيقونة إعادة المحاولة.",
-      "learnCorrection": "Learn dictionary correction",
-      "correctedText": "Corrected transcription",
-      "applyCorrection": "Add learned words",
-      "cancelCorrection": "Cancel correction",
-      "dictionaryLearned": "Added to custom words: {{words}}",
-      "dictionaryNoCandidates": "No new custom words found in that correction.",
-      "dictionaryLearnError": "Failed to learn custom words. Please try again."
+      "learnCorrection": "تعلم تصحيح القاموس",
+      "correctedText": "التفريغ المصحح",
+      "applyCorrection": "إضافة الكلمات المتعلمة",
+      "cancelCorrection": "إلغاء التصحيح",
+      "dictionaryLearned": "أضيفت إلى الكلمات المخصصة: {{words}}",
+      "dictionaryNoCandidates": "لم يتم العثور على كلمات مخصصة جديدة في هذا التصحيح.",
+      "dictionaryLearnError": "فشل تعلم الكلمات المخصصة. يرجى المحاولة مرة أخرى."
     },
     "debug": {
       "title": "تصحيح الأخطاء",
@@ -599,51 +668,92 @@
       "noModelsMatch": "لا توجد نماذج مطابقة لهذا الفلتر."
     },
     "dictionary": {
-      "title": "Dictionary",
-      "description": "Manage words and phrases Verbatim should recognize.",
-      "search": "Search dictionary",
-      "add": "Add entry",
-      "save": "Save entry",
-      "cancel": "Cancel",
-      "phrase": "Word or phrase",
-      "replacementOf": "Correct when Verbatim writes",
+      "title": "القاموس",
+      "description": "إدارة الكلمات والعبارات التي يجب أن يتعرف عليها Verbatim.",
+      "search": "البحث في القاموس",
+      "add": "إضافة إدخال",
+      "save": "حفظ الإدخال",
+      "cancel": "إلغاء",
+      "phrase": "كلمة أو عبارة",
+      "replacementOf": "صحح عندما يكتب Verbatim",
       "replacementPlaceholder": "robin",
-      "corrects": "Corrects: {{replacement}}",
-      "editEntry": "Edit {{phrase}}",
-      "deleteEntry": "Delete {{phrase}}",
-      "starEntry": "Star {{phrase}}",
-      "unstarEntry": "Unstar {{phrase}}",
+      "corrects": "يصحح: {{replacement}}",
+      "editEntry": "تعديل {{phrase}}",
+      "deleteEntry": "حذف {{phrase}}",
+      "starEntry": "تمييز {{phrase}}",
+      "unstarEntry": "إلغاء تمييز {{phrase}}",
       "autoAdd": {
-        "label": "Auto-add corrected words",
-        "description": "When you quickly correct text Verbatim just pasted, add the corrected word or phrase to your dictionary."
+        "label": "إضافة الكلمات المصححة تلقائيًا",
+        "description": "عندما تصحح بسرعة نصًا لصقه Verbatim للتو، أضف الكلمة أو العبارة المصححة إلى قاموسك."
       },
       "source": {
-        "manual": "Manual",
-        "auto_learned": "Auto-learned",
-        "imported": "Imported"
+        "manual": "يدوي",
+        "auto_learned": "متعلم تلقائيًا",
+        "imported": "مستورد"
       },
       "priority": {
-        "normal": "Normal",
-        "starred": "Starred"
+        "normal": "عادي",
+        "starred": "مميز"
       },
       "counts": {
-        "total": "{{count}} entries",
-        "autoLearned": "{{count}} auto-learned",
-        "starred": "{{count}} starred"
+        "total": "{{count}} إدخالات",
+        "autoLearned": "{{count}} متعلمة تلقائيًا",
+        "starred": "{{count}} مميزة"
       },
-      "empty": "No dictionary entries yet.",
-      "noResults": "No entries match your search.",
+      "empty": "لا توجد إدخالات في القاموس بعد.",
+      "noResults": "لا توجد إدخالات تطابق بحثك.",
       "recentlyLearned": {
-        "title": "Added to dictionary",
-        "description": "Added: {{phrases}}",
-        "undo": "Undo"
+        "title": "أضيف إلى القاموس",
+        "description": "تمت الإضافة: {{phrases}}",
+        "undo": "تراجع"
       },
       "errors": {
-        "load": "Failed to load dictionary",
-        "add": "Failed to add dictionary entry",
-        "update": "Failed to update dictionary entry",
-        "delete": "Failed to delete dictionary entry",
-        "duplicate": "{{phrase}} is already in your dictionary"
+        "load": "فشل تحميل القاموس",
+        "add": "فشل إضافة إدخال القاموس",
+        "update": "فشل تحديث إدخال القاموس",
+        "delete": "فشل حذف إدخال القاموس",
+        "duplicate": "{{phrase}} موجود بالفعل في قاموسك"
+      }
+    },
+    "formattingLevel": {
+      "title": "التنسيق الذكي",
+      "description": "يتحكم في قوة التنظيف الحتمي والتصحيح المنطوق قبل إدراج النص.",
+      "options": {
+        "none": "بلا",
+        "light": "خفيف",
+        "medium": "متوسط",
+        "high": "عالٍ"
+      },
+      "optionDescriptions": {
+        "none": "النص الخام بدون أي تنظيف.",
+        "light": "تصحيح آمن للمسافات والتصحيحات المنطوقة.",
+        "medium": "يضيف إزالة كلمات الحشو وعلامات الترقيم المنطوقة.",
+        "high": "يزيل أيضًا الكلمات المتجاورة المكررة."
+      }
+    },
+    "snippets": {
+      "title": "المقتطفات",
+      "description": "وسّع عبارات تشغيل محلية إلى نص محفوظ.",
+      "search": "البحث في المقتطفات",
+      "add": "إضافة مقتطف",
+      "save": "حفظ المقتطف",
+      "cancel": "إلغاء",
+      "trigger": "عبارة التشغيل",
+      "content": "محتوى المقتطف",
+      "editEntry": "تعديل {{trigger}}",
+      "deleteEntry": "حذف {{trigger}}",
+      "counts": {
+        "total": "{{count}} مقتطفات",
+        "multiline": "{{count}} متعددة الأسطر"
+      },
+      "empty": "لا توجد مقتطفات بعد.",
+      "noResults": "لا توجد مقتطفات تطابق بحثك.",
+      "errors": {
+        "load": "فشل تحميل المقتطفات",
+        "add": "فشل إضافة المقتطف",
+        "update": "فشل تحديث المقتطف",
+        "delete": "فشل حذف المقتطف",
+        "duplicate": "{{trigger}} مستخدمة بالفعل كعبارة تشغيل لمقتطف"
       }
     }
   },
@@ -660,9 +770,9 @@
     "installing": "...جاري التثبيت",
     "preparing": "...جاري التحضير",
     "checkForUpdates": "التحقق من وجود تحديثات",
-    "portableUpdateTitle": "Manual update required",
-    "portableUpdateMessage": "Portable installs cannot be updated automatically. To update: download the latest NSIS installer from GitHub Releases, install it to the same folder, then copy your Data/ folder (settings, models, recordings) from the old version to the new one.",
-    "portableUpdateButton": "Open GitHub Releases"
+    "portableUpdateTitle": "يلزم تحديث يدوي",
+    "portableUpdateMessage": "لا يمكن تحديث النسخ المحمولة تلقائيًا. للتحديث: نزّل أحدث مُثبّت NSIS من إصدارات GitHub وثبّته في المجلد نفسه، ثم انسخ مجلد Data/ (الإعدادات، النماذج، التسجيلات) من الإصدار القديم إلى الجديد.",
+    "portableUpdateButton": "فتح إصدارات GitHub"
   },
   "common": {
     "loading": "...جاري التحميل",
@@ -708,7 +818,15 @@
     "modelLoadFailed": "فشل في تحميل النموذج: {{model}}",
     "modelLoadFailedUnknown": "نموذج غير معروف",
     "pasteFailedTitle": "فشل لصق النص",
-    "pasteFailed": "تعذر لصق النص في التطبيق النشط."
+    "pasteFailed": "تعذر لصق النص في التطبيق النشط.",
+    "pasteFailedCopiedHint": "تم نسخ النص إلى الحافظة حتى تتمكن من لصقه يدويًا.",
+    "pasteFailedCopyAction": "انسخ مرة أخرى",
+    "languageGuardTitle": "تم اكتشاف لغة غير متوقعة",
+    "languageGuardDescription": "منع Verbatim نصًا لا يطابق اللغة المثبتة ({{language}}). تم نسخه إلى الحافظة.",
+    "languageGuardPreview": "معاينة: {{preview}}",
+    "languageGuardPasteAnyway": "الصق على أي حال",
+    "transformRecoveryCopiedTitle": "تم نسخ نتيجة التحويل",
+    "transformRecoveryCopiedDescription": "تم تحويل النص المحدد، لكن تعذر استبداله في التطبيق النشط. تم نسخ النتيجة إلى الحافظة."
   },
   "appLanguage": {
     "title": "لغة التطبيق",
@@ -716,6 +834,40 @@
   },
   "overlay": {
     "transcribing": "...جاري التفريغ",
-    "processing": "...جاري المعالجة"
+    "processing": "...جاري المعالجة",
+    "languageMode": {
+      "title": "لغة الإملاء",
+      "change": "تغيير لغة الإملاء"
+    },
+    "docked": {
+      "expand": "توسيع الشريط",
+      "collapse": "طي الشريط"
+    },
+    "actions": {
+      "copyLastTranscript": "نسخ آخر تفريغ",
+      "pasteLastTranscript": "لصق آخر تفريغ",
+      "retryPaste": "إعادة محاولة اللصق",
+      "reviewDictionary": "مراجعة القاموس",
+      "openSettings": "فتح الإعدادات",
+      "cancel": "إلغاء التسجيل",
+      "undoLearnedWord": "تراجع عن الكلمة المتعلمة",
+      "tryAgain": "حاول مرة أخرى",
+      "selectMicrophone": "اختر الميكروفون",
+      "copyTransformResult": "نسخ نتيجة التحويل"
+    },
+    "dictionaryLearned": {
+      "title": "أضيف إلى القاموس"
+    },
+    "pasteFailed": "فشل اللصق",
+    "states": {
+      "idle": "جاهز",
+      "recording": "جاري التسجيل",
+      "silence": "لم يتم اكتشاف كلام",
+      "inserted": "تم الإدراج",
+      "copied": "تم النسخ",
+      "micFailed": "مشكلة في الميكروفون",
+      "cancelled": "تم الإلغاء",
+      "transformCopied": "تم نسخ التحويل"
+    }
   }
 }

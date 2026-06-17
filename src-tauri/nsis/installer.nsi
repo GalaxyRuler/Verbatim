@@ -734,8 +734,21 @@ Section Install
   ; Remove stale resources left by pre-Verbatim installs.
   Delete "$INSTDIR\resources\handy.png"
 
-  ; Copy main executable
+  ; Copy main executable. Delete first so a locked executable cannot leave an
+  ; apparently successful install running the previous build.
+  ${If} ${FileExists} "$INSTDIR\${MAINBINARYNAME}.exe"
+    ClearErrors
+    Delete "$INSTDIR\${MAINBINARYNAME}.exe"
+    ${If} ${Errors}
+      Abort "Failed to replace ${PRODUCTNAME}. Please close ${PRODUCTNAME} and run the installer again."
+    ${EndIf}
+  ${EndIf}
+
+  ClearErrors
   File "${MAINBINARYSRCPATH}"
+  ${If} ${Errors}
+    Abort "Failed to install ${PRODUCTNAME}. Please close ${PRODUCTNAME} and run the installer again."
+  ${EndIf}
 
   ; Copy resources
   {{#each resources_dirs}}

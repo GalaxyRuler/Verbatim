@@ -100,6 +100,35 @@ export const AdaptiveProfiles: React.FC<AdaptiveProfilesProps> = ({
         grouped={grouped}
       />
 
+      <ToggleSwitch
+        checked={settings?.context_awareness_enabled ?? false}
+        onChange={(enabled) =>
+          updateSetting("context_awareness_enabled", enabled)
+        }
+        isUpdating={isUpdating("context_awareness_enabled")}
+        label={t("settings.advanced.adaptiveProfiles.contextAwareness.label")}
+        description={t(
+          "settings.advanced.adaptiveProfiles.contextAwareness.description",
+        )}
+        descriptionMode={descriptionMode}
+        grouped={grouped}
+      />
+
+      <ToggleSwitch
+        checked={settings?.context_nearby_text_enabled ?? false}
+        onChange={(enabled) =>
+          updateSetting("context_nearby_text_enabled", enabled)
+        }
+        disabled={!settings?.context_awareness_enabled}
+        isUpdating={isUpdating("context_nearby_text_enabled")}
+        label={t("settings.advanced.adaptiveProfiles.nearbyText.label")}
+        description={t(
+          "settings.advanced.adaptiveProfiles.nearbyText.description",
+        )}
+        descriptionMode={descriptionMode}
+        grouped={grouped}
+      />
+
       <SettingContainer
         title={t("settings.advanced.adaptiveProfiles.defaultProfile.title")}
         description={t(

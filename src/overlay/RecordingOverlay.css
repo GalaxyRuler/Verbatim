@@ -1,17 +1,49 @@
+#root {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .recording-overlay {
   --overlay-accent: #7aa2f7;
   --overlay-accent-soft: #2563eb33;
+  --overlay-background: #000000cc;
+  --overlay-foreground: #ffffff;
+  --overlay-border: color-mix(in srgb, var(--overlay-accent) 18%, transparent);
   height: 36px;
-  width: 172px;
+  width: 220px;
   display: grid;
   grid-template-columns: auto 1fr auto;
   align-items: center;
   padding: 6px;
-  background: #000000cc;
+  background: var(--overlay-background);
+  border: 1px solid var(--overlay-border);
   border-radius: 18px;
   opacity: 0;
-  transition: opacity 300ms ease-out;
+  transition:
+    opacity 300ms ease-out,
+    width 160ms ease-out,
+    height 160ms ease-out;
   box-sizing: border-box;
+}
+
+.recording-overlay.docked-collapsed {
+  width: 44px;
+  grid-template-columns: 1fr;
+  justify-items: center;
+  padding: 5px 6px;
+  cursor: pointer;
+}
+
+.recording-overlay.docked-expanded {
+  width: 320px;
+  height: 40px;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: 20px;
+  opacity: 1;
 }
 
 .overlay-left {
@@ -30,9 +62,11 @@
   display: flex;
   align-items: center;
   justify-content: flex-end;
+  gap: 4px;
 }
 
 .bars-container {
+  flex: 1 1 auto;
   display: flex;
   align-items: end;
   justify-content: center;
@@ -56,7 +90,7 @@
 }
 
 .transcribing-text {
-  color: white;
+  color: var(--overlay-foreground);
   font-size: 12px;
   font-family:
     -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -96,4 +130,204 @@
 
 .cancel-button:active {
   transform: scale(0.95);
+}
+
+.language-mode-chip {
+  min-width: 50px;
+  max-width: 76px;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid color-mix(in srgb, var(--overlay-accent) 60%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--overlay-accent) 16%, transparent);
+  color: var(--overlay-foreground);
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color 150ms ease-out,
+    border-color 150ms ease-out,
+    transform 100ms ease-out;
+}
+
+.language-mode-chip:hover {
+  background: var(--overlay-accent-soft);
+  border-color: var(--overlay-accent);
+}
+
+.language-mode-chip:active {
+  transform: scale(0.95);
+}
+
+.docked-pill-handle {
+  width: 30px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--overlay-accent);
+  cursor: pointer;
+}
+
+.docked-pill-handle:hover {
+  background: var(--overlay-accent-soft);
+}
+
+.docked-waveform {
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+}
+
+.docked-waveform-bar {
+  width: 2px;
+  min-height: 4px;
+  max-height: 16px;
+  border-radius: 999px;
+  background: var(--overlay-accent);
+  transition:
+    height 80ms linear,
+    opacity 120ms ease-out;
+}
+
+.docked-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--overlay-accent);
+  opacity: 0.85;
+}
+
+.docked-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 3px;
+  min-width: 0;
+}
+
+.language-picker-options {
+  width: 100%;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+}
+
+.language-picker-option {
+  min-width: 0;
+  max-width: 42px;
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid color-mix(in srgb, var(--overlay-accent) 38%, transparent);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--overlay-foreground);
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  flex: 1 1 0;
+}
+
+.language-picker-option:hover,
+.language-picker-option[aria-checked="true"] {
+  background: var(--overlay-accent-soft);
+  border-color: var(--overlay-accent);
+  color: var(--overlay-foreground);
+}
+
+.overlay-action-button {
+  width: 23px;
+  height: 23px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--overlay-accent) 38%, transparent);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--overlay-accent);
+  cursor: pointer;
+  flex: 0 0 auto;
+  transition:
+    background-color 150ms ease-out,
+    border-color 150ms ease-out,
+    transform 100ms ease-out;
+}
+
+.overlay-action-button:hover {
+  background: var(--overlay-accent-soft);
+  border-color: var(--overlay-accent);
+}
+
+.overlay-action-button:active {
+  transform: scale(0.94);
+}
+
+.docked-status {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  line-height: 1.05;
+  color: var(--overlay-foreground);
+  overflow: hidden;
+}
+
+.docked-status-title,
+.docked-status-detail {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.docked-status-title {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--overlay-accent);
+}
+
+.recording-overlay[data-state="silence"],
+.recording-overlay[data-state="mic_failed"] {
+  --overlay-background: #000000cc;
+  --overlay-foreground: #ffffff;
+}
+
+.recording-overlay[data-state="silence"] .docked-status-title,
+.recording-overlay[data-state="mic_failed"] .docked-status-title {
+  color: var(--overlay-foreground);
+}
+
+.docked-status-detail {
+  font-size: 10px;
+}
+
+@media (prefers-color-scheme: light) {
+  .recording-overlay {
+    --overlay-background: #fffffff2;
+    --overlay-foreground: #111827;
+    --overlay-border: color-mix(in srgb, var(--overlay-accent) 24%, #11182722);
+    box-shadow: 0 8px 20px #1118271f;
+  }
 }

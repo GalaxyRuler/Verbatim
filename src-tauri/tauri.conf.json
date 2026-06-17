@@ -1,13 +1,14 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Verbatim",
-  "version": "0.8.7",
+  "version": "0.8.8",
   "identifier": "com.galaxyruler.verbatim",
   "build": {
     "beforeDevCommand": "bun run dev",
     "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "bun run build",
-    "frontendDist": "../dist"
+    "frontendDist": "../dist",
+    "features": ["transcribe-rs-engine", "silero-vad-engine"]
   },
   "app": {
     "macOSPrivateApi": true,

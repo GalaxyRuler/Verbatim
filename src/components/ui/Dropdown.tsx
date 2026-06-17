@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 export interface DropdownOption {
   value: string;
   label: string;
+  description?: string;
   disabled?: boolean;
 }
 
@@ -96,7 +97,7 @@ export const Dropdown: React.FC<DropdownProps> = ({
               <button
                 key={option.value}
                 type="button"
-                className={`w-full px-2 py-1 text-sm text-start hover:bg-logo-primary/10 transition-colors duration-150 ${
+                className={`w-full px-2 py-1.5 text-sm text-start hover:bg-logo-primary/10 transition-colors duration-150 ${
                   selectedValue === option.value
                     ? "bg-logo-primary/20 font-semibold"
                     : ""
@@ -104,7 +105,12 @@ export const Dropdown: React.FC<DropdownProps> = ({
                 onClick={() => handleSelect(option.value)}
                 disabled={option.disabled}
               >
-                <span className="truncate">{option.label}</span>
+                <span className="block truncate">{option.label}</span>
+                {option.description && (
+                  <span className="block whitespace-normal text-xs font-normal leading-snug text-mid-gray">
+                    {option.description}
+                  </span>
+                )}
               </button>
             ))
           )}

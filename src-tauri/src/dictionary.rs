@@ -21,6 +21,7 @@ pub fn sanitize_dictionary_phrase(raw: &str) -> Option<String> {
     if cleaned.is_empty()
         || cleaned.chars().count() > MAX_DICTIONARY_PHRASE_CHARS
         || !cleaned.chars().any(char::is_alphabetic)
+        || !dictionary_phrase_has_valid_token_boundaries(&cleaned)
     {
         return None;
     }
@@ -63,9 +64,29 @@ pub fn dictionary_phrases(entries: &[DictionaryEntry]) -> Vec<String> {
 }
 
 pub fn sync_legacy_custom_words(settings: &mut AppSettings) -> bool {
+    sync_legacy_custom_words_with_migration(settings, true)
+}
+
+pub fn sync_legacy_custom_words_with_migration(
+    settings: &mut AppSettings,
+    migrate_legacy_custom_words: bool,
+) -> bool {
     let mut changed = false;
 
-    if settings.dictionary_entries.is_empty() && !settings.custom_words.is_empty() {
+    changed |= sync_auto_learn_suppression_keys(settings);
+
+    let before_len = settings.dictionary_entries.len();
+    settings
+        .dictionary_entries
+        .retain(|entry| sanitize_dictionary_phrase(&entry.phrase).is_some());
+    if settings.dictionary_entries.len() != before_len {
+        changed = true;
+    }
+
+    if migrate_legacy_custom_words
+        && settings.dictionary_entries.is_empty()
+        && !settings.custom_words.is_empty()
+    {
         let mut entries = Vec::new();
         for (index, word) in settings.custom_words.iter().enumerate() {
             let Some(phrase) = sanitize_dictionary_phrase(word) else {
@@ -113,6 +134,8 @@ pub fn upsert_manual_entry(
         return Err(format!("{} is already in your dictionary", phrase));
     }
 
+    unsuppress_auto_learn_phrase(settings, &phrase);
+
     let entry = DictionaryEntry {
         id: make_dictionary_entry_id(now_ms, &phrase),
         phrase,
@@ -135,8 +158,13 @@ pub fn upsert_auto_learn_entry(
     phrase: String,
     replacement_of: Option<String>,
 ) -> Result<Option<DictionaryEntry>, String> {
-    let phrase = sanitize_dictionary_phrase(&phrase).ok_or("Dictionary entry is empty")?;
+    let Some(phrase) = sanitize_auto_learn_phrase(&phrase) else {
+        return Ok(None);
+    };
     if has_phrase(&settings.dictionary_entries, &phrase, None) {
+        return Ok(None);
+    }
+    if auto_learn_phrase_is_suppressed(settings, &phrase) {
         return Ok(None);
     }
 
@@ -176,23 +204,33 @@ pub fn update_entry(
         }
     }
 
-    let entry = &mut settings.dictionary_entries[index];
+    let phrase_to_unsuppress;
+    let updated = {
+        let entry = &mut settings.dictionary_entries[index];
 
-    if let Some(next_phrase) = phrase {
-        entry.phrase =
-            sanitize_dictionary_phrase(&next_phrase).ok_or("Dictionary entry is empty")?;
+        if let Some(next_phrase) = phrase {
+            entry.phrase =
+                sanitize_dictionary_phrase(&next_phrase).ok_or("Dictionary entry is empty")?;
+            phrase_to_unsuppress = Some(entry.phrase.clone());
+        } else {
+            phrase_to_unsuppress = None;
+        }
+
+        if let Some(next_replacement) = replacement_of {
+            entry.replacement_of = sanitize_optional_phrase(next_replacement);
+        }
+
+        if let Some(next_priority) = priority {
+            entry.priority = next_priority;
+        }
+
+        entry.updated_at_ms = now_ms;
+        entry.clone()
+    };
+
+    if let Some(phrase) = phrase_to_unsuppress {
+        unsuppress_auto_learn_phrase(settings, &phrase);
     }
-
-    if let Some(next_replacement) = replacement_of {
-        entry.replacement_of = sanitize_optional_phrase(next_replacement);
-    }
-
-    if let Some(next_priority) = priority {
-        entry.priority = next_priority;
-    }
-
-    entry.updated_at_ms = now_ms;
-    let updated = entry.clone();
     sync_legacy_custom_words(settings);
 
     Ok(updated)
@@ -210,6 +248,10 @@ pub fn delete_entries(settings: &mut AppSettings, ids: &[String]) -> Vec<Diction
     });
 
     if !deleted.is_empty() {
+        for entry in &deleted {
+            suppress_auto_learn_phrase(settings, &entry.phrase);
+        }
+        settings.custom_words = dictionary_phrases(&settings.dictionary_entries);
         sync_legacy_custom_words(settings);
     }
 
@@ -241,9 +283,11 @@ pub fn replace_dictionary_phrases(
 
     for phrase in desired_phrases {
         if has_phrase(&settings.dictionary_entries, &phrase, None) {
+            unsuppress_auto_learn_phrase(settings, &phrase);
             continue;
         }
 
+        unsuppress_auto_learn_phrase(settings, &phrase);
         settings.dictionary_entries.push(DictionaryEntry {
             id: make_dictionary_entry_id(now_ms, &phrase),
             phrase,
@@ -268,6 +312,80 @@ pub fn current_unix_ms() -> u64 {
 
 fn sanitize_optional_phrase(raw: Option<String>) -> Option<String> {
     raw.and_then(|value| sanitize_dictionary_phrase(&value))
+}
+
+fn sanitize_auto_learn_phrase(raw: &str) -> Option<String> {
+    let phrase = sanitize_dictionary_phrase(raw)?;
+    auto_learn_phrase_is_valid(&phrase).then_some(phrase)
+}
+
+fn auto_learn_phrase_is_valid(phrase: &str) -> bool {
+    dictionary_phrase_has_valid_token_boundaries(phrase)
+}
+
+fn sync_auto_learn_suppression_keys(settings: &mut AppSettings) -> bool {
+    let mut changed = false;
+    let mut normalized = Vec::new();
+
+    for phrase in &settings.dictionary_auto_learn_suppressed {
+        let key = normalize_dictionary_key(phrase);
+        if key.is_empty() {
+            changed = true;
+            continue;
+        }
+
+        if !normalized.contains(&key) {
+            normalized.push(key);
+        } else {
+            changed = true;
+        }
+    }
+
+    if settings.dictionary_auto_learn_suppressed != normalized {
+        settings.dictionary_auto_learn_suppressed = normalized;
+        changed = true;
+    }
+
+    changed
+}
+
+fn auto_learn_phrase_is_suppressed(settings: &AppSettings, phrase: &str) -> bool {
+    let key = normalize_dictionary_key(phrase);
+    !key.is_empty()
+        && settings
+            .dictionary_auto_learn_suppressed
+            .iter()
+            .any(|suppressed| suppressed == &key)
+}
+
+fn suppress_auto_learn_phrase(settings: &mut AppSettings, phrase: &str) -> bool {
+    let key = normalize_dictionary_key(phrase);
+    if key.is_empty() || settings.dictionary_auto_learn_suppressed.contains(&key) {
+        return false;
+    }
+
+    settings.dictionary_auto_learn_suppressed.push(key);
+    true
+}
+
+fn unsuppress_auto_learn_phrase(settings: &mut AppSettings, phrase: &str) -> bool {
+    let key = normalize_dictionary_key(phrase);
+    if key.is_empty() {
+        return false;
+    }
+
+    let before_len = settings.dictionary_auto_learn_suppressed.len();
+    settings
+        .dictionary_auto_learn_suppressed
+        .retain(|suppressed| suppressed != &key);
+
+    settings.dictionary_auto_learn_suppressed.len() != before_len
+}
+
+fn dictionary_phrase_has_valid_token_boundaries(phrase: &str) -> bool {
+    phrase
+        .split_whitespace()
+        .all(|token| !token.starts_with('-') && !token.ends_with('-'))
 }
 
 fn has_phrase(entries: &[DictionaryEntry], phrase: &str, except_id: Option<&str>) -> bool {
@@ -302,6 +420,29 @@ mod tests {
             sanitize_dictionary_phrase("<Robyn&>"),
             Some("Robyn".to_string())
         );
+    }
+
+    #[test]
+    fn sanitize_dictionary_phrase_allows_internal_hyphen_names() {
+        assert_eq!(
+            sanitize_dictionary_phrase("Jean-Luc Picard"),
+            Some("Jean-Luc Picard".to_string())
+        );
+    }
+
+    #[test]
+    fn sanitize_dictionary_phrase_allows_internal_technical_punctuation() {
+        assert_eq!(
+            sanitize_dictionary_phrase("Node.js C++ F#"),
+            Some("Node.js C++ F#".to_string())
+        );
+    }
+
+    #[test]
+    fn sanitize_dictionary_phrase_rejects_dangling_hyphen_words() {
+        assert_eq!(sanitize_dictionary_phrase("Vow-"), None);
+        assert_eq!(sanitize_dictionary_phrase("-Vow"), None);
+        assert_eq!(sanitize_dictionary_phrase("Robyn -"), None);
     }
 
     #[test]
@@ -352,6 +493,71 @@ mod tests {
     }
 
     #[test]
+    fn sync_legacy_custom_words_removes_dangling_hyphen_auto_learned_entries() {
+        let mut settings = get_default_settings();
+        settings.dictionary_entries = vec![
+            DictionaryEntry {
+                source: DictionaryEntrySource::AutoLearned,
+                ..entry("dict_1_vow", "Vow-")
+            },
+            DictionaryEntry {
+                source: DictionaryEntrySource::AutoLearned,
+                ..entry("dict_2_robyn", "Robyn")
+            },
+        ];
+        settings.custom_words = vec!["Vow-".to_string(), "Robyn".to_string()];
+
+        let changed = sync_legacy_custom_words(&mut settings);
+
+        assert!(changed);
+        assert_eq!(settings.dictionary_entries.len(), 1);
+        assert_eq!(settings.dictionary_entries[0].phrase, "Robyn");
+        assert_eq!(settings.custom_words, vec!["Robyn"]);
+    }
+
+    #[test]
+    fn sync_legacy_custom_words_removes_dangling_hyphen_manual_and_imported_entries() {
+        let mut settings = get_default_settings();
+        settings.dictionary_entries = vec![
+            entry("dict_1_vow", "Vow-"),
+            DictionaryEntry {
+                source: DictionaryEntrySource::Imported,
+                ..entry("dict_2_al", "Al-")
+            },
+            entry("dict_3_jean_luc", "Jean-Luc"),
+        ];
+        settings.custom_words = vec![
+            "Vow-".to_string(),
+            "Al-".to_string(),
+            "Jean-Luc".to_string(),
+        ];
+
+        let changed = sync_legacy_custom_words(&mut settings);
+
+        assert!(changed);
+        assert_eq!(settings.dictionary_entries.len(), 1);
+        assert_eq!(settings.dictionary_entries[0].phrase, "Jean-Luc");
+        assert_eq!(settings.custom_words, vec!["Jean-Luc"]);
+    }
+
+    #[test]
+    fn sync_legacy_custom_words_rejects_dangling_hyphen_legacy_words_as_manual() {
+        let mut settings = get_default_settings();
+        settings.custom_words = vec!["Vow-".to_string(), "Robyn".to_string()];
+
+        let changed = sync_legacy_custom_words(&mut settings);
+
+        assert!(changed);
+        assert_eq!(settings.dictionary_entries.len(), 1);
+        assert_eq!(settings.dictionary_entries[0].phrase, "Robyn");
+        assert_eq!(
+            settings.dictionary_entries[0].source,
+            DictionaryEntrySource::Manual
+        );
+        assert_eq!(settings.custom_words, vec!["Robyn"]);
+    }
+
+    #[test]
     fn upsert_manual_entry_rejects_case_duplicate() {
         let mut settings = get_default_settings();
         settings.dictionary_entries = vec![entry("dict_1_robyn", "Robyn")];
@@ -359,6 +565,17 @@ mod tests {
         let result = upsert_manual_entry(&mut settings, 42, "robyn".to_string(), None);
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn upsert_manual_entry_rejects_dangling_hyphen_words() {
+        let mut settings = get_default_settings();
+
+        let result = upsert_manual_entry(&mut settings, 42, "Vow-".to_string(), None);
+
+        assert!(result.is_err());
+        assert!(settings.dictionary_entries.is_empty());
+        assert!(settings.custom_words.is_empty());
     }
 
     #[test]
@@ -425,6 +642,101 @@ mod tests {
 
         assert!(learned.is_none());
         assert_eq!(settings.dictionary_entries.len(), 1);
+    }
+
+    #[test]
+    fn deleted_entry_is_not_auto_learned_again() {
+        let mut settings = get_default_settings();
+        let learned = upsert_auto_learn_entry(
+            &mut settings,
+            42,
+            "Gibbeteen".to_string(),
+            Some("gibberish".to_string()),
+        )
+        .expect("auto learn")
+        .expect("new entry");
+
+        let deleted = delete_entries(&mut settings, &[learned.id]);
+        assert_eq!(deleted.len(), 1);
+        assert!(settings.dictionary_entries.is_empty());
+        assert_eq!(settings.dictionary_auto_learn_suppressed, vec!["gibbeteen"]);
+
+        let learned_again = upsert_auto_learn_entry(
+            &mut settings,
+            43,
+            "Gibbeteen".to_string(),
+            Some("gibberish".to_string()),
+        )
+        .expect("auto learn");
+
+        assert!(learned_again.is_none());
+        assert!(settings.dictionary_entries.is_empty());
+        assert!(settings.custom_words.is_empty());
+    }
+
+    #[test]
+    fn manual_entry_clears_deleted_auto_learn_suppression() {
+        let mut settings = get_default_settings();
+        settings
+            .dictionary_auto_learn_suppressed
+            .push("gibbeteen".to_string());
+
+        let manual = upsert_manual_entry(&mut settings, 42, "Gibbeteen".to_string(), None)
+            .expect("manual add should override previous suppression");
+
+        assert_eq!(manual.phrase, "Gibbeteen");
+        assert!(settings.dictionary_auto_learn_suppressed.is_empty());
+        assert_eq!(settings.custom_words, vec!["Gibbeteen"]);
+    }
+
+    #[test]
+    fn replaced_dictionary_phrases_clear_matching_auto_learn_suppression() {
+        let mut settings = get_default_settings();
+        settings
+            .dictionary_auto_learn_suppressed
+            .extend(["robyn".to_string(), "gibbeteen".to_string()]);
+
+        replace_dictionary_phrases(
+            &mut settings,
+            42,
+            vec!["Robyn".to_string(), "Abdullah al Kulaib".to_string()],
+        );
+
+        assert_eq!(settings.dictionary_auto_learn_suppressed, vec!["gibbeteen"]);
+        assert_eq!(
+            settings.custom_words,
+            vec!["Robyn".to_string(), "Abdullah al Kulaib".to_string()]
+        );
+    }
+
+    #[test]
+    fn upsert_auto_learn_entry_rejects_dangling_hyphen_words() {
+        let mut settings = get_default_settings();
+
+        let learned = upsert_auto_learn_entry(&mut settings, 42, "Vow-".to_string(), None)
+            .expect("auto learn should ignore dangling hyphen");
+
+        assert!(learned.is_none());
+        assert!(settings.dictionary_entries.is_empty());
+        assert!(settings.custom_words.is_empty());
+    }
+
+    #[test]
+    fn upsert_auto_learn_entry_accepts_non_cased_script_words() {
+        let mut settings = get_default_settings();
+
+        let learned = upsert_auto_learn_entry(
+            &mut settings,
+            42,
+            "عبدالله".to_string(),
+            Some("عبدالة".to_string()),
+        )
+        .expect("auto learn")
+        .expect("new entry");
+
+        assert_eq!(learned.phrase, "عبدالله");
+        assert_eq!(learned.replacement_of, Some("عبدالة".to_string()));
+        assert_eq!(settings.custom_words, vec!["عبدالله"]);
     }
 
     #[test]

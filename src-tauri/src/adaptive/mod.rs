@@ -1,8 +1,11 @@
 pub mod context;
 pub mod correction;
 pub mod language;
+pub mod language_guard;
 pub mod processor;
 pub mod profile;
 pub mod routing;
 pub mod session;
+pub mod smart_formatting;
+pub mod text_direction;
 pub mod types;

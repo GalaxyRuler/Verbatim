@@ -37,7 +37,10 @@ fn build_reprocessed_adaptive_entry(
             profile_id: Some(profile.id.clone()),
             profile_name: Some(profile.name.clone()),
             routing_json: entry.adaptive_routing_json.clone(),
-            context_json: entry.adaptive_context_json.clone(),
+            context_json: entry
+                .adaptive_context_json
+                .as_deref()
+                .and_then(crate::adaptive::context::redact_context_json_for_history),
             language_json: entry.adaptive_language_json.clone(),
             insertion_json: None,
             parent_entry_id: Some(entry.id),
@@ -121,10 +124,29 @@ mod tests {
             adaptive_profile_id: Some("email".to_string()),
             adaptive_profile_name: Some("Email".to_string()),
             adaptive_routing_json: Some("{\"profile_id\":\"email\"}".to_string()),
-            adaptive_context_json: Some("{\"target_kind\":\"Email\"}".to_string()),
+            adaptive_context_json: Some(
+                serde_json::json!({
+                    "captured_at_ms": 1,
+                    "process_name": "OUTLOOK.EXE",
+                    "window_title": "Inbox - private@example.com - Outlook",
+                    "window_title_hash": null,
+                    "window_class": "rctrl_renwnd32",
+                    "target_kind": "Email",
+                    "target_fingerprint": "outlook.exe|rctrl_renwnd32",
+                    "is_sensitive": false
+                })
+                .to_string(),
+            ),
             adaptive_language_json: Some("{\"class\":\"MostlyLatin\"}".to_string()),
             adaptive_insertion_json: Some("{\"succeeded\":true}".to_string()),
             adaptive_parent_entry_id: None,
+            transform_action: None,
+            transform_original_text: None,
+            transform_result_text: None,
+            transform_target_language: None,
+            transform_provider_id: None,
+            transform_model: None,
+            transform_recovery_status: None,
         }
     }
 
@@ -150,10 +172,14 @@ mod tests {
             reprocessed.metadata.profile_id.as_deref(),
             Some("default_clean")
         );
-        assert_eq!(
-            reprocessed.metadata.context_json.as_deref(),
-            Some("{\"target_kind\":\"Email\"}")
-        );
+        let context_json = reprocessed
+            .metadata
+            .context_json
+            .as_deref()
+            .expect("redacted context metadata");
+        assert!(context_json.contains("\"target_kind\":\"Email\""));
+        assert!(!context_json.contains("private@example.com"));
+        assert!(!context_json.contains("window_title"));
         assert!(reprocessed.metadata.insertion_json.is_none());
     }
 

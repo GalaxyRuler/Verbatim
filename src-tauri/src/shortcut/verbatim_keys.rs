@@ -38,7 +38,7 @@ use std::thread::{self, JoinHandle};
 use tauri::{AppHandle, Emitter, Manager};
 use verbatim_keys::{Hotkey, HotkeyId, HotkeyManager, HotkeyState, KeyboardListener};
 
-use crate::settings::{self, get_settings, ShortcutBinding};
+use crate::settings::{self, get_settings, is_unbound_shortcut, ShortcutBinding};
 
 use super::handler::handle_shortcut_event;
 
@@ -411,8 +411,8 @@ fn modifiers_to_strings(modifiers: verbatim_keys::Modifiers) -> Vec<String> {
 /// Validate a shortcut string for the VerbatimKeys implementation.
 /// VerbatimKeys is more permissive: allows modifier-only combos and the fn key.
 pub fn validate_shortcut(raw: &str) -> Result<(), String> {
-    if raw.trim().is_empty() {
-        return Err("Shortcut cannot be empty".into());
+    if is_unbound_shortcut(raw) {
+        return Ok(());
     }
     // VerbatimKeys accepts modifier-only, key-only, and modifier+key combos
     // Just verify the string is parseable
@@ -443,6 +443,9 @@ pub fn init_shortcuts(app: &AppHandle) -> Result<(), String> {
             .get(&id)
             .cloned()
             .unwrap_or(default_binding);
+        if is_unbound_shortcut(&binding.current_binding) {
+            continue;
+        }
 
         if let Err(e) = state.register(&binding) {
             error!(
@@ -471,6 +474,9 @@ pub fn register_cancel_shortcut(app: &AppHandle) {
         let app_clone = app.clone();
         tauri::async_runtime::spawn(async move {
             if let Some(cancel_binding) = get_settings(&app_clone).bindings.get("cancel").cloned() {
+                if is_unbound_shortcut(&cancel_binding.current_binding) {
+                    return;
+                }
                 if let Some(state) = app_clone.try_state::<VerbatimKeysState>() {
                     if let Err(e) = state.register(&cancel_binding) {
                         error!("Failed to register cancel shortcut: {}", e);
@@ -504,6 +510,10 @@ pub fn unregister_cancel_shortcut(app: &AppHandle) {
 
 /// Register a shortcut
 pub fn register_shortcut(app: &AppHandle, binding: ShortcutBinding) -> Result<(), String> {
+    if is_unbound_shortcut(&binding.current_binding) {
+        return Ok(());
+    }
+
     let state = app
         .try_state::<VerbatimKeysState>()
         .ok_or("VerbatimKeysState not initialized")?;
@@ -512,6 +522,10 @@ pub fn register_shortcut(app: &AppHandle, binding: ShortcutBinding) -> Result<()
 
 /// Unregister a shortcut
 pub fn unregister_shortcut(app: &AppHandle, binding: ShortcutBinding) -> Result<(), String> {
+    if is_unbound_shortcut(&binding.current_binding) {
+        return Ok(());
+    }
+
     let state = app
         .try_state::<VerbatimKeysState>()
         .ok_or("VerbatimKeysState not initialized")?;

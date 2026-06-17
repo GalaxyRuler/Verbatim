@@ -255,6 +255,10 @@ export const VerbatimKeysShortcutInput: React.FC<
     `settings.general.shortcut.bindings.${shortcutId}.description`,
     binding.description,
   );
+  const formattedBinding =
+    binding.current_binding.trim().length > 0
+      ? formatKeyCombination(binding.current_binding, osType)
+      : t("settings.general.shortcut.unassigned");
 
   return (
     <SettingContainer
@@ -278,7 +282,7 @@ export const VerbatimKeysShortcutInput: React.FC<
             className="px-2 py-1 text-sm font-semibold bg-mid-gray/10 border border-mid-gray/80 hover:bg-logo-primary/10 rounded-md cursor-pointer hover:border-logo-primary"
             onClick={startRecording}
           >
-            {formatKeyCombination(binding.current_binding, osType)}
+            {formattedBinding}
           </div>
         )}
         <ResetButton

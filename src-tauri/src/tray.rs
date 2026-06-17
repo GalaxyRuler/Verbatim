@@ -133,6 +133,10 @@ pub fn tray_tooltip() -> String {
 }
 
 fn version_label() -> String {
+    if let Some(dev_version) = option_env!("VERBATIM_DEV_VERSION") {
+        return format!("Verbatim Dev v{}", dev_version);
+    }
+
     if cfg!(debug_assertions) {
         format!("Verbatim v{} (Dev)", env!("CARGO_PKG_VERSION"))
     } else {
@@ -270,7 +274,7 @@ pub fn update_tray_menu(app: &AppHandle, state: &TrayIconState, locale: Option<&
     let _ = tray.set_tooltip(Some(version_label));
 }
 
-fn last_transcript_text(entry: &HistoryEntry) -> &str {
+pub(crate) fn last_transcript_text(entry: &HistoryEntry) -> &str {
     entry
         .post_processed_text
         .as_deref()
@@ -340,6 +344,13 @@ mod tests {
             adaptive_language_json: None,
             adaptive_insertion_json: None,
             adaptive_parent_entry_id: None,
+            transform_action: None,
+            transform_original_text: None,
+            transform_result_text: None,
+            transform_target_language: None,
+            transform_provider_id: None,
+            transform_model: None,
+            transform_recovery_status: None,
         }
     }
 

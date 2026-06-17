@@ -4,6 +4,8 @@ use serde::{Deserialize, Deserializer, Serialize};
 use specta::Type;
 use std::collections::HashMap;
 use std::fmt;
+use std::fs;
+use std::path::{Path, PathBuf};
 use tauri::AppHandle;
 use tauri_plugin_store::StoreExt;
 
@@ -84,6 +86,10 @@ pub struct ShortcutBinding {
     pub description: String,
     pub default_binding: String,
     pub current_binding: String,
+}
+
+pub fn is_unbound_shortcut(raw: &str) -> bool {
+    raw.trim().is_empty()
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Type)]
@@ -365,6 +371,35 @@ impl Default for OrtAcceleratorSetting {
     }
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum DictationLanguageMode {
+    Auto,
+    Single,
+    Multilingual,
+}
+
+impl Default for DictationLanguageMode {
+    fn default() -> Self {
+        DictationLanguageMode::Auto
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Type)]
+#[serde(rename_all = "lowercase")]
+pub enum FormattingLevel {
+    None,
+    Light,
+    Medium,
+    High,
+}
+
+impl Default for FormattingLevel {
+    fn default() -> Self {
+        FormattingLevel::Light
+    }
+}
+
 #[derive(Clone, Serialize, Deserialize, Type)]
 #[serde(transparent)]
 pub(crate) struct SecretMap(HashMap<String, String>);
@@ -431,8 +466,12 @@ pub struct AppSettings {
     pub translation_model_id: Option<String>,
     #[serde(default = "default_selected_language")]
     pub selected_language: String,
+    #[serde(default)]
+    pub dictation_language_mode: DictationLanguageMode,
     #[serde(default = "default_overlay_position")]
     pub overlay_position: OverlayPosition,
+    #[serde(default)]
+    pub docked_pill_enabled: bool,
     #[serde(default = "default_debug_mode")]
     pub debug_mode: bool,
     #[serde(default = "default_log_level")]
@@ -441,8 +480,12 @@ pub struct AppSettings {
     pub custom_words: Vec<String>,
     #[serde(default)]
     pub dictionary_entries: Vec<DictionaryEntry>,
+    #[serde(default)]
+    pub dictionary_auto_learn_suppressed: Vec<String>,
     #[serde(default = "default_auto_add_dictionary_words")]
     pub auto_add_dictionary_words: bool,
+    #[serde(default)]
+    pub snippets: Vec<crate::snippets::SnippetEntry>,
     #[serde(default)]
     pub model_unload_timeout: ModelUnloadTimeout,
     #[serde(default = "default_word_correction_threshold")]
@@ -461,6 +504,8 @@ pub struct AppSettings {
     pub auto_submit_key: AutoSubmitKey,
     #[serde(default = "default_post_process_enabled")]
     pub post_process_enabled: bool,
+    #[serde(default)]
+    pub formatting_level: FormattingLevel,
     #[serde(default = "default_post_process_provider_id")]
     pub post_process_provider_id: String,
     #[serde(default = "default_post_process_providers")]
@@ -473,6 +518,8 @@ pub struct AppSettings {
     pub post_process_prompts: Vec<LLMPrompt>,
     #[serde(default)]
     pub post_process_selected_prompt_id: Option<String>,
+    #[serde(default)]
+    pub local_llm: crate::local_llm::LocalLlmSettings,
     #[serde(default)]
     pub mute_while_recording: bool,
     #[serde(default)]
@@ -496,6 +543,10 @@ pub struct AppSettings {
     pub custom_filler_words: Option<Vec<String>>,
     #[serde(default)]
     pub adaptive_profiles_enabled: bool,
+    #[serde(default)]
+    pub context_awareness_enabled: bool,
+    #[serde(default)]
+    pub context_nearby_text_enabled: bool,
     #[serde(default = "default_adaptive_language_shortlist")]
     pub adaptive_language_shortlist: Vec<String>,
     #[serde(default = "default_adaptive_default_profile_id")]
@@ -580,7 +631,7 @@ fn default_debug_mode() -> bool {
 }
 
 fn default_log_level() -> LogLevel {
-    LogLevel::Debug
+    LogLevel::Info
 }
 
 fn default_word_correction_threshold() -> f64 {
@@ -683,6 +734,30 @@ fn default_post_process_providers() -> Vec<PostProcessProvider> {
             models_endpoint: Some("/models".to_string()),
             supports_structured_output: true,
         },
+        PostProcessProvider {
+            id: "lm_studio".to_string(),
+            label: "LM Studio".to_string(),
+            base_url: "http://localhost:1234/v1".to_string(),
+            allow_base_url_edit: true,
+            models_endpoint: Some("/models".to_string()),
+            supports_structured_output: false,
+        },
+        PostProcessProvider {
+            id: "ollama".to_string(),
+            label: "Ollama".to_string(),
+            base_url: "http://localhost:11434/v1".to_string(),
+            allow_base_url_edit: true,
+            models_endpoint: Some("/models".to_string()),
+            supports_structured_output: false,
+        },
+        PostProcessProvider {
+            id: "vllm".to_string(),
+            label: "vLLM".to_string(),
+            base_url: "http://localhost:8000/v1".to_string(),
+            allow_base_url_edit: true,
+            models_endpoint: Some("/models".to_string()),
+            supports_structured_output: false,
+        },
     ];
 
     // Note: We always include Apple Intelligence on macOS ARM64 without checking availability
@@ -739,6 +814,25 @@ fn default_model_for_provider(provider_id: &str) -> String {
     String::new()
 }
 
+pub fn is_local_post_process_base_url(base_url: &str) -> bool {
+    let Ok(parsed) = reqwest::Url::parse(base_url.trim()) else {
+        return false;
+    };
+
+    if parsed.scheme() == "apple-intelligence" {
+        return true;
+    }
+
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return false;
+    }
+
+    matches!(
+        parsed.host_str(),
+        Some("localhost") | Some("127.0.0.1") | Some("::1") | Some("[::1]")
+    )
+}
+
 fn default_post_process_models() -> HashMap<String, String> {
     let mut map = HashMap::new();
     for provider in default_post_process_providers() {
@@ -748,6 +842,33 @@ fn default_post_process_models() -> HashMap<String, String> {
         );
     }
     map
+}
+
+fn known_openai_compatible_port(provider_id: &str, port: Option<u16>) -> bool {
+    matches!(provider_id, "lm_studio" | "ollama" | "vllm")
+        || matches!(port, Some(1234 | 11434 | 8000))
+}
+
+fn normalize_known_openai_compatible_base_url(provider_id: &str, base_url: &str) -> Option<String> {
+    let Ok(mut parsed) = reqwest::Url::parse(base_url.trim()) else {
+        return None;
+    };
+
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return None;
+    }
+
+    if !known_openai_compatible_port(provider_id, parsed.port_or_known_default()) {
+        return None;
+    }
+
+    let path = parsed.path().trim_end_matches('/');
+    if !path.is_empty() && path != "/" {
+        return None;
+    }
+
+    parsed.set_path("/v1");
+    Some(parsed.to_string().trim_end_matches('/').to_string())
 }
 
 fn default_post_process_prompts() -> Vec<LLMPrompt> {
@@ -787,6 +908,14 @@ fn ensure_post_process_defaults(settings: &mut AppSettings) -> bool {
                     existing.supports_structured_output = provider.supports_structured_output;
                     changed = true;
                 }
+                if existing.allow_base_url_edit != provider.allow_base_url_edit {
+                    existing.allow_base_url_edit = provider.allow_base_url_edit;
+                    changed = true;
+                }
+                if existing.models_endpoint != provider.models_endpoint {
+                    existing.models_endpoint = provider.models_endpoint.clone();
+                    changed = true;
+                }
             }
             None => {
                 // Provider doesn't exist, add it
@@ -814,6 +943,21 @@ fn ensure_post_process_defaults(settings: &mut AppSettings) -> bool {
                 settings
                     .post_process_models
                     .insert(provider.id.clone(), default_model);
+                changed = true;
+            }
+        }
+    }
+
+    for provider in settings.post_process_providers.iter_mut() {
+        if let Some(normalized) =
+            normalize_known_openai_compatible_base_url(&provider.id, &provider.base_url)
+        {
+            if normalized != provider.base_url {
+                debug!(
+                    "Normalizing post-process provider '{}' base URL from '{}' to '{}'",
+                    provider.id, provider.base_url, normalized
+                );
+                provider.base_url = normalized;
                 changed = true;
             }
         }
@@ -886,8 +1030,29 @@ fn ensure_translation_defaults(settings: &mut AppSettings) -> bool {
     false
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 fn ensure_dictionary_defaults(settings: &mut AppSettings) -> bool {
     crate::dictionary::sync_legacy_custom_words(settings)
+}
+
+fn settings_value_has_dictionary_entries(settings_value: Option<&serde_json::Value>) -> bool {
+    settings_value
+        .and_then(serde_json::Value::as_object)
+        .is_some_and(|settings| settings.contains_key("dictionary_entries"))
+}
+
+fn ensure_dictionary_defaults_for_loaded_value(
+    settings: &mut AppSettings,
+    settings_value: Option<&serde_json::Value>,
+) -> bool {
+    crate::dictionary::sync_legacy_custom_words_with_migration(
+        settings,
+        !settings_value_has_dictionary_entries(settings_value),
+    )
+}
+
+fn ensure_snippet_defaults(settings: &mut AppSettings) -> bool {
+    crate::snippets::sync_snippets(settings)
 }
 
 pub fn set_translation_target_language(settings: &mut AppSettings, target_language: String) {
@@ -959,6 +1124,44 @@ pub fn get_default_settings() -> AppSettings {
             current_binding: "escape".to_string(),
         },
     );
+    for (id, name, description) in [
+        (
+            "transform_polish",
+            "Polish Selected Text",
+            "Transforms the selected text with the configured post-processing provider.",
+        ),
+        (
+            "transform_make_concise",
+            "Make Selected Text Concise",
+            "Makes the selected text more concise with the configured post-processing provider.",
+        ),
+        (
+            "transform_turn_into_list",
+            "Turn Selected Text Into List",
+            "Turns the selected text into a list with the configured post-processing provider.",
+        ),
+        (
+            "transform_translate",
+            "Translate Selected Text",
+            "Translates the selected text to your configured translation target.",
+        ),
+        (
+            "transform_prompt_engineer",
+            "Prompt Engineer Selected Text",
+            "Rewrites the selected text as a clearer prompt.",
+        ),
+    ] {
+        bindings.insert(
+            id.to_string(),
+            ShortcutBinding {
+                id: id.to_string(),
+                name: name.to_string(),
+                description: description.to_string(),
+                default_binding: String::new(),
+                current_binding: String::new(),
+            },
+        );
+    }
 
     AppSettings {
         bindings,
@@ -980,12 +1183,16 @@ pub fn get_default_settings() -> AppSettings {
         translation_provider_id: None,
         translation_model_id: None,
         selected_language: "auto".to_string(),
+        dictation_language_mode: DictationLanguageMode::default(),
         overlay_position: default_overlay_position(),
+        docked_pill_enabled: false,
         debug_mode: false,
         log_level: default_log_level(),
         custom_words: Vec::new(),
         dictionary_entries: Vec::new(),
+        dictionary_auto_learn_suppressed: Vec::new(),
         auto_add_dictionary_words: default_auto_add_dictionary_words(),
+        snippets: Vec::new(),
         model_unload_timeout: ModelUnloadTimeout::default(),
         word_correction_threshold: default_word_correction_threshold(),
         history_limit: default_history_limit(),
@@ -995,12 +1202,14 @@ pub fn get_default_settings() -> AppSettings {
         auto_submit: default_auto_submit(),
         auto_submit_key: AutoSubmitKey::default(),
         post_process_enabled: default_post_process_enabled(),
+        formatting_level: FormattingLevel::default(),
         post_process_provider_id: default_post_process_provider_id(),
         post_process_providers: default_post_process_providers(),
         post_process_api_keys: default_post_process_api_keys(),
         post_process_models: default_post_process_models(),
         post_process_prompts: default_post_process_prompts(),
         post_process_selected_prompt_id: None,
+        local_llm: crate::local_llm::LocalLlmSettings::default(),
         mute_while_recording: true,
         append_trailing_space: false,
         app_language: default_app_language(),
@@ -1013,6 +1222,8 @@ pub fn get_default_settings() -> AppSettings {
         external_script_path: None,
         custom_filler_words: None,
         adaptive_profiles_enabled: false,
+        context_awareness_enabled: false,
+        context_nearby_text_enabled: false,
         adaptive_language_shortlist: default_adaptive_language_shortlist(),
         adaptive_default_profile_id: default_adaptive_default_profile_id(),
         adaptive_profiles: default_adaptive_profiles(),
@@ -1026,6 +1237,65 @@ pub fn get_default_settings() -> AppSettings {
 }
 
 impl AppSettings {
+    pub fn apply_dictation_language_mode(
+        &mut self,
+        mode: DictationLanguageMode,
+        selected_language: Option<String>,
+        languages: Vec<String>,
+    ) -> Result<(), String> {
+        let cleaned = languages.into_iter().fold(Vec::new(), |mut acc, language| {
+            let language = language.trim().to_lowercase();
+            if !language.is_empty() && language != "auto" && !acc.contains(&language) {
+                acc.push(language);
+            }
+            acc
+        });
+
+        self.dictation_language_mode = mode;
+        match mode {
+            DictationLanguageMode::Single => {
+                let language = selected_language
+                    .as_deref()
+                    .map(str::trim)
+                    .map(str::to_lowercase)
+                    .filter(|language| !language.is_empty() && language != "auto")
+                    .or_else(|| cleaned.first().cloned());
+                let Some(language) = language else {
+                    return Err("Single-language mode requires a language".to_string());
+                };
+                let shortlist = if cleaned.is_empty() {
+                    vec![language.clone()]
+                } else {
+                    cleaned
+                };
+                if !shortlist.contains(&language) {
+                    return Err(
+                        "Single-language mode requires the selected language in the language list"
+                            .to_string(),
+                    );
+                }
+                self.selected_language = language.clone();
+                self.adaptive_language_shortlist = shortlist;
+            }
+            DictationLanguageMode::Multilingual => {
+                if cleaned.len() < 2 {
+                    return Err("Multilingual mode requires at least two languages".to_string());
+                }
+                self.selected_language = "auto".to_string();
+                self.adaptive_language_shortlist = cleaned;
+            }
+            DictationLanguageMode::Auto => {
+                self.selected_language = "auto".to_string();
+                self.adaptive_language_shortlist = if cleaned.is_empty() {
+                    default_adaptive_language_shortlist()
+                } else {
+                    cleaned
+                };
+            }
+        }
+        Ok(())
+    }
+
     pub fn active_post_process_provider(&self) -> Option<&PostProcessProvider> {
         self.post_process_providers
             .iter()
@@ -1053,28 +1323,129 @@ impl AppSettings {
     }
 }
 
+fn existing_settings_log_message(settings: &AppSettings) -> String {
+    format!(
+        "Found existing settings ({} bindings, {} dictionary entries, {} custom words, {} snippets, {} post-process providers)",
+        settings.bindings.len(),
+        settings.dictionary_entries.len(),
+        settings.custom_words.len(),
+        settings.snippets.len(),
+        settings.post_process_providers.len()
+    )
+}
+
+fn recover_settings_from_unparseable_value(settings_value: &serde_json::Value) -> AppSettings {
+    let default_settings = get_default_settings();
+    let default_value = match serde_json::to_value(&default_settings) {
+        Ok(value) => value,
+        Err(_) => return default_settings,
+    };
+    let Some(source) = settings_value.as_object() else {
+        return default_settings;
+    };
+
+    let mut merged_value = default_value.clone();
+    let Some(merged_object) = merged_value.as_object_mut() else {
+        return default_settings;
+    };
+
+    for (key, value) in source {
+        let mut candidate = default_value.clone();
+        if let Some(candidate_object) = candidate.as_object_mut() {
+            candidate_object.insert(key.clone(), value.clone());
+        }
+
+        if serde_json::from_value::<AppSettings>(candidate).is_ok() {
+            merged_object.insert(key.clone(), value.clone());
+        }
+    }
+
+    serde_json::from_value::<AppSettings>(merged_value).unwrap_or(default_settings)
+}
+
+fn settings_store_file_path(app: &AppHandle) -> Result<PathBuf, String> {
+    let store_path = crate::portable::store_path(SETTINGS_STORE_PATH);
+    if store_path.is_absolute() {
+        return Ok(store_path);
+    }
+
+    crate::portable::resolve_app_data(app, SETTINGS_STORE_PATH)
+        .map_err(|err| format!("resolve settings store path: {err}"))
+}
+
+fn settings_backup_directory(app: &AppHandle) -> Result<PathBuf, String> {
+    let settings_path = settings_store_file_path(app)?;
+    settings_path
+        .parent()
+        .map(Path::to_path_buf)
+        .ok_or_else(|| "settings store path has no parent directory".to_string())
+}
+
+fn backup_settings_value_to_dir(
+    backup_dir: &Path,
+    settings_value: &serde_json::Value,
+) -> Result<PathBuf, String> {
+    fs::create_dir_all(backup_dir)
+        .map_err(|err| format!("create settings backup directory: {err}"))?;
+    let timestamp = chrono::Utc::now().format("%Y%m%d%H%M%S%3f");
+    let backup_path = backup_dir.join(format!("settings_store.parse-error.{timestamp}.json"));
+    let contents = serde_json::to_string_pretty(settings_value)
+        .map_err(|err| format!("serialize settings backup: {err}"))?;
+    fs::write(&backup_path, contents).map_err(|err| format!("write settings backup: {err}"))?;
+    Ok(backup_path)
+}
+
+fn backup_unparseable_settings(app: &AppHandle, settings_value: &serde_json::Value) {
+    match settings_backup_directory(app)
+        .and_then(|dir| backup_settings_value_to_dir(&dir, settings_value))
+    {
+        Ok(path) => warn!(
+            "Backed up unparseable settings before recovery to {}",
+            path.display()
+        ),
+        Err(err) => warn!("Failed to back up unparseable settings: {}", err),
+    }
+}
+
+fn recover_unparseable_settings(
+    app: &AppHandle,
+    settings_value: &serde_json::Value,
+    error: &serde_json::Error,
+) -> AppSettings {
+    warn!("Failed to parse settings: {}", error);
+    backup_unparseable_settings(app, settings_value);
+    recover_settings_from_unparseable_value(settings_value)
+}
+
+fn ensure_binding_defaults(settings: &mut AppSettings) -> bool {
+    let default_settings = get_default_settings();
+    let mut changed = false;
+
+    for (key, value) in default_settings.bindings {
+        if !settings.bindings.contains_key(&key) {
+            debug!("Adding missing binding: {}", key);
+            settings.bindings.insert(key, value);
+            changed = true;
+        }
+    }
+
+    changed
+}
+
 pub fn load_or_create_app_settings(app: &AppHandle) -> AppSettings {
     // Initialize store
     let store = app
         .store(crate::portable::store_path(SETTINGS_STORE_PATH))
         .expect("Failed to initialize store");
 
+    let mut settings_value_for_defaults = None;
     let mut settings = if let Some(settings_value) = store.get("settings") {
+        settings_value_for_defaults = Some(settings_value.clone());
         // Parse the entire settings object
-        match serde_json::from_value::<AppSettings>(settings_value) {
+        match serde_json::from_value::<AppSettings>(settings_value.clone()) {
             Ok(mut settings) => {
-                debug!("Found existing settings: {:?}", settings);
-                let default_settings = get_default_settings();
-                let mut updated = false;
-
-                // Merge default bindings into existing settings
-                for (key, value) in default_settings.bindings {
-                    if !settings.bindings.contains_key(&key) {
-                        debug!("Adding missing binding: {}", key);
-                        settings.bindings.insert(key, value);
-                        updated = true;
-                    }
-                }
+                debug!("{}", existing_settings_log_message(&settings));
+                let updated = ensure_binding_defaults(&mut settings);
 
                 if updated {
                     debug!("Settings updated with new bindings");
@@ -1084,11 +1455,12 @@ pub fn load_or_create_app_settings(app: &AppHandle) -> AppSettings {
                 settings
             }
             Err(e) => {
-                warn!("Failed to parse settings: {}", e);
-                // Fall back to default settings if parsing fails
-                let default_settings = get_default_settings();
-                store.set("settings", serde_json::to_value(&default_settings).unwrap());
-                default_settings
+                let recovered_settings = recover_unparseable_settings(app, &settings_value, &e);
+                store.set(
+                    "settings",
+                    serde_json::to_value(&recovered_settings).unwrap(),
+                );
+                recovered_settings
             }
         }
     } else {
@@ -1097,11 +1469,22 @@ pub fn load_or_create_app_settings(app: &AppHandle) -> AppSettings {
         default_settings
     };
 
+    let binding_changed = ensure_binding_defaults(&mut settings);
     let post_process_changed = ensure_post_process_defaults(&mut settings);
     let adaptive_changed = ensure_adaptive_defaults(&mut settings);
     let translation_changed = ensure_translation_defaults(&mut settings);
-    let dictionary_changed = ensure_dictionary_defaults(&mut settings);
-    if post_process_changed || adaptive_changed || translation_changed || dictionary_changed {
+    let dictionary_changed = ensure_dictionary_defaults_for_loaded_value(
+        &mut settings,
+        settings_value_for_defaults.as_ref(),
+    );
+    let snippet_changed = ensure_snippet_defaults(&mut settings);
+    if binding_changed
+        || post_process_changed
+        || adaptive_changed
+        || translation_changed
+        || dictionary_changed
+        || snippet_changed
+    {
         store.set("settings", serde_json::to_value(&settings).unwrap());
     }
 
@@ -1113,11 +1496,16 @@ pub fn get_settings(app: &AppHandle) -> AppSettings {
         .store(crate::portable::store_path(SETTINGS_STORE_PATH))
         .expect("Failed to initialize store");
 
+    let mut settings_value_for_defaults = None;
     let mut settings = if let Some(settings_value) = store.get("settings") {
-        serde_json::from_value::<AppSettings>(settings_value).unwrap_or_else(|_| {
-            let default_settings = get_default_settings();
-            store.set("settings", serde_json::to_value(&default_settings).unwrap());
-            default_settings
+        settings_value_for_defaults = Some(settings_value.clone());
+        serde_json::from_value::<AppSettings>(settings_value.clone()).unwrap_or_else(|err| {
+            let recovered_settings = recover_unparseable_settings(app, &settings_value, &err);
+            store.set(
+                "settings",
+                serde_json::to_value(&recovered_settings).unwrap(),
+            );
+            recovered_settings
         })
     } else {
         let default_settings = get_default_settings();
@@ -1125,11 +1513,22 @@ pub fn get_settings(app: &AppHandle) -> AppSettings {
         default_settings
     };
 
+    let binding_changed = ensure_binding_defaults(&mut settings);
     let post_process_changed = ensure_post_process_defaults(&mut settings);
     let adaptive_changed = ensure_adaptive_defaults(&mut settings);
     let translation_changed = ensure_translation_defaults(&mut settings);
-    let dictionary_changed = ensure_dictionary_defaults(&mut settings);
-    if post_process_changed || adaptive_changed || translation_changed || dictionary_changed {
+    let dictionary_changed = ensure_dictionary_defaults_for_loaded_value(
+        &mut settings,
+        settings_value_for_defaults.as_ref(),
+    );
+    let snippet_changed = ensure_snippet_defaults(&mut settings);
+    if binding_changed
+        || post_process_changed
+        || adaptive_changed
+        || translation_changed
+        || dictionary_changed
+        || snippet_changed
+    {
         store.set("settings", serde_json::to_value(&settings).unwrap());
     }
 
@@ -1142,6 +1541,7 @@ pub fn write_settings(app: &AppHandle, mut settings: AppSettings) {
         .expect("Failed to initialize store");
 
     crate::dictionary::sync_legacy_custom_words(&mut settings);
+    crate::snippets::sync_snippets(&mut settings);
     store.set("settings", serde_json::to_value(&settings).unwrap());
 }
 
@@ -1181,6 +1581,49 @@ mod tests {
     }
 
     #[test]
+    fn transform_shortcut_defaults_are_visible_but_unbound() {
+        let settings = get_default_settings();
+        for id in [
+            "transform_polish",
+            "transform_make_concise",
+            "transform_turn_into_list",
+            "transform_translate",
+            "transform_prompt_engineer",
+        ] {
+            let binding = settings.bindings.get(id).expect("transform binding");
+            assert!(is_unbound_shortcut(&binding.default_binding));
+            assert!(is_unbound_shortcut(&binding.current_binding));
+        }
+    }
+
+    #[test]
+    fn binding_defaults_migrate_transform_shortcuts_into_existing_settings() {
+        let mut settings = get_default_settings();
+        for id in [
+            "transform_polish",
+            "transform_make_concise",
+            "transform_turn_into_list",
+            "transform_translate",
+            "transform_prompt_engineer",
+        ] {
+            settings.bindings.remove(id);
+        }
+
+        assert!(ensure_binding_defaults(&mut settings));
+
+        for id in [
+            "transform_polish",
+            "transform_make_concise",
+            "transform_turn_into_list",
+            "transform_translate",
+            "transform_prompt_engineer",
+        ] {
+            let binding = settings.bindings.get(id).expect("transform binding");
+            assert!(is_unbound_shortcut(&binding.current_binding));
+        }
+    }
+
+    #[test]
     fn default_settings_mute_system_audio_while_recording() {
         let settings = get_default_settings();
         assert!(settings.mute_while_recording);
@@ -1199,9 +1642,332 @@ mod tests {
     }
 
     #[test]
+    fn default_settings_start_with_empty_dictionary_auto_learn_suppression() {
+        let settings = get_default_settings();
+        assert!(settings.dictionary_auto_learn_suppressed.is_empty());
+    }
+
+    #[test]
+    fn default_settings_start_with_empty_snippets() {
+        let settings = get_default_settings();
+        assert!(settings.snippets.is_empty());
+    }
+
+    #[test]
     fn default_settings_keep_empty_custom_words_for_compatibility() {
         let settings = get_default_settings();
         assert!(settings.custom_words.is_empty());
+    }
+
+    #[test]
+    fn default_settings_disable_post_processing() {
+        let settings = get_default_settings();
+        assert!(!settings.post_process_enabled);
+    }
+
+    #[test]
+    fn default_settings_do_not_enable_managed_local_llm() {
+        let settings = get_default_settings();
+
+        assert!(!settings.local_llm.enabled);
+        assert_eq!(settings.local_llm.runtime_mode, "managed");
+        assert_eq!(settings.local_llm.runtime_host, "127.0.0.1");
+        assert_eq!(settings.local_llm.runtime_port, 0);
+        assert_eq!(settings.local_llm.max_output_tokens, 512);
+    }
+
+    #[test]
+    fn default_settings_use_info_log_level() {
+        let settings = get_default_settings();
+        assert_eq!(settings.log_level, LogLevel::Info);
+    }
+
+    #[test]
+    fn existing_settings_log_message_does_not_include_user_content() {
+        let mut settings = get_default_settings();
+        settings.custom_words.push("ConfidentialWord".to_string());
+
+        let message = existing_settings_log_message(&settings);
+
+        assert!(message.contains("Found existing settings"));
+        assert!(!message.contains("ConfidentialWord"));
+    }
+
+    #[test]
+    fn parse_failure_recovery_preserves_valid_user_fields() {
+        let mut settings_value = serde_json::to_value(get_default_settings()).unwrap();
+        let object = settings_value.as_object_mut().unwrap();
+        object.insert("log_level".to_string(), serde_json::json!("verbose"));
+        object.insert("custom_words".to_string(), serde_json::json!(["Robyn"]));
+        object.insert(
+            "dictionary_entries".to_string(),
+            serde_json::json!([
+                {
+                    "id": "dict_1_robyn",
+                    "phrase": "Robyn",
+                    "source": "manual",
+                    "priority": "normal",
+                    "created_at_ms": 1,
+                    "updated_at_ms": 1
+                }
+            ]),
+        );
+        object.insert(
+            "snippets".to_string(),
+            serde_json::json!([
+                {
+                    "id": "snippet_1_email",
+                    "trigger": "email signature",
+                    "content": "Regards,\nAbdullah",
+                    "created_at_ms": 1,
+                    "updated_at_ms": 1
+                }
+            ]),
+        );
+        object.insert(
+            "post_process_api_keys".to_string(),
+            serde_json::json!({"openai": "dummy-api-key"}),
+        );
+
+        assert!(serde_json::from_value::<AppSettings>(settings_value.clone()).is_err());
+
+        let recovered = recover_settings_from_unparseable_value(&settings_value);
+
+        assert_eq!(recovered.log_level, LogLevel::Info);
+        assert_eq!(recovered.custom_words, vec!["Robyn"]);
+        assert_eq!(recovered.dictionary_entries[0].phrase, "Robyn");
+        assert_eq!(recovered.snippets[0].trigger, "email signature");
+        assert_eq!(
+            recovered
+                .post_process_api_keys
+                .get("openai")
+                .map(String::as_str),
+            Some("dummy-api-key")
+        );
+    }
+
+    #[test]
+    fn settings_parse_failure_backup_writes_recoverable_json() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let settings_value = serde_json::json!({
+            "log_level": "verbose",
+            "custom_words": ["Robyn"]
+        });
+
+        let backup_path =
+            backup_settings_value_to_dir(temp_dir.path(), &settings_value).expect("backup path");
+
+        assert!(backup_path.exists());
+        assert!(backup_path
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .starts_with("settings_store.parse-error."));
+        let restored: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(backup_path).unwrap()).unwrap();
+        assert_eq!(restored, settings_value);
+    }
+
+    #[test]
+    fn default_post_process_providers_include_local_openai_compatible_servers() {
+        let providers = default_post_process_providers();
+
+        let lm_studio = providers
+            .iter()
+            .find(|provider| provider.id == "lm_studio")
+            .expect("LM Studio provider");
+        assert_eq!(lm_studio.base_url, "http://localhost:1234/v1");
+        assert!(lm_studio.allow_base_url_edit);
+        assert_eq!(lm_studio.models_endpoint.as_deref(), Some("/models"));
+        assert!(!lm_studio.supports_structured_output);
+
+        let ollama = providers
+            .iter()
+            .find(|provider| provider.id == "ollama")
+            .expect("Ollama provider");
+        assert_eq!(ollama.base_url, "http://localhost:11434/v1");
+        assert!(ollama.allow_base_url_edit);
+        assert_eq!(ollama.models_endpoint.as_deref(), Some("/models"));
+        assert!(!ollama.supports_structured_output);
+
+        let vllm = providers
+            .iter()
+            .find(|provider| provider.id == "vllm")
+            .expect("vLLM provider");
+        assert_eq!(vllm.base_url, "http://localhost:8000/v1");
+        assert!(vllm.allow_base_url_edit);
+        assert_eq!(vllm.models_endpoint.as_deref(), Some("/models"));
+        assert!(!vllm.supports_structured_output);
+    }
+
+    #[test]
+    fn post_process_defaults_normalize_known_openai_compatible_base_urls() {
+        let mut settings = get_default_settings();
+
+        settings
+            .post_process_provider_mut("custom")
+            .unwrap()
+            .base_url = "http://192.0.2.10:1234".to_string();
+        settings
+            .post_process_provider_mut("lm_studio")
+            .unwrap()
+            .base_url = "http://localhost:1234/".to_string();
+        settings
+            .post_process_provider_mut("ollama")
+            .unwrap()
+            .base_url = "http://localhost:11434".to_string();
+        settings.post_process_provider_mut("vllm").unwrap().base_url =
+            "http://localhost:8000".to_string();
+
+        assert!(ensure_post_process_defaults(&mut settings));
+
+        assert_eq!(
+            settings.post_process_provider("custom").unwrap().base_url,
+            "http://192.0.2.10:1234/v1"
+        );
+        assert_eq!(
+            settings
+                .post_process_provider("lm_studio")
+                .unwrap()
+                .base_url,
+            "http://localhost:1234/v1"
+        );
+        assert_eq!(
+            settings.post_process_provider("ollama").unwrap().base_url,
+            "http://localhost:11434/v1"
+        );
+        assert_eq!(
+            settings.post_process_provider("vllm").unwrap().base_url,
+            "http://localhost:8000/v1"
+        );
+    }
+
+    #[test]
+    fn local_post_process_base_url_detection_accepts_local_presets_only() {
+        assert!(is_local_post_process_base_url("http://localhost:1234/v1"));
+        assert!(is_local_post_process_base_url("http://localhost:11434/v1"));
+        assert!(is_local_post_process_base_url("http://localhost:8000/v1"));
+        assert!(is_local_post_process_base_url("https://127.0.0.1:8080/v1"));
+        assert!(is_local_post_process_base_url("http://[::1]:11434/v1"));
+        assert!(is_local_post_process_base_url("apple-intelligence://local"));
+
+        for base_url in [
+            "http://localhost.evil.com/v1",
+            "http://localhost@evil.com/v1",
+            "https://127.0.0.1.evil.com/v1",
+            "https://api.openai.com/v1",
+        ] {
+            assert!(
+                !is_local_post_process_base_url(base_url),
+                "{base_url} must not be treated as a local provider"
+            );
+        }
+    }
+
+    #[test]
+    fn default_settings_use_light_formatting() {
+        let settings = get_default_settings();
+        assert_eq!(settings.formatting_level, FormattingLevel::Light);
+    }
+
+    #[test]
+    fn default_settings_use_auto_language() {
+        let settings = get_default_settings();
+        assert_eq!(settings.selected_language, "auto");
+    }
+
+    #[test]
+    fn default_settings_select_auto_dictation_language_mode() {
+        let settings = get_default_settings();
+        assert_eq!(
+            settings.dictation_language_mode,
+            DictationLanguageMode::Auto
+        );
+    }
+
+    #[test]
+    fn default_settings_keep_docked_pill_disabled() {
+        let settings = get_default_settings();
+        assert!(!settings.docked_pill_enabled);
+    }
+
+    #[test]
+    fn dictation_language_mode_maps_to_language_settings() {
+        let mut settings = get_default_settings();
+
+        settings
+            .apply_dictation_language_mode(
+                DictationLanguageMode::Single,
+                Some("de".to_string()),
+                vec!["fr".to_string(), "de".to_string(), "ja".to_string()],
+            )
+            .expect("single language mode");
+        assert_eq!(
+            settings.dictation_language_mode,
+            DictationLanguageMode::Single
+        );
+        assert_eq!(settings.selected_language, "de");
+        assert_eq!(
+            settings.adaptive_language_shortlist,
+            vec!["fr".to_string(), "de".to_string(), "ja".to_string()]
+        );
+
+        settings
+            .apply_dictation_language_mode(
+                DictationLanguageMode::Multilingual,
+                None,
+                vec!["fr".to_string(), "ja".to_string()],
+            )
+            .expect("multilingual mode");
+        assert_eq!(
+            settings.dictation_language_mode,
+            DictationLanguageMode::Multilingual
+        );
+        assert_eq!(settings.selected_language, "auto");
+        assert_eq!(
+            settings.adaptive_language_shortlist,
+            vec!["fr".to_string(), "ja".to_string()]
+        );
+
+        settings
+            .apply_dictation_language_mode(
+                DictationLanguageMode::Auto,
+                None,
+                vec!["fr".to_string(), "ja".to_string()],
+            )
+            .expect("auto mode");
+        assert_eq!(
+            settings.dictation_language_mode,
+            DictationLanguageMode::Auto
+        );
+        assert_eq!(settings.selected_language, "auto");
+        assert_eq!(
+            settings.adaptive_language_shortlist,
+            vec!["fr".to_string(), "ja".to_string()]
+        );
+    }
+
+    #[test]
+    fn dictation_language_mode_rejects_invalid_language_lists() {
+        let mut settings = get_default_settings();
+
+        assert!(settings
+            .apply_dictation_language_mode(DictationLanguageMode::Single, None, vec![])
+            .is_err());
+        assert!(settings
+            .apply_dictation_language_mode(
+                DictationLanguageMode::Multilingual,
+                None,
+                vec!["fr".to_string()]
+            )
+            .is_err());
+        assert!(settings
+            .apply_dictation_language_mode(
+                DictationLanguageMode::Single,
+                Some("ja".to_string()),
+                vec!["fr".to_string()]
+            )
+            .is_err());
     }
 
     #[test]
@@ -1218,10 +1984,63 @@ mod tests {
     }
 
     #[test]
+    fn dictionary_defaults_do_not_rehydrate_explicitly_empty_entries_from_legacy_words() {
+        let mut settings_value = serde_json::to_value(get_default_settings()).unwrap();
+        let object = settings_value.as_object_mut().unwrap();
+        object.insert("custom_words".to_string(), serde_json::json!(["Gibbeteen"]));
+        object.insert("dictionary_entries".to_string(), serde_json::json!([]));
+
+        let mut settings: AppSettings = serde_json::from_value(settings_value.clone()).unwrap();
+
+        let changed =
+            ensure_dictionary_defaults_for_loaded_value(&mut settings, Some(&settings_value));
+
+        assert!(changed);
+        assert!(settings.dictionary_entries.is_empty());
+        assert!(settings.custom_words.is_empty());
+    }
+
+    #[test]
+    fn dictionary_defaults_still_migrate_missing_legacy_entries_key() {
+        let mut settings_value = serde_json::to_value(get_default_settings()).unwrap();
+        let object = settings_value.as_object_mut().unwrap();
+        object.insert("custom_words".to_string(), serde_json::json!(["Robyn"]));
+        object.remove("dictionary_entries");
+
+        let mut settings: AppSettings = serde_json::from_value(settings_value.clone()).unwrap();
+
+        let changed =
+            ensure_dictionary_defaults_for_loaded_value(&mut settings, Some(&settings_value));
+
+        assert!(changed);
+        assert_eq!(settings.dictionary_phrases(), vec!["Robyn"]);
+        assert_eq!(settings.custom_words, vec!["Robyn"]);
+    }
+
+    #[test]
+    fn snippet_defaults_normalize_stored_entries() {
+        let mut settings = get_default_settings();
+        settings.snippets = vec![crate::snippets::SnippetEntry {
+            id: "snippet_1_email".to_string(),
+            trigger: "  email   signature  ".to_string(),
+            content: "Signature".to_string(),
+            created_at_ms: 1,
+            updated_at_ms: 1,
+        }];
+
+        let changed = ensure_snippet_defaults(&mut settings);
+
+        assert!(changed);
+        assert_eq!(settings.snippets[0].trigger, "email signature");
+    }
+
+    #[test]
     fn default_settings_enable_adaptive_data_but_not_adaptive_mode() {
         let settings = get_default_settings();
 
         assert!(!settings.adaptive_profiles_enabled);
+        assert!(!settings.context_awareness_enabled);
+        assert!(!settings.context_nearby_text_enabled);
         assert_eq!(
             settings.adaptive_language_shortlist,
             vec!["en".to_string(), "ar".to_string()]

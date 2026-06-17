@@ -31,8 +31,9 @@ tauri_panel! {
     })
 }
 
-const OVERLAY_WIDTH: f64 = 172.0;
-const OVERLAY_HEIGHT: f64 = 36.0;
+const OVERLAY_EXPANDED_WIDTH: f64 = 320.0;
+const OVERLAY_COLLAPSED_WIDTH: f64 = 44.0;
+const OVERLAY_HEIGHT: f64 = 42.0;
 
 #[cfg(target_os = "macos")]
 const OVERLAY_TOP_OFFSET: f64 = 46.0;
@@ -143,23 +144,12 @@ fn get_monitor_with_cursor(app_handle: &AppHandle) -> Option<tauri::Monitor> {
     if let Some(mouse_location) = input::get_cursor_position(app_handle) {
         if let Ok(monitors) = app_handle.available_monitors() {
             for monitor in monitors {
-                // Tauri's monitor position/size are physical pixels, but enigo
-                // may return logical coordinates (confirmed on macOS via
-                // NSEvent::mouseLocation; on Windows, GetCursorPos behavior
-                // depends on the process DPI-awareness context). Dividing by
-                // scale_factor normalizes to logical, which is safe regardless:
-                // if enigo returns logical it matches directly, and if it returns
-                // physical on a scale=1 monitor the division is a no-op.
-                let scale = monitor.scale_factor();
-                let pos = PhysicalPosition::new(
-                    (monitor.position().x as f64 / scale) as i32,
-                    (monitor.position().y as f64 / scale) as i32,
-                );
-                let size = PhysicalSize::new(
-                    (monitor.size().width as f64 / scale) as u32,
-                    (monitor.size().height as f64 / scale) as u32,
-                );
-                if is_mouse_within_monitor(mouse_location, &pos, &size) {
+                if is_mouse_within_monitor_coordinate_spaces(
+                    mouse_location,
+                    &monitor.position(),
+                    &monitor.size(),
+                    monitor.scale_factor(),
+                ) {
                     return Some(monitor);
                 }
             }
@@ -167,6 +157,31 @@ fn get_monitor_with_cursor(app_handle: &AppHandle) -> Option<tauri::Monitor> {
     }
 
     app_handle.primary_monitor().ok().flatten()
+}
+
+fn is_mouse_within_monitor_coordinate_spaces(
+    mouse_pos: (i32, i32),
+    physical_monitor_pos: &PhysicalPosition<i32>,
+    physical_monitor_size: &PhysicalSize<u32>,
+    scale_factor: f64,
+) -> bool {
+    if is_mouse_within_monitor(mouse_pos, physical_monitor_pos, physical_monitor_size) {
+        return true;
+    }
+
+    if scale_factor <= 0.0 {
+        return false;
+    }
+
+    let logical_pos = PhysicalPosition::new(
+        (physical_monitor_pos.x as f64 / scale_factor).round() as i32,
+        (physical_monitor_pos.y as f64 / scale_factor).round() as i32,
+    );
+    let logical_size = PhysicalSize::new(
+        (physical_monitor_size.width as f64 / scale_factor).round() as u32,
+        (physical_monitor_size.height as f64 / scale_factor).round() as u32,
+    );
+    is_mouse_within_monitor(mouse_pos, &logical_pos, &logical_size)
 }
 
 fn is_mouse_within_monitor(
@@ -200,7 +215,18 @@ fn is_mouse_within_monitor(
 /// We must use LogicalPosition (not PhysicalPosition) because Tauri/tao
 /// converts PhysicalPosition using the scale factor of the monitor the window
 /// is *currently* on, which is wrong when moving cross-monitor.
-fn calculate_overlay_position(app_handle: &AppHandle) -> Option<(f64, f64)> {
+fn overlay_width_for_expanded_state(expanded: bool) -> f64 {
+    if expanded {
+        OVERLAY_EXPANDED_WIDTH
+    } else {
+        OVERLAY_COLLAPSED_WIDTH
+    }
+}
+
+fn calculate_overlay_position_for_width(
+    app_handle: &AppHandle,
+    overlay_width: f64,
+) -> Option<(f64, f64)> {
     let monitor = get_monitor_with_cursor(app_handle)?;
     let scale = monitor.scale_factor();
     let monitor_x = monitor.position().x as f64 / scale;
@@ -210,7 +236,7 @@ fn calculate_overlay_position(app_handle: &AppHandle) -> Option<(f64, f64)> {
 
     let settings = settings::get_settings(app_handle);
 
-    let x = monitor_x + (monitor_width - OVERLAY_WIDTH) / 2.0;
+    let x = monitor_x + (monitor_width - overlay_width) / 2.0;
     let y = match settings.overlay_position {
         OverlayPosition::Top => monitor_y + OVERLAY_TOP_OFFSET,
         OverlayPosition::Bottom | OverlayPosition::None => {
@@ -219,6 +245,33 @@ fn calculate_overlay_position(app_handle: &AppHandle) -> Option<(f64, f64)> {
     };
 
     Some((x, y))
+}
+
+fn calculate_overlay_position(app_handle: &AppHandle) -> Option<(f64, f64)> {
+    calculate_overlay_position_for_width(app_handle, OVERLAY_EXPANDED_WIDTH)
+}
+
+fn apply_overlay_geometry(app_handle: &AppHandle, overlay_width: f64) {
+    if let Some(overlay_window) = app_handle.get_webview_window("recording_overlay") {
+        #[cfg(target_os = "linux")]
+        {
+            update_gtk_layer_shell_anchors(&overlay_window);
+        }
+
+        let _ = overlay_window.set_size(tauri::Size::Logical(tauri::LogicalSize {
+            width: overlay_width,
+            height: OVERLAY_HEIGHT,
+        }));
+
+        if let Some((x, y)) = calculate_overlay_position_for_width(app_handle, overlay_width) {
+            let _ = overlay_window
+                .set_position(tauri::Position::Logical(tauri::LogicalPosition { x, y }));
+        }
+    }
+}
+
+pub fn set_recording_overlay_expanded(app_handle: &AppHandle, expanded: bool) {
+    apply_overlay_geometry(app_handle, overlay_width_for_expanded_state(expanded));
 }
 
 /// Creates the recording overlay window and keeps it hidden by default
@@ -244,7 +297,7 @@ pub fn create_recording_overlay(app_handle: &AppHandle) {
     )
     .title("Recording")
     .resizable(false)
-    .inner_size(OVERLAY_WIDTH, OVERLAY_HEIGHT)
+    .inner_size(OVERLAY_EXPANDED_WIDTH, OVERLAY_HEIGHT)
     .shadow(false)
     .maximizable(false)
     .minimizable(false)
@@ -254,6 +307,7 @@ pub fn create_recording_overlay(app_handle: &AppHandle) {
     .always_on_top(true)
     .skip_taskbar(true)
     .transparent(true)
+    .focusable(false)
     .focused(false)
     .visible(false);
 
@@ -264,6 +318,8 @@ pub fn create_recording_overlay(app_handle: &AppHandle) {
     #[allow(unused_variables)]
     match builder.build() {
         Ok(window) => {
+            let _ = window.set_focusable(false);
+
             #[cfg(target_os = "linux")]
             {
                 // Try to initialize GTK layer shell, ignore errors if compositor doesn't support it
@@ -275,6 +331,13 @@ pub fn create_recording_overlay(app_handle: &AppHandle) {
             }
 
             debug!("Recording overlay window created successfully (hidden)");
+            if settings::get_settings(app_handle).docked_pill_enabled {
+                let app = app_handle.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                    show_docked_overlay(&app);
+                });
+            }
         }
         Err(e) => {
             debug!("Failed to create recording overlay window: {}", e);
@@ -294,7 +357,7 @@ pub fn create_recording_overlay(app_handle: &AppHandle) {
             .position(tauri::Position::Logical(tauri::LogicalPosition { x, y }))
             .level(PanelLevel::Status)
             .size(tauri::Size::Logical(tauri::LogicalSize {
-                width: OVERLAY_WIDTH,
+                width: OVERLAY_EXPANDED_WIDTH,
                 height: OVERLAY_HEIGHT,
             }))
             .has_shadow(false)
@@ -322,11 +385,11 @@ pub fn create_recording_overlay(app_handle: &AppHandle) {
 fn show_overlay_state(app_handle: &AppHandle, state: &str) {
     // Check if overlay should be shown based on position setting
     let settings = settings::get_settings(app_handle);
-    if settings.overlay_position == OverlayPosition::None {
+    if settings.overlay_position == OverlayPosition::None && !settings.docked_pill_enabled {
         return;
     }
 
-    update_overlay_position(app_handle);
+    set_recording_overlay_expanded(app_handle, true);
 
     if let Some(overlay_window) = app_handle.get_webview_window("recording_overlay") {
         let _ = overlay_window.show();
@@ -354,23 +417,32 @@ pub fn show_processing_overlay(app_handle: &AppHandle) {
     show_overlay_state(app_handle, "processing");
 }
 
+pub fn show_docked_overlay(app_handle: &AppHandle) {
+    set_recording_overlay_expanded(app_handle, false);
+
+    if let Some(overlay_window) = app_handle.get_webview_window("recording_overlay") {
+        let _ = overlay_window.show();
+
+        #[cfg(target_os = "windows")]
+        force_overlay_topmost(&overlay_window);
+
+        let _ = overlay_window.emit("show-docked-overlay", ());
+    }
+}
+
 /// Updates the overlay window position based on current settings
 pub fn update_overlay_position(app_handle: &AppHandle) {
-    if let Some(overlay_window) = app_handle.get_webview_window("recording_overlay") {
-        #[cfg(target_os = "linux")]
-        {
-            update_gtk_layer_shell_anchors(&overlay_window);
-        }
-
-        if let Some((x, y)) = calculate_overlay_position(app_handle) {
-            let _ = overlay_window
-                .set_position(tauri::Position::Logical(tauri::LogicalPosition { x, y }));
-        }
-    }
+    let expanded = !settings::get_settings(app_handle).docked_pill_enabled;
+    set_recording_overlay_expanded(app_handle, expanded);
 }
 
 /// Hides the recording overlay window with fade-out animation
 pub fn hide_recording_overlay(app_handle: &AppHandle) {
+    if settings::get_settings(app_handle).docked_pill_enabled {
+        show_docked_overlay(app_handle);
+        return;
+    }
+
     // Always hide the overlay regardless of settings - if setting was changed while recording,
     // we still want to hide it properly
     if let Some(overlay_window) = app_handle.get_webview_window("recording_overlay") {
@@ -392,5 +464,57 @@ pub fn emit_levels(app_handle: &AppHandle, levels: &Vec<f32>) {
     // also emit to the recording overlay if it's open
     if let Some(overlay_window) = app_handle.get_webview_window("recording_overlay") {
         let _ = overlay_window.emit("mic-level", levels);
+    }
+}
+
+pub fn emit_overlay_state_changed(app_handle: &AppHandle, state: &str) {
+    let _ = app_handle.emit("overlay-state-changed", state);
+
+    if let Some(overlay_window) = app_handle.get_webview_window("recording_overlay") {
+        let _ = overlay_window.emit("overlay-state-changed", state);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn monitor_hit_accepts_physical_cursor_coordinates_on_scaled_monitor() {
+        let monitor_pos = PhysicalPosition::new(3840, 0);
+        let monitor_size = PhysicalSize::new(3840, 2160);
+
+        assert!(is_mouse_within_monitor_coordinate_spaces(
+            (5000, 1000),
+            &monitor_pos,
+            &monitor_size,
+            2.0,
+        ));
+    }
+
+    #[test]
+    fn monitor_hit_accepts_logical_cursor_coordinates_on_scaled_monitor() {
+        let monitor_pos = PhysicalPosition::new(3840, 0);
+        let monitor_size = PhysicalSize::new(3840, 2160);
+
+        assert!(is_mouse_within_monitor_coordinate_spaces(
+            (2500, 500),
+            &monitor_pos,
+            &monitor_size,
+            2.0,
+        ));
+    }
+
+    #[test]
+    fn monitor_hit_rejects_cursor_outside_both_coordinate_spaces() {
+        let monitor_pos = PhysicalPosition::new(3840, 0);
+        let monitor_size = PhysicalSize::new(3840, 2160);
+
+        assert!(!is_mouse_within_monitor_coordinate_spaces(
+            (100, 100),
+            &monitor_pos,
+            &monitor_size,
+            2.0,
+        ));
     }
 }

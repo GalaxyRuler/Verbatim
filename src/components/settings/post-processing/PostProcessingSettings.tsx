@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
-import { RefreshCcw } from "lucide-react";
-import { commands } from "@/bindings";
+import { Check, Download, Loader2, RefreshCcw, Trash2 } from "lucide-react";
+import { listen } from "@tauri-apps/api/event";
+import { commands, type LocalLlmModelInfo } from "@/bindings";
 
 import { Alert } from "../../ui/Alert";
 import {
@@ -21,6 +22,13 @@ import { ModelSelect } from "../PostProcessingSettingsApi/ModelSelect";
 import { usePostProcessProviderState } from "../PostProcessingSettingsApi/usePostProcessProviderState";
 import { ShortcutInput } from "../ShortcutInput";
 import { useSettings } from "../../../hooks/useSettings";
+
+type LocalLlmDownloadProgress = {
+  model_id: string;
+  downloaded: number;
+  total: number;
+  percentage: number;
+};
 
 const PostProcessingSettingsApiComponent: React.FC = () => {
   const { t } = useTranslation();
@@ -52,7 +60,7 @@ const PostProcessingSettingsApiComponent: React.FC = () => {
         ) : null
       ) : (
         <>
-          {state.selectedProvider?.id === "custom" && (
+          {state.selectedProvider?.allow_base_url_edit && (
             <SettingContainer
               title={t("settings.postProcessing.api.baseUrl.title")}
               description={t("settings.postProcessing.api.baseUrl.description")}
@@ -140,6 +148,281 @@ const PostProcessingSettingsApiComponent: React.FC = () => {
         </SettingContainer>
       )}
     </>
+  );
+};
+
+const PostProcessingLocalModelComponent: React.FC = () => {
+  const { t } = useTranslation();
+  const { settings, refreshSettings } = useSettings();
+  const [models, setModels] = useState<LocalLlmModelInfo[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [busyModelId, setBusyModelId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [progress, setProgress] = useState<Record<string, number>>({});
+
+  const localLlmSettings = settings?.local_llm;
+  const selectedModelId = localLlmSettings?.selected_model_id ?? "";
+  const localLlmEnabled = localLlmSettings?.enabled ?? false;
+  const selectedModel = useMemo(
+    () => models.find((model) => model.id === selectedModelId),
+    [models, selectedModelId],
+  );
+  const canEnable = !!selectedModel?.is_downloaded;
+
+  const loadModels = useCallback(async () => {
+    setIsLoading(true);
+    const result = await commands.listLocalLlmModels();
+    if (result.status === "ok") {
+      setModels(result.data);
+      setError(null);
+    } else {
+      setError(result.error);
+    }
+    setIsLoading(false);
+  }, []);
+
+  useEffect(() => {
+    void loadModels();
+
+    let disposed = false;
+    const unlisteners: Array<() => void> = [];
+
+    void listen<LocalLlmDownloadProgress>(
+      "local-llm-download-progress",
+      (event) => {
+        setProgress((current) => ({
+          ...current,
+          [event.payload.model_id]: event.payload.percentage,
+        }));
+      },
+    ).then((unlisten) => {
+      if (disposed) {
+        unlisten();
+      } else {
+        unlisteners.push(unlisten);
+      }
+    });
+
+    void listen<string>("local-llm-model-changed", () => {
+      void loadModels();
+    }).then((unlisten) => {
+      if (disposed) {
+        unlisten();
+      } else {
+        unlisteners.push(unlisten);
+      }
+    });
+
+    return () => {
+      disposed = true;
+      unlisteners.forEach((unlisten) => unlisten());
+    };
+  }, [loadModels]);
+
+  const runModelAction = async (
+    modelId: string,
+    action: () => Promise<
+      { status: "ok"; data: unknown } | { status: "error"; error: string }
+    >,
+  ) => {
+    setBusyModelId(modelId);
+    setError(null);
+    try {
+      const result = await action();
+      if (result.status === "error") {
+        setError(result.error);
+      }
+      await loadModels();
+      await refreshSettings();
+    } finally {
+      setBusyModelId(null);
+    }
+  };
+
+  const handleDownload = (modelId: string) =>
+    runModelAction(modelId, () => commands.downloadLocalLlmModel(modelId));
+
+  const handleCancel = (modelId: string) =>
+    runModelAction(modelId, () => commands.cancelLocalLlmDownload(modelId));
+
+  const handleDelete = (modelId: string) =>
+    runModelAction(modelId, () => commands.deleteLocalLlmModel(modelId));
+
+  const handleSelect = (modelId: string) =>
+    runModelAction(modelId, () => commands.selectLocalLlmModel(modelId));
+
+  const handleEnabledChange = async (enabled: boolean) => {
+    setBusyModelId("__enabled__");
+    setError(null);
+    try {
+      const result = await commands.setLocalLlmEnabled(enabled);
+      if (result.status === "error") {
+        setError(result.error);
+      }
+      await refreshSettings();
+      await loadModels();
+    } finally {
+      setBusyModelId(null);
+    }
+  };
+
+  return (
+    <SettingContainer
+      title={t("settings.postProcessing.localModel.title")}
+      description={t("settings.postProcessing.localModel.description")}
+      descriptionMode="tooltip"
+      layout="stacked"
+      grouped={true}
+    >
+      <div className="space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <Alert variant="info" contained className="flex-1">
+            {t("settings.postProcessing.localModel.caveat")}
+          </Alert>
+          <Button
+            variant={localLlmEnabled ? "secondary" : "primary"}
+            size="md"
+            onClick={() => handleEnabledChange(!localLlmEnabled)}
+            disabled={
+              busyModelId === "__enabled__" || (!localLlmEnabled && !canEnable)
+            }
+          >
+            {localLlmEnabled
+              ? t("settings.postProcessing.localModel.disable")
+              : t("settings.postProcessing.localModel.enable")}
+          </Button>
+        </div>
+
+        {!canEnable && (
+          <p className="text-xs text-mid-gray">
+            {t("settings.postProcessing.localModel.enableUnavailable")}
+          </p>
+        )}
+
+        {error && (
+          <Alert variant="error" contained>
+            {error}
+          </Alert>
+        )}
+
+        <div className="space-y-2">
+          {isLoading ? (
+            <div className="flex items-center gap-2 text-sm text-mid-gray">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span>{t("settings.postProcessing.localModel.loading")}</span>
+            </div>
+          ) : (
+            models.map((model) => {
+              const isSelected = model.id === selectedModelId;
+              const isBusy = busyModelId === model.id || model.is_downloading;
+              const modelProgress = progress[model.id] ?? 0;
+
+              return (
+                <div
+                  key={model.id}
+                  className="rounded-md border border-mid-gray/20 bg-mid-gray/5 p-3"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 space-y-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-semibold text-sm">
+                          {model.label}
+                        </span>
+                        {isSelected && (
+                          <span className="rounded bg-logo-primary/20 px-2 py-0.5 text-xs text-logo-primary">
+                            {t("settings.postProcessing.localModel.selected")}
+                          </span>
+                        )}
+                        <span className="rounded bg-mid-gray/10 px-2 py-0.5 text-xs text-mid-gray">
+                          {t(
+                            `settings.postProcessing.localModel.roles.${model.recommended_role}`,
+                            model.recommended_role,
+                          )}
+                        </span>
+                      </div>
+                      <p className="text-xs text-mid-gray">
+                        {t("settings.postProcessing.localModel.modelDetails", {
+                          size: model.size_mb,
+                          quantization: model.quantization,
+                          license: model.license_label,
+                        })}
+                      </p>
+                      <p className="text-xs text-mid-gray/80">
+                        {model.supported_language_notes}
+                      </p>
+                      {model.is_downloading && (
+                        <div className="h-1.5 overflow-hidden rounded bg-mid-gray/20">
+                          <div
+                            className="h-full rounded bg-logo-primary"
+                            style={{
+                              width: `${Math.min(100, Math.max(0, modelProgress))}%`,
+                            }}
+                          />
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex shrink-0 items-center gap-1">
+                      {model.is_downloading ? (
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => handleCancel(model.id)}
+                        >
+                          {t("settings.postProcessing.localModel.cancel")}
+                        </Button>
+                      ) : model.is_downloaded ? (
+                        <>
+                          <Button
+                            variant={isSelected ? "secondary" : "primary-soft"}
+                            size="sm"
+                            onClick={() => handleSelect(model.id)}
+                            disabled={isSelected || isBusy}
+                            aria-label={t(
+                              "settings.postProcessing.localModel.select",
+                            )}
+                          >
+                            {isSelected ? (
+                              <Check className="h-4 w-4" />
+                            ) : (
+                              t("settings.postProcessing.localModel.select")
+                            )}
+                          </Button>
+                          <Button
+                            variant="danger-ghost"
+                            size="sm"
+                            onClick={() => handleDelete(model.id)}
+                            disabled={isBusy}
+                            aria-label={t(
+                              "settings.postProcessing.localModel.delete",
+                            )}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </>
+                      ) : (
+                        <Button
+                          variant="primary-soft"
+                          size="sm"
+                          onClick={() => handleDownload(model.id)}
+                          disabled={isBusy}
+                          className="inline-flex items-center gap-1"
+                        >
+                          <Download className="h-4 w-4" />
+                          <span>
+                            {t("settings.postProcessing.localModel.download")}
+                          </span>
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>
+    </SettingContainer>
   );
 };
 
@@ -425,6 +708,29 @@ PostProcessingSettingsPrompts.displayName = "PostProcessingSettingsPrompts";
 
 export const PostProcessingSettings: React.FC = () => {
   const { t } = useTranslation();
+  const { getSetting, settings, refreshSettings } = useSettings();
+  const postProcessingEnabled = getSetting("post_process_enabled") || false;
+  const localLlmEnabled = settings?.local_llm?.enabled ?? false;
+  const hasSelectedLocalModel = !!settings?.local_llm?.selected_model_id;
+  const [engineError, setEngineError] = useState<string | null>(null);
+  const [isEngineUpdating, setIsEngineUpdating] = useState(false);
+
+  const handleEngineSelect = async (engine: "api" | "local") => {
+    const enableLocal = engine === "local";
+    if (enableLocal === localLlmEnabled) return;
+
+    setIsEngineUpdating(true);
+    setEngineError(null);
+    try {
+      const result = await commands.setLocalLlmEnabled(enableLocal);
+      if (result.status === "error") {
+        setEngineError(result.error);
+      }
+      await refreshSettings();
+    } finally {
+      setIsEngineUpdating(false);
+    }
+  };
 
   return (
     <div className="max-w-3xl w-full mx-auto space-y-6">
@@ -436,9 +742,69 @@ export const PostProcessingSettings: React.FC = () => {
         />
       </SettingsGroup>
 
-      <SettingsGroup title={t("settings.postProcessing.api.title")}>
-        <PostProcessingSettingsApi />
-      </SettingsGroup>
+      {postProcessingEnabled && (
+        <SettingsGroup title={t("settings.postProcessing.engine.title")}>
+          <SettingContainer
+            title={t("settings.postProcessing.engine.modeTitle")}
+            description={t("settings.postProcessing.engine.description")}
+            descriptionMode="tooltip"
+            layout="stacked"
+            grouped={true}
+          >
+            <div className="space-y-2">
+              <div className="grid grid-cols-2 gap-2">
+                <Button
+                  variant={localLlmEnabled ? "secondary" : "primary"}
+                  size="md"
+                  aria-pressed={!localLlmEnabled}
+                  disabled={isEngineUpdating}
+                  onClick={() => handleEngineSelect("api")}
+                >
+                  {t("settings.postProcessing.engine.api")}
+                </Button>
+                <Button
+                  variant={localLlmEnabled ? "primary" : "secondary"}
+                  size="md"
+                  aria-pressed={localLlmEnabled}
+                  disabled={isEngineUpdating || !hasSelectedLocalModel}
+                  onClick={() => handleEngineSelect("local")}
+                >
+                  {t("settings.postProcessing.engine.local")}
+                </Button>
+              </div>
+              <p className="text-xs leading-snug text-mid-gray">
+                {localLlmEnabled
+                  ? t("settings.postProcessing.engine.localActive")
+                  : t("settings.postProcessing.engine.apiActive")}
+              </p>
+              {!hasSelectedLocalModel && (
+                <p className="text-xs leading-snug text-mid-gray">
+                  {t("settings.postProcessing.engine.localUnavailable")}
+                </p>
+              )}
+              {engineError && (
+                <Alert variant="error" contained>
+                  {engineError}
+                </Alert>
+              )}
+            </div>
+          </SettingContainer>
+        </SettingsGroup>
+      )}
+
+      {!localLlmEnabled && (
+        <SettingsGroup title={t("settings.postProcessing.api.title")}>
+          <PostProcessingSettingsApi />
+        </SettingsGroup>
+      )}
+
+      {postProcessingEnabled && (
+        <SettingsGroup
+          title={t("settings.postProcessing.localModel.groupTitle")}
+        >
+          <PostProcessingLocalModelComponent />
+        </SettingsGroup>
+      )}
 
       <SettingsGroup title={t("settings.postProcessing.prompts.title")}>
         <PostProcessingSettingsPrompts />

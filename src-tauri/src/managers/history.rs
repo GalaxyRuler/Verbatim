@@ -38,9 +38,16 @@ static MIGRATIONS: &[M] = &[
     M::up("ALTER TABLE transcription_history ADD COLUMN adaptive_language_json TEXT;"),
     M::up("ALTER TABLE transcription_history ADD COLUMN adaptive_insertion_json TEXT;"),
     M::up("ALTER TABLE transcription_history ADD COLUMN adaptive_parent_entry_id INTEGER;"),
+    M::up("ALTER TABLE transcription_history ADD COLUMN transform_action TEXT;"),
+    M::up("ALTER TABLE transcription_history ADD COLUMN transform_original_text TEXT;"),
+    M::up("ALTER TABLE transcription_history ADD COLUMN transform_result_text TEXT;"),
+    M::up("ALTER TABLE transcription_history ADD COLUMN transform_target_language TEXT;"),
+    M::up("ALTER TABLE transcription_history ADD COLUMN transform_provider_id TEXT;"),
+    M::up("ALTER TABLE transcription_history ADD COLUMN transform_model TEXT;"),
+    M::up("ALTER TABLE transcription_history ADD COLUMN transform_recovery_status TEXT;"),
 ];
 
-const HISTORY_COLUMNS: &str = "id, file_name, timestamp, saved, title, transcription_text, post_processed_text, post_process_prompt, post_process_requested, adaptive_profile_id, adaptive_profile_name, adaptive_routing_json, adaptive_context_json, adaptive_language_json, adaptive_insertion_json, adaptive_parent_entry_id";
+const HISTORY_COLUMNS: &str = "id, file_name, timestamp, saved, title, transcription_text, post_processed_text, post_process_prompt, post_process_requested, adaptive_profile_id, adaptive_profile_name, adaptive_routing_json, adaptive_context_json, adaptive_language_json, adaptive_insertion_json, adaptive_parent_entry_id, transform_action, transform_original_text, transform_result_text, transform_target_language, transform_provider_id, transform_model, transform_recovery_status";
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 pub struct PaginatedHistory {
@@ -79,6 +86,13 @@ pub struct HistoryEntry {
     pub adaptive_language_json: Option<String>,
     pub adaptive_insertion_json: Option<String>,
     pub adaptive_parent_entry_id: Option<i64>,
+    pub transform_action: Option<String>,
+    pub transform_original_text: Option<String>,
+    pub transform_result_text: Option<String>,
+    pub transform_target_language: Option<String>,
+    pub transform_provider_id: Option<String>,
+    pub transform_model: Option<String>,
+    pub transform_recovery_status: Option<String>,
 }
 
 pub struct AdaptiveHistoryMetadata {
@@ -101,6 +115,30 @@ impl AdaptiveHistoryMetadata {
             language_json: None,
             insertion_json: None,
             parent_entry_id: None,
+        }
+    }
+}
+
+pub struct TransformHistoryMetadata {
+    pub action: Option<String>,
+    pub original_text: Option<String>,
+    pub result_text: Option<String>,
+    pub target_language: Option<String>,
+    pub provider_id: Option<String>,
+    pub model: Option<String>,
+    pub recovery_status: Option<String>,
+}
+
+impl TransformHistoryMetadata {
+    pub fn empty() -> Self {
+        Self {
+            action: None,
+            original_text: None,
+            result_text: None,
+            target_language: None,
+            provider_id: None,
+            model: None,
+            recovery_status: None,
         }
     }
 }
@@ -254,6 +292,13 @@ impl HistoryManager {
             adaptive_language_json: row.get("adaptive_language_json")?,
             adaptive_insertion_json: row.get("adaptive_insertion_json")?,
             adaptive_parent_entry_id: row.get("adaptive_parent_entry_id")?,
+            transform_action: row.get("transform_action")?,
+            transform_original_text: row.get("transform_original_text")?,
+            transform_result_text: row.get("transform_result_text")?,
+            transform_target_language: row.get("transform_target_language")?,
+            transform_provider_id: row.get("transform_provider_id")?,
+            transform_model: row.get("transform_model")?,
+            transform_recovery_status: row.get("transform_recovery_status")?,
         })
     }
 
@@ -290,6 +335,57 @@ impl HistoryManager {
         post_process_prompt: Option<String>,
         metadata: AdaptiveHistoryMetadata,
     ) -> Result<HistoryEntry> {
+        self.save_entry_with_all_metadata(
+            file_name,
+            transcription_text,
+            post_process_requested,
+            post_processed_text,
+            post_process_prompt,
+            metadata,
+            TransformHistoryMetadata::empty(),
+        )
+    }
+
+    pub fn save_transform_entry(
+        &self,
+        original_text: String,
+        result_text: String,
+        action: String,
+        target_language: Option<String>,
+        provider_id: Option<String>,
+        model: Option<String>,
+        recovery_status: String,
+    ) -> Result<HistoryEntry> {
+        let file_name = format!("transform-{}.txt", Utc::now().timestamp_millis());
+        self.save_entry_with_all_metadata(
+            file_name,
+            original_text.clone(),
+            false,
+            Some(result_text.clone()),
+            None,
+            AdaptiveHistoryMetadata::empty(),
+            TransformHistoryMetadata {
+                action: Some(action),
+                original_text: Some(original_text),
+                result_text: Some(result_text),
+                target_language,
+                provider_id,
+                model,
+                recovery_status: Some(recovery_status),
+            },
+        )
+    }
+
+    fn save_entry_with_all_metadata(
+        &self,
+        file_name: String,
+        transcription_text: String,
+        post_process_requested: bool,
+        post_processed_text: Option<String>,
+        post_process_prompt: Option<String>,
+        metadata: AdaptiveHistoryMetadata,
+        transform_metadata: TransformHistoryMetadata,
+    ) -> Result<HistoryEntry> {
         let timestamp = Utc::now().timestamp();
         let title = self.format_timestamp_title(timestamp);
 
@@ -310,8 +406,15 @@ impl HistoryManager {
                 adaptive_context_json,
                 adaptive_language_json,
                 adaptive_insertion_json,
-                adaptive_parent_entry_id
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+                adaptive_parent_entry_id,
+                transform_action,
+                transform_original_text,
+                transform_result_text,
+                transform_target_language,
+                transform_provider_id,
+                transform_model,
+                transform_recovery_status
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
             params![
                 &file_name,
                 timestamp,
@@ -328,6 +431,13 @@ impl HistoryManager {
                 &metadata.language_json,
                 &metadata.insertion_json,
                 &metadata.parent_entry_id,
+                &transform_metadata.action,
+                &transform_metadata.original_text,
+                &transform_metadata.result_text,
+                &transform_metadata.target_language,
+                &transform_metadata.provider_id,
+                &transform_metadata.model,
+                &transform_metadata.recovery_status,
             ],
         )?;
 
@@ -348,6 +458,13 @@ impl HistoryManager {
             adaptive_language_json: metadata.language_json,
             adaptive_insertion_json: metadata.insertion_json,
             adaptive_parent_entry_id: metadata.parent_entry_id,
+            transform_action: transform_metadata.action,
+            transform_original_text: transform_metadata.original_text,
+            transform_result_text: transform_metadata.result_text,
+            transform_target_language: transform_metadata.target_language,
+            transform_provider_id: transform_metadata.provider_id,
+            transform_model: transform_metadata.model,
+            transform_recovery_status: transform_metadata.recovery_status,
         };
 
         debug!("Saved history entry with id {}", entry.id);
@@ -464,10 +581,24 @@ impl HistoryManager {
 
     fn cleanup_by_count(&self, limit: usize) -> Result<()> {
         let conn = self.get_connection()?;
+        let entries_to_delete = Self::count_cleanup_candidates(&conn, limit)?;
+        let deleted_count = self.delete_entries_and_files(&entries_to_delete)?;
 
-        // Get all entries that are not saved, ordered by timestamp desc
+        if deleted_count > 0 {
+            debug!("Cleaned up {} old history entries by count", deleted_count);
+        }
+
+        Ok(())
+    }
+
+    fn count_cleanup_candidates(conn: &Connection, limit: usize) -> Result<Vec<(i64, String)>> {
+        // Count-based retention protects recording history. Text-only transform
+        // entries stay visible but must not evict older WAV-backed dictation rows.
         let mut stmt = conn.prepare(
-            "SELECT id, file_name FROM transcription_history WHERE saved = 0 ORDER BY timestamp DESC"
+            "SELECT id, file_name
+             FROM transcription_history
+             WHERE saved = 0 AND transform_action IS NULL
+             ORDER BY timestamp DESC",
         )?;
 
         let rows = stmt.query_map([], |row| {
@@ -479,16 +610,11 @@ impl HistoryManager {
             entries.push(row?);
         }
 
-        if entries.len() > limit {
-            let entries_to_delete = &entries[limit..];
-            let deleted_count = self.delete_entries_and_files(entries_to_delete)?;
-
-            if deleted_count > 0 {
-                debug!("Cleaned up {} old history entries by count", deleted_count);
-            }
+        if entries.len() <= limit {
+            return Ok(Vec::new());
         }
 
-        Ok(())
+        Ok(entries.into_iter().skip(limit).collect())
     }
 
     fn cleanup_by_time(
@@ -616,12 +742,35 @@ impl HistoryManager {
         Self::get_latest_completed_entry_with_conn(&conn)
     }
 
+    pub fn get_latest_transform_entry(&self) -> Result<Option<HistoryEntry>> {
+        let conn = self.get_connection()?;
+        Self::get_latest_transform_entry_with_conn(&conn)
+    }
+
+    fn get_latest_transform_entry_with_conn(conn: &Connection) -> Result<Option<HistoryEntry>> {
+        let query = format!(
+            "SELECT {}
+             FROM transcription_history
+             WHERE transform_action IS NOT NULL
+               AND transform_result_text IS NOT NULL
+               AND transform_result_text != ''
+             ORDER BY timestamp DESC, id DESC
+             LIMIT 1",
+            HISTORY_COLUMNS
+        );
+        let mut stmt = conn.prepare(&query)?;
+
+        let entry = stmt.query_row([], Self::map_history_entry).optional()?;
+        Ok(entry)
+    }
+
     pub async fn get_latest_adaptive_entry(&self) -> Result<Option<HistoryEntry>> {
         let conn = self.get_connection()?;
         let query = format!(
             "SELECT {}
              FROM transcription_history
              WHERE transcription_text != ''
+               AND transform_action IS NULL
              ORDER BY timestamp DESC, id DESC
              LIMIT 1",
             HISTORY_COLUMNS
@@ -636,6 +785,7 @@ impl HistoryManager {
             "SELECT {}
              FROM transcription_history
              WHERE transcription_text != ''
+               AND transform_action IS NULL
              ORDER BY timestamp DESC
              LIMIT 1",
             HISTORY_COLUMNS
@@ -797,7 +947,14 @@ mod tests {
                 adaptive_context_json TEXT,
                 adaptive_language_json TEXT,
                 adaptive_insertion_json TEXT,
-                adaptive_parent_entry_id INTEGER
+                adaptive_parent_entry_id INTEGER,
+                transform_action TEXT,
+                transform_original_text TEXT,
+                transform_result_text TEXT,
+                transform_target_language TEXT,
+                transform_provider_id TEXT,
+                transform_model TEXT,
+                transform_recovery_status TEXT
             );",
         )
         .expect("create transcription_history table");
@@ -821,8 +978,15 @@ mod tests {
                 adaptive_context_json,
                 adaptive_language_json,
                 adaptive_insertion_json,
-                adaptive_parent_entry_id
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+                adaptive_parent_entry_id,
+                transform_action,
+                transform_original_text,
+                transform_result_text,
+                transform_target_language,
+                transform_provider_id,
+                transform_model,
+                transform_recovery_status
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
             params![
                 format!("verbatim-{}.wav", timestamp),
                 timestamp,
@@ -839,9 +1003,77 @@ mod tests {
                 Option::<String>::None,
                 Option::<String>::None,
                 Option::<i64>::None,
+                Option::<String>::None,
+                Option::<String>::None,
+                Option::<String>::None,
+                Option::<String>::None,
+                Option::<String>::None,
+                Option::<String>::None,
+                Option::<String>::None,
             ],
         )
         .expect("insert history entry");
+    }
+
+    fn insert_transform_entry(
+        conn: &Connection,
+        timestamp: i64,
+        original_text: &str,
+        result_text: &str,
+    ) -> i64 {
+        conn.execute(
+            "INSERT INTO transcription_history (
+                file_name,
+                timestamp,
+                saved,
+                title,
+                transcription_text,
+                post_processed_text,
+                post_process_prompt,
+                post_process_requested,
+                adaptive_profile_id,
+                adaptive_profile_name,
+                adaptive_routing_json,
+                adaptive_context_json,
+                adaptive_language_json,
+                adaptive_insertion_json,
+                adaptive_parent_entry_id,
+                transform_action,
+                transform_original_text,
+                transform_result_text,
+                transform_target_language,
+                transform_provider_id,
+                transform_model,
+                transform_recovery_status
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
+            params![
+                format!("transform-{}.txt", timestamp),
+                timestamp,
+                false,
+                format!("Transform {}", timestamp),
+                original_text,
+                result_text,
+                Option::<String>::None,
+                false,
+                Option::<String>::None,
+                Option::<String>::None,
+                Option::<String>::None,
+                Option::<String>::None,
+                Option::<String>::None,
+                Option::<String>::None,
+                Option::<i64>::None,
+                "polish",
+                original_text,
+                result_text,
+                Option::<String>::None,
+                "verbatim_local",
+                "model.gguf",
+                "replaced",
+            ],
+        )
+        .expect("insert transform history entry");
+
+        conn.last_insert_rowid()
     }
 
     #[test]
@@ -901,6 +1133,54 @@ mod tests {
     }
 
     #[test]
+    fn get_latest_completed_entry_skips_transform_entries() {
+        let conn = setup_conn();
+        insert_entry(&conn, 100, "latest dictation transcript", None);
+        insert_transform_entry(&conn, 200, "selected text", "polished selected text");
+
+        let entry = HistoryManager::get_latest_completed_entry_with_conn(&conn)
+            .expect("fetch latest completed entry")
+            .expect("completed entry exists");
+
+        assert_eq!(entry.timestamp, 100);
+        assert_eq!(entry.transcription_text, "latest dictation transcript");
+        assert!(entry.transform_action.is_none());
+    }
+
+    #[test]
+    fn get_latest_transform_entry_uses_id_tiebreaker_for_same_second_entries() {
+        let conn = setup_conn();
+        insert_transform_entry(&conn, 300, "first selection", "first result");
+        let newest_id = insert_transform_entry(&conn, 300, "second selection", "second result");
+
+        let entry = HistoryManager::get_latest_transform_entry_with_conn(&conn)
+            .expect("fetch latest transform")
+            .expect("latest transform entry");
+
+        assert_eq!(entry.id, newest_id);
+        assert_eq!(
+            entry.transform_result_text.as_deref(),
+            Some("second result")
+        );
+    }
+
+    #[test]
+    fn count_cleanup_does_not_let_transform_entries_evict_recording_history() {
+        let conn = setup_conn();
+        insert_entry(&conn, 100, "oldest dictation transcript", None);
+        insert_entry(&conn, 200, "middle dictation transcript", None);
+        insert_entry(&conn, 300, "newest dictation transcript", None);
+        insert_transform_entry(&conn, 400, "selected text", "polished selected text");
+        insert_transform_entry(&conn, 500, "another selection", "another result");
+
+        let candidates =
+            HistoryManager::count_cleanup_candidates(&conn, 2).expect("cleanup candidates");
+
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].1, "verbatim-100.wav");
+    }
+
+    #[test]
     fn adaptive_history_entry_can_hold_routing_metadata() {
         let entry = HistoryEntry {
             id: 1,
@@ -919,10 +1199,85 @@ mod tests {
             adaptive_language_json: Some("{}".to_string()),
             adaptive_insertion_json: Some("{}".to_string()),
             adaptive_parent_entry_id: None,
+            transform_action: None,
+            transform_original_text: None,
+            transform_result_text: None,
+            transform_target_language: None,
+            transform_provider_id: None,
+            transform_model: None,
+            transform_recovery_status: None,
         };
 
         assert_eq!(entry.transcription_text, "raw");
         assert_eq!(entry.post_processed_text.as_deref(), Some("processed"));
         assert_eq!(entry.adaptive_profile_id.as_deref(), Some("email"));
+    }
+
+    #[test]
+    fn history_entry_preserves_raw_text_and_formatted_final_text() {
+        let conn = setup_conn();
+        insert_entry(
+            &conn,
+            300,
+            "The deadline is Monday no, I mean Tuesday.",
+            Some("The deadline is Tuesday."),
+        );
+
+        let entry = HistoryManager::get_latest_entry_with_conn(&conn)
+            .expect("fetch latest entry")
+            .expect("entry exists");
+
+        assert_eq!(
+            entry.transcription_text,
+            "The deadline is Monday no, I mean Tuesday."
+        );
+        assert_eq!(
+            entry.post_processed_text.as_deref(),
+            Some("The deadline is Tuesday.")
+        );
+    }
+
+    #[test]
+    fn transform_history_entry_preserves_original_result_and_provider_metadata() {
+        let entry = HistoryEntry {
+            id: 1,
+            file_name: "transform-1.txt".to_string(),
+            timestamp: 1,
+            saved: false,
+            title: "Transform".to_string(),
+            transcription_text: "selected text before transform".to_string(),
+            post_processed_text: Some("selected text after transform".to_string()),
+            post_process_prompt: None,
+            post_process_requested: false,
+            adaptive_profile_id: None,
+            adaptive_profile_name: None,
+            adaptive_routing_json: None,
+            adaptive_context_json: None,
+            adaptive_language_json: None,
+            adaptive_insertion_json: None,
+            adaptive_parent_entry_id: None,
+            transform_action: Some("make_concise".to_string()),
+            transform_original_text: Some("selected text before transform".to_string()),
+            transform_result_text: Some("selected text after transform".to_string()),
+            transform_target_language: None,
+            transform_provider_id: Some("verbatim_local".to_string()),
+            transform_model: Some("qwen2.5-0.5b.gguf".to_string()),
+            transform_recovery_status: Some("replaced".to_string()),
+        };
+
+        assert_eq!(entry.transform_action.as_deref(), Some("make_concise"));
+        assert_eq!(
+            entry.transform_original_text.as_deref(),
+            Some("selected text before transform")
+        );
+        assert_eq!(
+            entry.transform_result_text.as_deref(),
+            Some("selected text after transform")
+        );
+        assert_eq!(
+            entry.transform_provider_id.as_deref(),
+            Some("verbatim_local")
+        );
+        assert_eq!(entry.transform_recovery_status.as_deref(), Some("replaced"));
     }
 }

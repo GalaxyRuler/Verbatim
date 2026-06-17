@@ -2,9 +2,61 @@ use crate::adaptive::types::{CapturedContext, TargetKind};
 use chrono::Utc;
 use sha2::{Digest, Sha256};
 
+#[derive(serde::Serialize)]
+struct PersistedContextMetadata {
+    captured_at_ms: i64,
+    process_name: Option<String>,
+    title_hash: Option<String>,
+    window_class: Option<String>,
+    target_kind: TargetKind,
+    target_fingerprint: Option<String>,
+    is_sensitive: bool,
+}
+
 pub fn capture_context(private_patterns: &[String]) -> CapturedContext {
     let context = capture_platform_context();
     sanitize_context(context, private_patterns)
+}
+
+pub fn unknown_context() -> CapturedContext {
+    CapturedContext {
+        captured_at_ms: Utc::now().timestamp_millis(),
+        process_name: None,
+        window_title: None,
+        window_title_hash: None,
+        window_class: None,
+        target_kind: TargetKind::Unknown,
+        target_fingerprint: None,
+        is_sensitive: false,
+    }
+}
+
+pub fn context_history_metadata_json(context: &CapturedContext) -> Option<String> {
+    if context.process_name.is_none()
+        && context.window_class.is_none()
+        && context.target_fingerprint.is_none()
+        && context.target_kind == TargetKind::Unknown
+        && !context.is_sensitive
+    {
+        return None;
+    }
+
+    let metadata = PersistedContextMetadata {
+        captured_at_ms: context.captured_at_ms,
+        process_name: context.process_name.clone(),
+        title_hash: context.window_title_hash.clone(),
+        window_class: context.window_class.clone(),
+        target_kind: context.target_kind.clone(),
+        target_fingerprint: context.target_fingerprint.clone(),
+        is_sensitive: context.is_sensitive,
+    };
+
+    serde_json::to_string(&metadata).ok()
+}
+
+pub fn redact_context_json_for_history(context_json: &str) -> Option<String> {
+    let context = serde_json::from_str::<CapturedContext>(context_json).ok()?;
+    context_history_metadata_json(&context)
 }
 
 pub fn classify_target(
@@ -15,8 +67,12 @@ pub fn classify_target(
     let process = process_name.unwrap_or_default().to_lowercase();
     let title = window_title.unwrap_or_default().to_lowercase();
     let class = window_class.unwrap_or_default().to_lowercase();
+    let is_new_outlook_host = matches!(process.as_str(), "olk.exe" | "olkbg.exe")
+        || (process.contains("msedgewebview2") && title.contains("outlook"));
 
     if process.contains("outlook")
+        || is_new_outlook_host
+        || title.contains("outlook")
         || title.contains("gmail")
         || title.contains("mail")
         || title.contains("message")
@@ -226,6 +282,26 @@ mod tests {
     }
 
     #[test]
+    fn classifies_new_outlook_hosts_as_email() {
+        assert_eq!(
+            classify_target(
+                Some("olk.exe"),
+                Some("Inbox - abdullah.alkulaib@pmbsr.gov.sa - Outlook"),
+                Some("Chrome_WidgetWin_1")
+            ),
+            TargetKind::Email
+        );
+        assert_eq!(
+            classify_target(
+                Some("msedgewebview2.exe"),
+                Some("Inbox - abdullah.alkulaib@pmbsr.gov.sa - Outlook"),
+                Some("Chrome_WidgetWin_1")
+            ),
+            TargetKind::Email
+        );
+    }
+
+    #[test]
     fn classifies_whatsapp_as_casual_message() {
         let kind = classify_target(
             Some("WhatsApp.exe"),
@@ -288,5 +364,59 @@ mod tests {
         assert!(context.is_sensitive);
         assert!(context.window_title.is_none());
         assert!(context.window_title_hash.is_some());
+    }
+
+    #[test]
+    fn history_metadata_omits_window_title() {
+        let context = CapturedContext {
+            captured_at_ms: 1,
+            process_name: Some("OUTLOOK.EXE".to_string()),
+            window_title: Some("Inbox - private@example.com - Outlook".to_string()),
+            window_title_hash: None,
+            window_class: Some("rctrl_renwnd32".to_string()),
+            target_kind: TargetKind::Email,
+            target_fingerprint: Some("outlook.exe|rctrl_renwnd32".to_string()),
+            is_sensitive: false,
+        };
+
+        let metadata = context_history_metadata_json(&context).expect("metadata json");
+
+        assert!(metadata.contains("\"target_kind\":\"Email\""));
+        assert!(metadata.contains("\"process_name\":\"OUTLOOK.EXE\""));
+        assert!(!metadata.contains("private@example.com"));
+        assert!(!metadata.contains("window_title"));
+    }
+
+    #[test]
+    fn unknown_context_has_no_history_metadata() {
+        let context = unknown_context();
+
+        assert!(context_history_metadata_json(&context).is_none());
+    }
+
+    #[test]
+    fn legacy_context_json_is_redacted_for_history() {
+        let legacy_json = serde_json::json!({
+            "captured_at_ms": 1,
+            "process_name": "OUTLOOK.EXE",
+            "window_title": "Inbox - private@example.com - Outlook",
+            "window_title_hash": null,
+            "window_class": "rctrl_renwnd32",
+            "target_kind": "Email",
+            "target_fingerprint": "outlook.exe|rctrl_renwnd32",
+            "is_sensitive": false
+        })
+        .to_string();
+
+        let redacted = redact_context_json_for_history(&legacy_json).expect("redacted");
+
+        assert!(redacted.contains("\"target_kind\":\"Email\""));
+        assert!(!redacted.contains("private@example.com"));
+        assert!(!redacted.contains("window_title"));
+    }
+
+    #[test]
+    fn invalid_legacy_context_json_is_not_retained() {
+        assert!(redact_context_json_for_history("{not json").is_none());
     }
 }

@@ -48,6 +48,7 @@ pub fn cancel_current_operation(app: &AppHandle) {
     audio_manager.cancel_recording();
 
     // Update tray icon and hide overlay
+    crate::overlay::emit_overlay_state_changed(app, "cancelled");
     change_tray_icon(app, crate::tray::TrayIconState::Idle);
     hide_recording_overlay(app);
 

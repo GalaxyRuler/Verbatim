@@ -1,6 +1,6 @@
 [package]
 name = "verbatim"
-version = "0.8.7"
+version = "0.8.8"
 description = "Verbatim"
 authors = ["GalaxyRuler"]
 edition = "2021"
@@ -8,7 +8,10 @@ license = "MIT"
 default-run = "verbatim"
 
 [features]
-default = ["transcribe-rs-engine"]
+# Desktop builds opt into this from Tauri config and Windows cargo wrappers.
+# Android uses the no-engine stubs until mobile ASR is implemented.
+default = []
+silero-vad-engine = ["dep:vad-rs"]
 transcribe-rs-engine = ["dep:transcribe-rs"]
 
 [profile.dev]
@@ -51,7 +54,6 @@ rusqlite_migration = "2.3"
 tauri-plugin-fs = "2.4.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-rdev = { git = "https://github.com/rustdesk-org/rdev" }
 cpal = "0.16.0"
 anyhow = "1.0.95"
 rubato = "0.16.2"
@@ -59,10 +61,14 @@ hound = "3.5.1"
 log = "0.4.25"
 env_filter = "0.1.0"
 tokio = "1.43.0"
-vad-rs = { git = "https://github.com/GalaxyRuler/vad-rs", branch = "verbatim-pinned", default-features = false }
+vad-rs = { git = "https://github.com/GalaxyRuler/vad-rs", branch = "verbatim-pinned", default-features = false, optional = true }
 enigo = "0.6.1"
 rodio = { git = "https://github.com/GalaxyRuler/rodio.git", branch = "verbatim-pinned" }
-reqwest = { version = "0.12", features = ["json", "stream"] }
+reqwest = { version = "0.12", default-features = false, features = [
+  "json",
+  "rustls-tls",
+  "stream",
+] }
 futures-util = "0.3"
 rustfft = "6.4.0"
 strsim = "0.11.0"
@@ -74,7 +80,6 @@ tar = "0.4.44"
 flate2 = "1.0"
 sha2 = "0.10"
 transcribe-rs = { version = "0.3.8", optional = true, features = ["whisper-cpp", "onnx"] }
-verbatim-keys = { path = "crates/verbatim-keys" }
 ferrous-opencc = "0.2.3"
 clap = { version = "4", features = ["derive"] }
 specta = "=2.0.0-rc.22"
@@ -86,10 +91,12 @@ tauri-plugin-dialog = "2.6"
 signal-hook = "0.3"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+rdev = { git = "https://github.com/rustdesk-org/rdev" }
 tauri-plugin-autostart = "2.5.1"
 tauri-plugin-global-shortcut = "2.3.1"
 tauri-plugin-single-instance = "2.3.2"
 tauri-plugin-updater = "2.10.0"
+verbatim-keys = { path = "crates/verbatim-keys" }
 
 [target.'cfg(windows)'.dependencies]
 transcribe-rs = { version = "0.3.3", optional = true, features = ["whisper-vulkan", "ort-directml"] }
@@ -97,6 +104,9 @@ windows = { version = "0.61.3", features = [
   "Win32_Media_Audio_Endpoints",
   "Win32_System_Com",
   "Win32_System_Com_StructuredStorage",
+  "Win32_System_DataExchange",
+  "Win32_System_Memory",
+  "Win32_System_Ole",
   "Win32_System_Variant",
   "Win32_Foundation",
   "Win32_UI_Accessibility",

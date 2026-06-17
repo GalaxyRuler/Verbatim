@@ -14,6 +14,7 @@ interface ValidationResult {
   valid: boolean;
   missing: string[][];
   extra: string[][];
+  untranslated: string[][];
 }
 
 function getLanguages(): string[] {
@@ -25,6 +26,28 @@ function getLanguages(): string[] {
 }
 
 const LANGUAGES = getLanguages();
+const RTL_LANGUAGES = new Set(["ar", "he"]);
+const RTL_VALUE_CHECK_PREFIXES = [
+  ["sidebar"],
+  ["settings", "advanced", "translation"],
+  ["settings", "advanced", "customWords", "autoAdd"],
+  ["settings", "advanced", "adaptiveProfiles"],
+  ["settings", "advanced", "dockedPill"],
+  ["settings", "history"],
+  ["settings", "dictionary"],
+  ["settings", "formattingLevel"],
+  ["settings", "snippets"],
+  ["footer"],
+  ["errors"],
+  ["overlay"],
+];
+const RTL_VALUE_ALLOWLIST = new Set([
+  "common.appName",
+  "settings.dictionary.replacementPlaceholder",
+  "settings.advanced.adaptiveProfiles.languages.placeholder",
+  "settings.postProcessing.api.baseUrl.placeholder",
+  "settings.postProcessing.api.apiKey.placeholder",
+]);
 
 // Colors for terminal output
 const colors: Record<string, string> = {
@@ -76,6 +99,64 @@ function hasKeyPath(obj: TranslationData, keyPath: string[]): boolean {
   return true;
 }
 
+function getValueAtPath(obj: TranslationData, keyPath: string[]): unknown {
+  let current: unknown = obj;
+  for (const key of keyPath) {
+    if (
+      typeof current !== "object" ||
+      current === null ||
+      (current as Record<string, unknown>)[key] === undefined
+    ) {
+      return undefined;
+    }
+    current = (current as Record<string, unknown>)[key];
+  }
+  return current;
+}
+
+function startsWithPath(keyPath: string[], prefix: string[]): boolean {
+  return (
+    keyPath.length >= prefix.length &&
+    prefix.every((segment, index) => keyPath[index] === segment)
+  );
+}
+
+function shouldCheckRtlValue(keyPath: string[]): boolean {
+  if (RTL_VALUE_ALLOWLIST.has(keyPath.join("."))) {
+    return false;
+  }
+
+  return RTL_VALUE_CHECK_PREFIXES.some((prefix) =>
+    startsWithPath(keyPath, prefix),
+  );
+}
+
+function hasAsciiLetters(value: string): boolean {
+  return /[A-Za-z]/.test(value);
+}
+
+function findUntranslatedRtlValues(
+  langData: TranslationData,
+  referenceData: TranslationData,
+  referenceKeyPaths: string[][],
+): string[][] {
+  return referenceKeyPaths.filter((keyPath) => {
+    if (!shouldCheckRtlValue(keyPath)) {
+      return false;
+    }
+
+    const localizedValue = getValueAtPath(langData, keyPath);
+    const referenceValue = getValueAtPath(referenceData, keyPath);
+
+    return (
+      typeof localizedValue === "string" &&
+      typeof referenceValue === "string" &&
+      localizedValue === referenceValue &&
+      hasAsciiLetters(referenceValue)
+    );
+  });
+}
+
 function loadTranslationFile(lang: string): TranslationData | null {
   const filePath = path.join(LOCALES_DIR, lang, "translation.json");
 
@@ -117,7 +198,12 @@ function validateTranslations(): void {
 
     if (!langData) {
       hasErrors = true;
-      results[lang] = { valid: false, missing: [], extra: [] };
+      results[lang] = {
+        valid: false,
+        missing: [],
+        extra: [],
+        untranslated: [],
+      };
       continue;
     }
 
@@ -131,14 +217,19 @@ function validateTranslations(): void {
     const extra = langKeyPaths.filter(
       (keyPath) => !hasKeyPath(referenceData, keyPath),
     );
+    const untranslated = RTL_LANGUAGES.has(lang)
+      ? findUntranslatedRtlValues(langData, referenceData, referenceKeyPaths)
+      : [];
 
     results[lang] = {
-      valid: missing.length === 0 && extra.length === 0,
+      valid:
+        missing.length === 0 && extra.length === 0 && untranslated.length === 0,
       missing,
       extra,
+      untranslated,
     };
 
-    if (missing.length > 0 || extra.length > 0) {
+    if (missing.length > 0 || extra.length > 0 || untranslated.length > 0) {
       hasErrors = true;
     }
   }
@@ -187,6 +278,26 @@ function validateTranslations(): void {
         if (result.extra.length > 10) {
           console.log(
             colorize(`    ... and ${result.extra.length - 10} more`, "yellow"),
+          );
+        }
+      }
+
+      if (result.untranslated.length > 0) {
+        console.log(
+          colorize(
+            `  Untranslated fallback values ${result.untranslated.length} keys:`,
+            "yellow",
+          ),
+        );
+        result.untranslated.slice(0, 10).forEach((keyPath) => {
+          console.log(`    - ${keyPath.join(".")}`);
+        });
+        if (result.untranslated.length > 10) {
+          console.log(
+            colorize(
+              `    ... and ${result.untranslated.length - 10} more`,
+              "yellow",
+            ),
           );
         }
       }

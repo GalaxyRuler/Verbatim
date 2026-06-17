@@ -1,3 +1,4 @@
+use super::mic_diagnostics::{MicDiagnosticState, SilenceDiagnostic};
 use crate::audio_toolkit::{list_input_devices, vad::SmoothedVad, AudioRecorder, SileroVad};
 use crate::helpers::clamshell;
 use crate::settings::{get_settings, AppSettings};
@@ -9,8 +10,12 @@ use std::time::{Duration, Instant};
 use tauri::Manager;
 
 const STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
+const SELECTED_MICROPHONE_UNAVAILABLE_PREFIX: &str = "Selected microphone unavailable";
 
 fn set_mute(mute: bool) {
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+    let _ = mute;
+
     // Expected behavior:
     // - Windows: works on most systems using standard audio drivers.
     // - Linux: works on many systems (PipeWire, PulseAudio, ALSA),
@@ -103,6 +108,13 @@ const WHISPER_SAMPLE_RATE: usize = 16000;
 
 /* ──────────────────────────────────────────────────────────────── */
 
+pub(crate) struct RecordingStopResult {
+    pub(crate) samples: Vec<f32>,
+    pub(crate) captured_sample_count: usize,
+    pub(crate) observed_active_signal: bool,
+    pub(crate) diagnostic_state: MicDiagnosticState,
+}
+
 #[derive(Clone, Debug)]
 pub enum RecordingState {
     Idle,
@@ -115,11 +127,27 @@ pub enum MicrophoneMode {
     OnDemand,
 }
 
+pub fn selected_microphone_unavailable_error(device_name: &str) -> anyhow::Error {
+    anyhow::anyhow!("{SELECTED_MICROPHONE_UNAVAILABLE_PREFIX}: {device_name}")
+}
+
+pub fn is_selected_microphone_unavailable_error(message: &str) -> bool {
+    message.starts_with(SELECTED_MICROPHONE_UNAVAILABLE_PREFIX)
+}
+
+fn is_default_microphone_selection(device_name: &str) -> bool {
+    device_name.eq_ignore_ascii_case("default")
+}
+
 /* ──────────────────────────────────────────────────────────────── */
 
 fn create_audio_recorder(
     vad_path: &str,
     app_handle: &tauri::AppHandle,
+    is_recording: Arc<Mutex<bool>>,
+    recording_started_at: Arc<Mutex<Option<Instant>>>,
+    mic_diagnostic: Arc<Mutex<SilenceDiagnostic>>,
+    mic_diagnostic_state: Arc<Mutex<MicDiagnosticState>>,
 ) -> Result<AudioRecorder, anyhow::Error> {
     let silero = SileroVad::new(vad_path, 0.3)
         .map_err(|e| anyhow::anyhow!("Failed to create SileroVad: {}", e))?;
@@ -134,6 +162,26 @@ fn create_audio_recorder(
             let app_handle = app_handle.clone();
             move |levels| {
                 utils::emit_levels(&app_handle, &levels);
+
+                if !*is_recording.lock().unwrap() {
+                    return;
+                }
+
+                let elapsed = match *recording_started_at.lock().unwrap() {
+                    Some(started_at) => started_at.elapsed(),
+                    None => return,
+                };
+
+                let next_state = {
+                    let mut diagnostic = mic_diagnostic.lock().unwrap();
+                    diagnostic.observe_at(&levels, elapsed)
+                };
+
+                let mut last_state = mic_diagnostic_state.lock().unwrap();
+                if next_state != *last_state {
+                    *last_state = next_state;
+                    utils::emit_overlay_state_changed(&app_handle, next_state.overlay_state());
+                }
             }
         });
 
@@ -151,6 +199,9 @@ pub struct AudioRecordingManager {
     recorder: Arc<Mutex<Option<AudioRecorder>>>,
     is_open: Arc<Mutex<bool>>,
     is_recording: Arc<Mutex<bool>>,
+    recording_started_at: Arc<Mutex<Option<Instant>>>,
+    mic_diagnostic: Arc<Mutex<SilenceDiagnostic>>,
+    mic_diagnostic_state: Arc<Mutex<MicDiagnosticState>>,
     did_mute: Arc<Mutex<bool>>,
     close_generation: Arc<AtomicU64>,
 }
@@ -174,6 +225,9 @@ impl AudioRecordingManager {
             recorder: Arc::new(Mutex::new(None)),
             is_open: Arc::new(Mutex::new(false)),
             is_recording: Arc::new(Mutex::new(false)),
+            recording_started_at: Arc::new(Mutex::new(None)),
+            mic_diagnostic: Arc::new(Mutex::new(SilenceDiagnostic::default())),
+            mic_diagnostic_state: Arc::new(Mutex::new(MicDiagnosticState::Recording)),
             did_mute: Arc::new(Mutex::new(false)),
             close_generation: Arc::new(AtomicU64::new(0)),
         };
@@ -188,7 +242,10 @@ impl AudioRecordingManager {
 
     /* ---------- helper methods --------------------------------------------- */
 
-    fn get_effective_microphone_device(&self, settings: &AppSettings) -> Option<cpal::Device> {
+    fn get_effective_microphone_device(
+        &self,
+        settings: &AppSettings,
+    ) -> Result<Option<cpal::Device>, anyhow::Error> {
         // Check if we're in clamshell mode and have a clamshell microphone configured
         let use_clamshell_mic = if let Ok(is_clamshell) = clamshell::is_clamshell() {
             is_clamshell && settings.clamshell_microphone.is_some()
@@ -197,20 +254,34 @@ impl AudioRecordingManager {
         };
 
         let device_name = if use_clamshell_mic {
-            settings.clamshell_microphone.as_ref().unwrap()
+            settings.clamshell_microphone.as_ref().map(String::as_str)
         } else {
-            settings.selected_microphone.as_ref()?
+            settings.selected_microphone.as_deref()
         };
+
+        let Some(device_name) = device_name else {
+            return Ok(None);
+        };
+        if is_default_microphone_selection(device_name) {
+            return Ok(None);
+        }
 
         // Find the device by name
         match list_input_devices() {
-            Ok(devices) => devices
-                .into_iter()
-                .find(|d| d.name == *device_name)
-                .map(|d| d.device),
+            Ok(devices) => {
+                if let Some(device) = devices
+                    .into_iter()
+                    .find(|d| d.name == device_name)
+                    .map(|d| d.device)
+                {
+                    Ok(Some(device))
+                } else {
+                    Err(selected_microphone_unavailable_error(device_name))
+                }
+            }
             Err(e) => {
                 debug!("Failed to list devices, using default: {}", e);
-                None
+                Ok(None)
             }
         }
     }
@@ -237,6 +308,18 @@ impl AudioRecordingManager {
                 rm.stop_microphone_stream();
             }
         });
+    }
+
+    fn start_mic_diagnostic(&self) {
+        self.mic_diagnostic.lock().unwrap().reset();
+        *self.mic_diagnostic_state.lock().unwrap() = MicDiagnosticState::Recording;
+        *self.recording_started_at.lock().unwrap() = Some(Instant::now());
+    }
+
+    fn reset_mic_diagnostic(&self) {
+        self.mic_diagnostic.lock().unwrap().reset();
+        *self.mic_diagnostic_state.lock().unwrap() = MicDiagnosticState::Recording;
+        *self.recording_started_at.lock().unwrap() = None;
     }
 
     /* ---------- microphone life-cycle -------------------------------------- */
@@ -268,7 +351,14 @@ impl AudioRecordingManager {
         if recorder_opt.is_none() {
             let vad_path = crate::utils::resolve_silero_vad_model_path(&self.app_handle)?;
             let vad_path = vad_path.to_string_lossy();
-            *recorder_opt = Some(create_audio_recorder(&vad_path, &self.app_handle)?);
+            *recorder_opt = Some(create_audio_recorder(
+                &vad_path,
+                &self.app_handle,
+                Arc::clone(&self.is_recording),
+                Arc::clone(&self.recording_started_at),
+                Arc::clone(&self.mic_diagnostic),
+                Arc::clone(&self.mic_diagnostic_state),
+            )?);
         }
         Ok(())
     }
@@ -288,7 +378,7 @@ impl AudioRecordingManager {
 
         // Get the selected device from settings, considering clamshell mode
         let settings = get_settings(&self.app_handle);
-        let selected_device = self.get_effective_microphone_device(&settings);
+        let selected_device = self.get_effective_microphone_device(&settings)?;
 
         // Pre-flight check: if no device was selected/configured AND no devices
         // exist at all, fail early with a clear error instead of letting cpal
@@ -341,6 +431,7 @@ impl AudioRecordingManager {
             if *self.is_recording.lock().unwrap() {
                 let _ = rec.stop();
                 *self.is_recording.lock().unwrap() = false;
+                self.reset_mic_diagnostic();
             }
             let _ = rec.close();
         }
@@ -392,6 +483,7 @@ impl AudioRecordingManager {
             if let Some(rec) = self.recorder.lock().unwrap().as_ref() {
                 if rec.start().is_ok() {
                     *self.is_recording.lock().unwrap() = true;
+                    self.start_mic_diagnostic();
                     *state = RecordingState::Recording {
                         binding_id: binding_id.to_string(),
                     };
@@ -415,7 +507,7 @@ impl AudioRecordingManager {
         Ok(())
     }
 
-    pub fn stop_recording(&self, binding_id: &str) -> Option<Vec<f32>> {
+    pub(crate) fn stop_recording(&self, binding_id: &str) -> Option<RecordingStopResult> {
         let mut state = self.state.lock().unwrap();
 
         match *state {
@@ -423,7 +515,14 @@ impl AudioRecordingManager {
                 binding_id: ref active,
             } if active == binding_id => {
                 *state = RecordingState::Idle;
+                let diagnostic_state = *self.mic_diagnostic_state.lock().unwrap();
+                let observed_active_signal = self
+                    .mic_diagnostic
+                    .lock()
+                    .unwrap()
+                    .has_observed_active_signal();
                 drop(state);
+                self.reset_mic_diagnostic();
 
                 // Optionally keep recording for a bit longer to capture trailing audio
                 let settings = get_settings(&self.app_handle);
@@ -449,6 +548,7 @@ impl AudioRecordingManager {
                 };
 
                 *self.is_recording.lock().unwrap() = false;
+                self.reset_mic_diagnostic();
 
                 // In on-demand mode, close the mic (lazily if the setting is enabled)
                 if matches!(*self.mode.lock().unwrap(), MicrophoneMode::OnDemand) {
@@ -460,15 +560,23 @@ impl AudioRecordingManager {
                 }
 
                 // Pad if very short
-                let s_len = samples.len();
+                let captured_sample_count = samples.len();
                 // debug!("Got {} samples", s_len);
-                if s_len < WHISPER_SAMPLE_RATE && s_len > 0 {
-                    let mut padded = samples;
-                    padded.resize(WHISPER_SAMPLE_RATE * 5 / 4, 0.0);
-                    Some(padded)
-                } else {
-                    Some(samples)
-                }
+                let samples =
+                    if captured_sample_count < WHISPER_SAMPLE_RATE && captured_sample_count > 0 {
+                        let mut padded = samples;
+                        padded.resize(WHISPER_SAMPLE_RATE * 5 / 4, 0.0);
+                        padded
+                    } else {
+                        samples
+                    };
+
+                Some(RecordingStopResult {
+                    samples,
+                    captured_sample_count,
+                    observed_active_signal,
+                    diagnostic_state,
+                })
             }
             _ => None,
         }
@@ -480,6 +588,39 @@ impl AudioRecordingManager {
         )
     }
 
+    pub fn retry_current_recording(&self) -> Result<(), String> {
+        let state = self.state.lock().unwrap();
+        if !matches!(*state, RecordingState::Recording { .. }) {
+            return Err("No active recording to retry".to_string());
+        }
+
+        let recorder_guard = self.recorder.lock().unwrap();
+        let rec = recorder_guard
+            .as_ref()
+            .ok_or_else(|| "Recorder not available".to_string())?;
+
+        *self.is_recording.lock().unwrap() = false;
+        self.reset_mic_diagnostic();
+
+        rec.stop()
+            .map_err(|e| format!("Failed to stop current recording: {e}"))?;
+
+        match rec.start() {
+            Ok(()) => {
+                *self.is_recording.lock().unwrap() = true;
+                self.start_mic_diagnostic();
+                utils::emit_overlay_state_changed(&self.app_handle, "recording");
+                Ok(())
+            }
+            Err(e) => {
+                *self.is_recording.lock().unwrap() = false;
+                self.reset_mic_diagnostic();
+                utils::emit_overlay_state_changed(&self.app_handle, "mic_failed");
+                Err(format!("Failed to restart recording: {e}"))
+            }
+        }
+    }
+
     /// Cancel any ongoing recording without returning audio samples
     pub fn cancel_recording(&self) {
         let mut state = self.state.lock().unwrap();
@@ -487,6 +628,7 @@ impl AudioRecordingManager {
         if let RecordingState::Recording { .. } = *state {
             *state = RecordingState::Idle;
             drop(state);
+            self.reset_mic_diagnostic();
 
             if let Some(rec) = self.recorder.lock().unwrap().as_ref() {
                 let _ = rec.stop(); // Discard the result
@@ -503,5 +645,25 @@ impl AudioRecordingManager {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn selected_microphone_unavailable_error_names_missing_device() {
+        let error = selected_microphone_unavailable_error("OBSBOT Tiny");
+
+        assert!(is_selected_microphone_unavailable_error(&error.to_string()));
+        assert!(error.to_string().contains("OBSBOT Tiny"));
+    }
+
+    #[test]
+    fn default_microphone_selection_is_not_treated_as_missing_device() {
+        assert!(is_default_microphone_selection("default"));
+        assert!(is_default_microphone_selection("Default"));
+        assert!(!is_default_microphone_selection("Default Array Microphone"));
     }
 }

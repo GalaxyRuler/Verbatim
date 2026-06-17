@@ -9,22 +9,112 @@
 //! The active implementation is determined by the `keyboard_implementation`
 //! setting and can be changed at runtime.
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod handler;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod tauri_impl;
+#[cfg(any(target_os = "android", target_os = "ios"))]
+mod tauri_impl {
+    use crate::settings::ShortcutBinding;
+    use tauri::AppHandle;
+
+    const MOBILE_SHORTCUT_ERROR: &str = "Desktop shortcuts are not supported on mobile";
+
+    pub fn init_shortcuts(_app: &AppHandle) {}
+
+    pub fn register_cancel_shortcut(_app: &AppHandle) {}
+
+    pub fn unregister_cancel_shortcut(_app: &AppHandle) {}
+
+    pub fn register_shortcut(_app: &AppHandle, binding: ShortcutBinding) -> Result<(), String> {
+        if crate::settings::is_unbound_shortcut(&binding.current_binding) {
+            Ok(())
+        } else {
+            Err(MOBILE_SHORTCUT_ERROR.to_string())
+        }
+    }
+
+    pub fn unregister_shortcut(_app: &AppHandle, _binding: ShortcutBinding) -> Result<(), String> {
+        Ok(())
+    }
+
+    pub fn validate_shortcut(raw: &str) -> Result<(), String> {
+        if crate::settings::is_unbound_shortcut(raw) {
+            Ok(())
+        } else {
+            Err(MOBILE_SHORTCUT_ERROR.to_string())
+        }
+    }
+}
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub mod verbatim_keys;
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub mod verbatim_keys {
+    use crate::settings::ShortcutBinding;
+    use tauri::AppHandle;
+
+    const MOBILE_SHORTCUT_ERROR: &str = "Verbatim Keys is not supported on mobile";
+
+    pub struct VerbatimKeysState;
+
+    pub fn init_shortcuts(_app: &AppHandle) -> Result<(), String> {
+        Err(MOBILE_SHORTCUT_ERROR.to_string())
+    }
+
+    pub fn register_cancel_shortcut(_app: &AppHandle) {}
+
+    pub fn unregister_cancel_shortcut(_app: &AppHandle) {}
+
+    pub fn register_shortcut(_app: &AppHandle, binding: ShortcutBinding) -> Result<(), String> {
+        if crate::settings::is_unbound_shortcut(&binding.current_binding) {
+            Ok(())
+        } else {
+            Err(MOBILE_SHORTCUT_ERROR.to_string())
+        }
+    }
+
+    pub fn unregister_shortcut(_app: &AppHandle, _binding: ShortcutBinding) -> Result<(), String> {
+        Ok(())
+    }
+
+    pub fn validate_shortcut(raw: &str) -> Result<(), String> {
+        if crate::settings::is_unbound_shortcut(raw) {
+            Ok(())
+        } else {
+            Err(MOBILE_SHORTCUT_ERROR.to_string())
+        }
+    }
+
+    #[tauri::command]
+    #[specta::specta]
+    pub fn start_verbatim_keys_recording(
+        _app: AppHandle,
+        _binding_id: String,
+    ) -> Result<(), String> {
+        Err(MOBILE_SHORTCUT_ERROR.to_string())
+    }
+
+    #[tauri::command]
+    #[specta::specta]
+    pub fn stop_verbatim_keys_recording(_app: AppHandle) -> Result<(), String> {
+        Err(MOBILE_SHORTCUT_ERROR.to_string())
+    }
+}
 
 use log::{error, info, warn};
 use serde::Serialize;
 use specta::Type;
 use tauri::{AppHandle, Emitter, Manager};
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use tauri_plugin_autostart::ManagerExt;
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 use crate::settings::APPLE_INTELLIGENCE_DEFAULT_MODEL_ID;
 use crate::settings::{
-    self, get_settings, AutoSubmitKey, ClipboardHandling, KeyboardImplementation, LLMPrompt,
-    OverlayPosition, PasteMethod, ShortcutBinding, SoundTheme, TranslationRequestSettings,
-    TranslationRoute, TypingTool, APPLE_INTELLIGENCE_PROVIDER_ID,
+    self, get_settings, is_unbound_shortcut, AutoSubmitKey, ClipboardHandling,
+    DictationLanguageMode, KeyboardImplementation, LLMPrompt, OverlayPosition, PasteMethod,
+    ShortcutBinding, SoundTheme, TranslationRequestSettings, TranslationRoute, TypingTool,
+    APPLE_INTELLIGENCE_PROVIDER_ID,
 };
 use crate::tray;
 
@@ -110,11 +200,6 @@ pub fn change_binding(
     id: String,
     binding: String,
 ) -> Result<BindingResponse, String> {
-    // Reject empty bindings — every shortcut should have a value
-    if binding.trim().is_empty() {
-        return Err("Binding cannot be empty".to_string());
-    }
-
     let mut settings = settings::get_settings(&app);
 
     // Get the binding to modify, or create it from defaults if it doesn't exist
@@ -176,15 +261,17 @@ pub fn change_binding(
     let mut updated_binding = binding_to_modify;
     updated_binding.current_binding = binding;
 
-    // Register the new binding
-    if let Err(e) = register_shortcut(&app, updated_binding.clone()) {
-        let error_msg = format!("Failed to register shortcut: {}", e);
-        error!("change_binding error: {}", error_msg);
-        return Ok(BindingResponse {
-            success: false,
-            binding: None,
-            error: Some(error_msg),
-        });
+    if !is_unbound_shortcut(&updated_binding.current_binding) {
+        // Register the new binding
+        if let Err(e) = register_shortcut(&app, updated_binding.clone()) {
+            let error_msg = format!("Failed to register shortcut: {}", e);
+            error!("change_binding error: {}", error_msg);
+            return Ok(BindingResponse {
+                success: false,
+                binding: None,
+                error: Some(error_msg),
+            });
+        }
     }
 
     // Update the binding in the settings
@@ -564,6 +651,20 @@ pub fn change_selected_language_setting(app: AppHandle, language: String) -> Res
 
 #[tauri::command]
 #[specta::specta]
+pub fn change_dictation_language_mode_setting(
+    app: AppHandle,
+    mode: DictationLanguageMode,
+    selected_language: Option<String>,
+    languages: Vec<String>,
+) -> Result<(), String> {
+    let mut settings = settings::get_settings(&app);
+    settings.apply_dictation_language_mode(mode, selected_language, languages)?;
+    settings::write_settings(&app, settings);
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
 pub fn change_overlay_position_setting(app: AppHandle, position: String) -> Result<(), String> {
     let mut settings = settings::get_settings(&app);
     let parsed = match position.as_str() {
@@ -581,6 +682,29 @@ pub fn change_overlay_position_setting(app: AppHandle, position: String) -> Resu
     // Update overlay position without recreating window
     crate::utils::update_overlay_position(&app);
 
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn change_docked_pill_setting(app: AppHandle, enabled: bool) -> Result<(), String> {
+    let mut settings = settings::get_settings(&app);
+    settings.docked_pill_enabled = enabled;
+    settings::write_settings(&app, settings);
+
+    if enabled {
+        crate::utils::show_docked_overlay(&app);
+    } else {
+        crate::utils::hide_recording_overlay(&app);
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn set_recording_overlay_expanded(app: AppHandle, expanded: bool) -> Result<(), String> {
+    crate::utils::set_recording_overlay_expanded(&app, expanded);
     Ok(())
 }
 
@@ -625,12 +749,19 @@ pub fn change_start_hidden_setting(app: AppHandle, enabled: bool) -> Result<(), 
 #[tauri::command]
 #[specta::specta]
 pub fn change_autostart_setting(app: AppHandle, enabled: bool) -> Result<(), String> {
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    if enabled {
+        return Err("Autostart is not supported on mobile".to_string());
+    }
+
     let mut settings = settings::get_settings(&app);
     settings.autostart_enabled = enabled;
     settings::write_settings(&app, settings);
 
     // Apply the autostart setting immediately
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     let autostart_manager = app.autolaunch();
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     if enabled {
         let _ = autostart_manager.enable();
     } else {
@@ -700,6 +831,33 @@ pub fn change_adaptive_profiles_enabled_setting(
 ) -> Result<(), String> {
     let mut settings = settings::get_settings(&app);
     settings.adaptive_profiles_enabled = enabled;
+    settings::write_settings(&app, settings);
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn change_context_awareness_enabled_setting(
+    app: AppHandle,
+    enabled: bool,
+) -> Result<(), String> {
+    let mut settings = settings::get_settings(&app);
+    settings.context_awareness_enabled = enabled;
+    if !enabled {
+        settings.context_nearby_text_enabled = false;
+    }
+    settings::write_settings(&app, settings);
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn change_context_nearby_text_enabled_setting(
+    app: AppHandle,
+    enabled: bool,
+) -> Result<(), String> {
+    let mut settings = settings::get_settings(&app);
+    settings.context_nearby_text_enabled = enabled && settings.context_awareness_enabled;
     settings::write_settings(&app, settings);
     Ok(())
 }
@@ -930,6 +1088,18 @@ pub fn change_post_process_enabled_setting(app: AppHandle, enabled: bool) -> Res
 
 #[tauri::command]
 #[specta::specta]
+pub fn change_formatting_level_setting(
+    app: AppHandle,
+    level: settings::FormattingLevel,
+) -> Result<(), String> {
+    let mut settings = settings::get_settings(&app);
+    settings.formatting_level = level;
+    settings::write_settings(&app, settings);
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
 pub fn change_experimental_enabled_setting(app: AppHandle, enabled: bool) -> Result<(), String> {
     let mut settings = settings::get_settings(&app);
     settings.experimental_enabled = enabled;
@@ -954,7 +1124,7 @@ pub fn change_post_process_base_url_setting(
         .post_process_provider_mut(&provider_id)
         .expect("Provider looked up above must exist");
 
-    if provider.id != "custom" {
+    if !provider.allow_base_url_edit {
         return Err(format!(
             "Provider '{}' does not allow editing the base URL",
             label
@@ -1130,7 +1300,7 @@ pub async fn fetch_post_process_models(
         .unwrap_or_default();
 
     // Skip fetching if no API key for providers that typically need one
-    if api_key.trim().is_empty() && provider.id != "custom" {
+    if api_key.trim().is_empty() && !settings::is_local_post_process_base_url(&provider.base_url) {
         return Err(format!(
             "API key is required for {}. Please add an API key to list available models.",
             provider.label
@@ -1267,4 +1437,31 @@ pub async fn get_available_accelerators() -> crate::managers::transcription::Ava
     tauri::async_runtime::spawn_blocking(crate::managers::transcription::get_available_accelerators)
         .await
         .expect("get_available_accelerators panicked")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_shortcuts_are_valid_for_registration_skip() {
+        assert!(validate_shortcut_for_implementation("", KeyboardImplementation::Tauri).is_ok());
+        assert!(
+            validate_shortcut_for_implementation("   ", KeyboardImplementation::VerbatimKeys)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn non_empty_shortcuts_still_validate_with_backend_rules() {
+        assert!(
+            validate_shortcut_for_implementation("ctrl+space", KeyboardImplementation::Tauri)
+                .is_ok()
+        );
+        assert!(validate_shortcut_for_implementation(
+            "ctrl+space",
+            KeyboardImplementation::VerbatimKeys
+        )
+        .is_ok());
+    }
 }

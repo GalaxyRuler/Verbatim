@@ -267,7 +267,15 @@ export const HistorySettings: React.FC = () => {
               key={entry.id}
               entry={entry}
               onToggleSaved={() => toggleSaved(entry.id)}
-              onCopyText={() => copyToClipboard(entry.transcription_text)}
+              onCopyText={() =>
+                copyToClipboard(
+                  entry.transform_action
+                    ? (entry.transform_result_text ??
+                        entry.post_processed_text ??
+                        entry.transcription_text)
+                    : entry.transcription_text,
+                )
+              }
               getAudioUrl={getAudioUrl}
               deleteAudio={deleteAudioEntry}
               retryTranscription={retryHistoryEntry}
@@ -327,13 +335,19 @@ const HistoryEntryComponent: React.FC<HistoryEntryProps> = ({
   const [correctedText, setCorrectedText] = useState(entry.transcription_text);
   const [learningCorrection, setLearningCorrection] = useState(false);
 
-  const hasTranscription = entry.transcription_text.trim().length > 0;
+  const isTransformEntry = entry.transform_action !== null;
+  const displayText = isTransformEntry
+    ? (entry.transform_result_text ??
+      entry.post_processed_text ??
+      entry.transcription_text)
+    : entry.transcription_text;
+  const hasTranscription = displayText.trim().length > 0;
 
   useEffect(() => {
     if (!isLearningCorrection) {
-      setCorrectedText(entry.transcription_text);
+      setCorrectedText(displayText);
     }
-  }, [entry.transcription_text, isLearningCorrection]);
+  }, [displayText, isLearningCorrection]);
 
   const handleLoadAudio = useCallback(
     () => getAudioUrl(entry.file_name),
@@ -372,11 +386,11 @@ const HistoryEntryComponent: React.FC<HistoryEntryProps> = ({
   };
 
   const handleStartLearningCorrection = () => {
-    if (!hasTranscription) {
+    if (!hasTranscription || isTransformEntry) {
       return;
     }
 
-    setCorrectedText(entry.transcription_text);
+    setCorrectedText(displayText);
     setIsLearningCorrection(true);
   };
 
@@ -392,6 +406,10 @@ const HistoryEntryComponent: React.FC<HistoryEntryProps> = ({
 
     try {
       setLearningCorrection(true);
+      if (isTransformEntry) {
+        return;
+      }
+
       const result = await commands.learnCustomWordsFromCorrection(
         entry.transcription_text,
         correctedText,
@@ -440,13 +458,15 @@ const HistoryEntryComponent: React.FC<HistoryEntryProps> = ({
               <Copy width={16} height={16} />
             )}
           </IconButton>
-          <IconButton
-            onClick={handleStartLearningCorrection}
-            disabled={!hasTranscription || retrying || isLearningCorrection}
-            title={t("settings.history.learnCorrection")}
-          >
-            <Sparkles width={16} height={16} />
-          </IconButton>
+          {!isTransformEntry && (
+            <IconButton
+              onClick={handleStartLearningCorrection}
+              disabled={!hasTranscription || retrying || isLearningCorrection}
+              title={t("settings.history.learnCorrection")}
+            >
+              <Sparkles width={16} height={16} />
+            </IconButton>
+          )}
           <IconButton
             onClick={onToggleSaved}
             disabled={retrying}
@@ -463,21 +483,23 @@ const HistoryEntryComponent: React.FC<HistoryEntryProps> = ({
               fill={entry.saved ? "currentColor" : "none"}
             />
           </IconButton>
-          <IconButton
-            onClick={handleRetranscribe}
-            disabled={retrying}
-            title={t("settings.history.retranscribe")}
-          >
-            <RotateCcw
-              width={16}
-              height={16}
-              style={
-                retrying
-                  ? { animation: "spin 1s linear infinite reverse" }
-                  : undefined
-              }
-            />
-          </IconButton>
+          {!isTransformEntry && (
+            <IconButton
+              onClick={handleRetranscribe}
+              disabled={retrying}
+              title={t("settings.history.retranscribe")}
+            >
+              <RotateCcw
+                width={16}
+                height={16}
+                style={
+                  retrying
+                    ? { animation: "spin 1s linear infinite reverse" }
+                    : undefined
+                }
+              />
+            </IconButton>
+          )}
           <IconButton
             onClick={handleDeleteEntry}
             disabled={retrying}
@@ -540,12 +562,14 @@ const HistoryEntryComponent: React.FC<HistoryEntryProps> = ({
           {retrying
             ? t("settings.history.transcribing")
             : hasTranscription
-              ? entry.transcription_text
+              ? displayText
               : t("settings.history.transcriptionFailed")}
         </p>
       )}
 
-      <AudioPlayer onLoadRequest={handleLoadAudio} className="w-full" />
+      {!isTransformEntry && (
+        <AudioPlayer onLoadRequest={handleLoadAudio} className="w-full" />
+      )}
     </div>
   );
 };

@@ -30,6 +30,19 @@ type PostProcessProviderState = {
 
 const APPLE_PROVIDER_ID = "apple_intelligence";
 
+const isLocalPostProcessBaseUrl = (baseUrl: string): boolean => {
+  try {
+    const parsed = new URL(baseUrl.trim());
+    return (
+      parsed.protocol === "apple-intelligence:" ||
+      ((parsed.protocol === "http:" || parsed.protocol === "https:") &&
+        ["localhost", "127.0.0.1", "::1", "[::1]"].includes(parsed.hostname))
+    );
+  } catch {
+    return false;
+  }
+};
+
 export const usePostProcessProviderState = (): PostProcessProviderState => {
   const {
     settings,
@@ -102,7 +115,10 @@ export const usePostProcessProviderState = (): PostProcessProviderState => {
         const hasBaseUrl = (provider?.base_url ?? "").trim() !== "";
         const hasApiKey = apiKey.trim() !== "";
 
-        if (provider?.id === "custom" ? hasBaseUrl : hasApiKey) {
+        if (
+          hasApiKey ||
+          (hasBaseUrl && isLocalPostProcessBaseUrl(provider?.base_url ?? ""))
+        ) {
           void fetchPostProcessModels(providerId);
         }
       }
@@ -118,7 +134,7 @@ export const usePostProcessProviderState = (): PostProcessProviderState => {
 
   const handleBaseUrlChange = useCallback(
     (value: string) => {
-      if (!selectedProvider || selectedProvider.id !== "custom") {
+      if (!selectedProvider?.allow_base_url_edit) {
         return;
       }
       const trimmed = value.trim();
@@ -205,7 +221,7 @@ export const usePostProcessProviderState = (): PostProcessProviderState => {
     `post_process_models_fetch:${selectedProviderId}`,
   );
 
-  const isCustomProvider = selectedProvider?.id === "custom";
+  const isCustomProvider = selectedProvider?.allow_base_url_edit === true;
 
   // No automatic fetching - user must click refresh button
 

@@ -2,11 +2,14 @@
 use crate::apple_intelligence;
 use crate::audio_feedback::{play_feedback_sound, play_feedback_sound_blocking, SoundType};
 use crate::audio_toolkit::{is_microphone_access_denied, is_no_input_device_error};
-use crate::managers::audio::AudioRecordingManager;
+use crate::managers::audio::{
+    is_selected_microphone_unavailable_error, AudioRecordingManager, RecordingStopResult,
+};
 use crate::managers::history::HistoryManager;
 use crate::managers::transcription::TranscriptionManager;
 use crate::settings::{get_settings, AppSettings, APPLE_INTELLIGENCE_PROVIDER_ID};
 use crate::shortcut;
+use crate::transform_mode::TransformAction;
 use crate::tray::{change_tray_icon, TrayIconState};
 use crate::utils::{
     self, show_processing_overlay, show_recording_overlay, show_transcribing_overlay,
@@ -20,11 +23,24 @@ use std::sync::Arc;
 use std::time::Instant;
 use tauri::Manager;
 use tauri::{AppHandle, Emitter};
+use tauri_plugin_clipboard_manager::ClipboardExt;
+
+const WHISPER_SAMPLE_RATE: usize = 16_000;
+const MIN_OBSERVED_ACTIVE_SIGNAL_SAMPLES: usize = WHISPER_SAMPLE_RATE * 3 / 10;
+const MIN_UNOBSERVED_USABLE_SPEECH_SAMPLES: usize = WHISPER_SAMPLE_RATE * 3 / 2;
+const MIN_UNOBSERVED_SPEECH_RMS: f32 = 0.003;
+const MIN_UNOBSERVED_SPEECH_PEAK: f32 = 0.02;
 
 #[derive(Clone, serde::Serialize)]
 struct RecordingErrorEvent {
     error_type: String,
     detail: Option<String>,
+}
+
+#[derive(Clone, serde::Serialize)]
+struct LanguageGuardEvent {
+    locked_language: String,
+    preview: String,
 }
 
 /// Drop guard that notifies the [`TranscriptionCoordinator`] when the
@@ -49,6 +65,10 @@ struct TranscribeAction {
     post_process: bool,
 }
 
+struct TransformShortcutAction {
+    action: TransformAction,
+}
+
 /// Field name for structured output JSON schema
 const TRANSCRIPTION_FIELD: &str = "transcription";
 
@@ -67,11 +87,124 @@ fn validate_post_processed_text(transcription: &str, processed_text: &str) -> Re
     crate::adaptive::processor::validate_unrequested_translation(transcription, processed_text)
 }
 
+fn copy_text_to_clipboard(app: &AppHandle, text: &str, reason: &str) {
+    if let Err(err) = app.clipboard().write_text(text.to_string()) {
+        error!("Failed to copy text to clipboard after {}: {}", reason, err);
+    }
+}
+
+fn recording_has_usable_speech(result: &RecordingStopResult) -> bool {
+    if result.samples.is_empty() || result.captured_sample_count == 0 {
+        return false;
+    }
+
+    if result.observed_active_signal {
+        return result.captured_sample_count >= MIN_OBSERVED_ACTIVE_SIGNAL_SAMPLES;
+    }
+
+    if result.captured_sample_count < MIN_UNOBSERVED_USABLE_SPEECH_SAMPLES {
+        return false;
+    }
+
+    let sample_count = result.captured_sample_count.min(result.samples.len());
+    let analyzed = &result.samples[..sample_count];
+    let peak = analyzed
+        .iter()
+        .map(|sample| sample.abs())
+        .fold(0.0_f32, f32::max);
+    let rms =
+        (analyzed.iter().map(|sample| sample * sample).sum::<f32>() / analyzed.len() as f32).sqrt();
+
+    rms >= MIN_UNOBSERVED_SPEECH_RMS && peak >= MIN_UNOBSERVED_SPEECH_PEAK
+}
+
+fn transcription_completed_log_message(
+    elapsed: std::time::Duration,
+    transcription: &str,
+) -> String {
+    format!(
+        "Transcription completed in {}ms ({} chars)",
+        elapsed.as_millis(),
+        transcription.chars().count()
+    )
+}
+
+fn language_guard_receipt(target_verified: bool) -> crate::adaptive::types::InsertionReceipt {
+    crate::adaptive::types::InsertionReceipt {
+        attempted: false,
+        succeeded: false,
+        method: crate::adaptive::types::InsertionMethod::None,
+        target_verified,
+        error: Some("language guard blocked paste".to_string()),
+    }
+}
+
+fn native_translation_allows_language_guard_bypass(
+    settings: &AppSettings,
+    model_supports_translation: bool,
+) -> bool {
+    model_supports_translation && settings.translate_to_english
+}
+
+fn selected_model_supports_translation(app: &AppHandle, settings: &AppSettings) -> bool {
+    app.try_state::<Arc<crate::managers::model::ModelManager>>()
+        .and_then(|model_manager| model_manager.get_model_info(&settings.selected_model))
+        .map(|info| info.supports_translation)
+        .unwrap_or(false)
+}
+
+fn language_guard_blocks(app: &AppHandle, settings: &AppSettings, final_text: &str) -> bool {
+    if native_translation_allows_language_guard_bypass(
+        settings,
+        selected_model_supports_translation(app, settings),
+    ) {
+        return false;
+    }
+
+    if !crate::adaptive::language_guard::contradicts_locked_language(
+        &settings.selected_language,
+        final_text,
+    ) {
+        return false;
+    }
+
+    warn!(
+        "Language guard blocked paste because output script contradicts locked language '{}'",
+        settings.selected_language
+    );
+    copy_text_to_clipboard(app, final_text, "language guard block");
+
+    let preview = final_text.chars().take(80).collect();
+    let _ = app.emit(
+        "language-guard-blocked",
+        LanguageGuardEvent {
+            locked_language: settings.selected_language.clone(),
+            preview,
+        },
+    );
+
+    true
+}
+
 fn accept_post_processed_text(
     transcription: &str,
     processed_text: String,
     provider_id: &str,
 ) -> Option<String> {
+    if provider_id == crate::local_llm::runtime::VERBATIM_LOCAL_PROVIDER_ID {
+        let evaluation = crate::local_llm::evaluation::evaluate_post_processing_output(
+            transcription,
+            &processed_text,
+        );
+        if !evaluation.passed {
+            warn!(
+                "Managed local post-processing output rejected for provider '{}': {:?}. Falling back to raw transcript.",
+                provider_id, evaluation.issues
+            );
+            return None;
+        }
+    }
+
     match validate_post_processed_text(transcription, &processed_text) {
         Ok(()) => Some(processed_text),
         Err(err) => {
@@ -84,7 +217,106 @@ fn accept_post_processed_text(
     }
 }
 
-async fn post_process_transcription(settings: &AppSettings, transcription: &str) -> Option<String> {
+fn is_local_post_process_provider(base_url: &str) -> bool {
+    crate::settings::is_local_post_process_base_url(base_url)
+}
+
+fn can_egress_post_process_text(provider_base_url: &str, api_key: &str) -> bool {
+    is_local_post_process_provider(provider_base_url) || !api_key.trim().is_empty()
+}
+
+fn should_run_requested_post_processing(requested: bool, settings: &AppSettings) -> bool {
+    requested && settings.post_process_enabled
+}
+
+fn should_attempt_api_post_processing(settings: &AppSettings) -> bool {
+    !settings.local_llm.enabled
+}
+
+async fn post_process_with_managed_local_llm(
+    app: &AppHandle,
+    settings: &AppSettings,
+    transcription: &str,
+) -> Option<String> {
+    if !settings.local_llm.enabled {
+        return None;
+    }
+
+    let Some(manager) = app.try_state::<Arc<crate::local_llm::download::LocalLlmManager>>() else {
+        debug!("Managed local post-processing skipped because local LLM manager is unavailable");
+        return None;
+    };
+
+    let endpoint = match manager.ensure_runtime(&settings.local_llm).await {
+        Ok(endpoint) => endpoint,
+        Err(err) => {
+            warn!(
+                "Managed local post-processing skipped because runtime is unavailable: {}",
+                err
+            );
+            return None;
+        }
+    };
+
+    debug!(
+        "Starting managed local post-processing with model '{}'",
+        endpoint.model_id
+    );
+
+    match crate::llm_client::send_chat_completion_with_schema(
+        &endpoint.provider,
+        String::new(),
+        &endpoint.model,
+        transcription.to_string(),
+        Some(crate::local_llm::runtime::local_post_processing_system_prompt()),
+        None,
+        None,
+        None,
+    )
+    .await
+    {
+        Ok(Some(content)) => {
+            let content = strip_invisible_chars(&content);
+            debug!(
+                "Managed local post-processing succeeded. Output length: {} chars",
+                content.len()
+            );
+            accept_post_processed_text(
+                transcription,
+                content,
+                crate::local_llm::runtime::VERBATIM_LOCAL_PROVIDER_ID,
+            )
+        }
+        Ok(None) => {
+            warn!("Managed local post-processing returned no content");
+            None
+        }
+        Err(err) => {
+            warn!(
+                "Managed local post-processing failed: {}. Falling back to configured provider or raw transcript.",
+                err
+            );
+            None
+        }
+    }
+}
+
+async fn post_process_transcription(
+    app: &AppHandle,
+    settings: &AppSettings,
+    transcription: &str,
+) -> Option<String> {
+    if let Some(processed_text) =
+        post_process_with_managed_local_llm(app, settings, transcription).await
+    {
+        return Some(processed_text);
+    }
+
+    if !should_attempt_api_post_processing(settings) {
+        debug!("Post-processing skipped API provider because local model mode is active");
+        return None;
+    }
+
     let provider = match settings.active_post_process_provider().cloned() {
         Some(provider) => provider,
         None => {
@@ -145,6 +377,14 @@ async fn post_process_transcription(settings: &AppSettings, transcription: &str)
         .get(&provider.id)
         .cloned()
         .unwrap_or_default();
+
+    if !can_egress_post_process_text(&provider.base_url, &api_key) {
+        warn!(
+            "Post-processing skipped for provider '{}' because remote providers require a configured API key before transcript egress",
+            provider.id
+        );
+        return None;
+    }
 
     // Disable reasoning for providers where post-processing rarely benefits from it.
     // - custom: top-level reasoning_effort (works for local OpenAI-compat servers)
@@ -389,8 +629,29 @@ pub(crate) async fn process_transcription_output(
         final_text = converted_text;
     }
 
+    let formatted_text = crate::adaptive::smart_formatting::format_transcript(
+        &final_text,
+        settings.formatting_level,
+    );
+    if formatted_text != final_text {
+        final_text = formatted_text;
+        post_processed_text = Some(final_text.clone());
+    }
+
     if post_process {
-        if let Some(processed_text) = post_process_transcription(&settings, &final_text).await {
+        if let Some(processed_text) = post_process_transcription(app, &settings, &final_text).await
+        {
+            if let Err(err) = validate_post_processed_text(transcription, &processed_text) {
+                warn!(
+                    "Post-processing output rejected against raw transcript: {}. Falling back to deterministic formatted transcript.",
+                    err
+                );
+                return ProcessedTranscription {
+                    final_text,
+                    post_processed_text,
+                    post_process_prompt,
+                };
+            }
             post_processed_text = Some(processed_text.clone());
             final_text = processed_text;
 
@@ -441,6 +702,54 @@ fn skipped_wrong_target_receipt() -> crate::adaptive::types::InsertionReceipt {
     }
 }
 
+fn prepare_adaptive_paste_text(
+    final_text: &str,
+    context: &crate::adaptive::types::CapturedContext,
+) -> String {
+    crate::adaptive::text_direction::stabilize_ltr_paste_text(final_text, &context.target_kind)
+}
+
+fn should_capture_adaptive_context(settings: &AppSettings) -> bool {
+    settings.adaptive_profiles_enabled && settings.context_awareness_enabled
+}
+
+fn should_verify_adaptive_target(context: &crate::adaptive::types::CapturedContext) -> bool {
+    context.target_fingerprint.is_some()
+}
+
+#[cfg(target_os = "windows")]
+fn force_ltr_input_direction_before_paste(
+    app: &AppHandle,
+    final_text: &str,
+    context: &crate::adaptive::types::CapturedContext,
+) {
+    if !crate::adaptive::text_direction::should_stabilize_ltr_paste_text(
+        final_text,
+        &context.target_kind,
+    ) {
+        return;
+    }
+
+    let Some(enigo_state) = app.try_state::<crate::input::EnigoState>() else {
+        return;
+    };
+    let Ok(mut enigo) = enigo_state.0.lock() else {
+        warn!("Failed to lock Enigo before setting LTR reading order");
+        return;
+    };
+    if let Err(err) = crate::input::send_ltr_reading_order(&mut enigo) {
+        warn!("Failed to set LTR reading order before paste: {}", err);
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn force_ltr_input_direction_before_paste(
+    _app: &AppHandle,
+    _final_text: &str,
+    _context: &crate::adaptive::types::CapturedContext,
+) {
+}
+
 pub(crate) async fn process_adaptive_transcription_output(
     settings: &AppSettings,
     transcription: &str,
@@ -470,7 +779,15 @@ pub(crate) async fn process_adaptive_transcription_output(
         &routing.profile_id,
     );
 
-    let final_text = crate::adaptive::processor::deterministic_process(transcription, profile);
+    let final_text = if settings.formatting_level == crate::settings::FormattingLevel::None {
+        transcription.to_string()
+    } else {
+        crate::adaptive::processor::deterministic_process(transcription, profile)
+    };
+    let final_text = crate::adaptive::smart_formatting::format_transcript(
+        &final_text,
+        settings.formatting_level,
+    );
     let final_text = match crate::adaptive::processor::validate_output(
         transcription,
         &final_text,
@@ -533,6 +850,19 @@ mod adaptive_action_tests {
     }
 
     #[test]
+    fn transform_shortcuts_are_mapped_to_actions() {
+        for id in [
+            "transform_polish",
+            "transform_make_concise",
+            "transform_turn_into_list",
+            "transform_translate",
+            "transform_prompt_engineer",
+        ] {
+            assert!(ACTION_MAP.contains_key(id), "{id} should be actionable");
+        }
+    }
+
+    #[test]
     fn adaptive_target_verification_allows_matching_fingerprint() {
         assert!(adaptive_target_verified(
             &context_with_fingerprint(Some("notepad|edit")),
@@ -557,6 +887,16 @@ mod adaptive_action_tests {
     }
 
     #[test]
+    fn adaptive_target_recheck_requires_original_fingerprint() {
+        assert!(!should_verify_adaptive_target(&context_with_fingerprint(
+            None
+        )));
+        assert!(should_verify_adaptive_target(&context_with_fingerprint(
+            Some("notepad|edit")
+        )));
+    }
+
+    #[test]
     fn wrong_target_receipt_is_not_attempted() {
         let receipt = skipped_wrong_target_receipt();
         assert!(!receipt.attempted);
@@ -567,6 +907,29 @@ mod adaptive_action_tests {
             receipt.error.as_deref(),
             Some("target changed before insertion")
         );
+    }
+
+    #[test]
+    fn adaptive_email_paste_text_gets_ltr_direction_marks() {
+        let mut context = context_with_fingerprint(Some("outlook.exe|rctrl_renwnd32"));
+        context.target_kind = TargetKind::Email;
+
+        let result = prepare_adaptive_paste_text("Dear James,\n\nHow did you come?", &context);
+
+        assert_eq!(
+            result,
+            "\u{200E}Dear James,\u{200E}\n\n\u{200E}How did you come?\u{200E}"
+        );
+    }
+
+    #[test]
+    fn adaptive_notes_paste_text_gets_ltr_direction_marks() {
+        let mut context = context_with_fingerprint(Some("notepad.exe|notepad"));
+        context.target_kind = TargetKind::Notes;
+
+        let result = prepare_adaptive_paste_text("I like simple notes.", &context);
+
+        assert_eq!(result, "\u{200E}I like simple notes.\u{200E}");
     }
 
     #[test]
@@ -601,6 +964,233 @@ mod adaptive_action_tests {
         );
         assert!(validation.is_ok());
     }
+
+    #[test]
+    fn managed_local_post_processing_rejects_script_loss() {
+        let accepted = accept_post_processed_text(
+            "meeting at two pm بخصوص التقرير النهائي",
+            "Meeting at 2 PM regarding the final report.".to_string(),
+            crate::local_llm::runtime::VERBATIM_LOCAL_PROVIDER_ID,
+        );
+
+        assert!(accepted.is_none());
+    }
+
+    #[test]
+    fn managed_local_post_processing_rejects_excessive_expansion() {
+        let accepted = accept_post_processed_text(
+            "send the invoice",
+            "send the invoice ".repeat(80),
+            crate::local_llm::runtime::VERBATIM_LOCAL_PROVIDER_ID,
+        );
+
+        assert!(accepted.is_none());
+    }
+
+    #[test]
+    fn managed_local_post_processing_rejects_short_source_term_loss() {
+        let accepted = accept_post_processed_text(
+            "email signature",
+            "Regards,\nAbdullah".to_string(),
+            crate::local_llm::runtime::VERBATIM_LOCAL_PROVIDER_ID,
+        );
+
+        assert!(accepted.is_none());
+    }
+
+    #[test]
+    fn transcription_completed_log_message_does_not_include_transcript_text() {
+        let transcript = "Confidential dictated sentence.";
+        let message =
+            transcription_completed_log_message(std::time::Duration::from_millis(123), transcript);
+
+        assert!(message.contains("123ms"));
+        assert!(message.contains("31 chars"));
+        assert!(!message.contains(transcript));
+        assert!(!message.contains("Confidential"));
+    }
+
+    #[test]
+    fn local_post_process_providers_do_not_require_api_key() {
+        assert!(can_egress_post_process_text(
+            "http://localhost:11434/v1",
+            ""
+        ));
+        assert!(can_egress_post_process_text(
+            "https://127.0.0.1:8080/v1",
+            "   "
+        ));
+        assert!(can_egress_post_process_text("http://[::1]:11434/v1", ""));
+        assert!(can_egress_post_process_text(
+            "apple-intelligence://local",
+            ""
+        ));
+    }
+
+    #[test]
+    fn remote_post_process_providers_require_api_key() {
+        assert!(!can_egress_post_process_text(
+            "https://api.openai.com/v1",
+            ""
+        ));
+        assert!(!can_egress_post_process_text(
+            "https://openrouter.ai/api/v1",
+            "   "
+        ));
+        assert!(can_egress_post_process_text(
+            "https://api.openai.com/v1",
+            "sk-test"
+        ));
+    }
+
+    #[test]
+    fn localhost_lookalike_post_process_providers_require_api_key() {
+        for base_url in [
+            "http://localhost@evil.com/v1",
+            "http://localhost.evil.com/v1",
+            "https://127.0.0.1.evil.com/v1",
+        ] {
+            assert!(
+                !can_egress_post_process_text(base_url, ""),
+                "{base_url} must not be treated as a local provider"
+            );
+        }
+    }
+
+    #[test]
+    fn disabled_post_processing_setting_blocks_requested_post_process_paths() {
+        let mut settings = crate::settings::get_default_settings();
+        settings.post_process_enabled = false;
+
+        assert!(!should_run_requested_post_processing(true, &settings));
+
+        settings.post_process_enabled = true;
+        assert!(should_run_requested_post_processing(true, &settings));
+        assert!(!should_run_requested_post_processing(false, &settings));
+    }
+
+    #[test]
+    fn local_post_processing_mode_does_not_attempt_api_fallback() {
+        let mut settings = crate::settings::get_default_settings();
+
+        settings.local_llm.enabled = false;
+        assert!(should_attempt_api_post_processing(&settings));
+
+        settings.local_llm.enabled = true;
+        assert!(!should_attempt_api_post_processing(&settings));
+    }
+
+    #[test]
+    fn unsupported_model_translation_setting_does_not_bypass_language_guard() {
+        let mut settings = crate::settings::get_default_settings();
+        settings.selected_language = "ar".to_string();
+        settings.translation_enabled = true;
+        settings.translate_to_english = true;
+
+        assert!(!native_translation_allows_language_guard_bypass(
+            &settings, false
+        ));
+    }
+
+    #[test]
+    fn supported_model_translation_setting_bypasses_language_guard() {
+        let mut settings = crate::settings::get_default_settings();
+        settings.selected_language = "ar".to_string();
+        settings.translation_enabled = true;
+        settings.translate_to_english = true;
+
+        assert!(native_translation_allows_language_guard_bypass(
+            &settings, true
+        ));
+    }
+
+    #[test]
+    fn short_false_positive_without_active_signal_is_not_usable_speech() {
+        let result = crate::managers::audio::RecordingStopResult {
+            samples: vec![0.01; 20_000],
+            captured_sample_count: 4_000,
+            observed_active_signal: false,
+            diagnostic_state: crate::managers::mic_diagnostics::MicDiagnosticState::Recording,
+        };
+
+        assert!(!recording_has_usable_speech(&result));
+    }
+
+    #[test]
+    fn very_short_tap_is_not_usable_even_with_active_signal() {
+        let result = crate::managers::audio::RecordingStopResult {
+            samples: vec![0.01; 20_000],
+            captured_sample_count: 3_200,
+            observed_active_signal: true,
+            diagnostic_state: crate::managers::mic_diagnostics::MicDiagnosticState::Recording,
+        };
+
+        assert!(!recording_has_usable_speech(&result));
+    }
+
+    #[test]
+    fn short_recording_with_active_signal_is_usable_speech() {
+        let result = crate::managers::audio::RecordingStopResult {
+            samples: vec![0.01; 20_000],
+            captured_sample_count: 8_000,
+            observed_active_signal: true,
+            diagnostic_state: crate::managers::mic_diagnostics::MicDiagnosticState::Recording,
+        };
+
+        assert!(recording_has_usable_speech(&result));
+    }
+
+    #[test]
+    fn observed_active_signal_keeps_long_enough_speech_usable() {
+        let result = crate::managers::audio::RecordingStopResult {
+            samples: vec![0.01; 24_000],
+            captured_sample_count: 24_000,
+            observed_active_signal: true,
+            diagnostic_state: crate::managers::mic_diagnostics::MicDiagnosticState::Recording,
+        };
+
+        assert!(recording_has_usable_speech(&result));
+    }
+
+    #[test]
+    fn quiet_long_buffer_without_active_signal_is_not_usable_speech() {
+        let result = crate::managers::audio::RecordingStopResult {
+            samples: vec![0.0005; 24_000],
+            captured_sample_count: 24_000,
+            observed_active_signal: false,
+            diagnostic_state: crate::managers::mic_diagnostics::MicDiagnosticState::Silence,
+        };
+
+        assert!(!recording_has_usable_speech(&result));
+    }
+
+    #[test]
+    fn energetic_buffer_without_level_observation_can_still_be_usable() {
+        let mut samples = vec![0.0; 24_000];
+        for sample in samples.iter_mut().take(24_000) {
+            *sample = 0.04;
+        }
+        let result = crate::managers::audio::RecordingStopResult {
+            samples,
+            captured_sample_count: 24_000,
+            observed_active_signal: false,
+            diagnostic_state: crate::managers::mic_diagnostics::MicDiagnosticState::Recording,
+        };
+
+        assert!(recording_has_usable_speech(&result));
+    }
+
+    #[test]
+    fn adaptive_context_capture_requires_context_awareness() {
+        let mut settings = crate::settings::get_default_settings();
+        settings.adaptive_profiles_enabled = true;
+        settings.context_awareness_enabled = false;
+
+        assert!(!should_capture_adaptive_context(&settings));
+
+        settings.context_awareness_enabled = true;
+        assert!(should_capture_adaptive_context(&settings));
+    }
 }
 
 impl ShortcutAction for TranscribeAction {
@@ -627,7 +1217,7 @@ impl ShortcutAction for TranscribeAction {
 
         // Get the microphone mode to determine audio feedback timing
         let settings = get_settings(app);
-        if settings.adaptive_profiles_enabled {
+        if should_capture_adaptive_context(&settings) {
             if let Some(store) = app.try_state::<crate::adaptive::session::ActiveDictationContext>()
             {
                 let context = crate::adaptive::context::capture_context(
@@ -635,6 +1225,10 @@ impl ShortcutAction for TranscribeAction {
                 );
                 store.insert(&binding_id, context);
             }
+        } else if let Some(store) =
+            app.try_state::<crate::adaptive::session::ActiveDictationContext>()
+        {
+            store.clear(&binding_id);
         }
         let is_always_on = settings.always_on_microphone;
         debug!("Microphone mode - always_on: {}", is_always_on);
@@ -702,6 +1296,8 @@ impl ShortcutAction for TranscribeAction {
                     "microphone_permission_denied"
                 } else if is_no_input_device_error(&err) {
                     "no_input_device"
+                } else if is_selected_microphone_unavailable_error(&err) {
+                    "selected_microphone_unavailable"
                 } else {
                     "unknown"
                 };
@@ -753,18 +1349,24 @@ impl ShortcutAction for TranscribeAction {
             );
 
             let stop_recording_time = Instant::now();
-            if let Some(samples) = rm.stop_recording(&binding_id) {
+            if let Some(stop_result) = rm.stop_recording(&binding_id) {
                 debug!(
-                    "Recording stopped and samples retrieved in {:?}, sample count: {}",
+                    "Recording stopped and samples retrieved in {:?}, sample count: {}, captured sample count: {}, active signal observed: {}, diagnostic state: {:?}",
                     stop_recording_time.elapsed(),
-                    samples.len()
+                    stop_result.samples.len(),
+                    stop_result.captured_sample_count,
+                    stop_result.observed_active_signal,
+                    stop_result.diagnostic_state
                 );
 
-                if samples.is_empty() {
-                    debug!("Recording produced no audio samples; skipping persistence");
+                if !recording_has_usable_speech(&stop_result) {
+                    debug!(
+                        "Recording did not contain usable speech; skipping transcription and paste"
+                    );
                     utils::hide_recording_overlay(&ah);
                     change_tray_icon(&ah, TrayIconState::Idle);
                 } else {
+                    let samples = stop_result.samples;
                     // Save WAV concurrently with transcription
                     let sample_count = samples.len();
                     let file_name = format!("verbatim-{}.wav", chrono::Utc::now().timestamp());
@@ -806,20 +1408,29 @@ impl ShortcutAction for TranscribeAction {
                     match transcription_result {
                         Ok(transcription) => {
                             debug!(
-                                "Transcription completed in {:?}: '{}'",
-                                transcription_time.elapsed(),
-                                transcription
+                                "{}",
+                                transcription_completed_log_message(
+                                    transcription_time.elapsed(),
+                                    &transcription
+                                )
                             );
 
                             let settings = get_settings(&ah);
+                            let effective_post_process =
+                                should_run_requested_post_processing(post_process, &settings);
                             let adaptive_context = if settings.adaptive_profiles_enabled {
-                                ah.try_state::<crate::adaptive::session::ActiveDictationContext>()
-                                    .and_then(|store| store.take(&binding_id))
+                                let captured = ah
+                                    .try_state::<crate::adaptive::session::ActiveDictationContext>()
+                                    .and_then(|store| store.take(&binding_id));
+                                Some(
+                                    captured
+                                        .unwrap_or_else(crate::adaptive::context::unknown_context),
+                                )
                             } else {
                                 None
                             };
 
-                            if post_process || adaptive_context.is_some() {
+                            if effective_post_process || adaptive_context.is_some() {
                                 show_processing_overlay(&ah);
                             }
 
@@ -842,7 +1453,10 @@ impl ShortcutAction for TranscribeAction {
                                             profile_id: Some(profile.id.clone()),
                                             profile_name: Some(profile.name.clone()),
                                             routing_json: serialize_json(&processed.routing),
-                                            context_json: serialize_json(&context),
+                                            context_json:
+                                                crate::adaptive::context::context_history_metadata_json(
+                                                    &context,
+                                                ),
                                             language_json: serialize_json(&processed.language),
                                             insertion_json: None,
                                             parent_entry_id: None,
@@ -850,7 +1464,7 @@ impl ShortcutAction for TranscribeAction {
                                     match hm.save_entry_with_metadata(
                                         file_name,
                                         transcription,
-                                        post_process,
+                                        effective_post_process,
                                         processed.post_processed_text.clone(),
                                         processed.post_process_prompt.clone(),
                                         metadata,
@@ -879,21 +1493,54 @@ impl ShortcutAction for TranscribeAction {
                                     let original_context = context.clone();
                                     let private_patterns =
                                         settings.adaptive_private_app_patterns.clone();
+                                    let verify_adaptive_target =
+                                        should_verify_adaptive_target(&original_context)
+                                            && should_capture_adaptive_context(&settings);
+                                    let settings_for_guard = settings.clone();
                                     ah.run_on_main_thread(move || {
-                                        let current_context =
-                                            crate::adaptive::context::capture_context(
-                                                &private_patterns,
-                                            );
-                                        let target_verified = adaptive_target_verified(
-                                            &original_context,
-                                            &current_context,
-                                        );
-                                        let receipt = if target_verified {
-                                            utils::paste_with_receipt(
-                                                final_text,
-                                                ah_clone.clone(),
-                                                true,
+                                        let target_verified = if verify_adaptive_target {
+                                            let current_context =
+                                                crate::adaptive::context::capture_context(
+                                                    &private_patterns,
+                                                );
+                                            adaptive_target_verified(
+                                                &original_context,
+                                                &current_context,
                                             )
+                                        } else {
+                                            true
+                                        };
+                                        let receipt = if target_verified {
+                                            if language_guard_blocks(
+                                                &ah_clone,
+                                                &settings_for_guard,
+                                                &final_text,
+                                            ) {
+                                                language_guard_receipt(true)
+                                            } else {
+                                                let paste_text = prepare_adaptive_paste_text(
+                                                    &final_text,
+                                                    &original_context,
+                                                );
+                                                force_ltr_input_direction_before_paste(
+                                                    &ah_clone,
+                                                    &final_text,
+                                                    &original_context,
+                                                );
+                                                let receipt = utils::paste_with_receipt(
+                                                    paste_text.clone(),
+                                                    ah_clone.clone(),
+                                                    true,
+                                                );
+                                                if !receipt.succeeded && receipt.attempted {
+                                                    copy_text_to_clipboard(
+                                                        &ah_clone,
+                                                        &paste_text,
+                                                        "adaptive paste failure",
+                                                    );
+                                                }
+                                                receipt
+                                            }
                                         } else {
                                             error!(
                                                 "Adaptive paste skipped because the foreground target changed before insertion"
@@ -905,6 +1552,10 @@ impl ShortcutAction for TranscribeAction {
                                             debug!(
                                                 "Text pasted successfully in {:?}",
                                                 paste_time.elapsed()
+                                            );
+                                            utils::emit_overlay_state_changed(
+                                                &ah_clone,
+                                                "inserted",
                                             );
                                         } else {
                                             error!(
@@ -938,16 +1589,19 @@ impl ShortcutAction for TranscribeAction {
                                     });
                                 }
                             } else {
-                                let processed =
-                                    process_transcription_output(&ah, &transcription, post_process)
-                                        .await;
+                                let processed = process_transcription_output(
+                                    &ah,
+                                    &transcription,
+                                    effective_post_process,
+                                )
+                                .await;
 
                                 // Save to history if WAV was saved
                                 if wav_saved {
                                     if let Err(err) = hm.save_entry(
                                         file_name,
                                         transcription,
-                                        post_process,
+                                        effective_post_process,
                                         processed.post_processed_text.clone(),
                                         processed.post_process_prompt.clone(),
                                     ) {
@@ -962,15 +1616,33 @@ impl ShortcutAction for TranscribeAction {
                                     let ah_clone = ah.clone();
                                     let paste_time = Instant::now();
                                     let final_text = processed.final_text;
+                                    let settings_for_guard = settings.clone();
                                     ah.run_on_main_thread(move || {
-                                        match utils::paste(final_text, ah_clone.clone()) {
-                                            Ok(()) => debug!(
-                                                "Text pasted successfully in {:?}",
-                                                paste_time.elapsed()
-                                            ),
-                                            Err(e) => {
-                                                error!("Failed to paste transcription: {}", e);
-                                                let _ = ah_clone.emit("paste-error", ());
+                                        if !language_guard_blocks(
+                                            &ah_clone,
+                                            &settings_for_guard,
+                                            &final_text,
+                                        ) {
+                                            match utils::paste(final_text.clone(), ah_clone.clone())
+                                            {
+                                                Ok(()) => {
+                                                    debug!(
+                                                        "Text pasted successfully in {:?}",
+                                                        paste_time.elapsed()
+                                                    );
+                                                    utils::emit_overlay_state_changed(
+                                                        &ah_clone, "inserted",
+                                                    );
+                                                }
+                                                Err(e) => {
+                                                    error!("Failed to paste transcription: {}", e);
+                                                    copy_text_to_clipboard(
+                                                        &ah_clone,
+                                                        &final_text,
+                                                        "paste failure",
+                                                    );
+                                                    let _ = ah_clone.emit("paste-error", ());
+                                                }
                                             }
                                         }
                                         utils::hide_recording_overlay(&ah_clone);
@@ -1033,6 +1705,47 @@ impl ShortcutAction for CancelAction {
     }
 }
 
+impl ShortcutAction for TransformShortcutAction {
+    fn start(&self, app: &AppHandle, binding_id: &str, _shortcut_str: &str) {
+        let app = app.clone();
+        let history_manager = Arc::clone(&app.state::<Arc<HistoryManager>>());
+        let action = self.action.clone();
+        let target_language = if matches!(action, TransformAction::TranslateToSelectedLanguage) {
+            Some(crate::commands::transform::shortcut_target_language(
+                &get_settings(&app),
+            ))
+        } else {
+            None
+        };
+        let binding_id = binding_id.to_string();
+
+        tauri::async_runtime::spawn(async move {
+            match crate::commands::transform::run_transform_selected_text(
+                app.clone(),
+                history_manager,
+                action,
+                target_language,
+            )
+            .await
+            {
+                Ok(result) => {
+                    debug!(
+                        "Transform shortcut '{}' completed with status {:?}",
+                        binding_id, result.status
+                    );
+                }
+                Err(err) => {
+                    warn!("Transform shortcut '{}' failed: {}", binding_id, err);
+                }
+            }
+        });
+    }
+
+    fn stop(&self, _app: &AppHandle, _binding_id: &str, _shortcut_str: &str) {
+        // Transform shortcuts run once on key press.
+    }
+}
+
 // Test Action
 struct TestAction;
 
@@ -1073,6 +1786,21 @@ pub static ACTION_MAP: Lazy<HashMap<String, Arc<dyn ShortcutAction>>> = Lazy::ne
         "cancel".to_string(),
         Arc::new(CancelAction) as Arc<dyn ShortcutAction>,
     );
+    for (id, action) in [
+        ("transform_polish", TransformAction::Polish),
+        ("transform_make_concise", TransformAction::MakeConcise),
+        ("transform_turn_into_list", TransformAction::TurnIntoList),
+        (
+            "transform_translate",
+            TransformAction::TranslateToSelectedLanguage,
+        ),
+        ("transform_prompt_engineer", TransformAction::PromptEngineer),
+    ] {
+        map.insert(
+            id.to_string(),
+            Arc::new(TransformShortcutAction { action }) as Arc<dyn ShortcutAction>,
+        );
+    }
     map.insert(
         "test".to_string(),
         Arc::new(TestAction) as Arc<dyn ShortcutAction>,

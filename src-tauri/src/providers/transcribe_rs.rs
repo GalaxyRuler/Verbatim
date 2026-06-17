@@ -102,14 +102,11 @@ fn transcription_language_candidates(
         })
 }
 
-fn whisper_language_hint(selected_language: &str, language_shortlist: &[String]) -> Option<String> {
-    if selected_language == "auto" {
-        None
-    } else {
-        transcription_language_candidates(selected_language, language_shortlist)
-            .first()
-            .cloned()
-    }
+fn whisper_language_hint(
+    _selected_language: &str,
+    _language_shortlist: &[String],
+) -> Option<String> {
+    None
 }
 
 fn score_text_for_language(text: &str, language: &str) -> f32 {
@@ -502,11 +499,8 @@ mod tests {
     }
 
     #[test]
-    fn whisper_forced_language_uses_selected_language() {
-        assert_eq!(
-            whisper_language_hint("ar", &["en".to_string()]),
-            Some("ar".to_string())
-        );
+    fn whisper_locked_transcription_uses_native_auto_detect() {
+        assert_eq!(whisper_language_hint("ar", &["en".to_string()]), None);
     }
 
     #[test]

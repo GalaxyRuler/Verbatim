@@ -310,3 +310,10 @@ pub fn is_recording(app: AppHandle) -> bool {
     let audio_manager = app.state::<Arc<AudioRecordingManager>>();
     audio_manager.is_recording()
 }
+
+#[tauri::command]
+#[specta::specta]
+pub fn retry_current_recording(app: AppHandle) -> Result<(), String> {
+    let audio_manager = app.state::<Arc<AudioRecordingManager>>();
+    audio_manager.retry_current_recording()
+}

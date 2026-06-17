@@ -4,6 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import type {
   AppSettings as Settings,
   AudioDevice,
+  FormattingLevel,
   TranslationRequestSettings,
   WhisperAcceleratorSetting,
   OrtAcceleratorSetting,
@@ -126,12 +127,18 @@ const settingUpdaters: {
     commands.changeSelectedLanguageSetting(value as string),
   overlay_position: (value) =>
     commands.changeOverlayPositionSetting(value as string),
+  docked_pill_enabled: (value) =>
+    commands.changeDockedPillSetting(value as boolean),
   debug_mode: (value) => commands.changeDebugModeSetting(value as boolean),
   custom_words: (value) => commands.updateCustomWords(value as string[]),
   auto_add_dictionary_words: (value) =>
     commands.changeAutoAddDictionaryWordsSetting(value as boolean),
   adaptive_profiles_enabled: (value) =>
     commands.changeAdaptiveProfilesEnabledSetting(value as boolean),
+  context_awareness_enabled: (value) =>
+    commands.changeContextAwarenessEnabledSetting(value as boolean),
+  context_nearby_text_enabled: (value) =>
+    commands.changeContextNearbyTextEnabledSetting(value as boolean),
   adaptive_language_shortlist: (value) =>
     commands.changeAdaptiveLanguageShortlistSetting(value as string[]),
   adaptive_default_profile_id: (value) =>
@@ -154,6 +161,8 @@ const settingUpdaters: {
   history_limit: (value) => commands.updateHistoryLimit(value as number),
   post_process_enabled: (value) =>
     commands.changePostProcessEnabledSetting(value as boolean),
+  formatting_level: (value) =>
+    commands.changeFormattingLevelSetting(value as FormattingLevel),
   post_process_selected_prompt_id: (value) =>
     commands.setPostProcessSelectedPrompt(value as string),
   mute_while_recording: (value) =>
@@ -300,12 +309,18 @@ export const useSettingsStore = create<SettingsStore>()(
       const { settings, setUpdating } = get();
       const updateKey = String(key);
       const originalValue = settings?.[key];
+      const optimisticPatch: Partial<Settings> = { [key]: value };
+      if (key === "context_awareness_enabled" && value === false) {
+        optimisticPatch.context_nearby_text_enabled = false;
+      }
 
       setUpdating(updateKey, true);
 
       try {
         set((state) => ({
-          settings: state.settings ? { ...state.settings, [key]: value } : null,
+          settings: state.settings
+            ? { ...state.settings, ...optimisticPatch }
+            : null,
         }));
 
         const updater = settingUpdaters[key];

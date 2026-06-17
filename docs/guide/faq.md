@@ -7,7 +7,7 @@ Yes — free and open source. No subscription, no account. The full source is on
 Never. Capture, transcription, and the final text all happen locally. No cloud, no telemetry. See [Privacy](privacy.md).
 
 **Why does my OS warn on first launch?**
-The builds are unsigned. On Windows choose *More info → Run anyway*; on macOS right-click the app → *Open*. One time only.
+The builds are unsigned. On Windows choose _More info → Run anyway_; on macOS right-click the app → _Open_. One time only.
 
 **Does it work offline?**
 Yes. Once a model is downloaded, Verbatim needs no network connection.

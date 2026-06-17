@@ -4,7 +4,7 @@ use crate::input::{self, EnigoState};
 use crate::settings::TypingTool;
 use crate::settings::{get_settings, AutoSubmitKey, ClipboardHandling, PasteMethod};
 use enigo::{Direction, Enigo, Key, Keyboard};
-use log::info;
+use log::{info, warn};
 use std::process::Command;
 use std::time::Duration;
 use tauri::{AppHandle, Manager};
@@ -12,6 +12,572 @@ use tauri_plugin_clipboard_manager::ClipboardExt;
 
 #[cfg(target_os = "linux")]
 use crate::utils::{is_kde_wayland, is_wayland};
+
+enum ClipboardSnapshot {
+    Native {
+        native: NativeClipboardSnapshot,
+        fallback_text: Option<String>,
+    },
+    TextFallback(Option<String>),
+}
+
+impl ClipboardSnapshot {
+    fn capture(app_handle: &AppHandle) -> Self {
+        let fallback_text = app_handle
+            .clipboard()
+            .read_text()
+            .ok()
+            .filter(|text| !text.is_empty());
+
+        match NativeClipboardSnapshot::capture(app_handle) {
+            Ok(native) => Self::Native {
+                native,
+                fallback_text,
+            },
+            Err(_) => Self::TextFallback(fallback_text),
+        }
+    }
+
+    fn restore(&self, app_handle: &AppHandle) -> Result<(), String> {
+        match self {
+            Self::Native {
+                native,
+                fallback_text,
+            } => {
+                if let Err(err) = native.restore(app_handle) {
+                    warn!("Failed to restore native clipboard snapshot: {}", err);
+                    if let Some(text) = fallback_text {
+                        restore_text_clipboard(app_handle, text).map_err(|fallback_err| {
+                            format!("{err}; text fallback restore failed: {fallback_err}")
+                        })?;
+                    }
+                    return Err(err);
+                }
+                Ok(())
+            }
+            Self::TextFallback(Some(text)) => restore_text_clipboard(app_handle, text),
+            Self::TextFallback(None) => Ok(()),
+        }
+    }
+
+    #[cfg(test)]
+    fn fallback_text_for_restore(&self) -> Option<&str> {
+        match self {
+            Self::Native { fallback_text, .. } => fallback_text.as_deref(),
+            Self::TextFallback(text) => text.as_deref(),
+        }
+    }
+
+    #[cfg(test)]
+    fn native_for_test() -> Self {
+        Self::Native {
+            native: NativeClipboardSnapshot::for_test(),
+            fallback_text: None,
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+#[derive(Clone, Debug)]
+struct NativeClipboardSnapshot {
+    formats: Vec<ClipboardFormatData>,
+    image_payload: Option<DesktopClipboardPayload>,
+}
+
+#[cfg(target_os = "windows")]
+#[derive(Clone, Debug)]
+struct ClipboardFormatData {
+    format: u32,
+    bytes: Vec<u8>,
+}
+
+#[cfg(target_os = "windows")]
+fn is_memory_backed_clipboard_format(format: u32) -> bool {
+    const CF_TEXT: u32 = 1;
+    const CF_SYLK: u32 = 4;
+    const CF_DIF: u32 = 5;
+    const CF_TIFF: u32 = 6;
+    const CF_OEMTEXT: u32 = 7;
+    const CF_DIB: u32 = 8;
+    const CF_PENDATA: u32 = 10;
+    const CF_RIFF: u32 = 11;
+    const CF_WAVE: u32 = 12;
+    const CF_UNICODETEXT: u32 = 13;
+    const CF_HDROP: u32 = 15;
+    const CF_LOCALE: u32 = 16;
+    const CF_DIBV5: u32 = 17;
+    const REGISTERED_FORMAT_START: u32 = 0xC000;
+
+    matches!(
+        format,
+        CF_TEXT
+            | CF_SYLK
+            | CF_DIF
+            | CF_TIFF
+            | CF_OEMTEXT
+            | CF_DIB
+            | CF_PENDATA
+            | CF_RIFF
+            | CF_WAVE
+            | CF_UNICODETEXT
+            | CF_HDROP
+            | CF_LOCALE
+            | CF_DIBV5
+    ) || format >= REGISTERED_FORMAT_START
+}
+
+#[cfg(target_os = "windows")]
+trait NativeClipboardRestoreOps {
+    type Handle: Copy;
+
+    fn allocate_format(&mut self, format: &ClipboardFormatData) -> Result<Self::Handle, String>;
+    fn open_and_empty(&mut self) -> Result<(), String>;
+    fn set_format(&mut self, format: u32, handle: Self::Handle) -> Result<(), String>;
+    fn free_handle(&mut self, handle: Self::Handle);
+}
+
+#[cfg(target_os = "windows")]
+fn restore_native_clipboard_snapshot_with_ops<O: NativeClipboardRestoreOps>(
+    formats: &[ClipboardFormatData],
+    ops: &mut O,
+) -> Result<(), String> {
+    if formats.is_empty() {
+        return Err("native clipboard snapshot is empty".to_string());
+    }
+
+    let mut prepared = Vec::with_capacity(formats.len());
+    for format in formats {
+        match ops.allocate_format(format) {
+            Ok(handle) => prepared.push((format.format, handle)),
+            Err(err) => {
+                for (_, handle) in prepared {
+                    ops.free_handle(handle);
+                }
+                return Err(format!(
+                    "prepare clipboard format {} before clearing clipboard: {}",
+                    format.format, err
+                ));
+            }
+        }
+    }
+
+    if let Err(err) = ops.open_and_empty() {
+        for (_, handle) in prepared {
+            ops.free_handle(handle);
+        }
+        return Err(err);
+    }
+
+    let format_count = prepared.len();
+    let mut failures = Vec::new();
+    for (format, handle) in prepared {
+        if let Err(err) = ops.set_format(format, handle) {
+            ops.free_handle(handle);
+            failures.push(format!("format {format}: {err}"));
+        }
+    }
+
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "set clipboard data failed for {} of {} formats: {}",
+            failures.len(),
+            format_count,
+            failures.join("; ")
+        ))
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn restore_native_clipboard_snapshot_with_image_fallback<
+    O: NativeClipboardRestoreOps,
+    D: DesktopClipboardOps,
+>(
+    formats: &[ClipboardFormatData],
+    image_payload: Option<&DesktopClipboardPayload>,
+    native_ops: &mut O,
+    desktop_ops: &mut D,
+) -> Result<(), String> {
+    if formats.is_empty() {
+        if let Some(image_payload) = image_payload {
+            return restore_desktop_clipboard_payload(image_payload, desktop_ops)
+                .map_err(|err| format!("restore clipboard image fallback: {err}"));
+        }
+        return Err("native clipboard snapshot is empty".to_string());
+    }
+
+    match restore_native_clipboard_snapshot_with_ops(formats, native_ops) {
+        Ok(()) => Ok(()),
+        Err(native_err) => {
+            if let Some(image_payload) = image_payload {
+                restore_desktop_clipboard_payload(image_payload, desktop_ops).map_err(|image_err| {
+                    format!("{native_err}; image fallback restore failed: {image_err}")
+                })
+            } else {
+                Err(native_err)
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+struct WinClipboardRestoreOps {
+    opened: bool,
+}
+
+#[cfg(target_os = "windows")]
+impl Drop for WinClipboardRestoreOps {
+    fn drop(&mut self) {
+        if self.opened {
+            unsafe {
+                let _ = windows::Win32::System::DataExchange::CloseClipboard();
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+impl NativeClipboardRestoreOps for WinClipboardRestoreOps {
+    type Handle = windows::Win32::Foundation::HGLOBAL;
+
+    fn allocate_format(&mut self, format: &ClipboardFormatData) -> Result<Self::Handle, String> {
+        use windows::Win32::Foundation::GlobalFree;
+        use windows::Win32::System::Memory::{
+            GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE,
+        };
+
+        unsafe {
+            let hglobal = GlobalAlloc(GMEM_MOVEABLE, format.bytes.len())
+                .map_err(|err| format!("allocate clipboard memory: {}", err))?;
+            let locked = GlobalLock(hglobal);
+            if locked.is_null() {
+                let _ = GlobalFree(Some(hglobal));
+                return Err("lock clipboard memory".to_string());
+            }
+
+            std::ptr::copy_nonoverlapping(
+                format.bytes.as_ptr(),
+                locked.cast::<u8>(),
+                format.bytes.len(),
+            );
+            let _ = GlobalUnlock(hglobal);
+            Ok(hglobal)
+        }
+    }
+
+    fn open_and_empty(&mut self) -> Result<(), String> {
+        use windows::Win32::System::DataExchange::{EmptyClipboard, OpenClipboard};
+
+        unsafe {
+            OpenClipboard(None).map_err(|err| format!("open clipboard: {}", err))?;
+            self.opened = true;
+            EmptyClipboard().map_err(|err| format!("empty clipboard: {}", err))
+        }
+    }
+
+    fn set_format(&mut self, format: u32, handle: Self::Handle) -> Result<(), String> {
+        use windows::Win32::Foundation::HANDLE;
+        use windows::Win32::System::DataExchange::SetClipboardData;
+
+        unsafe {
+            SetClipboardData(format, Some(HANDLE(handle.0)))
+                .map(|_| ())
+                .map_err(|err| format!("set clipboard data: {}", err))
+        }
+    }
+
+    fn free_handle(&mut self, handle: Self::Handle) {
+        use windows::Win32::Foundation::GlobalFree;
+
+        unsafe {
+            let _ = GlobalFree(Some(handle));
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+impl NativeClipboardSnapshot {
+    fn capture(app_handle: &AppHandle) -> Result<Self, String> {
+        use windows::Win32::Foundation::HGLOBAL;
+        use windows::Win32::System::DataExchange::{
+            EnumClipboardFormats, GetClipboardData, OpenClipboard,
+        };
+        use windows::Win32::System::Memory::{GlobalLock, GlobalSize, GlobalUnlock};
+
+        struct ClipboardGuard;
+
+        impl Drop for ClipboardGuard {
+            fn drop(&mut self) {
+                unsafe {
+                    let _ = windows::Win32::System::DataExchange::CloseClipboard();
+                }
+            }
+        }
+
+        let image_payload = PluginDesktopClipboardOps { app_handle }
+            .read_image_payload()
+            .ok();
+
+        unsafe {
+            OpenClipboard(None).map_err(|err| format!("open clipboard: {}", err))?;
+            let _guard = ClipboardGuard;
+            let mut formats = Vec::new();
+            let mut format = 0;
+
+            loop {
+                format = EnumClipboardFormats(format);
+                if format == 0 {
+                    break;
+                }
+                if !is_memory_backed_clipboard_format(format) {
+                    continue;
+                }
+
+                let handle = match GetClipboardData(format) {
+                    Ok(handle) if !handle.0.is_null() => handle,
+                    _ => continue,
+                };
+                let hglobal = HGLOBAL(handle.0);
+                let size = GlobalSize(hglobal);
+                if size == 0 {
+                    continue;
+                }
+
+                let locked = GlobalLock(hglobal);
+                if locked.is_null() {
+                    continue;
+                }
+
+                let bytes = std::slice::from_raw_parts(locked.cast::<u8>(), size).to_vec();
+                let _ = GlobalUnlock(hglobal);
+                formats.push(ClipboardFormatData { format, bytes });
+            }
+
+            if formats.is_empty() && image_payload.is_none() {
+                Err("no memory-backed or image clipboard formats captured".to_string())
+            } else {
+                Ok(Self {
+                    formats,
+                    image_payload,
+                })
+            }
+        }
+    }
+
+    fn restore(&self, app_handle: &AppHandle) -> Result<(), String> {
+        let mut ops = WinClipboardRestoreOps { opened: false };
+        let mut desktop_ops = PluginDesktopClipboardOps { app_handle };
+        restore_native_clipboard_snapshot_with_image_fallback(
+            &self.formats,
+            self.image_payload.as_ref(),
+            &mut ops,
+            &mut desktop_ops,
+        )
+    }
+
+    #[cfg(test)]
+    fn for_test() -> Self {
+        Self {
+            formats: vec![ClipboardFormatData {
+                format: 13,
+                bytes: b"test\0".to_vec(),
+            }],
+            image_payload: None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(target_os = "windows", allow(dead_code))]
+enum DesktopClipboardPayload {
+    Image {
+        rgba: Vec<u8>,
+        width: u32,
+        height: u32,
+    },
+    Text(String),
+}
+
+#[cfg_attr(target_os = "windows", allow(dead_code))]
+trait DesktopClipboardOps {
+    fn read_image_payload(&self) -> Result<DesktopClipboardPayload, String>;
+    fn read_text_payload(&self) -> Result<DesktopClipboardPayload, String>;
+    fn write_image_payload(&mut self, rgba: &[u8], width: u32, height: u32) -> Result<(), String>;
+    fn write_text_payload(&mut self, text: &str) -> Result<(), String>;
+}
+
+#[cfg_attr(target_os = "windows", allow(dead_code))]
+fn capture_desktop_clipboard_payload<O: DesktopClipboardOps>(
+    ops: &O,
+) -> Result<DesktopClipboardPayload, String> {
+    if let Ok(image) = ops.read_image_payload() {
+        return Ok(image);
+    }
+
+    match ops.read_text_payload()? {
+        DesktopClipboardPayload::Text(text) if !text.is_empty() => {
+            Ok(DesktopClipboardPayload::Text(text))
+        }
+        DesktopClipboardPayload::Text(_) => Err("desktop clipboard text is empty".to_string()),
+        image @ DesktopClipboardPayload::Image { .. } => Ok(image),
+    }
+}
+
+fn restore_desktop_clipboard_payload<O: DesktopClipboardOps>(
+    payload: &DesktopClipboardPayload,
+    ops: &mut O,
+) -> Result<(), String> {
+    match payload {
+        DesktopClipboardPayload::Image {
+            rgba,
+            width,
+            height,
+        } => ops.write_image_payload(rgba, *width, *height),
+        DesktopClipboardPayload::Text(text) => ops.write_text_payload(text),
+    }
+}
+
+struct PluginDesktopClipboardOps<'a> {
+    app_handle: &'a AppHandle,
+}
+
+impl DesktopClipboardOps for PluginDesktopClipboardOps<'_> {
+    fn read_image_payload(&self) -> Result<DesktopClipboardPayload, String> {
+        let image = self
+            .app_handle
+            .clipboard()
+            .read_image()
+            .map_err(|err| format!("read clipboard image: {}", err))?;
+        Ok(DesktopClipboardPayload::Image {
+            rgba: image.rgba().to_vec(),
+            width: image.width(),
+            height: image.height(),
+        })
+    }
+
+    fn read_text_payload(&self) -> Result<DesktopClipboardPayload, String> {
+        let text = self
+            .app_handle
+            .clipboard()
+            .read_text()
+            .map_err(|err| format!("read clipboard text: {}", err))?;
+        Ok(DesktopClipboardPayload::Text(text))
+    }
+
+    fn write_image_payload(&mut self, rgba: &[u8], width: u32, height: u32) -> Result<(), String> {
+        let image = tauri::image::Image::new_owned(rgba.to_vec(), width, height);
+        self.app_handle
+            .clipboard()
+            .write_image(&image)
+            .map_err(|err| format!("write clipboard image: {}", err))
+    }
+
+    fn write_text_payload(&mut self, text: &str) -> Result<(), String> {
+        write_text_clipboard(self.app_handle, text)
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+#[derive(Clone, Debug)]
+struct NativeClipboardSnapshot {
+    payload: DesktopClipboardPayload,
+}
+
+#[cfg(not(target_os = "windows"))]
+impl NativeClipboardSnapshot {
+    fn capture(app_handle: &AppHandle) -> Result<Self, String> {
+        let ops = PluginDesktopClipboardOps { app_handle };
+        capture_desktop_clipboard_payload(&ops).map(|payload| Self { payload })
+    }
+
+    fn restore(&self, app_handle: &AppHandle) -> Result<(), String> {
+        let mut ops = PluginDesktopClipboardOps { app_handle };
+        restore_desktop_clipboard_payload(&self.payload, &mut ops)
+    }
+
+    #[cfg(test)]
+    fn for_test() -> Self {
+        Self {
+            payload: DesktopClipboardPayload::Text(String::new()),
+        }
+    }
+}
+
+fn write_text_clipboard(app_handle: &AppHandle, text: &str) -> Result<(), String> {
+    let clipboard = app_handle.clipboard();
+
+    #[cfg(target_os = "linux")]
+    {
+        if is_wayland() && is_wl_copy_available() {
+            info!("Using wl-copy for clipboard write on Wayland");
+            return write_clipboard_via_wl_copy(text);
+        }
+    }
+
+    clipboard
+        .write_text(text)
+        .map_err(|e| format!("Failed to write to clipboard: {}", e))
+}
+
+fn restore_text_clipboard(app_handle: &AppHandle, text: &str) -> Result<(), String> {
+    write_text_clipboard(app_handle, text).map_err(|err| {
+        warn!("Failed to restore text clipboard fallback: {}", err);
+        err
+    })
+}
+
+pub(crate) fn copy_text_for_recovery(
+    app_handle: &AppHandle,
+    text: &str,
+    reason: &str,
+) -> Result<(), String> {
+    write_text_clipboard(app_handle, text)
+        .map_err(|err| format!("failed to copy recovery text after {reason}: {err}"))
+}
+
+pub(crate) fn paste_exact_preserving_clipboard(
+    text: &str,
+    app_handle: &AppHandle,
+) -> Result<(), String> {
+    let settings = get_settings(app_handle);
+    let paste_method = settings.paste_method;
+    let paste_delay_ms = settings.paste_delay_ms;
+
+    info!(
+        "Using exact replacement paste method: {:?}, delay: {}ms",
+        paste_method, paste_delay_ms
+    );
+
+    let enigo_state = app_handle
+        .try_state::<EnigoState>()
+        .ok_or("Enigo state not initialized")?;
+    let mut enigo = enigo_state
+        .0
+        .lock()
+        .map_err(|e| format!("Failed to lock Enigo: {}", e))?;
+
+    match paste_method {
+        PasteMethod::None => Err("PasteMethod::None cannot replace selected text".to_string()),
+        PasteMethod::Direct => paste_direct(
+            &mut enigo,
+            text,
+            #[cfg(target_os = "linux")]
+            settings.typing_tool,
+        ),
+        PasteMethod::CtrlV | PasteMethod::CtrlShiftV | PasteMethod::ShiftInsert => {
+            paste_via_clipboard(&mut enigo, text, app_handle, &paste_method, paste_delay_ms)
+        }
+        PasteMethod::ExternalScript => {
+            let script_path = settings
+                .external_script_path
+                .as_ref()
+                .filter(|p| !p.is_empty())
+                .ok_or("External script path is not configured")?;
+            paste_via_external_script(text, script_path)
+        }
+    }
+}
 
 /// Pastes text using the clipboard: saves current content, writes text, sends paste keystroke, restores clipboard.
 fn paste_via_clipboard(
@@ -21,27 +587,10 @@ fn paste_via_clipboard(
     paste_method: &PasteMethod,
     paste_delay_ms: u64,
 ) -> Result<(), String> {
-    let clipboard = app_handle.clipboard();
-    let clipboard_content = clipboard.read_text().unwrap_or_default();
+    let clipboard_snapshot = ClipboardSnapshot::capture(app_handle);
 
     // Write text to clipboard first
-    // On Wayland, prefer wl-copy for better compatibility (especially with umlauts)
-    #[cfg(target_os = "linux")]
-    let write_result = if is_wayland() && is_wl_copy_available() {
-        info!("Using wl-copy for clipboard write on Wayland");
-        write_clipboard_via_wl_copy(text)
-    } else {
-        clipboard
-            .write_text(text)
-            .map_err(|e| format!("Failed to write to clipboard: {}", e))
-    };
-
-    #[cfg(not(target_os = "linux"))]
-    let write_result = clipboard
-        .write_text(text)
-        .map_err(|e| format!("Failed to write to clipboard: {}", e));
-
-    write_result?;
+    write_text_clipboard(app_handle, text)?;
 
     std::thread::sleep(Duration::from_millis(paste_delay_ms));
 
@@ -64,17 +613,8 @@ fn paste_via_clipboard(
 
     std::thread::sleep(std::time::Duration::from_millis(50));
 
-    // Restore original clipboard content
-    // On Wayland, prefer wl-copy for better compatibility
-    #[cfg(target_os = "linux")]
-    if is_wayland() && is_wl_copy_available() {
-        let _ = write_clipboard_via_wl_copy(&clipboard_content);
-    } else {
-        let _ = clipboard.write_text(&clipboard_content);
-    }
-
-    #[cfg(not(target_os = "linux"))]
-    let _ = clipboard.write_text(&clipboard_content);
+    // Restore original clipboard content, including non-text formats where supported.
+    clipboard_snapshot.restore(app_handle)?;
 
     Ok(())
 }
@@ -789,5 +1329,245 @@ mod tests {
         assert!(receipt.attempted);
         assert!(!receipt.succeeded);
         assert_eq!(receipt.error.as_deref(), Some("failed"));
+    }
+
+    #[test]
+    fn native_clipboard_snapshot_does_not_restore_empty_text_placeholder() {
+        let snapshot = ClipboardSnapshot::native_for_test();
+
+        assert_eq!(snapshot.fallback_text_for_restore(), None);
+    }
+
+    #[cfg(target_os = "windows")]
+    #[derive(Default)]
+    struct FakeNativeRestoreOps {
+        fail_allocate_format: Option<u32>,
+        fail_set_format: Option<u32>,
+        opened_and_emptied: bool,
+        next_handle: usize,
+        set_attempts: Vec<u32>,
+        freed_handles: Vec<usize>,
+    }
+
+    #[cfg(target_os = "windows")]
+    impl NativeClipboardRestoreOps for FakeNativeRestoreOps {
+        type Handle = usize;
+
+        fn allocate_format(
+            &mut self,
+            format: &ClipboardFormatData,
+        ) -> Result<Self::Handle, String> {
+            if self.fail_allocate_format == Some(format.format) {
+                return Err(format!("allocate {}", format.format));
+            }
+
+            self.next_handle += 1;
+            Ok(self.next_handle)
+        }
+
+        fn open_and_empty(&mut self) -> Result<(), String> {
+            self.opened_and_emptied = true;
+            Ok(())
+        }
+
+        fn set_format(&mut self, format: u32, handle: Self::Handle) -> Result<(), String> {
+            self.set_attempts.push(format);
+            if self.fail_set_format == Some(format) {
+                return Err(format!("set {format} via {handle}"));
+            }
+            Ok(())
+        }
+
+        fn free_handle(&mut self, handle: Self::Handle) {
+            self.freed_handles.push(handle);
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    fn test_formats() -> Vec<ClipboardFormatData> {
+        vec![
+            ClipboardFormatData {
+                format: 13,
+                bytes: b"text\0".to_vec(),
+            },
+            ClipboardFormatData {
+                format: 15,
+                bytes: b"files".to_vec(),
+            },
+        ]
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn native_snapshot_only_reads_memory_backed_formats() {
+        assert!(is_memory_backed_clipboard_format(1));
+        assert!(is_memory_backed_clipboard_format(13));
+        assert!(is_memory_backed_clipboard_format(15));
+        assert!(is_memory_backed_clipboard_format(17));
+        assert!(is_memory_backed_clipboard_format(0xC000));
+        assert!(is_memory_backed_clipboard_format(0xC123));
+
+        assert!(!is_memory_backed_clipboard_format(2));
+        assert!(!is_memory_backed_clipboard_format(3));
+        assert!(!is_memory_backed_clipboard_format(9));
+        assert!(!is_memory_backed_clipboard_format(14));
+        assert!(!is_memory_backed_clipboard_format(0x0200));
+        assert!(!is_memory_backed_clipboard_format(0x0300));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn native_restore_does_not_empty_clipboard_when_preparation_fails() {
+        let mut ops = FakeNativeRestoreOps {
+            fail_allocate_format: Some(15),
+            ..FakeNativeRestoreOps::default()
+        };
+
+        let result = restore_native_clipboard_snapshot_with_ops(&test_formats(), &mut ops);
+
+        assert!(result.is_err());
+        assert!(!ops.opened_and_emptied);
+        assert_eq!(ops.freed_handles, vec![1]);
+        assert!(ops.set_attempts.is_empty());
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn native_restore_attempts_remaining_formats_after_set_failure() {
+        let mut ops = FakeNativeRestoreOps {
+            fail_set_format: Some(13),
+            ..FakeNativeRestoreOps::default()
+        };
+
+        let result = restore_native_clipboard_snapshot_with_ops(&test_formats(), &mut ops);
+
+        assert!(result.is_err());
+        assert!(ops.opened_and_emptied);
+        assert_eq!(ops.set_attempts, vec![13, 15]);
+        assert_eq!(ops.freed_handles, vec![1]);
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn native_restore_uses_image_payload_when_no_memory_formats() {
+        let mut native_ops = FakeNativeRestoreOps::default();
+        let mut desktop_ops = FakeDesktopClipboardOps::default();
+        let image = DesktopClipboardPayload::Image {
+            rgba: vec![255, 0, 0, 255],
+            width: 1,
+            height: 1,
+        };
+
+        restore_native_clipboard_snapshot_with_image_fallback(
+            &[],
+            Some(&image),
+            &mut native_ops,
+            &mut desktop_ops,
+        )
+        .unwrap();
+
+        assert!(!native_ops.opened_and_emptied);
+        assert_eq!(desktop_ops.writes, vec!["image"]);
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn native_restore_reports_failure_when_no_snapshot_fallback_exists() {
+        let mut native_ops = FakeNativeRestoreOps::default();
+        let mut desktop_ops = FakeDesktopClipboardOps::default();
+
+        let error = restore_native_clipboard_snapshot_with_image_fallback(
+            &[],
+            None,
+            &mut native_ops,
+            &mut desktop_ops,
+        )
+        .expect_err("empty snapshot without fallback should fail");
+
+        assert_eq!(error, "native clipboard snapshot is empty");
+        assert!(desktop_ops.writes.is_empty());
+    }
+
+    #[derive(Default)]
+    struct FakeDesktopClipboardOps {
+        image: Option<(Vec<u8>, u32, u32)>,
+        text: Option<String>,
+        writes: Vec<&'static str>,
+    }
+
+    impl DesktopClipboardOps for FakeDesktopClipboardOps {
+        fn read_image_payload(&self) -> Result<DesktopClipboardPayload, String> {
+            let Some((rgba, width, height)) = &self.image else {
+                return Err("no image".to_string());
+            };
+            Ok(DesktopClipboardPayload::Image {
+                rgba: rgba.clone(),
+                width: *width,
+                height: *height,
+            })
+        }
+
+        fn read_text_payload(&self) -> Result<DesktopClipboardPayload, String> {
+            let Some(text) = &self.text else {
+                return Err("no text".to_string());
+            };
+            Ok(DesktopClipboardPayload::Text(text.clone()))
+        }
+
+        fn write_image_payload(
+            &mut self,
+            _rgba: &[u8],
+            _width: u32,
+            _height: u32,
+        ) -> Result<(), String> {
+            self.writes.push("image");
+            Ok(())
+        }
+
+        fn write_text_payload(&mut self, _text: &str) -> Result<(), String> {
+            self.writes.push("text");
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn desktop_clipboard_capture_prefers_image_payload_over_text() {
+        let ops = FakeDesktopClipboardOps {
+            image: Some((vec![255, 0, 0, 255], 1, 1)),
+            text: Some("fallback text".to_string()),
+            writes: Vec::new(),
+        };
+
+        let snapshot = capture_desktop_clipboard_payload(&ops).unwrap();
+
+        assert_eq!(
+            snapshot,
+            DesktopClipboardPayload::Image {
+                rgba: vec![255, 0, 0, 255],
+                width: 1,
+                height: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn desktop_clipboard_restore_uses_captured_payload_type() {
+        let mut ops = FakeDesktopClipboardOps::default();
+        restore_desktop_clipboard_payload(
+            &DesktopClipboardPayload::Image {
+                rgba: vec![255, 0, 0, 255],
+                width: 1,
+                height: 1,
+            },
+            &mut ops,
+        )
+        .unwrap();
+        restore_desktop_clipboard_payload(
+            &DesktopClipboardPayload::Text("hello".to_string()),
+            &mut ops,
+        )
+        .unwrap();
+
+        assert_eq!(ops.writes, vec!["image", "text"]);
     }
 }

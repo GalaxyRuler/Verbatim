@@ -12,25 +12,38 @@ mod dictionary_learning;
 mod helpers;
 mod input;
 mod llm_client;
+pub mod local_llm;
 mod managers;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+mod overlay;
+#[cfg(any(target_os = "android", target_os = "ios"))]
+#[path = "overlay_stub.rs"]
 mod overlay;
 pub mod portable;
 mod post_paste_learning;
 pub mod providers;
+mod selection;
 mod settings;
 mod shortcut;
 mod signal_handle;
+mod snippets;
 mod transcription_coordinator;
+mod transform_mode;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+mod tray;
+#[cfg(any(target_os = "android", target_os = "ios"))]
+#[path = "tray_stub.rs"]
 mod tray;
 mod tray_i18n;
 mod utils;
 
 pub use cli::CliArgs;
-#[cfg(debug_assertions)]
+#[cfg(all(debug_assertions, not(any(target_os = "android", target_os = "ios"))))]
 use specta_typescript::{BigIntExportBehavior, Typescript};
 use tauri_specta::{collect_commands, collect_events, Builder};
 
 use env_filter::Builder as EnvFilterBuilder;
+use local_llm::download::LocalLlmManager;
 use managers::audio::AudioRecordingManager;
 use managers::history::HistoryManager;
 use managers::model::ModelManager;
@@ -41,11 +54,16 @@ use signal_hook::consts::{SIGUSR1, SIGUSR2};
 use signal_hook::iterator::Signals;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use tauri::image::Image;
 pub use transcription_coordinator::TranscriptionCoordinator;
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use tauri::tray::TrayIconBuilder;
-use tauri::{AppHandle, Emitter, Listener, Manager};
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+use tauri::Listener;
+use tauri::{AppHandle, Emitter, Manager};
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 use tauri_plugin_log::{Builder as LogBuilder, RotationStrategy, Target, TargetKind};
 
@@ -89,6 +107,7 @@ fn build_console_filter() -> env_filter::Filter {
     builder.build()
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn show_main_window(app: &AppHandle) {
     if let Some(main_window) = app.get_webview_window("main") {
         if let Err(e) = main_window.unminimize() {
@@ -116,7 +135,10 @@ fn show_main_window(app: &AppHandle) {
     );
 }
 
-#[allow(unused_variables)]
+#[cfg(any(target_os = "android", target_os = "ios"))]
+fn show_main_window(_app: &AppHandle) {}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn should_force_show_permissions_window(app: &AppHandle) -> bool {
     #[cfg(target_os = "windows")]
     {
@@ -160,6 +182,8 @@ fn initialize_core_logic(app_handle: &AppHandle) {
     );
     let history_manager =
         Arc::new(HistoryManager::new(app_handle).expect("Failed to initialize history manager"));
+    let local_llm_manager =
+        Arc::new(LocalLlmManager::new(app_handle).expect("Failed to initialize local LLM manager"));
 
     // Apply accelerator preferences before any model loads
     managers::transcription::apply_accelerator_settings(app_handle);
@@ -169,6 +193,7 @@ fn initialize_core_logic(app_handle: &AppHandle) {
     app_handle.manage(model_manager.clone());
     app_handle.manage(transcription_manager.clone());
     app_handle.manage(history_manager.clone());
+    app_handle.manage(local_llm_manager.clone());
     app_handle.manage(adaptive::session::ActiveDictationContext::default());
 
     // Note: Shortcuts are NOT initialized here.
@@ -191,113 +216,123 @@ fn initialize_core_logic(app_handle: &AppHandle) {
             let _ = app_handle.set_activation_policy(tauri::ActivationPolicy::Accessory);
         }
     }
-    // Get the current theme to set the appropriate initial icon
-    let initial_theme = tray::get_current_theme(app_handle);
-
-    // Choose the appropriate initial icon based on theme
-    let initial_icon_path = tray::get_icon_path(initial_theme, tray::TrayIconState::Idle);
-
-    let tray = TrayIconBuilder::new()
-        .icon(
-            Image::from_path(
-                app_handle
-                    .path()
-                    .resolve(initial_icon_path, tauri::path::BaseDirectory::Resource)
-                    .unwrap(),
-            )
-            .unwrap(),
-        )
-        .tooltip(tray::tray_tooltip())
-        .show_menu_on_left_click(true)
-        .icon_as_template(true)
-        .on_menu_event(|app, event| match event.id.as_ref() {
-            "settings" => {
-                show_main_window(app);
-            }
-            "check_updates" => {
-                let settings = settings::get_settings(app);
-                if settings.update_checks_enabled {
-                    show_main_window(app);
-                    let _ = app.emit("check-for-updates", ());
-                }
-            }
-            "copy_last_transcript" => {
-                tray::copy_last_transcript(app);
-            }
-            "unload_model" => {
-                let transcription_manager = app.state::<Arc<TranscriptionManager>>();
-                if !transcription_manager.is_model_loaded() {
-                    log::warn!("No model is currently loaded.");
-                    return;
-                }
-                match transcription_manager.unload_model() {
-                    Ok(()) => log::info!("Model unloaded via tray."),
-                    Err(e) => log::error!("Failed to unload model via tray: {}", e),
-                }
-            }
-            "cancel" => {
-                use crate::utils::cancel_current_operation;
-
-                // Use centralized cancellation that handles all operations
-                cancel_current_operation(app);
-            }
-            "quit" => {
-                app.exit(0);
-            }
-            id if id.starts_with("model_select:") => {
-                let model_id = id.strip_prefix("model_select:").unwrap().to_string();
-                let current_model = settings::get_settings(app).selected_model;
-                if model_id == current_model {
-                    return;
-                }
-                let app_clone = app.clone();
-                std::thread::spawn(move || {
-                    match commands::models::switch_active_model(&app_clone, &model_id) {
-                        Ok(()) => {
-                            log::info!("Model switched to {} via tray.", model_id);
-                        }
-                        Err(e) => {
-                            log::error!("Failed to switch model via tray: {}", e);
-                        }
-                    }
-                    tray::update_tray_menu(&app_clone, &tray::TrayIconState::Idle, None);
-                });
-            }
-            _ => {}
-        })
-        .build(app_handle)
-        .unwrap();
-    app_handle.manage(tray);
-
-    // Initialize tray menu with idle state
-    utils::update_tray_menu(app_handle, &utils::TrayIconState::Idle, None);
-
-    // Apply show_tray_icon setting
-    let settings = settings::get_settings(app_handle);
-    if !settings.show_tray_icon {
-        tray::set_tray_visibility(app_handle, false);
-    }
-
-    // Refresh tray menu when model state changes
-    let app_handle_for_listener = app_handle.clone();
-    app_handle.listen("model-state-changed", move |_| {
-        tray::update_tray_menu(&app_handle_for_listener, &tray::TrayIconState::Idle, None);
-    });
-
-    // Get the autostart manager and configure based on user setting
-    let autostart_manager = app_handle.autolaunch();
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     let settings = settings::get_settings(&app_handle);
 
-    if settings.autostart_enabled {
-        // Enable autostart if user has opted in
-        let _ = autostart_manager.enable();
-    } else {
-        // Disable autostart if user has opted out
-        let _ = autostart_manager.disable();
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        // Get the current theme to set the appropriate initial icon
+        let initial_theme = tray::get_current_theme(app_handle);
+
+        // Choose the appropriate initial icon based on theme
+        let initial_icon_path = tray::get_icon_path(initial_theme, tray::TrayIconState::Idle);
+
+        let tray = TrayIconBuilder::new()
+            .icon(
+                Image::from_path(
+                    app_handle
+                        .path()
+                        .resolve(initial_icon_path, tauri::path::BaseDirectory::Resource)
+                        .unwrap(),
+                )
+                .unwrap(),
+            )
+            .tooltip(tray::tray_tooltip())
+            .show_menu_on_left_click(true)
+            .icon_as_template(true)
+            .on_menu_event(|app, event| match event.id.as_ref() {
+                "settings" => {
+                    show_main_window(app);
+                }
+                "check_updates" => {
+                    let settings = settings::get_settings(app);
+                    if settings.update_checks_enabled {
+                        show_main_window(app);
+                        let _ = app.emit("check-for-updates", ());
+                    }
+                }
+                "copy_last_transcript" => {
+                    tray::copy_last_transcript(app);
+                }
+                "unload_model" => {
+                    let transcription_manager = app.state::<Arc<TranscriptionManager>>();
+                    if !transcription_manager.is_model_loaded() {
+                        log::warn!("No model is currently loaded.");
+                        return;
+                    }
+                    match transcription_manager.unload_model() {
+                        Ok(()) => log::info!("Model unloaded via tray."),
+                        Err(e) => log::error!("Failed to unload model via tray: {}", e),
+                    }
+                }
+                "cancel" => {
+                    use crate::utils::cancel_current_operation;
+
+                    // Use centralized cancellation that handles all operations
+                    cancel_current_operation(app);
+                }
+                "quit" => {
+                    app.exit(0);
+                }
+                id if id.starts_with("model_select:") => {
+                    let model_id = id.strip_prefix("model_select:").unwrap().to_string();
+                    let current_model = settings::get_settings(app).selected_model;
+                    if model_id == current_model {
+                        return;
+                    }
+                    let app_clone = app.clone();
+                    std::thread::spawn(move || {
+                        match commands::models::switch_active_model(&app_clone, &model_id) {
+                            Ok(()) => {
+                                log::info!("Model switched to {} via tray.", model_id);
+                            }
+                            Err(e) => {
+                                log::error!("Failed to switch model via tray: {}", e);
+                            }
+                        }
+                        tray::update_tray_menu(&app_clone, &tray::TrayIconState::Idle, None);
+                    });
+                }
+                _ => {}
+            })
+            .build(app_handle)
+            .unwrap();
+        app_handle.manage(tray);
+
+        // Initialize tray menu with idle state
+        utils::update_tray_menu(app_handle, &utils::TrayIconState::Idle, None);
+
+        // Apply show_tray_icon setting
+        if !settings.show_tray_icon {
+            tray::set_tray_visibility(app_handle, false);
+        }
+
+        // Refresh tray menu when model state changes
+        let app_handle_for_listener = app_handle.clone();
+        app_handle.listen("model-state-changed", move |_| {
+            tray::update_tray_menu(&app_handle_for_listener, &tray::TrayIconState::Idle, None);
+        });
     }
 
-    // Create the recording overlay window (hidden by default)
-    utils::create_recording_overlay(app_handle);
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        // Get the autostart manager and configure based on user setting
+        let autostart_manager = app_handle.autolaunch();
+
+        if settings.autostart_enabled {
+            // Enable autostart if user has opted in
+            let _ = autostart_manager.enable();
+        } else {
+            // Disable autostart if user has opted out
+            let _ = autostart_manager.disable();
+        }
+    }
+
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        // Create the recording overlay window (hidden by default)
+        utils::create_recording_overlay(app_handle);
+    }
 }
 
 #[tauri::command]
@@ -319,8 +354,21 @@ fn show_main_window_command(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
+#[cfg_attr(
+    any(target_os = "android", target_os = "ios"),
+    tauri::mobile_entry_point
+)]
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub fn run() {
+    run_inner(CliArgs::default());
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn run(cli_args: CliArgs) {
+    run_inner(cli_args);
+}
+
+fn run_inner(cli_args: CliArgs) {
     // Detect portable mode before anything else
     portable::init();
 
@@ -341,7 +389,10 @@ pub fn run(cli_args: CliArgs) {
             shortcut::change_translate_to_english_setting,
             shortcut::change_translation_target_language_setting,
             shortcut::change_selected_language_setting,
+            shortcut::change_dictation_language_mode_setting,
             shortcut::change_overlay_position_setting,
+            shortcut::change_docked_pill_setting,
+            shortcut::set_recording_overlay_expanded,
             shortcut::change_debug_mode_setting,
             shortcut::change_word_correction_threshold_setting,
             shortcut::change_extra_recording_buffer_setting,
@@ -354,6 +405,7 @@ pub fn run(cli_args: CliArgs) {
             shortcut::change_auto_submit_setting,
             shortcut::change_auto_submit_key_setting,
             shortcut::change_post_process_enabled_setting,
+            shortcut::change_formatting_level_setting,
             shortcut::change_experimental_enabled_setting,
             shortcut::change_post_process_base_url_setting,
             shortcut::change_post_process_api_key_setting,
@@ -367,6 +419,8 @@ pub fn run(cli_args: CliArgs) {
             shortcut::update_custom_words,
             shortcut::change_auto_add_dictionary_words_setting,
             shortcut::change_adaptive_profiles_enabled_setting,
+            shortcut::change_context_awareness_enabled_setting,
+            shortcut::change_context_nearby_text_enabled_setting,
             shortcut::change_adaptive_language_shortlist_setting,
             shortcut::change_adaptive_default_profile_setting,
             shortcut::reset_adaptive_profiles,
@@ -411,6 +465,16 @@ pub fn run(cli_args: CliArgs) {
             commands::dictionary::delete_dictionary_entry,
             commands::dictionary::undo_dictionary_entries,
             commands::dictionary::learn_custom_words_from_correction,
+            commands::snippets::list_snippet_entries,
+            commands::snippets::add_snippet_entry,
+            commands::snippets::update_snippet_entry,
+            commands::snippets::delete_snippet_entry,
+            commands::local_llm::list_local_llm_models,
+            commands::local_llm::download_local_llm_model,
+            commands::local_llm::cancel_local_llm_download,
+            commands::local_llm::delete_local_llm_model,
+            commands::local_llm::select_local_llm_model,
+            commands::local_llm::set_local_llm_enabled,
             commands::models::get_available_models,
             commands::models::get_model_info,
             commands::models::download_model,
@@ -437,6 +501,7 @@ pub fn run(cli_args: CliArgs) {
             commands::audio::set_clamshell_microphone,
             commands::audio::get_clamshell_microphone,
             commands::audio::is_recording,
+            commands::audio::retry_current_recording,
             commands::transcription::set_model_unload_timeout,
             commands::transcription::get_model_load_status,
             commands::transcription::unload_model_manually,
@@ -447,11 +512,15 @@ pub fn run(cli_args: CliArgs) {
             commands::history::retry_history_entry_transcription,
             commands::history::update_history_limit,
             commands::history::update_recording_retention_period,
+            commands::transcript::copy_last_transcript,
+            commands::transcript::copy_last_transform_result,
+            commands::transcript::paste_last_transcript,
+            commands::transform::transform_selected_text,
             helpers::clamshell::is_laptop,
         ])
         .events(collect_events![managers::history::HistoryUpdatePayload,]);
 
-    #[cfg(debug_assertions)] // <- Only export on non-release builds
+    #[cfg(all(debug_assertions, not(any(target_os = "android", target_os = "ios"))))]
     specta_builder
         .export(
             Typescript::default().bigint(BigIntExportBehavior::Number),
@@ -501,8 +570,9 @@ pub fn run(cli_args: CliArgs) {
         builder = builder.plugin(tauri_nspanel::init());
     }
 
-    builder
-        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
             if args.iter().any(|a| a == "--toggle-transcription") {
                 signal_handle::send_transcription_input(app, "transcribe", "CLI");
             } else if args.iter().any(|a| a == "--toggle-post-process") {
@@ -512,40 +582,60 @@ pub fn run(cli_args: CliArgs) {
             } else {
                 show_main_window(app);
             }
-        }))
+        }));
+    }
+
+    builder = builder
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_clipboard_manager::init())
-        .plugin(tauri_plugin_macos_permissions::init())
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_store::Builder::default().build())
-        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
-        .plugin(tauri_plugin_autostart::init(
-            MacosLauncher::LaunchAgent,
-            Some(vec![]),
-        ))
+        .plugin(tauri_plugin_store::Builder::default().build());
+
+    #[cfg(target_os = "macos")]
+    {
+        builder = builder.plugin(tauri_plugin_macos_permissions::init());
+    }
+
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        builder = builder
+            .plugin(tauri_plugin_updater::Builder::new().build())
+            .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+            .plugin(tauri_plugin_autostart::init(
+                MacosLauncher::LaunchAgent,
+                Some(vec![]),
+            ));
+    }
+
+    builder
         .manage(cli_args.clone())
         .setup(move |app| {
             specta_builder.mount_events(app);
 
-            // Create main window programmatically so we can set data_directory
-            // for portable mode (redirects WebView2 cache to portable Data dir)
-            let mut win_builder =
-                tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App("/".into()))
-                    .title("Verbatim")
-                    .inner_size(680.0, 570.0)
-                    .min_inner_size(680.0, 570.0)
-                    .resizable(true)
-                    .maximizable(false)
-                    .visible(false);
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            {
+                // Create main window programmatically so we can set data_directory
+                // for portable mode (redirects WebView2 cache to portable Data dir)
+                let mut win_builder = tauri::WebviewWindowBuilder::new(
+                    app,
+                    "main",
+                    tauri::WebviewUrl::App("/".into()),
+                )
+                .title("Verbatim")
+                .inner_size(680.0, 570.0)
+                .min_inner_size(680.0, 570.0)
+                .resizable(true)
+                .maximizable(false)
+                .visible(false);
 
-            if let Some(data_dir) = portable::data_dir() {
-                win_builder = win_builder.data_directory(data_dir.join("webview"));
+                if let Some(data_dir) = portable::data_dir() {
+                    win_builder = win_builder.data_directory(data_dir.join("webview"));
+                }
+
+                win_builder.build()?;
             }
-
-            win_builder.build()?;
 
             let mut settings = get_settings(&app.handle());
 
@@ -575,46 +665,55 @@ pub fn run(cli_args: CliArgs) {
                 let _ = crate::managers::transcription::get_available_accelerators();
             });
 
-            // Hide tray icon if --no-tray was passed
-            if cli_args.no_tray {
-                tray::set_tray_visibility(&app_handle, false);
-            }
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            {
+                // Hide tray icon if --no-tray was passed
+                if cli_args.no_tray {
+                    tray::set_tray_visibility(&app_handle, false);
+                }
 
-            // Show main window only if not starting hidden.
-            // CLI --start-hidden flag overrides the setting.
-            // But if permission onboarding is required, always show the window.
-            let should_hide = settings.start_hidden || cli_args.start_hidden;
-            let should_force_show = should_force_show_permissions_window(&app_handle);
+                // Show main window only if not starting hidden.
+                // CLI --start-hidden flag overrides the setting.
+                // But if permission onboarding is required, always show the window.
+                let should_hide = settings.start_hidden || cli_args.start_hidden;
+                let should_force_show = should_force_show_permissions_window(&app_handle);
 
-            // If start_hidden but tray is disabled, we must show the window
-            // anyway. Without a tray icon, the dock is the only way back in.
-            let tray_available = settings.show_tray_icon && !cli_args.no_tray;
-            if should_force_show || !should_hide || !tray_available {
-                show_main_window(&app_handle);
+                // If start_hidden but tray is disabled, we must show the window
+                // anyway. Without a tray icon, the dock is the only way back in.
+                let tray_available = settings.show_tray_icon && !cli_args.no_tray;
+                if should_force_show || !should_hide || !tray_available {
+                    show_main_window(&app_handle);
+                }
             }
 
             Ok(())
         })
         .on_window_event(|window, event| match event {
             tauri::WindowEvent::CloseRequested { api, .. } => {
-                api.prevent_close();
-                let _res = window.hide();
+                #[cfg(any(target_os = "android", target_os = "ios"))]
+                let _ = api;
 
-                #[cfg(target_os = "macos")]
+                #[cfg(not(any(target_os = "android", target_os = "ios")))]
                 {
-                    let settings = get_settings(&window.app_handle());
-                    let tray_visible =
-                        settings.show_tray_icon && !window.app_handle().state::<CliArgs>().no_tray;
-                    if tray_visible {
-                        // Tray is available: hide the dock icon, app lives in the tray
-                        let res = window
-                            .app_handle()
-                            .set_activation_policy(tauri::ActivationPolicy::Accessory);
-                        if let Err(e) = res {
-                            log::error!("Failed to set activation policy: {}", e);
+                    api.prevent_close();
+                    let _res = window.hide();
+
+                    #[cfg(target_os = "macos")]
+                    {
+                        let settings = get_settings(&window.app_handle());
+                        let tray_visible = settings.show_tray_icon
+                            && !window.app_handle().state::<CliArgs>().no_tray;
+                        if tray_visible {
+                            // Tray is available: hide the dock icon, app lives in the tray
+                            let res = window
+                                .app_handle()
+                                .set_activation_policy(tauri::ActivationPolicy::Accessory);
+                            if let Err(e) = res {
+                                log::error!("Failed to set activation policy: {}", e);
+                            }
                         }
+                        // No tray: keep the dock icon visible so the user can reopen
                     }
-                    // No tray: keep the dock icon visible so the user can reopen
                 }
             }
             tauri::WindowEvent::ThemeChanged(theme) => {

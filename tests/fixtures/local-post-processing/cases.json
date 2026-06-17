@@ -1,0 +1,64 @@
+[
+  {
+    "id": "short-english",
+    "input": "send the invoice tomorrow morning",
+    "expectedGood": "Send the invoice tomorrow morning.",
+    "rejected": [
+      "Dear team,\n\nI will send the invoice tomorrow morning.\n\nBest regards,"
+    ]
+  },
+  {
+    "id": "long-email",
+    "input": "dear james new paragraph i hope you are doing well your email about the excel sheet is good but i would want more concrete details about the assumptions sincerely abdullah al kulaib",
+    "expectedGood": "Dear James,\n\nI hope you are doing well. Your email about the Excel sheet is good, but I would want more concrete details about the assumptions.\n\nSincerely,\nAbdullah Al Kulaib",
+    "rejected": [
+      "Dear James,\n\nI hope you are doing well. Your email about the Excel sheet is good, but your assumptions are wrong and should be revised.\n\nSincerely,\nAbdullah Al Kulaib"
+    ]
+  },
+  {
+    "id": "arabic",
+    "input": "مرحبا خالد كيف حالك ارسل التقرير اليوم",
+    "expectedGood": "مرحبا خالد، كيف حالك؟ أرسل التقرير اليوم.",
+    "rejected": ["Hello Khaled, how are you? Send the report today."]
+  },
+  {
+    "id": "mixed-arabic-english",
+    "input": "schedule the meeting بكرة after the product review",
+    "expectedGood": "Schedule the meeting بكرة after the product review.",
+    "rejected": ["Schedule the meeting tomorrow after the product review."]
+  },
+  {
+    "id": "technical",
+    "input": "run cargo test dash dash no default features and check the api url",
+    "expectedGood": "Run cargo test --no-default-features and check the API URL.",
+    "rejected": ["Run the entire Rust validation suite and deploy the API URL."]
+  },
+  {
+    "id": "outlook-email",
+    "input": "dear mona new paragraph can you review the attached budget before noon question mark new paragraph regards abdullah",
+    "expectedGood": "Dear Mona,\n\nCan you review the attached budget before noon?\n\nRegards,\nAbdullah",
+    "rejected": [
+      "Dear Mona,\n\nCan you approve the attached budget before noon?\n\nRegards,\nAbdullah"
+    ]
+  },
+  {
+    "id": "name-preservation",
+    "input": "abdullah al kulaib met with qwen and smollm today",
+    "expectedGood": "Abdullah Al Kulaib met with Qwen and SmolLM today.",
+    "rejected": ["Abdullah Al-Khulayb met with Gwen and SmallLM today."]
+  },
+  {
+    "id": "snippet-trigger",
+    "input": "email signature",
+    "expectedGood": "Email signature.",
+    "rejected": ["Regards,\nAbdullah"]
+  },
+  {
+    "id": "no-speech-hallucination",
+    "input": "gibbeteen",
+    "expectedGood": "gibbeteen",
+    "rejected": [
+      "Gibbeteen is a fictional word that may refer to a transcription artifact."
+    ]
+  }
+]
