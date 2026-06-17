@@ -39,6 +39,23 @@ if ($Command -eq "test") {
     throw "Windows test manifest is missing: $testManifestPath"
   }
 
+  $hasExplicitTestTarget =
+    $CargoArgs -contains "--lib" -or
+    $CargoArgs -contains "--bin" -or
+    $CargoArgs -contains "--bins" -or
+    $CargoArgs -contains "--test" -or
+    $CargoArgs -contains "--tests" -or
+    $CargoArgs -contains "--example" -or
+    $CargoArgs -contains "--examples" -or
+    $CargoArgs -contains "--bench" -or
+    $CargoArgs -contains "--benches" -or
+    $CargoArgs -contains "--all-targets"
+
+  if (-not $hasExplicitTestTarget) {
+    $CargoArgs = @("--lib") + $CargoArgs
+    Write-Host "Cargo test target=lib"
+  }
+
   $unitSeparator = [char]0x1f
   $manifestRustFlags = @(
     "-C",
