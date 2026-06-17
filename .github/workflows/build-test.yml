@@ -1,6 +1,13 @@
 name: "Build Test"
 
-on: workflow_dispatch
+on:
+  workflow_dispatch:
+    inputs:
+      dev_version:
+        description: "Optional Verbatim Dev SemVer to match a Windows dev build, for example 0.8.9-dev.202606171606+24144"
+        required: false
+        default: ""
+        type: string
 
 jobs:
   build-test:
@@ -29,4 +36,5 @@ jobs:
       asset-prefix: "verbatim-test"
       upload-artifacts: true
       is-debug-build: ${{ contains(matrix.args, '--debug') }}
+      dev-version: ${{ inputs.dev_version }}
     secrets: inherit
