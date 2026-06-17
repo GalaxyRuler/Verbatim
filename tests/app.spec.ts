@@ -213,7 +213,7 @@ const installTauriMocks = async (
   page: Page,
   settingsOverrides: Partial<typeof baseSettings> = {},
   historyEntries: Array<Record<string, unknown>> = [],
-  osType: "windows" | "linux" | "macos" = "windows",
+  osType: "windows" | "linux" | "macos" | "android" = "windows",
 ) => {
   await page.addInitScript(
     ({
@@ -698,6 +698,39 @@ const installTauriMocks = async (
   );
 };
 
+const installAndroidBridgeMock = async (
+  page: Page,
+  snapshot: {
+    microphone: boolean;
+    overlay: boolean;
+    accessibility: boolean;
+    bubbleRunning: boolean;
+    speechRecognizerAvailable: boolean;
+    onDeviceSpeechRecognizerAvailable: boolean;
+  },
+) => {
+  await page.addInitScript((snapshot) => {
+    const testWindow = window as typeof window & {
+      VerbatimAndroid: {
+        permissionSnapshot: () => string;
+        requestMicrophone: () => void;
+        openOverlaySettings: () => void;
+        openAccessibilitySettings: () => void;
+        startBubble: () => void;
+        stopBubble: () => void;
+      };
+    };
+    testWindow.VerbatimAndroid = {
+      permissionSnapshot: () => JSON.stringify(snapshot),
+      requestMicrophone: () => undefined,
+      openOverlaySettings: () => undefined,
+      openAccessibilitySettings: () => undefined,
+      startBubble: () => undefined,
+      stopBubble: () => undefined,
+    };
+  }, snapshot);
+};
+
 test.describe("Verbatim App", () => {
   test("dev server responds", async ({ page }) => {
     // Just verify the dev server is running and responds
@@ -712,6 +745,36 @@ test.describe("Verbatim App", () => {
     const html = await page.content();
     expect(html).toContain("<html");
     expect(html).toContain("<body");
+  });
+
+  test("android setup requires on-device speech before bubble readiness", async ({
+    page,
+  }) => {
+    await installTauriMocks(page, {}, [], "android");
+    await installAndroidBridgeMock(page, {
+      microphone: true,
+      overlay: true,
+      accessibility: true,
+      bubbleRunning: true,
+      speechRecognizerAvailable: true,
+      onDeviceSpeechRecognizerAvailable: false,
+    });
+
+    await page.goto("/");
+
+    await expect(
+      page.getByRole("heading", { name: "Set up mobile dictation" }),
+    ).toBeVisible();
+    await expect(page.getByText("Use on-device speech")).toBeVisible();
+    await expect(
+      page.getByText(
+        "Install an offline speech pack or use a device with on-device speech. Verbatim will not silently use remote speech.",
+      ),
+    ).toBeVisible();
+    await expect(page.getByText("Unavailable")).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Tap mic to dictate anywhere" }),
+    ).toHaveCount(0);
   });
 
   test("adaptive profiles can be enabled from experimental settings", async ({

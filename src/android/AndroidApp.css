@@ -383,6 +383,20 @@
   padding: 4px 10px;
 }
 
+.android-status-pill {
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 800;
+  padding: 6px 10px;
+  white-space: nowrap;
+}
+
+.android-status-warning {
+  background: rgba(255, 185, 92, 0.18);
+  color: var(--android-warning);
+}
+
 .android-settings-group {
   background: var(--android-surface);
   border: 1px solid var(--android-outline);

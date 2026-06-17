@@ -885,7 +885,8 @@
       "switchModel": "Switch"
     },
     "permissions": {
-      "granted": "Granted"
+      "granted": "Granted",
+      "unavailable": "Unavailable"
     },
     "onboarding": {
       "title": "Set up mobile dictation",
@@ -906,6 +907,12 @@
         "description": "Verbatim uses Android's accessibility API to insert text wherever your cursor is, like a keyboard.",
         "action": "Enable in Accessibility",
         "callout": "Can insert your transcribed text. Does not log screen text or app content."
+      },
+      "speech": {
+        "title": "Use on-device speech",
+        "description": "Verbatim starts dictation only when Android can recognize speech on this device.",
+        "readyCallout": "Speech recognition stays on-device for this prototype.",
+        "missingCallout": "Install an offline speech pack or use a device with on-device speech. Verbatim will not silently use remote speech."
       }
     },
     "home": {

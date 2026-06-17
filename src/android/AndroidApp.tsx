@@ -146,7 +146,10 @@ export default function AndroidApp() {
   }, [theme]);
 
   const allPermissionsReady =
-    permissions.microphone && permissions.overlay && permissions.accessibility;
+    permissions.microphone &&
+    permissions.overlay &&
+    permissions.accessibility &&
+    permissions.onDeviceSpeechRecognizerAvailable;
 
   const title = t(`android.tabs.${activeTab}`);
 
@@ -250,6 +253,16 @@ function AndroidOnboarding({
       onClick: () => bridge?.openAccessibilitySettings(),
       callout: t("android.onboarding.accessibility.callout"),
     },
+    {
+      ready: permissions.onDeviceSpeechRecognizerAvailable,
+      title: t("android.onboarding.speech.title"),
+      description: t("android.onboarding.speech.description"),
+      action: null,
+      onClick: null,
+      callout: permissions.onDeviceSpeechRecognizerAvailable
+        ? t("android.onboarding.speech.readyCallout")
+        : t("android.onboarding.speech.missingCallout"),
+    },
   ];
 
   return (
@@ -282,7 +295,7 @@ function AndroidOnboarding({
             </div>
             {step.ready ? (
               <Check aria-label={t("android.permissions.granted")} size={24} />
-            ) : (
+            ) : step.action && step.onClick ? (
               <button
                 type="button"
                 className="android-action android-primary-action"
@@ -293,6 +306,10 @@ function AndroidOnboarding({
               >
                 {step.action}
               </button>
+            ) : (
+              <span className="android-status-pill android-status-warning">
+                {t("android.permissions.unavailable")}
+              </span>
             )}
           </div>
         ))}
@@ -326,7 +343,10 @@ function HomeTab({
   }, []);
 
   const bubbleReady =
-    permissions.microphone && permissions.overlay && permissions.accessibility;
+    permissions.microphone &&
+    permissions.overlay &&
+    permissions.accessibility &&
+    permissions.onDeviceSpeechRecognizerAvailable;
 
   return (
     <>
