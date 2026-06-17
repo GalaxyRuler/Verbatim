@@ -12,6 +12,9 @@
     <string name="bubble_recovery_copied">Copied</string>
     <string name="bubble_permissions_needed">Permissions needed</string>
     <string name="bubble_speech_missing">Speech unavailable</string>
+    <string name="bubble_speech_pack_missing">Offline speech missing</string>
+    <string name="bubble_language_unsupported">Language unsupported</string>
+    <string name="bubble_recognizer_busy">Speech busy</string>
     <string name="bubble_microphone_blocked">Mic unavailable</string>
     <string name="bubble_permission_missing">Enable microphone, overlay, and accessibility permissions in Verbatim.</string>
     <string name="bubble_speech_unavailable">On-device speech recognition is not available on this Android device.</string>

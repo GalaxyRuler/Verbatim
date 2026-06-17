@@ -279,8 +279,9 @@ class FloatingBubbleService : Service() {
         }
         override fun onError(error: Int) {
           stopMicrophoneForeground()
-          showFailure(R.string.bubble_listen_failed, null)
-          Toast.makeText(this@FloatingBubbleService, R.string.bubble_listen_failed, Toast.LENGTH_SHORT).show()
+          val message = speechErrorMessage(error)
+          showFailure(message, null)
+          Toast.makeText(this@FloatingBubbleService, message, Toast.LENGTH_SHORT).show()
         }
         override fun onResults(results: Bundle?) {
           stopMicrophoneForeground()
@@ -316,6 +317,17 @@ class FloatingBubbleService : Service() {
 
   private fun createSpeechRecognizer(): SpeechRecognizer =
     SpeechRecognizer.createOnDeviceSpeechRecognizer(this)
+
+  private fun speechErrorMessage(error: Int): Int =
+    when (error) {
+      SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE -> R.string.bubble_speech_pack_missing
+      SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED -> R.string.bubble_language_unsupported
+      SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> R.string.bubble_permissions_needed
+      SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> R.string.bubble_recognizer_busy
+      SpeechRecognizer.ERROR_SERVER,
+      SpeechRecognizer.ERROR_SERVER_DISCONNECTED -> R.string.bubble_speech_missing
+      else -> R.string.bubble_listen_failed
+    }
 
   private fun startMicrophoneForeground(): Boolean {
     if (foregroundActive) {

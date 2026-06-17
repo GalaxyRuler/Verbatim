@@ -42,14 +42,18 @@ class MainActivity : TauriActivity() {
   private fun hasOverlayPermission(): Boolean = Settings.canDrawOverlays(this)
 
   private fun isAccessibilityEnabled(): Boolean {
-    val expected = ComponentName(this, VerbatimAccessibilityService::class.java)
-      .flattenToString()
+    val component = ComponentName(this, VerbatimAccessibilityService::class.java)
+    val expected = component.flattenToString()
+    val shortExpected = component.flattenToShortString()
     val enabled = Settings.Secure.getString(
       contentResolver,
       Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
     ) ?: return false
 
-    return enabled.split(':').any { it.equals(expected, ignoreCase = true) }
+    return enabled.split(':').any {
+      it.equals(expected, ignoreCase = true) ||
+        it.equals(shortExpected, ignoreCase = true)
+    }
   }
 
   private fun startBubbleService() {
