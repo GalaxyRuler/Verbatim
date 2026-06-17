@@ -72,18 +72,35 @@ impl TranscriptionCoordinator {
                             if push_to_talk {
                                 if is_pressed && matches!(stage, Stage::Idle) {
                                     start(&app, &mut stage, &binding_id, &hotkey_string);
-                                } else if !is_pressed
-                                    && matches!(&stage, Stage::Recording(id) if id == &binding_id)
-                                {
-                                    stop(&app, &mut stage, &binding_id, &hotkey_string);
+                                } else if !is_pressed {
+                                    if let Some(active_binding_id) =
+                                        stop_binding_for_input(&stage, &binding_id)
+                                            .map(str::to_string)
+                                    {
+                                        stop(&app, &mut stage, &active_binding_id, &hotkey_string);
+                                    }
                                 }
                             } else if is_pressed {
                                 match &stage {
                                     Stage::Idle => {
                                         start(&app, &mut stage, &binding_id, &hotkey_string);
                                     }
-                                    Stage::Recording(id) if id == &binding_id => {
-                                        stop(&app, &mut stage, &binding_id, &hotkey_string);
+                                    Stage::Recording(_) => {
+                                        if let Some(active_binding_id) =
+                                            stop_binding_for_input(&stage, &binding_id)
+                                                .map(str::to_string)
+                                        {
+                                            stop(
+                                                &app,
+                                                &mut stage,
+                                                &active_binding_id,
+                                                &hotkey_string,
+                                            );
+                                        } else {
+                                            debug!(
+                                                "Ignoring press for '{binding_id}': pipeline busy"
+                                            );
+                                        }
                                     }
                                     _ => {
                                         debug!("Ignoring press for '{binding_id}': pipeline busy")
@@ -181,4 +198,47 @@ fn stop(app: &AppHandle, stage: &mut Stage, binding_id: &str, hotkey_string: &st
     };
     action.stop(app, binding_id, hotkey_string);
     *stage = Stage::Processing;
+}
+
+fn stop_binding_for_input<'a>(stage: &'a Stage, incoming_binding_id: &str) -> Option<&'a str> {
+    let Stage::Recording(active_binding_id) = stage else {
+        return None;
+    };
+
+    if active_binding_id == incoming_binding_id
+        || (is_transcribe_binding(active_binding_id) && is_transcribe_binding(incoming_binding_id))
+    {
+        Some(active_binding_id)
+    } else {
+        None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn alternate_transcribe_binding_can_stop_active_recording() {
+        let stage = Stage::Recording("transcribe_with_post_process".to_string());
+
+        assert_eq!(
+            stop_binding_for_input(&stage, "transcribe"),
+            Some("transcribe_with_post_process")
+        );
+    }
+
+    #[test]
+    fn non_transcribe_binding_cannot_stop_active_recording() {
+        let stage = Stage::Recording("transcribe_with_post_process".to_string());
+
+        assert_eq!(stop_binding_for_input(&stage, "cancel"), None);
+    }
+
+    #[test]
+    fn transcribe_binding_does_not_interrupt_processing() {
+        let stage = Stage::Processing;
+
+        assert_eq!(stop_binding_for_input(&stage, "transcribe"), None);
+    }
 }

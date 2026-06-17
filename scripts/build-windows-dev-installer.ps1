@@ -27,20 +27,30 @@ function Get-DefaultDevVersion {
   $major = [int]$parts[0]
   $minor = [int]$parts[1]
   $patch = [int]$parts[2] + 1
-  $stamp = Get-Date -Format "yyyyMMddHHmm"
-  return "$major.$minor.$patch-dev.$stamp"
+  $now = Get-Date
+  $stamp = $now.ToString("yyyyMMddHHmm")
+  $minuteOfDay = ($now.Hour * 60) + $now.Minute
+  $tenMinuteSlot = [math]::Floor($minuteOfDay / 10)
+  $windowsBuildNumber = (($now.DayOfYear - 1) * 144) + $tenMinuteSlot
+  return "$major.$minor.$patch-dev.$stamp+$windowsBuildNumber"
 }
 
 function Assert-DevSemVer {
   param([string]$Version)
 
-  $semverPattern = "^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$"
+  $semverPattern = "^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)(\+[0-9]+)$"
   if ($Version -notmatch $semverPattern) {
-    throw "DevVersion '$Version' is not valid SemVer. Use values like 0.8.8-dev.1."
+    throw "DevVersion '$Version' must be valid SemVer with prerelease and numeric build metadata, for example 0.8.8-dev.1+42."
   }
 
   if ($Version -notmatch "-") {
-    throw "DevVersion '$Version' must be a prerelease version, for example 0.8.8-dev.1."
+    throw "DevVersion '$Version' must be a prerelease version, for example 0.8.8-dev.1+42."
+  }
+
+  $buildMetadata = $Version -replace "^.*\+", ""
+  $buildNumber = [int]$buildMetadata
+  if ($buildNumber -lt 0 -or $buildNumber -gt 65535) {
+    throw "DevVersion '$Version' build metadata must fit in a Windows PE version word (0-65535)."
   }
 }
 

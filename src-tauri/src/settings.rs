@@ -1030,8 +1030,25 @@ fn ensure_translation_defaults(settings: &mut AppSettings) -> bool {
     false
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 fn ensure_dictionary_defaults(settings: &mut AppSettings) -> bool {
     crate::dictionary::sync_legacy_custom_words(settings)
+}
+
+fn settings_value_has_dictionary_entries(settings_value: Option<&serde_json::Value>) -> bool {
+    settings_value
+        .and_then(serde_json::Value::as_object)
+        .is_some_and(|settings| settings.contains_key("dictionary_entries"))
+}
+
+fn ensure_dictionary_defaults_for_loaded_value(
+    settings: &mut AppSettings,
+    settings_value: Option<&serde_json::Value>,
+) -> bool {
+    crate::dictionary::sync_legacy_custom_words_with_migration(
+        settings,
+        !settings_value_has_dictionary_entries(settings_value),
+    )
 }
 
 fn ensure_snippet_defaults(settings: &mut AppSettings) -> bool {
@@ -1421,7 +1438,9 @@ pub fn load_or_create_app_settings(app: &AppHandle) -> AppSettings {
         .store(crate::portable::store_path(SETTINGS_STORE_PATH))
         .expect("Failed to initialize store");
 
+    let mut settings_value_for_defaults = None;
     let mut settings = if let Some(settings_value) = store.get("settings") {
+        settings_value_for_defaults = Some(settings_value.clone());
         // Parse the entire settings object
         match serde_json::from_value::<AppSettings>(settings_value.clone()) {
             Ok(mut settings) => {
@@ -1454,7 +1473,10 @@ pub fn load_or_create_app_settings(app: &AppHandle) -> AppSettings {
     let post_process_changed = ensure_post_process_defaults(&mut settings);
     let adaptive_changed = ensure_adaptive_defaults(&mut settings);
     let translation_changed = ensure_translation_defaults(&mut settings);
-    let dictionary_changed = ensure_dictionary_defaults(&mut settings);
+    let dictionary_changed = ensure_dictionary_defaults_for_loaded_value(
+        &mut settings,
+        settings_value_for_defaults.as_ref(),
+    );
     let snippet_changed = ensure_snippet_defaults(&mut settings);
     if binding_changed
         || post_process_changed
@@ -1474,7 +1496,9 @@ pub fn get_settings(app: &AppHandle) -> AppSettings {
         .store(crate::portable::store_path(SETTINGS_STORE_PATH))
         .expect("Failed to initialize store");
 
+    let mut settings_value_for_defaults = None;
     let mut settings = if let Some(settings_value) = store.get("settings") {
+        settings_value_for_defaults = Some(settings_value.clone());
         serde_json::from_value::<AppSettings>(settings_value.clone()).unwrap_or_else(|err| {
             let recovered_settings = recover_unparseable_settings(app, &settings_value, &err);
             store.set(
@@ -1493,7 +1517,10 @@ pub fn get_settings(app: &AppHandle) -> AppSettings {
     let post_process_changed = ensure_post_process_defaults(&mut settings);
     let adaptive_changed = ensure_adaptive_defaults(&mut settings);
     let translation_changed = ensure_translation_defaults(&mut settings);
-    let dictionary_changed = ensure_dictionary_defaults(&mut settings);
+    let dictionary_changed = ensure_dictionary_defaults_for_loaded_value(
+        &mut settings,
+        settings_value_for_defaults.as_ref(),
+    );
     let snippet_changed = ensure_snippet_defaults(&mut settings);
     if binding_changed
         || post_process_changed
@@ -1952,6 +1979,40 @@ mod tests {
 
         assert!(changed);
         assert_eq!(settings.dictionary_entries.len(), 1);
+        assert_eq!(settings.dictionary_phrases(), vec!["Robyn"]);
+        assert_eq!(settings.custom_words, vec!["Robyn"]);
+    }
+
+    #[test]
+    fn dictionary_defaults_do_not_rehydrate_explicitly_empty_entries_from_legacy_words() {
+        let mut settings_value = serde_json::to_value(get_default_settings()).unwrap();
+        let object = settings_value.as_object_mut().unwrap();
+        object.insert("custom_words".to_string(), serde_json::json!(["Gibbeteen"]));
+        object.insert("dictionary_entries".to_string(), serde_json::json!([]));
+
+        let mut settings: AppSettings = serde_json::from_value(settings_value.clone()).unwrap();
+
+        let changed =
+            ensure_dictionary_defaults_for_loaded_value(&mut settings, Some(&settings_value));
+
+        assert!(changed);
+        assert!(settings.dictionary_entries.is_empty());
+        assert!(settings.custom_words.is_empty());
+    }
+
+    #[test]
+    fn dictionary_defaults_still_migrate_missing_legacy_entries_key() {
+        let mut settings_value = serde_json::to_value(get_default_settings()).unwrap();
+        let object = settings_value.as_object_mut().unwrap();
+        object.insert("custom_words".to_string(), serde_json::json!(["Robyn"]));
+        object.remove("dictionary_entries");
+
+        let mut settings: AppSettings = serde_json::from_value(settings_value.clone()).unwrap();
+
+        let changed =
+            ensure_dictionary_defaults_for_loaded_value(&mut settings, Some(&settings_value));
+
+        assert!(changed);
         assert_eq!(settings.dictionary_phrases(), vec!["Robyn"]);
         assert_eq!(settings.custom_words, vec!["Robyn"]);
     }

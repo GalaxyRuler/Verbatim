@@ -1,12 +1,76 @@
 fn main() {
     println!("cargo:rerun-if-env-changed=VERBATIM_DEV_VERSION");
 
+    apply_dev_version_for_windows_resources();
+
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     build_apple_intelligence_bridge();
 
     generate_tray_translations();
 
     tauri_build::build()
+}
+
+fn apply_dev_version_for_windows_resources() {
+    let Ok(dev_version) = std::env::var("VERBATIM_DEV_VERSION") else {
+        return;
+    };
+
+    let Some((major, minor, patch)) = parse_semver_core(&dev_version) else {
+        println!("cargo:warning=Ignoring invalid VERBATIM_DEV_VERSION={dev_version}");
+        return;
+    };
+
+    std::env::set_var("CARGO_PKG_VERSION", &dev_version);
+    std::env::set_var("CARGO_PKG_VERSION_MAJOR", major);
+    std::env::set_var("CARGO_PKG_VERSION_MINOR", minor);
+    std::env::set_var("CARGO_PKG_VERSION_PATCH", patch);
+}
+
+fn parse_semver_core(version: &str) -> Option<(&str, &str, &str)> {
+    let core = version
+        .split_once('-')
+        .map(|(core, _)| core)
+        .or_else(|| version.split_once('+').map(|(core, _)| core))
+        .unwrap_or(version);
+    let mut parts = core.split('.');
+    let major = parts.next()?;
+    let minor = parts.next()?;
+    let patch = parts.next()?;
+    if parts.next().is_some()
+        || !is_semver_number(major)
+        || !is_semver_number(minor)
+        || !is_semver_number(patch)
+    {
+        return None;
+    }
+    Some((major, minor, patch))
+}
+
+fn is_semver_number(value: &str) -> bool {
+    !value.is_empty()
+        && value.chars().all(|ch| ch.is_ascii_digit())
+        && (value == "0" || !value.starts_with('0'))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_dev_semver_core_with_prerelease_and_build_metadata() {
+        assert_eq!(
+            parse_semver_core("0.8.9-dev.202606171528+24140"),
+            Some(("0", "8", "9"))
+        );
+    }
+
+    #[test]
+    fn rejects_non_semver_core_numbers() {
+        assert_eq!(parse_semver_core("0.08.9-dev.1+42"), None);
+        assert_eq!(parse_semver_core("0.8-dev.1+42"), None);
+        assert_eq!(parse_semver_core("0.8.9.1-dev.1+42"), None);
+    }
 }
 
 /// Generate tray menu translations from frontend locale files.

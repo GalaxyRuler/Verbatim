@@ -64,6 +64,13 @@ pub fn dictionary_phrases(entries: &[DictionaryEntry]) -> Vec<String> {
 }
 
 pub fn sync_legacy_custom_words(settings: &mut AppSettings) -> bool {
+    sync_legacy_custom_words_with_migration(settings, true)
+}
+
+pub fn sync_legacy_custom_words_with_migration(
+    settings: &mut AppSettings,
+    migrate_legacy_custom_words: bool,
+) -> bool {
     let mut changed = false;
 
     changed |= sync_auto_learn_suppression_keys(settings);
@@ -76,7 +83,10 @@ pub fn sync_legacy_custom_words(settings: &mut AppSettings) -> bool {
         changed = true;
     }
 
-    if settings.dictionary_entries.is_empty() && !settings.custom_words.is_empty() {
+    if migrate_legacy_custom_words
+        && settings.dictionary_entries.is_empty()
+        && !settings.custom_words.is_empty()
+    {
         let mut entries = Vec::new();
         for (index, word) in settings.custom_words.iter().enumerate() {
             let Some(phrase) = sanitize_dictionary_phrase(word) else {
