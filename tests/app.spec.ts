@@ -180,6 +180,8 @@ const baseSettings = {
   external_script_path: null,
   custom_filler_words: null,
   adaptive_profiles_enabled: false,
+  context_awareness_enabled: false,
+  context_nearby_text_enabled: false,
   adaptive_language_shortlist: ["fr", "de", "ja"],
   adaptive_default_profile_id: "default_clean",
   adaptive_profiles: adaptiveProfiles,
@@ -616,6 +618,23 @@ const installTauriMocks = async (
                 adaptive_profiles_enabled: Boolean(args?.enabled),
               };
               return null;
+            case "change_context_awareness_enabled_setting":
+              appSettings = {
+                ...appSettings,
+                context_awareness_enabled: Boolean(args?.enabled),
+                context_nearby_text_enabled: args?.enabled
+                  ? appSettings.context_nearby_text_enabled
+                  : false,
+              };
+              return null;
+            case "change_context_nearby_text_enabled_setting":
+              appSettings = {
+                ...appSettings,
+                context_nearby_text_enabled:
+                  appSettings.context_awareness_enabled &&
+                  Boolean(args?.enabled),
+              };
+              return null;
             case "change_dictation_language_mode_setting": {
               const mode = args?.mode as string;
               const selectedLanguage = args?.selectedLanguage as
@@ -727,6 +746,71 @@ test.describe("Verbatim App", () => {
     await expect(adaptiveToggle).not.toBeChecked();
     await adaptiveToggle.check({ force: true });
     await expect(adaptiveToggle).toBeChecked();
+  });
+
+  test("adaptive profile settings expose privacy-gated context controls", async ({
+    page,
+  }) => {
+    await installTauriMocks(page);
+    await page.goto("/");
+    await expect(page.getByTitle("General")).toBeVisible();
+    await page.getByText("Advanced").click();
+
+    await settingRow(page, "Experimental Features")
+      .getByRole("checkbox")
+      .check({ force: true });
+
+    await expect(page.getByText("Context Awareness")).toBeVisible();
+    await expect(page.getByText("Nearby Text")).toBeVisible();
+    await expect(
+      settingRow(page, "Nearby Text").getByRole("checkbox"),
+    ).toBeDisabled();
+
+    await settingRow(page, "Context Awareness")
+      .getByRole("checkbox")
+      .check({ force: true });
+    await expect(
+      settingRow(page, "Nearby Text").getByRole("checkbox"),
+    ).toBeEnabled();
+    await settingRow(page, "Nearby Text")
+      .getByRole("checkbox")
+      .check({ force: true });
+    await expect(
+      settingRow(page, "Nearby Text").getByRole("checkbox"),
+    ).toBeChecked();
+
+    await settingRow(page, "Context Awareness")
+      .getByRole("checkbox")
+      .uncheck({ force: true });
+    await expect(
+      settingRow(page, "Nearby Text").getByRole("checkbox"),
+    ).toBeDisabled();
+    await expect(
+      settingRow(page, "Nearby Text").getByRole("checkbox"),
+    ).not.toBeChecked();
+
+    const invokes = await page.evaluate(() => {
+      const win = window as typeof window & {
+        __VERBATIM_TEST_INVOKES__: Array<{
+          cmd: string;
+          args?: Record<string, unknown>;
+        }>;
+      };
+      return win.__VERBATIM_TEST_INVOKES__;
+    });
+
+    expect(invokes).toContainEqual({
+      cmd: "change_context_awareness_enabled_setting",
+      args: { enabled: true },
+    });
+    expect(invokes).toContainEqual({
+      cmd: "change_context_nearby_text_enabled_setting",
+      args: { enabled: true },
+    });
+    expect(invokes).toContainEqual({
+      cmd: "change_context_awareness_enabled_setting",
+      args: { enabled: false },
+    });
   });
 
   test("general settings show unbound selected-text transform shortcuts", async ({

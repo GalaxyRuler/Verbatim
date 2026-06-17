@@ -709,6 +709,14 @@ fn prepare_adaptive_paste_text(
     crate::adaptive::text_direction::stabilize_ltr_paste_text(final_text, &context.target_kind)
 }
 
+fn should_capture_adaptive_context(settings: &AppSettings) -> bool {
+    settings.adaptive_profiles_enabled && settings.context_awareness_enabled
+}
+
+fn should_verify_adaptive_target(context: &crate::adaptive::types::CapturedContext) -> bool {
+    context.target_fingerprint.is_some()
+}
+
 #[cfg(target_os = "windows")]
 fn force_ltr_input_direction_before_paste(
     app: &AppHandle,
@@ -876,6 +884,16 @@ mod adaptive_action_tests {
             &context_with_fingerprint(None),
             &context_with_fingerprint(Some("notepad|edit"))
         ));
+    }
+
+    #[test]
+    fn adaptive_target_recheck_requires_original_fingerprint() {
+        assert!(!should_verify_adaptive_target(&context_with_fingerprint(
+            None
+        )));
+        assert!(should_verify_adaptive_target(&context_with_fingerprint(
+            Some("notepad|edit")
+        )));
     }
 
     #[test]
@@ -1161,6 +1179,18 @@ mod adaptive_action_tests {
 
         assert!(recording_has_usable_speech(&result));
     }
+
+    #[test]
+    fn adaptive_context_capture_requires_context_awareness() {
+        let mut settings = crate::settings::get_default_settings();
+        settings.adaptive_profiles_enabled = true;
+        settings.context_awareness_enabled = false;
+
+        assert!(!should_capture_adaptive_context(&settings));
+
+        settings.context_awareness_enabled = true;
+        assert!(should_capture_adaptive_context(&settings));
+    }
 }
 
 impl ShortcutAction for TranscribeAction {
@@ -1187,7 +1217,7 @@ impl ShortcutAction for TranscribeAction {
 
         // Get the microphone mode to determine audio feedback timing
         let settings = get_settings(app);
-        if settings.adaptive_profiles_enabled {
+        if should_capture_adaptive_context(&settings) {
             if let Some(store) = app.try_state::<crate::adaptive::session::ActiveDictationContext>()
             {
                 let context = crate::adaptive::context::capture_context(
@@ -1195,6 +1225,10 @@ impl ShortcutAction for TranscribeAction {
                 );
                 store.insert(&binding_id, context);
             }
+        } else if let Some(store) =
+            app.try_state::<crate::adaptive::session::ActiveDictationContext>()
+        {
+            store.clear(&binding_id);
         }
         let is_always_on = settings.always_on_microphone;
         debug!("Microphone mode - always_on: {}", is_always_on);
@@ -1385,8 +1419,13 @@ impl ShortcutAction for TranscribeAction {
                             let effective_post_process =
                                 should_run_requested_post_processing(post_process, &settings);
                             let adaptive_context = if settings.adaptive_profiles_enabled {
-                                ah.try_state::<crate::adaptive::session::ActiveDictationContext>()
-                                    .and_then(|store| store.take(&binding_id))
+                                let captured = ah
+                                    .try_state::<crate::adaptive::session::ActiveDictationContext>()
+                                    .and_then(|store| store.take(&binding_id));
+                                Some(
+                                    captured
+                                        .unwrap_or_else(crate::adaptive::context::unknown_context),
+                                )
                             } else {
                                 None
                             };
@@ -1414,7 +1453,10 @@ impl ShortcutAction for TranscribeAction {
                                             profile_id: Some(profile.id.clone()),
                                             profile_name: Some(profile.name.clone()),
                                             routing_json: serialize_json(&processed.routing),
-                                            context_json: serialize_json(&context),
+                                            context_json:
+                                                crate::adaptive::context::context_history_metadata_json(
+                                                    &context,
+                                                ),
                                             language_json: serialize_json(&processed.language),
                                             insertion_json: None,
                                             parent_entry_id: None,
@@ -1451,16 +1493,23 @@ impl ShortcutAction for TranscribeAction {
                                     let original_context = context.clone();
                                     let private_patterns =
                                         settings.adaptive_private_app_patterns.clone();
+                                    let verify_adaptive_target =
+                                        should_verify_adaptive_target(&original_context)
+                                            && should_capture_adaptive_context(&settings);
                                     let settings_for_guard = settings.clone();
                                     ah.run_on_main_thread(move || {
-                                        let current_context =
-                                            crate::adaptive::context::capture_context(
-                                                &private_patterns,
-                                            );
-                                        let target_verified = adaptive_target_verified(
-                                            &original_context,
-                                            &current_context,
-                                        );
+                                        let target_verified = if verify_adaptive_target {
+                                            let current_context =
+                                                crate::adaptive::context::capture_context(
+                                                    &private_patterns,
+                                                );
+                                            adaptive_target_verified(
+                                                &original_context,
+                                                &current_context,
+                                            )
+                                        } else {
+                                            true
+                                        };
                                         let receipt = if target_verified {
                                             if language_guard_blocks(
                                                 &ah_clone,

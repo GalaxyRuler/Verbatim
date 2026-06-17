@@ -543,6 +543,10 @@ pub struct AppSettings {
     pub custom_filler_words: Option<Vec<String>>,
     #[serde(default)]
     pub adaptive_profiles_enabled: bool,
+    #[serde(default)]
+    pub context_awareness_enabled: bool,
+    #[serde(default)]
+    pub context_nearby_text_enabled: bool,
     #[serde(default = "default_adaptive_language_shortlist")]
     pub adaptive_language_shortlist: Vec<String>,
     #[serde(default = "default_adaptive_default_profile_id")]
@@ -1201,6 +1205,8 @@ pub fn get_default_settings() -> AppSettings {
         external_script_path: None,
         custom_filler_words: None,
         adaptive_profiles_enabled: false,
+        context_awareness_enabled: false,
+        context_nearby_text_enabled: false,
         adaptive_language_shortlist: default_adaptive_language_shortlist(),
         adaptive_default_profile_id: default_adaptive_default_profile_id(),
         adaptive_profiles: default_adaptive_profiles(),
@@ -1972,6 +1978,8 @@ mod tests {
         let settings = get_default_settings();
 
         assert!(!settings.adaptive_profiles_enabled);
+        assert!(!settings.context_awareness_enabled);
+        assert!(!settings.context_nearby_text_enabled);
         assert_eq!(
             settings.adaptive_language_shortlist,
             vec!["en".to_string(), "ar".to_string()]

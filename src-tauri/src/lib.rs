@@ -379,6 +379,8 @@ pub fn run(cli_args: CliArgs) {
             shortcut::update_custom_words,
             shortcut::change_auto_add_dictionary_words_setting,
             shortcut::change_adaptive_profiles_enabled_setting,
+            shortcut::change_context_awareness_enabled_setting,
+            shortcut::change_context_nearby_text_enabled_setting,
             shortcut::change_adaptive_language_shortlist_setting,
             shortcut::change_adaptive_default_profile_setting,
             shortcut::reset_adaptive_profiles,

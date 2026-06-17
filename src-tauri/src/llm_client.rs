@@ -399,7 +399,7 @@ mod tests {
             respond_json_status(
                 &mut stream,
                 "400 Bad Request",
-                r#"{"error":{"message":"Pineapple Lighthouse 17.B3 transcript echoed"}}"#,
+                r#"{"error":{"message":"Synthetic transcript marker echoed"}}"#,
             );
         });
 
@@ -407,7 +407,7 @@ mod tests {
             &provider(format!("http://{}/v1", addr)),
             String::new(),
             "test-model",
-            "Pineapple Lighthouse 17.B3".to_string(),
+            "Synthetic transcript marker".to_string(),
             None,
             None,
         )
@@ -415,7 +415,7 @@ mod tests {
         .expect_err("http failure should be returned");
 
         assert!(error.contains("status 400 Bad Request"));
-        assert!(!error.contains("Pineapple"));
+        assert!(!error.contains("Synthetic transcript marker"));
         assert!(!error.contains("transcript echoed"));
         server.join().expect("server thread");
     }

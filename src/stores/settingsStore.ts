@@ -135,6 +135,10 @@ const settingUpdaters: {
     commands.changeAutoAddDictionaryWordsSetting(value as boolean),
   adaptive_profiles_enabled: (value) =>
     commands.changeAdaptiveProfilesEnabledSetting(value as boolean),
+  context_awareness_enabled: (value) =>
+    commands.changeContextAwarenessEnabledSetting(value as boolean),
+  context_nearby_text_enabled: (value) =>
+    commands.changeContextNearbyTextEnabledSetting(value as boolean),
   adaptive_language_shortlist: (value) =>
     commands.changeAdaptiveLanguageShortlistSetting(value as string[]),
   adaptive_default_profile_id: (value) =>
@@ -305,12 +309,18 @@ export const useSettingsStore = create<SettingsStore>()(
       const { settings, setUpdating } = get();
       const updateKey = String(key);
       const originalValue = settings?.[key];
+      const optimisticPatch: Partial<Settings> = { [key]: value };
+      if (key === "context_awareness_enabled" && value === false) {
+        optimisticPatch.context_nearby_text_enabled = false;
+      }
 
       setUpdating(updateKey, true);
 
       try {
         set((state) => ({
-          settings: state.settings ? { ...state.settings, [key]: value } : null,
+          settings: state.settings
+            ? { ...state.settings, ...optimisticPatch }
+            : null,
         }));
 
         const updater = settingUpdaters[key];

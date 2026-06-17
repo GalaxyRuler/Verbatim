@@ -741,6 +741,33 @@ pub fn change_adaptive_profiles_enabled_setting(
 
 #[tauri::command]
 #[specta::specta]
+pub fn change_context_awareness_enabled_setting(
+    app: AppHandle,
+    enabled: bool,
+) -> Result<(), String> {
+    let mut settings = settings::get_settings(&app);
+    settings.context_awareness_enabled = enabled;
+    if !enabled {
+        settings.context_nearby_text_enabled = false;
+    }
+    settings::write_settings(&app, settings);
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn change_context_nearby_text_enabled_setting(
+    app: AppHandle,
+    enabled: bool,
+) -> Result<(), String> {
+    let mut settings = settings::get_settings(&app);
+    settings.context_nearby_text_enabled = enabled && settings.context_awareness_enabled;
+    settings::write_settings(&app, settings);
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
 pub fn change_adaptive_language_shortlist_setting(
     app: AppHandle,
     languages: Vec<String>,
