@@ -9,6 +9,7 @@ use crate::managers::history::HistoryManager;
 use crate::managers::transcription::TranscriptionManager;
 use crate::settings::{get_settings, AppSettings, APPLE_INTELLIGENCE_PROVIDER_ID};
 use crate::shortcut;
+use crate::transform_mode::TransformAction;
 use crate::tray::{change_tray_icon, TrayIconState};
 use crate::utils::{
     self, show_processing_overlay, show_recording_overlay, show_transcribing_overlay,
@@ -62,6 +63,10 @@ pub trait ShortcutAction: Send + Sync {
 // Transcribe Action
 struct TranscribeAction {
     post_process: bool,
+}
+
+struct TransformShortcutAction {
+    action: TransformAction,
 }
 
 /// Field name for structured output JSON schema
@@ -834,6 +839,19 @@ mod adaptive_action_tests {
             error: None,
         };
         assert!(serialize_json(&receipt).unwrap().contains("succeeded"));
+    }
+
+    #[test]
+    fn transform_shortcuts_are_mapped_to_actions() {
+        for id in [
+            "transform_polish",
+            "transform_make_concise",
+            "transform_turn_into_list",
+            "transform_translate",
+            "transform_prompt_engineer",
+        ] {
+            assert!(ACTION_MAP.contains_key(id), "{id} should be actionable");
+        }
     }
 
     #[test]
@@ -1638,6 +1656,47 @@ impl ShortcutAction for CancelAction {
     }
 }
 
+impl ShortcutAction for TransformShortcutAction {
+    fn start(&self, app: &AppHandle, binding_id: &str, _shortcut_str: &str) {
+        let app = app.clone();
+        let history_manager = Arc::clone(&app.state::<Arc<HistoryManager>>());
+        let action = self.action.clone();
+        let target_language = if matches!(action, TransformAction::TranslateToSelectedLanguage) {
+            Some(crate::commands::transform::shortcut_target_language(
+                &get_settings(&app),
+            ))
+        } else {
+            None
+        };
+        let binding_id = binding_id.to_string();
+
+        tauri::async_runtime::spawn(async move {
+            match crate::commands::transform::run_transform_selected_text(
+                app.clone(),
+                history_manager,
+                action,
+                target_language,
+            )
+            .await
+            {
+                Ok(result) => {
+                    debug!(
+                        "Transform shortcut '{}' completed with status {:?}",
+                        binding_id, result.status
+                    );
+                }
+                Err(err) => {
+                    warn!("Transform shortcut '{}' failed: {}", binding_id, err);
+                }
+            }
+        });
+    }
+
+    fn stop(&self, _app: &AppHandle, _binding_id: &str, _shortcut_str: &str) {
+        // Transform shortcuts run once on key press.
+    }
+}
+
 // Test Action
 struct TestAction;
 
@@ -1678,6 +1737,21 @@ pub static ACTION_MAP: Lazy<HashMap<String, Arc<dyn ShortcutAction>>> = Lazy::ne
         "cancel".to_string(),
         Arc::new(CancelAction) as Arc<dyn ShortcutAction>,
     );
+    for (id, action) in [
+        ("transform_polish", TransformAction::Polish),
+        ("transform_make_concise", TransformAction::MakeConcise),
+        ("transform_turn_into_list", TransformAction::TurnIntoList),
+        (
+            "transform_translate",
+            TransformAction::TranslateToSelectedLanguage,
+        ),
+        ("transform_prompt_engineer", TransformAction::PromptEngineer),
+    ] {
+        map.insert(
+            id.to_string(),
+            Arc::new(TransformShortcutAction { action }) as Arc<dyn ShortcutAction>,
+        );
+    }
     map.insert(
         "test".to_string(),
         Arc::new(TestAction) as Arc<dyn ShortcutAction>,

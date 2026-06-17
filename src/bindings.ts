@@ -1057,6 +1057,14 @@ async copyLastTranscript() : Promise<Result<boolean, string>> {
     else return { status: "error", error: e  as any };
 }
 },
+async copyLastTransformResult() : Promise<Result<boolean, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("copy_last_transform_result") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async pasteLastTranscript() : Promise<Result<boolean, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("paste_last_transcript") };

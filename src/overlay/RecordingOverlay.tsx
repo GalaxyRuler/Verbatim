@@ -36,6 +36,7 @@ type OverlayState =
   | "processing"
   | "inserted"
   | "copied"
+  | "transform_copied"
   | "paste_failed"
   | "mic_failed"
   | "dictionary_learned"
@@ -49,6 +50,7 @@ const overlayStates = new Set<OverlayState>([
   "processing",
   "inserted",
   "copied",
+  "transform_copied",
   "paste_failed",
   "mic_failed",
   "dictionary_learned",
@@ -63,6 +65,7 @@ const stateLabelKeys: Record<OverlayState, string> = {
   processing: "overlay.processing",
   inserted: "overlay.states.inserted",
   copied: "overlay.states.copied",
+  transform_copied: "overlay.states.transformCopied",
   paste_failed: "overlay.pasteFailed",
   mic_failed: "overlay.states.micFailed",
   dictionary_learned: "overlay.dictionaryLearned.title",
@@ -106,6 +109,7 @@ const RecordingOverlay: React.FC = () => {
 
   const isStickyRecoveryState = (nextState: OverlayState) =>
     nextState === "copied" ||
+    nextState === "transform_copied" ||
     nextState === "paste_failed" ||
     nextState === "dictionary_learned";
 
@@ -212,6 +216,20 @@ const RecordingOverlay: React.FC = () => {
         },
       );
 
+      const unlistenTransformRecoveryCopied = await listen(
+        "transform-recovery-copied",
+        async () => {
+          stateRef.current = "transform_copied";
+          if (!(await shouldShowDockedFeedback())) return;
+
+          setDockedMode(true);
+          setIsDockedExpanded(true);
+          setIsLanguagePickerOpen(false);
+          setOverlayState("transform_copied");
+          setIsVisible(true);
+        },
+      );
+
       const unlistenDictionaryLearned = await listen<DictionaryEntry[]>(
         "dictionary-entries-learned",
         async (event) => {
@@ -280,6 +298,7 @@ const RecordingOverlay: React.FC = () => {
         unlistenShowDocked();
         unlistenPasteError();
         unlistenLanguageGuardBlocked();
+        unlistenTransformRecoveryCopied();
         unlistenDictionaryLearned();
         unlistenStateChanged();
         unlistenHide();
@@ -437,6 +456,12 @@ const RecordingOverlay: React.FC = () => {
         <span className="docked-status-title">{t(stateLabelKeys[state])}</span>
       </div>
       <div className="docked-actions">
+        {state === "transform_copied" &&
+          renderActionButton(
+            t("overlay.actions.copyTransformResult"),
+            commands.copyLastTransformResult,
+            <ClipboardCopy size={14} strokeWidth={2.25} />,
+          )}
         {(state === "copied" || state === "paste_failed") &&
           renderActionButton(
             t("overlay.actions.pasteLastTranscript"),
@@ -531,6 +556,30 @@ const RecordingOverlay: React.FC = () => {
             {renderActionButton(
               t("overlay.actions.copyLastTranscript"),
               commands.copyLastTranscript,
+              <ClipboardCopy size={14} strokeWidth={2.25} />,
+            )}
+            {renderActionButton(
+              t("overlay.actions.openSettings"),
+              showMainWindow,
+              <Settings size={14} strokeWidth={2.25} />,
+            )}
+          </div>
+        </>
+      );
+    }
+
+    if (state === "transform_copied") {
+      return (
+        <>
+          <div className="docked-status" role="status" aria-live="polite">
+            <span className="docked-status-title">
+              {t("overlay.states.transformCopied")}
+            </span>
+          </div>
+          <div className="docked-actions">
+            {renderActionButton(
+              t("overlay.actions.copyTransformResult"),
+              commands.copyLastTransformResult,
               <ClipboardCopy size={14} strokeWidth={2.25} />,
             )}
             {renderActionButton(

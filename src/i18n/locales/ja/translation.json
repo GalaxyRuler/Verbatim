@@ -196,13 +196,34 @@
           "transcribe_with_post_process": {
             "name": "後処理ホットキー",
             "description": "オプション：文字起こしに常にAI後処理を適用する専用ホットキー。"
+          },
+          "transform_polish": {
+            "name": "Polish selected text",
+            "description": "Use the configured post-processing provider to polish selected text without changing its meaning."
+          },
+          "transform_make_concise": {
+            "name": "Make selected text concise",
+            "description": "Use the configured post-processing provider to shorten selected text while preserving key details."
+          },
+          "transform_turn_into_list": {
+            "name": "Turn selected text into a list",
+            "description": "Use the configured post-processing provider to reshape selected text into a clear list."
+          },
+          "transform_translate": {
+            "name": "Translate selected text",
+            "description": "Use the configured post-processing provider to translate selected text to your translation target, or English if none is set."
+          },
+          "transform_prompt_engineer": {
+            "name": "Prompt-engineer selected text",
+            "description": "Use the configured post-processing provider to rewrite selected text as a clearer prompt."
           }
         },
         "errors": {
           "restore": "元のショートカットを復元できませんでした",
           "set": "ショートカットを設定できませんでした: {{error}}",
           "reset": "ショートカットを元の値にリセットできませんでした"
-        }
+        },
+        "unassigned": "Unassigned"
       },
       "language": {
         "title": "言語",
@@ -215,6 +236,10 @@
       "pushToTalk": {
         "label": "プッシュトゥトーク",
         "description": "押し続けて録音、離して停止"
+      },
+      "transformSelectedText": {
+        "title": "Transform Selected Text",
+        "description": "Assign optional shortcuts that transform selected text in the current app using your configured local or remote post-processing provider."
       }
     },
     "sound": {
@@ -791,7 +816,9 @@
     "languageGuardTitle": "Wrong Language Detected",
     "languageGuardDescription": "Verbatim blocked text that did not match your locked language ({{language}}). It was copied to your clipboard.",
     "languageGuardPreview": "Preview: {{preview}}",
-    "languageGuardPasteAnyway": "Paste anyway"
+    "languageGuardPasteAnyway": "Paste anyway",
+    "transformRecoveryCopiedTitle": "Transform Result Copied",
+    "transformRecoveryCopiedDescription": "The selected text was transformed, but Verbatim could not replace it in the active app. The result was copied to your clipboard."
   },
   "appLanguage": {
     "title": "アプリケーション言語",
@@ -817,7 +844,8 @@
       "cancel": "Cancel recording",
       "undoLearnedWord": "Undo learned word",
       "tryAgain": "Try again",
-      "selectMicrophone": "Select microphone"
+      "selectMicrophone": "Select microphone",
+      "copyTransformResult": "Copy transform result"
     },
     "dictionaryLearned": {
       "title": "Added to dictionary"
@@ -830,7 +858,8 @@
       "inserted": "Inserted",
       "copied": "Copied",
       "micFailed": "Microphone issue",
-      "cancelled": "Cancelled"
+      "cancelled": "Cancelled",
+      "transformCopied": "Transform copied"
     }
   }
 }

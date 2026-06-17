@@ -31,6 +31,21 @@ pub async fn transform_selected_text(
     action: TransformAction,
     target_language: Option<String>,
 ) -> Result<TransformCommandResult, String> {
+    run_transform_selected_text(
+        app,
+        Arc::clone(history_manager.inner()),
+        action,
+        target_language,
+    )
+    .await
+}
+
+pub async fn run_transform_selected_text(
+    app: AppHandle,
+    history_manager: Arc<HistoryManager>,
+    action: TransformAction,
+    target_language: Option<String>,
+) -> Result<TransformCommandResult, String> {
     let captured = capture_selection_on_main_thread(&app).await?;
     crate::selection::validate_selected_text_anchor(&captured).map_err(|err| format!("{err:?}"))?;
     let task = transform_mode::build_transform_task(
@@ -44,6 +59,8 @@ pub async fn transform_selected_text(
         .await
         .map_err(|err| err.to_string())?;
 
+    let mut should_emit_recovery_copied = false;
+
     let status = match replace_selection_on_main_thread(&app, captured, transformed.text.clone())
         .await
     {
@@ -51,7 +68,7 @@ pub async fn transform_selected_text(
         Ok(SelectionReplacementOutcome::Recoverable(recovery)) => {
             crate::clipboard::copy_text_for_recovery(&app, &recovery.copy_text, &recovery.reason)
                 .map_err(|err| err.to_string())?;
-            let _ = app.emit("paste-error", ());
+            should_emit_recovery_copied = true;
             TransformCommandStatus::CopiedForRecovery
         }
         Err(err) => {
@@ -62,7 +79,7 @@ pub async fn transform_selected_text(
             )
             .map_err(|copy_err| copy_err.to_string())?;
             log::warn!("Transform replacement failed after processing: {}", err);
-            let _ = app.emit("paste-error", ());
+            should_emit_recovery_copied = true;
             TransformCommandStatus::CopiedForRecovery
         }
     };
@@ -79,12 +96,30 @@ pub async fn transform_selected_text(
         )
         .map_err(|err| err.to_string())?;
 
+    if should_emit_recovery_copied {
+        emit_transform_recovery_copied(&app);
+    }
+
     Ok(TransformCommandResult {
         status,
         history_entry_id: history_entry.id,
         provider_id: transformed.provider_id,
         model: transformed.model,
     })
+}
+
+pub fn shortcut_target_language(settings: &crate::settings::AppSettings) -> String {
+    settings
+        .translation_request
+        .as_ref()
+        .map(|request| request.target_language.trim())
+        .filter(|language| !language.is_empty())
+        .unwrap_or("en")
+        .to_string()
+}
+
+fn emit_transform_recovery_copied(app: &AppHandle) {
+    let _ = app.emit("transform-recovery-copied", ());
 }
 
 async fn capture_selection_on_main_thread(
@@ -141,5 +176,29 @@ fn recovery_status(status: &TransformCommandStatus) -> &'static str {
     match status {
         TransformCommandStatus::Replaced => "replaced",
         TransformCommandStatus::CopiedForRecovery => "copied_for_recovery",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shortcut_target_language_uses_configured_translation_target() {
+        let mut settings = crate::settings::get_default_settings();
+        settings.translation_request = Some(crate::settings::TranslationRequestSettings {
+            source_language: "auto".to_string(),
+            target_language: "fr".to_string(),
+            route: crate::settings::TranslationRoute::Auto,
+        });
+
+        assert_eq!(shortcut_target_language(&settings), "fr");
+    }
+
+    #[test]
+    fn shortcut_target_language_falls_back_to_english() {
+        let settings = crate::settings::get_default_settings();
+
+        assert_eq!(shortcut_target_language(&settings), "en");
     }
 }

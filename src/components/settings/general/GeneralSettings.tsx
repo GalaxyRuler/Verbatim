@@ -16,7 +16,9 @@ export const GeneralSettings: React.FC = () => {
   const { t } = useTranslation();
   const { audioFeedbackEnabled, getSetting } = useSettings();
   const pushToTalk = getSetting("push_to_talk");
-  const isLinux = type() === "linux";
+  const osType = type();
+  const isLinux = osType === "linux";
+  const supportsSelectedTextTransforms = osType === "windows";
   return (
     <div className="max-w-3xl w-full mx-auto space-y-6">
       <SettingsGroup title={t("settings.general.title")}>
@@ -27,6 +29,21 @@ export const GeneralSettings: React.FC = () => {
           <ShortcutInput shortcutId="cancel" grouped={true} />
         )}
       </SettingsGroup>
+      {supportsSelectedTextTransforms && (
+        <SettingsGroup
+          title={t("settings.general.transformSelectedText.title")}
+          description={t("settings.general.transformSelectedText.description")}
+        >
+          <ShortcutInput shortcutId="transform_polish" grouped={true} />
+          <ShortcutInput shortcutId="transform_make_concise" grouped={true} />
+          <ShortcutInput shortcutId="transform_turn_into_list" grouped={true} />
+          <ShortcutInput shortcutId="transform_translate" grouped={true} />
+          <ShortcutInput
+            shortcutId="transform_prompt_engineer"
+            grouped={true}
+          />
+        </SettingsGroup>
+      )}
       <ModelSettingsCard />
       <SettingsGroup title={t("settings.sound.title")}>
         <MicrophoneSelector descriptionMode="tooltip" grouped={true} />

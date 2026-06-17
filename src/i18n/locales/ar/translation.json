@@ -174,13 +174,34 @@
           "transcribe_with_post_process": {
             "name": "مفتاح المعالجة اللاحقة",
             "description": "اختياري: مفتاح اختصار مخصص يطبق دائماً المعالجة اللاحقة بالذكاء الاصطناعي على التفريغ الصوتي."
+          },
+          "transform_polish": {
+            "name": "Polish selected text",
+            "description": "Use the configured post-processing provider to polish selected text without changing its meaning."
+          },
+          "transform_make_concise": {
+            "name": "Make selected text concise",
+            "description": "Use the configured post-processing provider to shorten selected text while preserving key details."
+          },
+          "transform_turn_into_list": {
+            "name": "Turn selected text into a list",
+            "description": "Use the configured post-processing provider to reshape selected text into a clear list."
+          },
+          "transform_translate": {
+            "name": "Translate selected text",
+            "description": "Use the configured post-processing provider to translate selected text to your translation target, or English if none is set."
+          },
+          "transform_prompt_engineer": {
+            "name": "Prompt-engineer selected text",
+            "description": "Use the configured post-processing provider to rewrite selected text as a clearer prompt."
           }
         },
         "errors": {
           "restore": "فشل استعادة الاختصار الأصلي",
           "set": "فشل تعيين الاختصار: {{error}}",
           "reset": "فشل إعادة تعيين الاختصار إلى قيمته الأصلية"
-        }
+        },
+        "unassigned": "Unassigned"
       },
       "language": {
         "title": "اللغة",
@@ -193,6 +214,10 @@
       "pushToTalk": {
         "label": "اضغط للتحدث",
         "description": "استمر في الضغط للتسجيل، واترك للتوقف"
+      },
+      "transformSelectedText": {
+        "title": "Transform Selected Text",
+        "description": "Assign optional shortcuts that transform selected text in the current app using your configured local or remote post-processing provider."
       }
     },
     "sound": {
@@ -791,7 +816,9 @@
     "languageGuardTitle": "تم اكتشاف لغة غير متوقعة",
     "languageGuardDescription": "منع Verbatim نصًا لا يطابق اللغة المثبتة ({{language}}). تم نسخه إلى الحافظة.",
     "languageGuardPreview": "معاينة: {{preview}}",
-    "languageGuardPasteAnyway": "الصق على أي حال"
+    "languageGuardPasteAnyway": "الصق على أي حال",
+    "transformRecoveryCopiedTitle": "تم نسخ نتيجة التحويل",
+    "transformRecoveryCopiedDescription": "تم تحويل النص المحدد، لكن تعذر استبداله في التطبيق النشط. تم نسخ النتيجة إلى الحافظة."
   },
   "appLanguage": {
     "title": "لغة التطبيق",
@@ -817,7 +844,8 @@
       "cancel": "إلغاء التسجيل",
       "undoLearnedWord": "تراجع عن الكلمة المتعلمة",
       "tryAgain": "حاول مرة أخرى",
-      "selectMicrophone": "اختر الميكروفون"
+      "selectMicrophone": "اختر الميكروفون",
+      "copyTransformResult": "نسخ نتيجة التحويل"
     },
     "dictionaryLearned": {
       "title": "أضيف إلى القاموس"
@@ -830,7 +858,8 @@
       "inserted": "تم الإدراج",
       "copied": "تم النسخ",
       "micFailed": "مشكلة في الميكروفون",
-      "cancelled": "تم الإلغاء"
+      "cancelled": "تم الإلغاء",
+      "transformCopied": "تم نسخ التحويل"
     }
   }
 }

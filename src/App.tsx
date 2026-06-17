@@ -154,6 +154,23 @@ function App() {
     };
   }, [t]);
 
+  useEffect(() => {
+    const unlisten = listen("transform-recovery-copied", () => {
+      toast.error(t("errors.transformRecoveryCopiedTitle"), {
+        description: t("errors.transformRecoveryCopiedDescription"),
+        action: {
+          label: t("errors.pasteFailedCopyAction"),
+          onClick: () => {
+            void commands.copyLastTransformResult();
+          },
+        },
+      });
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [t]);
+
   // If a locked language clearly conflicts with the transcribed script, keep
   // the text recoverable while making the recovery action explicit.
   useEffect(() => {

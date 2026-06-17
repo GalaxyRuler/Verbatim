@@ -88,6 +88,10 @@ pub struct ShortcutBinding {
     pub current_binding: String,
 }
 
+pub fn is_unbound_shortcut(raw: &str) -> bool {
+    raw.trim().is_empty()
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Type)]
 #[serde(rename_all = "snake_case")]
 pub enum DictionaryEntrySource {
@@ -1099,6 +1103,44 @@ pub fn get_default_settings() -> AppSettings {
             current_binding: "escape".to_string(),
         },
     );
+    for (id, name, description) in [
+        (
+            "transform_polish",
+            "Polish Selected Text",
+            "Transforms the selected text with the configured post-processing provider.",
+        ),
+        (
+            "transform_make_concise",
+            "Make Selected Text Concise",
+            "Makes the selected text more concise with the configured post-processing provider.",
+        ),
+        (
+            "transform_turn_into_list",
+            "Turn Selected Text Into List",
+            "Turns the selected text into a list with the configured post-processing provider.",
+        ),
+        (
+            "transform_translate",
+            "Translate Selected Text",
+            "Translates the selected text to your configured translation target.",
+        ),
+        (
+            "transform_prompt_engineer",
+            "Prompt Engineer Selected Text",
+            "Rewrites the selected text as a clearer prompt.",
+        ),
+    ] {
+        bindings.insert(
+            id.to_string(),
+            ShortcutBinding {
+                id: id.to_string(),
+                name: name.to_string(),
+                description: description.to_string(),
+                default_binding: String::new(),
+                current_binding: String::new(),
+            },
+        );
+    }
 
     AppSettings {
         bindings,
@@ -1503,6 +1545,49 @@ mod tests {
         let settings = get_default_settings();
         assert!(!settings.auto_submit);
         assert_eq!(settings.auto_submit_key, AutoSubmitKey::Enter);
+    }
+
+    #[test]
+    fn transform_shortcut_defaults_are_visible_but_unbound() {
+        let settings = get_default_settings();
+        for id in [
+            "transform_polish",
+            "transform_make_concise",
+            "transform_turn_into_list",
+            "transform_translate",
+            "transform_prompt_engineer",
+        ] {
+            let binding = settings.bindings.get(id).expect("transform binding");
+            assert!(is_unbound_shortcut(&binding.default_binding));
+            assert!(is_unbound_shortcut(&binding.current_binding));
+        }
+    }
+
+    #[test]
+    fn binding_defaults_migrate_transform_shortcuts_into_existing_settings() {
+        let mut settings = get_default_settings();
+        for id in [
+            "transform_polish",
+            "transform_make_concise",
+            "transform_turn_into_list",
+            "transform_translate",
+            "transform_prompt_engineer",
+        ] {
+            settings.bindings.remove(id);
+        }
+
+        assert!(ensure_binding_defaults(&mut settings));
+
+        for id in [
+            "transform_polish",
+            "transform_make_concise",
+            "transform_turn_into_list",
+            "transform_translate",
+            "transform_prompt_engineer",
+        ] {
+            let binding = settings.bindings.get(id).expect("transform binding");
+            assert!(is_unbound_shortcut(&binding.current_binding));
+        }
     }
 
     #[test]

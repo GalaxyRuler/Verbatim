@@ -742,6 +742,28 @@ impl HistoryManager {
         Self::get_latest_completed_entry_with_conn(&conn)
     }
 
+    pub fn get_latest_transform_entry(&self) -> Result<Option<HistoryEntry>> {
+        let conn = self.get_connection()?;
+        Self::get_latest_transform_entry_with_conn(&conn)
+    }
+
+    fn get_latest_transform_entry_with_conn(conn: &Connection) -> Result<Option<HistoryEntry>> {
+        let query = format!(
+            "SELECT {}
+             FROM transcription_history
+             WHERE transform_action IS NOT NULL
+               AND transform_result_text IS NOT NULL
+               AND transform_result_text != ''
+             ORDER BY timestamp DESC, id DESC
+             LIMIT 1",
+            HISTORY_COLUMNS
+        );
+        let mut stmt = conn.prepare(&query)?;
+
+        let entry = stmt.query_row([], Self::map_history_entry).optional()?;
+        Ok(entry)
+    }
+
     pub async fn get_latest_adaptive_entry(&self) -> Result<Option<HistoryEntry>> {
         let conn = self.get_connection()?;
         let query = format!(
@@ -998,7 +1020,7 @@ mod tests {
         timestamp: i64,
         original_text: &str,
         result_text: &str,
-    ) {
+    ) -> i64 {
         conn.execute(
             "INSERT INTO transcription_history (
                 file_name,
@@ -1050,6 +1072,8 @@ mod tests {
             ],
         )
         .expect("insert transform history entry");
+
+        conn.last_insert_rowid()
     }
 
     #[test]
@@ -1121,6 +1145,23 @@ mod tests {
         assert_eq!(entry.timestamp, 100);
         assert_eq!(entry.transcription_text, "latest dictation transcript");
         assert!(entry.transform_action.is_none());
+    }
+
+    #[test]
+    fn get_latest_transform_entry_uses_id_tiebreaker_for_same_second_entries() {
+        let conn = setup_conn();
+        insert_transform_entry(&conn, 300, "first selection", "first result");
+        let newest_id = insert_transform_entry(&conn, 300, "second selection", "second result");
+
+        let entry = HistoryManager::get_latest_transform_entry_with_conn(&conn)
+            .expect("fetch latest transform")
+            .expect("latest transform entry");
+
+        assert_eq!(entry.id, newest_id);
+        assert_eq!(
+            entry.transform_result_text.as_deref(),
+            Some("second result")
+        );
     }
 
     #[test]

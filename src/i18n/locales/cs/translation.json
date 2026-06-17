@@ -196,13 +196,34 @@
           "transcribe_with_post_process": {
             "name": "Klávesa pro následné zpracování",
             "description": "Volitelné: Vyhrazená klávesová zkratka, která vždy použije AI následné zpracování na váš přepis."
+          },
+          "transform_polish": {
+            "name": "Polish selected text",
+            "description": "Use the configured post-processing provider to polish selected text without changing its meaning."
+          },
+          "transform_make_concise": {
+            "name": "Make selected text concise",
+            "description": "Use the configured post-processing provider to shorten selected text while preserving key details."
+          },
+          "transform_turn_into_list": {
+            "name": "Turn selected text into a list",
+            "description": "Use the configured post-processing provider to reshape selected text into a clear list."
+          },
+          "transform_translate": {
+            "name": "Translate selected text",
+            "description": "Use the configured post-processing provider to translate selected text to your translation target, or English if none is set."
+          },
+          "transform_prompt_engineer": {
+            "name": "Prompt-engineer selected text",
+            "description": "Use the configured post-processing provider to rewrite selected text as a clearer prompt."
           }
         },
         "errors": {
           "restore": "Nepodařilo se obnovit původní zkratku",
           "set": "Nepodařilo se nastavit zkratku: {{error}}",
           "reset": "Nepodařilo se vrátit zkratku na původní hodnotu"
-        }
+        },
+        "unassigned": "Unassigned"
       },
       "language": {
         "title": "Jazyk",
@@ -215,6 +236,10 @@
       "pushToTalk": {
         "label": "Stisk a mluv",
         "description": "Podržte pro nahrávání, uvolněte pro zastavení"
+      },
+      "transformSelectedText": {
+        "title": "Transform Selected Text",
+        "description": "Assign optional shortcuts that transform selected text in the current app using your configured local or remote post-processing provider."
       }
     },
     "sound": {
@@ -791,7 +816,9 @@
     "languageGuardTitle": "Wrong Language Detected",
     "languageGuardDescription": "Verbatim blocked text that did not match your locked language ({{language}}). It was copied to your clipboard.",
     "languageGuardPreview": "Preview: {{preview}}",
-    "languageGuardPasteAnyway": "Paste anyway"
+    "languageGuardPasteAnyway": "Paste anyway",
+    "transformRecoveryCopiedTitle": "Transform Result Copied",
+    "transformRecoveryCopiedDescription": "The selected text was transformed, but Verbatim could not replace it in the active app. The result was copied to your clipboard."
   },
   "appLanguage": {
     "title": "Jazyk aplikace",
@@ -817,7 +844,8 @@
       "cancel": "Cancel recording",
       "undoLearnedWord": "Undo learned word",
       "tryAgain": "Try again",
-      "selectMicrophone": "Select microphone"
+      "selectMicrophone": "Select microphone",
+      "copyTransformResult": "Copy transform result"
     },
     "dictionaryLearned": {
       "title": "Added to dictionary"
@@ -830,7 +858,8 @@
       "inserted": "Inserted",
       "copied": "Copied",
       "micFailed": "Microphone issue",
-      "cancelled": "Cancelled"
+      "cancelled": "Cancelled",
+      "transformCopied": "Transform copied"
     }
   }
 }

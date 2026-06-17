@@ -178,13 +178,34 @@
           "transcribe_with_post_process": {
             "name": "קיצור לעיבוד משלים",
             "description": "אופציונלי: קיצור מקשים ייעודי שתמיד מפעיל עיבוד AI על התמלול."
+          },
+          "transform_polish": {
+            "name": "Polish selected text",
+            "description": "Use the configured post-processing provider to polish selected text without changing its meaning."
+          },
+          "transform_make_concise": {
+            "name": "Make selected text concise",
+            "description": "Use the configured post-processing provider to shorten selected text while preserving key details."
+          },
+          "transform_turn_into_list": {
+            "name": "Turn selected text into a list",
+            "description": "Use the configured post-processing provider to reshape selected text into a clear list."
+          },
+          "transform_translate": {
+            "name": "Translate selected text",
+            "description": "Use the configured post-processing provider to translate selected text to your translation target, or English if none is set."
+          },
+          "transform_prompt_engineer": {
+            "name": "Prompt-engineer selected text",
+            "description": "Use the configured post-processing provider to rewrite selected text as a clearer prompt."
           }
         },
         "errors": {
           "restore": "שחזור קיצור הדרך המקורי נכשל",
           "set": "הגדרת קיצור הדרך נכשלה: {{error}}",
           "reset": "איפוס קיצור הדרך לערך המקורי נכשל"
-        }
+        },
+        "unassigned": "Unassigned"
       },
       "language": {
         "title": "שפה",
@@ -197,6 +218,10 @@
       "pushToTalk": {
         "label": "לחץ כדי לדבר",
         "description": "החזק כדי להקליט, שחרר כדי לעצור"
+      },
+      "transformSelectedText": {
+        "title": "Transform Selected Text",
+        "description": "Assign optional shortcuts that transform selected text in the current app using your configured local or remote post-processing provider."
       }
     },
     "models": {
@@ -791,7 +816,9 @@
     "languageGuardTitle": "זוהתה שפה לא צפויה",
     "languageGuardDescription": "Verbatim חסם טקסט שלא תאם לשפה הנעולה שלך ({{language}}). הוא הועתק ללוח.",
     "languageGuardPreview": "תצוגה מקדימה: {{preview}}",
-    "languageGuardPasteAnyway": "הדבק בכל זאת"
+    "languageGuardPasteAnyway": "הדבק בכל זאת",
+    "transformRecoveryCopiedTitle": "תוצאת ההמרה הועתקה",
+    "transformRecoveryCopiedDescription": "הטקסט שנבחר הומר, אך לא ניתן היה להחליף אותו ביישום הפעיל. התוצאה הועתקה ללוח."
   },
   "appLanguage": {
     "title": "שפת האפליקציה",
@@ -817,7 +844,8 @@
       "cancel": "בטל הקלטה",
       "undoLearnedWord": "בטל מילה שנלמדה",
       "tryAgain": "נסה שוב",
-      "selectMicrophone": "בחר מיקרופון"
+      "selectMicrophone": "בחר מיקרופון",
+      "copyTransformResult": "העתק תוצאת המרה"
     },
     "dictionaryLearned": {
       "title": "נוסף למילון"
@@ -830,7 +858,8 @@
       "inserted": "הוכנס",
       "copied": "הועתק",
       "micFailed": "בעיה במיקרופון",
-      "cancelled": "בוטל"
+      "cancelled": "בוטל",
+      "transformCopied": "ההמרה הועתקה"
     }
   }
 }

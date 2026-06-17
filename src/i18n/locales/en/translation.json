@@ -166,6 +166,7 @@
         "none": "No shortcuts configured",
         "notFound": "Shortcut not found",
         "pressKeys": "Press keys...",
+        "unassigned": "Unassigned",
         "bindings": {
           "transcribe": {
             "name": "Transcribe Shortcut",
@@ -178,6 +179,26 @@
           "transcribe_with_post_process": {
             "name": "Post-Processing Hotkey",
             "description": "Optional: A dedicated hotkey that always applies AI post-processing to your transcription."
+          },
+          "transform_polish": {
+            "name": "Polish selected text",
+            "description": "Use the configured post-processing provider to polish selected text without changing its meaning."
+          },
+          "transform_make_concise": {
+            "name": "Make selected text concise",
+            "description": "Use the configured post-processing provider to shorten selected text while preserving key details."
+          },
+          "transform_turn_into_list": {
+            "name": "Turn selected text into a list",
+            "description": "Use the configured post-processing provider to reshape selected text into a clear list."
+          },
+          "transform_translate": {
+            "name": "Translate selected text",
+            "description": "Use the configured post-processing provider to translate selected text to your translation target, or English if none is set."
+          },
+          "transform_prompt_engineer": {
+            "name": "Prompt-engineer selected text",
+            "description": "Use the configured post-processing provider to rewrite selected text as a clearer prompt."
           }
         },
         "errors": {
@@ -197,6 +218,10 @@
       "pushToTalk": {
         "label": "Push To Talk",
         "description": "Hold to record, release to stop"
+      },
+      "transformSelectedText": {
+        "title": "Transform Selected Text",
+        "description": "Assign optional shortcuts that transform selected text in the current app using your configured local or remote post-processing provider."
       }
     },
     "models": {
@@ -788,6 +813,8 @@
     "pasteFailed": "Text could not be pasted into the active application.",
     "pasteFailedCopiedHint": "The text was copied to your clipboard so you can paste it manually.",
     "pasteFailedCopyAction": "Copy again",
+    "transformRecoveryCopiedTitle": "Transform Result Copied",
+    "transformRecoveryCopiedDescription": "The selected text was transformed, but Verbatim could not replace it in the active app. The result was copied to your clipboard.",
     "languageGuardTitle": "Wrong Language Detected",
     "languageGuardDescription": "Verbatim blocked text that did not match your locked language ({{language}}). It was copied to your clipboard.",
     "languageGuardPreview": "Preview: {{preview}}",
@@ -810,6 +837,7 @@
       "silence": "No speech detected",
       "inserted": "Inserted",
       "copied": "Copied",
+      "transformCopied": "Transform copied",
       "micFailed": "Microphone issue",
       "cancelled": "Cancelled"
     },
@@ -819,6 +847,7 @@
     },
     "actions": {
       "copyLastTranscript": "Copy last transcript",
+      "copyTransformResult": "Copy transform result",
       "pasteLastTranscript": "Paste last transcript",
       "retryPaste": "Retry paste",
       "reviewDictionary": "Review dictionary",

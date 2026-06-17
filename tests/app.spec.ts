@@ -65,6 +65,62 @@ const localLlmModels = [
   },
 ];
 
+const defaultBindings = {
+  transcribe: {
+    id: "transcribe",
+    name: "Transcribe",
+    description: "Converts your speech into text.",
+    default_binding: "ctrl+space",
+    current_binding: "ctrl+space",
+  },
+  cancel: {
+    id: "cancel",
+    name: "Cancel",
+    description: "Cancels the current recording.",
+    default_binding: "escape",
+    current_binding: "escape",
+  },
+  transform_polish: {
+    id: "transform_polish",
+    name: "Polish Selected Text",
+    description:
+      "Transforms the selected text with the configured post-processing provider.",
+    default_binding: "",
+    current_binding: "",
+  },
+  transform_make_concise: {
+    id: "transform_make_concise",
+    name: "Make Selected Text Concise",
+    description:
+      "Makes the selected text more concise with the configured post-processing provider.",
+    default_binding: "",
+    current_binding: "",
+  },
+  transform_turn_into_list: {
+    id: "transform_turn_into_list",
+    name: "Turn Selected Text Into List",
+    description:
+      "Turns the selected text into a list with the configured post-processing provider.",
+    default_binding: "",
+    current_binding: "",
+  },
+  transform_translate: {
+    id: "transform_translate",
+    name: "Translate Selected Text",
+    description:
+      "Translates the selected text to your configured translation target.",
+    default_binding: "",
+    current_binding: "",
+  },
+  transform_prompt_engineer: {
+    id: "transform_prompt_engineer",
+    name: "Prompt Engineer Selected Text",
+    description: "Rewrites the selected text as a clearer prompt.",
+    default_binding: "",
+    current_binding: "",
+  },
+};
+
 const baseSettings = {
   bindings: {},
   push_to_talk: false,
@@ -155,6 +211,7 @@ const installTauriMocks = async (
   page: Page,
   settingsOverrides: Partial<typeof baseSettings> = {},
   historyEntries: Array<Record<string, unknown>> = [],
+  osType: "windows" | "linux" | "macos" = "windows",
 ) => {
   await page.addInitScript(
     ({
@@ -163,6 +220,7 @@ const installTauriMocks = async (
       models,
       localPostProcessingModels,
       initialHistoryEntries,
+      osType,
     }) => {
       let appSettings = { ...settings };
       const callbacks = new Map<number, (payload?: unknown) => void>();
@@ -249,13 +307,13 @@ const installTauriMocks = async (
       };
 
       testWindow.__TAURI_OS_PLUGIN_INTERNALS__ = {
-        platform: "windows",
-        os_type: "windows",
-        family: "windows",
+        platform: osType,
+        os_type: osType,
+        family: osType,
         version: "11",
         arch: "x86_64",
-        exe_extension: "exe",
-        eol: "\r\n",
+        exe_extension: osType === "windows" ? "exe" : "",
+        eol: osType === "windows" ? "\r\n" : "\n",
       };
       testWindow.__TAURI_EVENT_PLUGIN_INTERNALS__ = {
         unregisterListener: (event: string, eventId: number) => {
@@ -410,6 +468,7 @@ const installTauriMocks = async (
               syncSnippetSettings();
               return null;
             case "copy_last_transcript":
+            case "copy_last_transform_result":
             case "paste_last_transcript":
               return true;
             case "get_history_entries": {
@@ -615,6 +674,7 @@ const installTauriMocks = async (
       models,
       localPostProcessingModels: localLlmModels,
       initialHistoryEntries: historyEntries,
+      osType,
     },
   );
 };
@@ -667,6 +727,55 @@ test.describe("Verbatim App", () => {
     await expect(adaptiveToggle).not.toBeChecked();
     await adaptiveToggle.check({ force: true });
     await expect(adaptiveToggle).toBeChecked();
+  });
+
+  test("general settings show unbound selected-text transform shortcuts", async ({
+    page,
+  }) => {
+    await installTauriMocks(page, {
+      bindings: defaultBindings,
+    });
+    await page.goto("/");
+
+    await expect(
+      page.getByRole("heading", { name: "Transform Selected Text" }),
+    ).toBeVisible();
+    await expect(
+      page.getByText(
+        "Assign optional shortcuts that transform selected text in the current app using your configured local or remote post-processing provider.",
+      ),
+    ).toBeVisible();
+
+    for (const name of [
+      "Polish selected text",
+      "Make selected text concise",
+      "Turn selected text into a list",
+      "Translate selected text",
+      "Prompt-engineer selected text",
+    ]) {
+      await expect(page.getByText(name)).toBeVisible();
+    }
+
+    await expect(page.getByText("Unassigned")).toHaveCount(5);
+  });
+
+  test("general settings hide selected-text transform shortcuts off Windows", async ({
+    page,
+  }) => {
+    await installTauriMocks(
+      page,
+      {
+        bindings: defaultBindings,
+      },
+      [],
+      "linux",
+    );
+    await page.goto("/");
+
+    await expect(
+      page.getByRole("heading", { name: "Transform Selected Text" }),
+    ).toHaveCount(0);
+    await expect(page.getByText("Polish selected text")).toHaveCount(0);
   });
 
   test("formatting level can be changed from advanced transcription settings", async ({
@@ -1552,6 +1661,60 @@ test.describe("Verbatim App", () => {
     await expect(
       page.getByRole("button", { name: "Paste last transcript" }),
     ).toBeVisible();
+  });
+
+  test("docked pill surfaces transform copied recovery", async ({ page }) => {
+    await installTauriMocks(page);
+    await page.goto("/src/overlay/index.html");
+
+    await page.evaluate(() => {
+      const win = window as typeof window & {
+        __VERBATIM_TEST_EMIT_EVENT__: (
+          event: string,
+          payload?: unknown,
+        ) => void;
+      };
+      win.__VERBATIM_TEST_EMIT_EVENT__("show-docked-overlay");
+    });
+    await expect(page.getByTestId("recording-overlay")).toHaveClass(
+      /docked-collapsed/,
+    );
+
+    await page.evaluate(() => {
+      const win = window as typeof window & {
+        __VERBATIM_TEST_EMIT_EVENT__: (
+          event: string,
+          payload?: unknown,
+        ) => void;
+      };
+      win.__VERBATIM_TEST_EMIT_EVENT__("transform-recovery-copied");
+    });
+
+    const overlay = page.getByTestId("recording-overlay");
+    await expect(overlay).toHaveClass(/docked-expanded/);
+    await expect(overlay).toHaveAttribute("data-state", "transform_copied");
+    await expect(overlay).toContainText("Transform copied");
+    await expect(
+      page.getByRole("button", { name: "Copy transform result" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Open settings" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Paste last transcript" }),
+    ).toBeHidden();
+
+    await page.getByRole("button", { name: "Copy transform result" }).click();
+    await page.getByRole("button", { name: "Open settings" }).click();
+
+    const result = await page.evaluate(() => {
+      const win = window as typeof window & {
+        __VERBATIM_TEST_COMMANDS__: string[];
+      };
+      return win.__VERBATIM_TEST_COMMANDS__;
+    });
+    expect(result).toContain("copy_last_transform_result");
+    expect(result).toContain("show_main_window_command");
   });
 
   test("docked pill keeps language guard recovery after docked reset", async ({

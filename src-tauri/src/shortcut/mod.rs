@@ -22,9 +22,10 @@ use tauri_plugin_autostart::ManagerExt;
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 use crate::settings::APPLE_INTELLIGENCE_DEFAULT_MODEL_ID;
 use crate::settings::{
-    self, get_settings, AutoSubmitKey, ClipboardHandling, DictationLanguageMode,
-    KeyboardImplementation, LLMPrompt, OverlayPosition, PasteMethod, ShortcutBinding, SoundTheme,
-    TranslationRequestSettings, TranslationRoute, TypingTool, APPLE_INTELLIGENCE_PROVIDER_ID,
+    self, get_settings, is_unbound_shortcut, AutoSubmitKey, ClipboardHandling,
+    DictationLanguageMode, KeyboardImplementation, LLMPrompt, OverlayPosition, PasteMethod,
+    ShortcutBinding, SoundTheme, TranslationRequestSettings, TranslationRoute, TypingTool,
+    APPLE_INTELLIGENCE_PROVIDER_ID,
 };
 use crate::tray;
 
@@ -110,11 +111,6 @@ pub fn change_binding(
     id: String,
     binding: String,
 ) -> Result<BindingResponse, String> {
-    // Reject empty bindings — every shortcut should have a value
-    if binding.trim().is_empty() {
-        return Err("Binding cannot be empty".to_string());
-    }
-
     let mut settings = settings::get_settings(&app);
 
     // Get the binding to modify, or create it from defaults if it doesn't exist
@@ -176,15 +172,17 @@ pub fn change_binding(
     let mut updated_binding = binding_to_modify;
     updated_binding.current_binding = binding;
 
-    // Register the new binding
-    if let Err(e) = register_shortcut(&app, updated_binding.clone()) {
-        let error_msg = format!("Failed to register shortcut: {}", e);
-        error!("change_binding error: {}", error_msg);
-        return Ok(BindingResponse {
-            success: false,
-            binding: None,
-            error: Some(error_msg),
-        });
+    if !is_unbound_shortcut(&updated_binding.current_binding) {
+        // Register the new binding
+        if let Err(e) = register_shortcut(&app, updated_binding.clone()) {
+            let error_msg = format!("Failed to register shortcut: {}", e);
+            error!("change_binding error: {}", error_msg);
+            return Ok(BindingResponse {
+                success: false,
+                binding: None,
+                error: Some(error_msg),
+            });
+        }
     }
 
     // Update the binding in the settings
@@ -1316,4 +1314,31 @@ pub async fn get_available_accelerators() -> crate::managers::transcription::Ava
     tauri::async_runtime::spawn_blocking(crate::managers::transcription::get_available_accelerators)
         .await
         .expect("get_available_accelerators panicked")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_shortcuts_are_valid_for_registration_skip() {
+        assert!(validate_shortcut_for_implementation("", KeyboardImplementation::Tauri).is_ok());
+        assert!(
+            validate_shortcut_for_implementation("   ", KeyboardImplementation::VerbatimKeys)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn non_empty_shortcuts_still_validate_with_backend_rules() {
+        assert!(
+            validate_shortcut_for_implementation("ctrl+space", KeyboardImplementation::Tauri)
+                .is_ok()
+        );
+        assert!(validate_shortcut_for_implementation(
+            "ctrl+space",
+            KeyboardImplementation::VerbatimKeys
+        )
+        .is_ok());
+    }
 }

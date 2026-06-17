@@ -31,6 +31,34 @@ pub async fn copy_last_transcript(
 
 #[tauri::command]
 #[specta::specta]
+pub async fn copy_last_transform_result(
+    app: AppHandle,
+    history_manager: State<'_, Arc<HistoryManager>>,
+) -> Result<bool, String> {
+    let Some(entry) = history_manager
+        .get_latest_transform_entry()
+        .map_err(|err| err.to_string())?
+    else {
+        return Ok(false);
+    };
+
+    let text = entry
+        .transform_result_text
+        .as_deref()
+        .or(entry.post_processed_text.as_deref())
+        .unwrap_or("");
+    if text.trim().is_empty() {
+        return Ok(false);
+    }
+
+    app.clipboard()
+        .write_text(text.to_string())
+        .map_err(|err| err.to_string())?;
+    Ok(true)
+}
+
+#[tauri::command]
+#[specta::specta]
 pub async fn paste_last_transcript(
     app: AppHandle,
     history_manager: State<'_, Arc<HistoryManager>>,

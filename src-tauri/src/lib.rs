@@ -471,6 +471,7 @@ pub fn run(cli_args: CliArgs) {
             commands::history::update_history_limit,
             commands::history::update_recording_retention_period,
             commands::transcript::copy_last_transcript,
+            commands::transcript::copy_last_transform_result,
             commands::transcript::paste_last_transcript,
             commands::transform::transform_selected_text,
             helpers::clamshell::is_laptop,
