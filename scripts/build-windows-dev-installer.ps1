@@ -81,11 +81,18 @@ New-Item -ItemType Directory -Force -Path $resolvedTargetDir | Out-Null
 New-Item -ItemType Directory -Force -Path $resolvedOutputDir | Out-Null
 
 $devConfigPath = Join-Path $resolvedOutputDir "tauri.dev.generated.json"
-$generateConfigScript = Join-Path $repoRoot "scripts\generate-dev-tauri-config.ts"
-& bun $generateConfigScript --version $DevVersion --output $devConfigPath
-if ($LASTEXITCODE -ne 0) {
-  exit $LASTEXITCODE
+$devConfig = [ordered]@{
+  productName    = "Verbatim Dev"
+  mainBinaryName = "verbatim-dev"
+  version        = $DevVersion
+  identifier     = "com.galaxyruler.verbatim.dev"
+  plugins        = @{
+    updater = @{
+      endpoints = @("https://127.0.0.1:9/verbatim-dev/latest.json")
+    }
+  }
 }
+$devConfig | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $devConfigPath -Encoding UTF8
 
 $bundleRoot = Join-Path $resolvedTargetDir "release\bundle"
 $nsisBundleDir = Join-Path $bundleRoot "nsis"

@@ -47,10 +47,6 @@ on:
         required: false
         type: boolean
         default: false
-      dev-version:
-        required: false
-        type: string
-        default: ""
 
 env:
   TSC_VERSION: "0.9.0"
@@ -203,17 +199,6 @@ jobs:
       - name: install frontend dependencies
         run: bun install
 
-      - name: Generate dev app config
-        if: inputs.dev-version != ''
-        shell: bash
-        env:
-          DEV_VERSION: ${{ inputs.dev-version }}
-        run: |
-          bun scripts/generate-dev-tauri-config.ts --version "$DEV_VERSION" --output "$RUNNER_TEMP/tauri.dev.generated.json"
-          echo "VERBATIM_DEV_VERSION=$DEV_VERSION" >> "$GITHUB_ENV"
-          echo "VITE_VERBATIM_DEV_VERSION=$DEV_VERSION" >> "$GITHUB_ENV"
-          echo "VERBATIM_TAURI_EXTRA_ARGS=--config $RUNNER_TEMP/tauri.dev.generated.json --ignore-version-mismatches" >> "$GITHUB_ENV"
-
       - name: rustup install target
         if: ${{ inputs.target != '' && !contains(inputs.target, 'x86_64-unknown-linux-gnu') && !contains(inputs.target, 'x86_64-pc-windows-msvc') }}
         run: rustup target add ${{ inputs.target }}
@@ -332,7 +317,7 @@ jobs:
           releaseName: ${{ inputs.release-id && format('v{0}', steps.get-version.outputs.version) || '' }}
           releaseId: ${{ inputs.release-id }}
           assetNamePattern: ${{ steps.patch-release-name.outputs.platform }}
-          args: ${{ inputs.build-args }} ${{ env.VERBATIM_TAURI_EXTRA_ARGS }} ${{ env.VERBATIM_WINDOWS_RUNTIME_CONFIG }}
+          args: ${{ inputs.build-args }} ${{ env.VERBATIM_WINDOWS_RUNTIME_CONFIG }}
 
       - name: Build with Tauri (unsigned)
         if: ${{ !inputs.sign-binaries }}
@@ -353,7 +338,7 @@ jobs:
           releaseName: ${{ inputs.release-id && format('v{0}', steps.get-version.outputs.version) || '' }}
           releaseId: ${{ inputs.release-id }}
           assetNamePattern: ${{ steps.patch-release-name.outputs.platform }}
-          args: ${{ inputs.build-args }} ${{ env.VERBATIM_TAURI_EXTRA_ARGS }} ${{ env.VERBATIM_WINDOWS_RUNTIME_CONFIG }}
+          args: ${{ inputs.build-args }} ${{ env.VERBATIM_WINDOWS_RUNTIME_CONFIG }}
 
       - name: Upload artifacts (macOS)
         if: inputs.upload-artifacts && contains(inputs.platform, 'macos')
