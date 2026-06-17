@@ -905,7 +905,7 @@
         "title": "Type into any app",
         "description": "Verbatim uses Android's accessibility API to insert text wherever your cursor is, like a keyboard.",
         "action": "Enable in Accessibility",
-        "callout": "Can insert your transcribed text. Does not log screen text or other apps."
+        "callout": "Can insert your transcribed text. Does not log screen text or app content."
       }
     },
     "home": {

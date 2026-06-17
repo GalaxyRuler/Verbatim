@@ -49,6 +49,11 @@ class FloatingBubbleService : Service() {
   }
 
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+    if (BuildConfig.DEBUG && intent?.action == ACTION_DEBUG_INSERT_PROBE) {
+      insertDebugProbe()
+      return START_STICKY
+    }
+
     if (bubbleView == null) {
       showBubble()
     }
@@ -377,6 +382,26 @@ class FloatingBubbleService : Service() {
     }
   }
 
+  private fun insertDebugProbe() {
+    if (!BuildConfig.DEBUG) {
+      return
+    }
+
+    when (VerbatimAccessibilityService.insert(DEBUG_INSERTION_TEXT)) {
+      VerbatimAccessibilityService.InsertResult.INSERTED -> {
+        Toast.makeText(this, R.string.bubble_inserted, Toast.LENGTH_SHORT).show()
+      }
+      VerbatimAccessibilityService.InsertResult.SENSITIVE -> {
+        Toast.makeText(this, R.string.bubble_sensitive_blocked, Toast.LENGTH_LONG).show()
+      }
+      VerbatimAccessibilityService.InsertResult.FAILED,
+      VerbatimAccessibilityService.InsertResult.NO_TARGET -> {
+        copyForRecovery(DEBUG_INSERTION_TEXT)
+        Toast.makeText(this, R.string.bubble_copied, Toast.LENGTH_LONG).show()
+      }
+    }
+  }
+
   private fun copyForRecovery(text: String) {
     val clipboard = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
     clipboard.setPrimaryClip(
@@ -434,6 +459,9 @@ class FloatingBubbleService : Service() {
   companion object {
     private const val NOTIFICATION_CHANNEL_ID = "verbatim_dictation"
     private const val FOREGROUND_NOTIFICATION_ID = 4808
+    private const val ACTION_DEBUG_INSERT_PROBE =
+      "com.galaxyruler.verbatim.action.DEBUG_INSERT_PROBE"
+    private const val DEBUG_INSERTION_TEXT = "Verbatim Android insertion probe"
 
     @Volatile
     var isRunning: Boolean = false

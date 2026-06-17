@@ -36,13 +36,8 @@ class VerbatimAccessibilityService : AccessibilityService() {
   }
 
   private fun insertText(text: CharSequence): InsertResult {
-    val target = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
-      ?: focusedNode
+    val target = focusedEditableNode()
       ?: return InsertResult.NO_TARGET
-
-    if (!isEditableNode(target)) {
-      return InsertResult.NO_TARGET
-    }
 
     if (isSensitiveNode(target)) {
       return InsertResult.SENSITIVE
@@ -60,6 +55,26 @@ class VerbatimAccessibilityService : AccessibilityService() {
     } else {
       InsertResult.FAILED
     }
+  }
+
+  private fun focusedEditableNode(): AccessibilityNodeInfo? {
+    rootInActiveWindow
+      ?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+      ?.takeIf { isEditableNode(it) }
+      ?.let { return it }
+
+    focusedNode
+      ?.takeIf { isEditableNode(it) }
+      ?.let { return it }
+
+    windows.forEach { window ->
+      window.root
+        ?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+        ?.takeIf { isEditableNode(it) }
+        ?.let { return it }
+    }
+
+    return null
   }
 
   private fun isEditableNode(node: AccessibilityNodeInfo): Boolean {
