@@ -1,0 +1,40 @@
+name: "Linux Parity"
+
+# Manual Ubuntu x64 build lane. This keeps Linux parity evidence separate from
+# Windows/macOS failures while reusing the canonical build job.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref to build. Leave empty to build the workflow ref."
+        required: false
+        default: ""
+        type: string
+      build_profile:
+        description: "Build profile"
+        required: false
+        default: "release"
+        type: choice
+        options:
+          - release
+          - debug
+
+concurrency:
+  group: ${{ github.workflow }}-${{ inputs.ref || github.ref }}-${{ inputs.build_profile }}
+  cancel-in-progress: true
+
+jobs:
+  ubuntu-x64:
+    permissions:
+      contents: write
+    uses: ./.github/workflows/build.yml
+    with:
+      platform: "ubuntu-22.04"
+      target: "x86_64-unknown-linux-gnu"
+      build-args: ${{ inputs.build_profile == 'debug' && '--debug --bundles deb' || '--bundles deb' }}
+      asset-prefix: "verbatim-linux-parity"
+      upload-artifacts: true
+      ref: ${{ inputs.ref != '' && inputs.ref || github.ref }}
+      is-debug-build: ${{ inputs.build_profile == 'debug' }}
+    secrets: inherit
