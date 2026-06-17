@@ -248,11 +248,13 @@ class FloatingBubbleService : Service() {
 
   private fun startListening() {
     if (!hasRequiredPermissions()) {
+      showFailure(R.string.bubble_permissions_needed, null)
       Toast.makeText(this, R.string.bubble_permission_missing, Toast.LENGTH_LONG).show()
       return
     }
 
     if (!SpeechRecognizer.isRecognitionAvailable(this)) {
+      showFailure(R.string.bubble_speech_missing, null)
       Toast.makeText(this, R.string.bubble_speech_unavailable, Toast.LENGTH_LONG).show()
       return
     }
@@ -350,6 +352,7 @@ class FloatingBubbleService : Service() {
       foregroundActive = true
       true
     } catch (_: RuntimeException) {
+      showFailure(R.string.bubble_microphone_blocked, null)
       Toast.makeText(this, R.string.bubble_foreground_failed, Toast.LENGTH_LONG).show()
       false
     }

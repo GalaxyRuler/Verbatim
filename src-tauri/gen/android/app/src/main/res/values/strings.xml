@@ -10,6 +10,9 @@
     <string name="bubble_retry_insert">Retry</string>
     <string name="bubble_dismiss">Dismiss</string>
     <string name="bubble_recovery_copied">Copied</string>
+    <string name="bubble_permissions_needed">Permissions needed</string>
+    <string name="bubble_speech_missing">Speech unavailable</string>
+    <string name="bubble_microphone_blocked">Mic unavailable</string>
     <string name="bubble_permission_missing">Enable microphone, overlay, and accessibility permissions in Verbatim.</string>
     <string name="bubble_speech_unavailable">Speech recognition is not available on this Android device.</string>
     <string name="bubble_inserted">Inserted transcription.</string>
