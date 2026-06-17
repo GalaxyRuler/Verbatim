@@ -77,6 +77,10 @@ class MainActivity : TauriActivity() {
         .toString()
 
     @JavascriptInterface
+    fun nativeTranscriptHistory(): String =
+      FloatingBubbleService.nativeTranscriptHistory(activity)
+
+    @JavascriptInterface
     fun requestMicrophone() {
       activity.runOnUiThread {
         ActivityCompat.requestPermissions(

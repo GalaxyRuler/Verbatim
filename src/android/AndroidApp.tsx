@@ -43,6 +43,7 @@ declare global {
   interface Window {
     VerbatimAndroid?: {
       permissionSnapshot: () => string;
+      nativeTranscriptHistory?: () => string;
       requestMicrophone: () => void;
       openOverlaySettings: () => void;
       openAccessibilitySettings: () => void;
@@ -75,6 +76,70 @@ const parsePermissions = (value: string): AndroidPermissionSnapshot => {
     return { ...defaultPermissions, ...JSON.parse(value) };
   } catch {
     return defaultPermissions;
+  }
+};
+
+const historyEntryFromAndroidSnapshot = (
+  entry: Record<string, unknown>,
+): HistoryEntry | null => {
+  const text = entry.transcription_text;
+  if (typeof text !== "string" || text.trim().length === 0) {
+    return null;
+  }
+
+  const id = Number(entry.id);
+  const timestamp = Number(entry.timestamp);
+  const fallbackTimestamp = Date.now();
+  const normalizedTimestamp = Number.isFinite(timestamp)
+    ? timestamp
+    : fallbackTimestamp;
+  return {
+    id: Number.isFinite(id) ? id : normalizedTimestamp,
+    file_name: "android-native",
+    timestamp: normalizedTimestamp,
+    saved: false,
+    title: typeof entry.title === "string" ? entry.title : "",
+    transcription_text: text,
+    post_processed_text: null,
+    post_process_prompt: null,
+    post_process_requested: false,
+    adaptive_profile_id: null,
+    adaptive_profile_name: null,
+    adaptive_routing_json: null,
+    adaptive_context_json: null,
+    adaptive_language_json: null,
+    adaptive_insertion_json: null,
+    adaptive_parent_entry_id: null,
+    transform_action: null,
+    transform_original_text: null,
+    transform_result_text: null,
+    transform_target_language: null,
+    transform_provider_id: null,
+    transform_model: null,
+    transform_recovery_status: null,
+  };
+};
+
+const readAndroidNativeHistory = (): HistoryEntry[] => {
+  const snapshot = safeBridge()?.nativeTranscriptHistory?.();
+  if (!snapshot) {
+    return [];
+  }
+
+  try {
+    const entries = JSON.parse(snapshot);
+    if (!Array.isArray(entries)) {
+      return [];
+    }
+    return entries
+      .map((entry) =>
+        typeof entry === "object" && entry !== null && !Array.isArray(entry)
+          ? historyEntryFromAndroidSnapshot(entry as Record<string, unknown>)
+          : null,
+      )
+      .filter((entry): entry is HistoryEntry => entry !== null);
+  } catch {
+    return [];
   }
 };
 
@@ -334,13 +399,25 @@ function HomeTab({
   const activeModel = models.find((model) => model.id === currentModel);
   const selectedLanguage = settings?.selected_language || t("common.default");
 
-  useEffect(() => {
+  const loadLastEntry = useCallback(() => {
+    const nativeEntries = readAndroidNativeHistory();
+    if (nativeEntries.length > 0) {
+      setLastEntry(nativeEntries[0]);
+      return;
+    }
+
     commands.getHistoryEntries(null, 1).then((result) => {
       if (result.status === "ok") {
         setLastEntry(result.data.entries[0] ?? null);
       }
     });
   }, []);
+
+  useEffect(() => {
+    loadLastEntry();
+    const interval = window.setInterval(loadLastEntry, 1500);
+    return () => window.clearInterval(interval);
+  }, [loadLastEntry]);
 
   const bubbleReady =
     permissions.microphone &&
@@ -443,13 +520,23 @@ function HistoryTab() {
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [search, setSearch] = useState("");
 
-  useEffect(() => {
+  const loadEntries = useCallback(() => {
+    const nativeEntries = readAndroidNativeHistory();
+    if (nativeEntries.length > 0) {
+      setEntries(nativeEntries);
+      return;
+    }
+
     commands.getHistoryEntries(null, 30).then((result) => {
       if (result.status === "ok") {
         setEntries(result.data.entries);
       }
     });
   }, []);
+
+  useEffect(() => {
+    loadEntries();
+  }, [loadEntries]);
 
   const filteredEntries = entries.filter((entry) =>
     entry.transcription_text.toLowerCase().includes(search.toLowerCase()),

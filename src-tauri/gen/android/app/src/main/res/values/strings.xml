@@ -19,6 +19,7 @@
     <string name="bubble_copied">Could not insert text. Transcription copied.</string>
     <string name="bubble_sensitive_blocked">Verbatim skipped a sensitive field.</string>
     <string name="bubble_listen_failed">Dictation failed. Try again.</string>
+    <string name="android_history_title">Android dictation</string>
     <string name="bubble_clip_label">Verbatim transcript</string>
     <string name="bubble_notification_text">Listening through the floating mic bubble.</string>
     <string name="bubble_foreground_failed">Could not start Android microphone service.</string>

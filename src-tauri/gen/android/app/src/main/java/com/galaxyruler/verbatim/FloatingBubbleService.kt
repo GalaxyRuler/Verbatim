@@ -30,8 +30,11 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
+import org.json.JSONArray
+import org.json.JSONObject
 import java.util.Locale
 import kotlin.math.abs
+import kotlin.math.min
 
 class FloatingBubbleService : Service() {
   private var windowManager: WindowManager? = null
@@ -397,9 +400,12 @@ class FloatingBubbleService : Service() {
     insertOrRecover(text)
   }
 
-  private fun insertOrRecover(text: String) {
+  private fun insertOrRecover(text: String, shouldRecord: Boolean = true) {
     when (VerbatimAccessibilityService.insert(text)) {
       VerbatimAccessibilityService.InsertResult.INSERTED -> {
+        if (shouldRecord) {
+          recordTranscript(text, HISTORY_STATUS_INSERTED)
+        }
         resetToIdle()
         Toast.makeText(this, R.string.bubble_inserted, Toast.LENGTH_SHORT).show()
       }
@@ -410,6 +416,9 @@ class FloatingBubbleService : Service() {
       VerbatimAccessibilityService.InsertResult.FAILED,
       VerbatimAccessibilityService.InsertResult.NO_TARGET -> {
         copyForRecovery(text)
+        if (shouldRecord) {
+          recordTranscript(text, HISTORY_STATUS_COPIED)
+        }
         showFailure(R.string.bubble_recovery_copied, text)
         Toast.makeText(this, R.string.bubble_copied, Toast.LENGTH_LONG).show()
       }
@@ -432,7 +441,7 @@ class FloatingBubbleService : Service() {
     }
     bubbleState = BubbleState.TRANSCRIBING
     bubbleView?.let { renderBubble(it) }
-    insertOrRecover(text)
+    insertOrRecover(text, shouldRecord = false)
   }
 
   private fun showFailure(messageResId: Int, recoverableText: String?) {
@@ -453,6 +462,34 @@ class FloatingBubbleService : Service() {
     clipboard.setPrimaryClip(
       ClipData.newPlainText(getString(R.string.bubble_clip_label), text),
     )
+  }
+
+  private fun recordTranscript(text: String, status: String) {
+    try {
+      val now = System.currentTimeMillis()
+      val entry = JSONObject()
+        .put("id", now)
+        .put("timestamp", now)
+        .put("title", getString(R.string.android_history_title))
+        .put("transcription_text", text)
+        .put("insertion_status", status)
+
+      val stored = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+        .getString(ANDROID_HISTORY_KEY, "[]") ?: "[]"
+      val existing = JSONArray(stored)
+      val next = JSONArray().put(entry)
+      val keep = min(existing.length(), ANDROID_HISTORY_LIMIT - 1)
+      for (index in 0 until keep) {
+        existing.optJSONObject(index)?.let { next.put(it) }
+      }
+
+      getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+        .edit()
+        .putString(ANDROID_HISTORY_KEY, next.toString())
+        .apply()
+    } catch (_: Exception) {
+      // History is a local convenience path; never surface transcript text in errors.
+    }
   }
 
   private fun hasRequiredPermissions(): Boolean =
@@ -487,10 +524,10 @@ class FloatingBubbleService : Service() {
     (value * resources.displayMetrics.density).toInt()
 
   private fun loadCoordinate(key: String, fallback: Int): Int =
-    getSharedPreferences("verbatim_android", MODE_PRIVATE).getInt(key, fallback)
+    getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getInt(key, fallback)
 
   private fun saveCoordinate(key: String, value: Int) {
-    getSharedPreferences("verbatim_android", MODE_PRIVATE)
+    getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
       .edit()
       .putInt(key, value)
       .apply()
@@ -504,6 +541,11 @@ class FloatingBubbleService : Service() {
   }
 
   companion object {
+    private const val PREFS_NAME = "verbatim_android"
+    private const val ANDROID_HISTORY_KEY = "native_transcript_history"
+    private const val ANDROID_HISTORY_LIMIT = 30
+    private const val HISTORY_STATUS_INSERTED = "inserted"
+    private const val HISTORY_STATUS_COPIED = "copied"
     private const val NOTIFICATION_CHANNEL_ID = "verbatim_dictation"
     private const val FOREGROUND_NOTIFICATION_ID = 4808
     private const val ACTION_DEBUG_INSERT_PROBE =
@@ -513,5 +555,10 @@ class FloatingBubbleService : Service() {
     @Volatile
     var isRunning: Boolean = false
       private set
+
+    fun nativeTranscriptHistory(context: Context): String =
+      context
+        .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        .getString(ANDROID_HISTORY_KEY, "[]") ?: "[]"
   }
 }

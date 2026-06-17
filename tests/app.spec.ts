@@ -708,27 +708,33 @@ const installAndroidBridgeMock = async (
     speechRecognizerAvailable: boolean;
     onDeviceSpeechRecognizerAvailable: boolean;
   },
+  nativeHistoryEntries: Array<Record<string, unknown>> = [],
 ) => {
-  await page.addInitScript((snapshot) => {
-    const testWindow = window as typeof window & {
-      VerbatimAndroid: {
-        permissionSnapshot: () => string;
-        requestMicrophone: () => void;
-        openOverlaySettings: () => void;
-        openAccessibilitySettings: () => void;
-        startBubble: () => void;
-        stopBubble: () => void;
+  await page.addInitScript(
+    ({ snapshot, nativeHistoryEntries }) => {
+      const testWindow = window as typeof window & {
+        VerbatimAndroid: {
+          permissionSnapshot: () => string;
+          nativeTranscriptHistory: () => string;
+          requestMicrophone: () => void;
+          openOverlaySettings: () => void;
+          openAccessibilitySettings: () => void;
+          startBubble: () => void;
+          stopBubble: () => void;
+        };
       };
-    };
-    testWindow.VerbatimAndroid = {
-      permissionSnapshot: () => JSON.stringify(snapshot),
-      requestMicrophone: () => undefined,
-      openOverlaySettings: () => undefined,
-      openAccessibilitySettings: () => undefined,
-      startBubble: () => undefined,
-      stopBubble: () => undefined,
-    };
-  }, snapshot);
+      testWindow.VerbatimAndroid = {
+        permissionSnapshot: () => JSON.stringify(snapshot),
+        nativeTranscriptHistory: () => JSON.stringify(nativeHistoryEntries),
+        requestMicrophone: () => undefined,
+        openOverlaySettings: () => undefined,
+        openAccessibilitySettings: () => undefined,
+        startBubble: () => undefined,
+        stopBubble: () => undefined,
+      };
+    },
+    { snapshot, nativeHistoryEntries },
+  );
 };
 
 test.describe("Verbatim App", () => {
@@ -775,6 +781,42 @@ test.describe("Verbatim App", () => {
     await expect(
       page.getByRole("heading", { name: "Tap mic to dictate anywhere" }),
     ).toHaveCount(0);
+  });
+
+  test("android home reads native transcript history from bridge", async ({
+    page,
+  }) => {
+    await installTauriMocks(page, {}, [], "android");
+    await installAndroidBridgeMock(
+      page,
+      {
+        microphone: true,
+        overlay: true,
+        accessibility: true,
+        bubbleRunning: true,
+        speechRecognizerAvailable: true,
+        onDeviceSpeechRecognizerAvailable: true,
+      },
+      [
+        {
+          id: 101,
+          timestamp: 1781740000000,
+          title: "Android dictation",
+          transcription_text: "Native Android transcript",
+          insertion_status: "inserted",
+        },
+      ],
+    );
+
+    await page.goto("/");
+
+    await expect(
+      page.getByRole("heading", { name: "Tap mic to dictate anywhere" }),
+    ).toBeVisible();
+    await expect(page.getByText("Native Android transcript")).toBeVisible();
+
+    await page.getByRole("button", { name: "History" }).click();
+    await expect(page.getByText("Native Android transcript")).toBeVisible();
   });
 
   test("adaptive profiles can be enabled from experimental settings", async ({
