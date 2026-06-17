@@ -1,15 +1,20 @@
 package com.galaxyruler.verbatim
 
 import android.Manifest
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.pm.ServiceInfo
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.drawable.GradientDrawable
+import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
 import android.provider.Settings
@@ -23,6 +28,7 @@ import android.view.WindowManager
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import java.util.Locale
 import kotlin.math.abs
@@ -33,6 +39,7 @@ class FloatingBubbleService : Service() {
   private var layoutParams: WindowManager.LayoutParams? = null
   private var speechRecognizer: SpeechRecognizer? = null
   private var bubbleState = BubbleState.IDLE
+  private var foregroundActive = false
 
   override fun onCreate() {
     super.onCreate()
@@ -53,6 +60,7 @@ class FloatingBubbleService : Service() {
   override fun onDestroy() {
     speechRecognizer?.destroy()
     speechRecognizer = null
+    stopMicrophoneForeground()
     bubbleView?.let { view ->
       windowManager?.removeView(view)
     }
@@ -216,8 +224,12 @@ class FloatingBubbleService : Service() {
       return
     }
 
+    if (!startMicrophoneForeground()) {
+      return
+    }
+
     speechRecognizer?.destroy()
-    speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this).apply {
+    speechRecognizer = createSpeechRecognizer().apply {
       setRecognitionListener(object : RecognitionListener {
         override fun onReadyForSpeech(params: Bundle?) = Unit
         override fun onBeginningOfSpeech() = Unit
@@ -228,11 +240,13 @@ class FloatingBubbleService : Service() {
           bubbleView?.let { renderBubble(it) }
         }
         override fun onError(error: Int) {
+          stopMicrophoneForeground()
           bubbleState = BubbleState.IDLE
           bubbleView?.let { renderBubble(it) }
           Toast.makeText(this@FloatingBubbleService, R.string.bubble_listen_failed, Toast.LENGTH_SHORT).show()
         }
         override fun onResults(results: Bundle?) {
+          stopMicrophoneForeground()
           val text = results
             ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
             ?.firstOrNull()
@@ -253,9 +267,91 @@ class FloatingBubbleService : Service() {
           RecognizerIntent.LANGUAGE_MODEL_FREE_FORM,
         )
         putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
+        putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
         putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toLanguageTag())
       },
     )
+  }
+
+  private fun createSpeechRecognizer(): SpeechRecognizer =
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+      SpeechRecognizer.isOnDeviceRecognitionAvailable(this)
+    ) {
+      SpeechRecognizer.createOnDeviceSpeechRecognizer(this)
+    } else {
+      SpeechRecognizer.createSpeechRecognizer(this)
+    }
+
+  private fun startMicrophoneForeground(): Boolean {
+    if (foregroundActive) {
+      return true
+    }
+
+    return try {
+      createNotificationChannel()
+      val intent = Intent(this, MainActivity::class.java)
+      val pendingIntent = PendingIntent.getActivity(
+        this,
+        0,
+        intent,
+        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+      )
+      val notification = NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
+        .setSmallIcon(R.mipmap.ic_launcher)
+        .setContentTitle(getString(R.string.bubble_recording))
+        .setContentText(getString(R.string.bubble_notification_text))
+        .setContentIntent(pendingIntent)
+        .setOngoing(true)
+        .setCategory(NotificationCompat.CATEGORY_SERVICE)
+        .setPriority(NotificationCompat.PRIORITY_LOW)
+        .build()
+
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        startForeground(
+          FOREGROUND_NOTIFICATION_ID,
+          notification,
+          ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE,
+        )
+      } else {
+        startForeground(FOREGROUND_NOTIFICATION_ID, notification)
+      }
+      foregroundActive = true
+      true
+    } catch (_: RuntimeException) {
+      Toast.makeText(this, R.string.bubble_foreground_failed, Toast.LENGTH_LONG).show()
+      false
+    }
+  }
+
+  private fun stopMicrophoneForeground() {
+    if (!foregroundActive) {
+      return
+    }
+
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+      stopForeground(STOP_FOREGROUND_REMOVE)
+    } else {
+      @Suppress("DEPRECATION")
+      stopForeground(true)
+    }
+    foregroundActive = false
+  }
+
+  private fun createNotificationChannel() {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+      return
+    }
+
+    val channel = NotificationChannel(
+      NOTIFICATION_CHANNEL_ID,
+      getString(R.string.app_name),
+      NotificationManager.IMPORTANCE_LOW,
+    ).apply {
+      description = getString(R.string.bubble_notification_text)
+    }
+
+    val manager = getSystemService(NotificationManager::class.java)
+    manager.createNotificationChannel(channel)
   }
 
   private fun handleRecognizedText(text: String?) {
@@ -336,6 +432,9 @@ class FloatingBubbleService : Service() {
   }
 
   companion object {
+    private const val NOTIFICATION_CHANNEL_ID = "verbatim_dictation"
+    private const val FOREGROUND_NOTIFICATION_ID = 4808
+
     @Volatile
     var isRunning: Boolean = false
       private set

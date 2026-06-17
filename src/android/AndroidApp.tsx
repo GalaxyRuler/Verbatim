@@ -36,6 +36,7 @@ type AndroidPermissionSnapshot = {
   accessibility: boolean;
   bubbleRunning: boolean;
   speechRecognizerAvailable: boolean;
+  onDeviceSpeechRecognizerAvailable: boolean;
 };
 
 declare global {
@@ -57,6 +58,7 @@ const defaultPermissions: AndroidPermissionSnapshot = {
   accessibility: false,
   bubbleRunning: false,
   speechRecognizerAvailable: false,
+  onDeviceSpeechRecognizerAvailable: false,
 };
 
 const tabs: Array<{ id: AndroidTab; labelKey: string; icon: typeof Home }> = [

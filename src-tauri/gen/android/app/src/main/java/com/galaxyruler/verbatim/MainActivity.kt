@@ -69,6 +69,11 @@ class MainActivity : TauriActivity() {
         .put("accessibility", activity.isAccessibilityEnabled())
         .put("bubbleRunning", FloatingBubbleService.isRunning)
         .put("speechRecognizerAvailable", SpeechRecognizer.isRecognitionAvailable(activity))
+        .put(
+          "onDeviceSpeechRecognizerAvailable",
+          android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S &&
+            SpeechRecognizer.isOnDeviceRecognitionAvailable(activity),
+        )
         .toString()
 
     @JavascriptInterface
