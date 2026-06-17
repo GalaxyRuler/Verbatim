@@ -1,4 +1,6 @@
-use enigo::{Enigo, Key, Keyboard, Mouse, Settings};
+use enigo::{Enigo, Mouse, Settings};
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+use enigo::{Key, Keyboard};
 use std::sync::Mutex;
 use tauri::{AppHandle, Manager};
 
@@ -25,6 +27,7 @@ pub fn get_cursor_position(app_handle: &AppHandle) -> Option<(i32, i32)> {
 /// Sends a Ctrl+V or Cmd+V paste command using platform-specific virtual key codes.
 /// This ensures the paste works regardless of keyboard layout (e.g., Russian, AZERTY, DVORAK).
 /// Note: On Wayland, this may not work - callers should check for Wayland and use alternative methods.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn send_paste_ctrl_v(enigo: &mut Enigo) -> Result<(), String> {
     // Platform-specific key definitions
     #[cfg(target_os = "macos")]
@@ -51,9 +54,15 @@ pub fn send_paste_ctrl_v(enigo: &mut Enigo) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub fn send_paste_ctrl_v(_enigo: &mut Enigo) -> Result<(), String> {
+    Err("Desktop paste shortcuts are not supported on mobile".to_string())
+}
+
 /// Sends a Ctrl+Shift+V paste command.
 /// This is commonly used in terminal applications on Linux to paste without formatting.
 /// Note: On Wayland, this may not work - callers should check for Wayland and use alternative methods.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn send_paste_ctrl_shift_v(enigo: &mut Enigo) -> Result<(), String> {
     // Platform-specific key definitions
     #[cfg(target_os = "macos")]
@@ -86,9 +95,15 @@ pub fn send_paste_ctrl_shift_v(enigo: &mut Enigo) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub fn send_paste_ctrl_shift_v(_enigo: &mut Enigo) -> Result<(), String> {
+    Err("Desktop paste shortcuts are not supported on mobile".to_string())
+}
+
 /// Sends a Shift+Insert paste command (Windows and Linux only).
 /// This is more universal for terminal applications and legacy software.
 /// Note: On Wayland, this may not work - callers should check for Wayland and use alternative methods.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn send_paste_shift_insert(enigo: &mut Enigo) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     let insert_key_code = Key::Other(0x2D); // VK_INSERT
@@ -110,6 +125,11 @@ pub fn send_paste_shift_insert(enigo: &mut Enigo) -> Result<(), String> {
         .map_err(|e| format!("Failed to release Shift key: {}", e))?;
 
     Ok(())
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub fn send_paste_shift_insert(_enigo: &mut Enigo) -> Result<(), String> {
+    Err("Desktop paste shortcuts are not supported on mobile".to_string())
 }
 
 /// Sets left-to-right reading order in Windows rich edit controls.
@@ -138,10 +158,16 @@ pub fn send_ltr_reading_order(enigo: &mut Enigo) -> Result<(), String> {
 
 /// Pastes text directly using the enigo text method.
 /// This tries to use system input methods if possible, otherwise simulates keystrokes one by one.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn paste_text_direct(enigo: &mut Enigo, text: &str) -> Result<(), String> {
     enigo
         .text(text)
         .map_err(|e| format!("Failed to send text directly: {}", e))?;
 
     Ok(())
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub fn paste_text_direct(_enigo: &mut Enigo, _text: &str) -> Result<(), String> {
+    Err("Desktop direct text injection is not supported on mobile".to_string())
 }
