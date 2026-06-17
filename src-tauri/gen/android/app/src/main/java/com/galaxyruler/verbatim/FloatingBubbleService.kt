@@ -253,7 +253,7 @@ class FloatingBubbleService : Service() {
       return
     }
 
-    if (!SpeechRecognizer.isRecognitionAvailable(this)) {
+    if (!isOnDeviceSpeechRecognitionAvailable()) {
       showFailure(R.string.bubble_speech_missing, null)
       Toast.makeText(this, R.string.bubble_speech_unavailable, Toast.LENGTH_LONG).show()
       return
@@ -307,14 +307,12 @@ class FloatingBubbleService : Service() {
     )
   }
 
-  private fun createSpeechRecognizer(): SpeechRecognizer =
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+  private fun isOnDeviceSpeechRecognitionAvailable(): Boolean =
+    Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
       SpeechRecognizer.isOnDeviceRecognitionAvailable(this)
-    ) {
-      SpeechRecognizer.createOnDeviceSpeechRecognizer(this)
-    } else {
-      SpeechRecognizer.createSpeechRecognizer(this)
-    }
+
+  private fun createSpeechRecognizer(): SpeechRecognizer =
+    SpeechRecognizer.createOnDeviceSpeechRecognizer(this)
 
   private fun startMicrophoneForeground(): Boolean {
     if (foregroundActive) {
