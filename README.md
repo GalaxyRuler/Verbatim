@@ -53,13 +53,13 @@ Download the latest Windows, macOS, and Linux installers from the [Verbatim Rele
 
 <!-- latest-release:start -->
 
-**Latest published release:** [v0.8.7](https://github.com/GalaxyRuler/Verbatim/releases/tag/v0.8.7) (2026-06-13)
+**Latest published release:** [v0.8.8](https://github.com/GalaxyRuler/Verbatim/releases/tag/v0.8.8) (2026-06-17)
 
 | Platform            | Direct downloads                                                                                                                                                                                                  |
 | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Windows x64         | [setup.exe](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.8.7/Verbatim_0.8.7_x64-setup.exe) · [MSI](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.8.7/Verbatim_0.8.7_x64_en-US.msi) |
-| macOS Apple Silicon | [DMG](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.8.7/Verbatim_0.8.7_aarch64.dmg)                                                                                                                |
-| Ubuntu x64          | [DEB](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.8.7/Verbatim_0.8.7_amd64.deb)                                                                                                                  |
+| Windows x64         | [setup.exe](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.8.8/Verbatim_0.8.8_x64-setup.exe) · [MSI](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.8.8/Verbatim_0.8.8_x64_en-US.msi) |
+| macOS Apple Silicon | [DMG](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.8.8/Verbatim_0.8.8_aarch64.dmg)                                                                                                                |
+| Ubuntu x64          | [DEB](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.8.8/Verbatim_0.8.8_amd64.deb)                                                                                                                  |
 
 <!-- latest-release:end -->
 
