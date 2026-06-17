@@ -38,7 +38,7 @@ mod tray_i18n;
 mod utils;
 
 pub use cli::CliArgs;
-#[cfg(debug_assertions)]
+#[cfg(all(debug_assertions, not(any(target_os = "android", target_os = "ios"))))]
 use specta_typescript::{BigIntExportBehavior, Typescript};
 use tauri_specta::{collect_commands, collect_events, Builder};
 
@@ -520,7 +520,7 @@ fn run_inner(cli_args: CliArgs) {
         ])
         .events(collect_events![managers::history::HistoryUpdatePayload,]);
 
-    #[cfg(debug_assertions)] // <- Only export on non-release builds
+    #[cfg(all(debug_assertions, not(any(target_os = "android", target_os = "ios"))))]
     specta_builder
         .export(
             Typescript::default().bigint(BigIntExportBehavior::Number),
