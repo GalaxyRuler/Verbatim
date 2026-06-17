@@ -214,12 +214,23 @@ const installTauriMocks = async (
   settingsOverrides: Partial<typeof baseSettings> = {},
   historyEntries: Array<Record<string, unknown>> = [],
   osType: "windows" | "linux" | "macos" | "android" = "windows",
+  mockOptions: {
+    availableModels?: typeof models;
+    currentModel?: string;
+    hasAnyModels?: boolean;
+  } = {},
 ) => {
+  const availableModels = mockOptions.availableModels ?? models;
+  const currentModel = mockOptions.currentModel ?? "small";
+  const hasAnyModels = mockOptions.hasAnyModels ?? true;
+
   await page.addInitScript(
     ({
       settings,
       profiles,
-      models,
+      availableModels,
+      currentModel,
+      hasAnyModels,
       localPostProcessingModels,
       initialHistoryEntries,
       osType,
@@ -570,12 +581,12 @@ const installTauriMocks = async (
               };
               return null;
             case "has_any_models_available":
-              return true;
+              return hasAnyModels;
             case "get_available_models":
-              return models;
+              return availableModels;
             case "get_current_model":
             case "get_transcription_model_status":
-              return "small";
+              return currentModel;
             case "get_windows_microphone_permission_status":
               return {
                 supported: true,
@@ -690,7 +701,9 @@ const installTauriMocks = async (
     {
       settings: { ...baseSettings, ...settingsOverrides },
       profiles: adaptiveProfiles,
-      models,
+      availableModels,
+      currentModel,
+      hasAnyModels,
       localPostProcessingModels: localLlmModels,
       initialHistoryEntries: historyEntries,
       osType,
@@ -705,6 +718,7 @@ const installAndroidBridgeMock = async (
     overlay: boolean;
     accessibility: boolean;
     bubbleRunning: boolean;
+    bubbleVisible?: boolean;
     speechRecognizerAvailable: boolean;
     onDeviceSpeechRecognizerAvailable: boolean;
   },
@@ -778,6 +792,45 @@ test.describe("Verbatim App", () => {
       ),
     ).toBeVisible();
     await expect(page.getByText("Unavailable")).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Tap mic to dictate anywhere" }),
+    ).toHaveCount(0);
+  });
+
+  test("android setup requires a downloaded local model before bubble readiness", async ({
+    page,
+  }) => {
+    await installTauriMocks(page, {}, [], "android", {
+      availableModels: models.map((model) => ({
+        ...model,
+        is_downloaded: false,
+      })),
+      currentModel: "",
+      hasAnyModels: false,
+    });
+    await installAndroidBridgeMock(page, {
+      microphone: true,
+      overlay: true,
+      accessibility: true,
+      bubbleRunning: true,
+      speechRecognizerAvailable: true,
+      onDeviceSpeechRecognizerAvailable: true,
+    });
+
+    await page.goto("/");
+
+    await expect(
+      page.getByRole("heading", { name: "Set up mobile dictation" }),
+    ).toBeVisible();
+    await expect(page.getByText("Download a speech model")).toBeVisible();
+    await expect(
+      page.getByText(
+        "Choose a local model so Android dictation uses Verbatim's offline transcription path.",
+      ),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Choose model" }),
+    ).toBeVisible();
     await expect(
       page.getByRole("heading", { name: "Tap mic to dictate anywhere" }),
     ).toHaveCount(0);

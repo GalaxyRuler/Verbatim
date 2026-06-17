@@ -72,6 +72,7 @@ class MainActivity : TauriActivity() {
         .put("overlay", activity.hasOverlayPermission())
         .put("accessibility", activity.isAccessibilityEnabled())
         .put("bubbleRunning", FloatingBubbleService.isRunning)
+        .put("bubbleVisible", FloatingBubbleService.isVisible)
         .put("speechRecognizerAvailable", SpeechRecognizer.isRecognitionAvailable(activity))
         .put(
           "onDeviceSpeechRecognizerAvailable",

@@ -35,6 +35,7 @@ type AndroidPermissionSnapshot = {
   overlay: boolean;
   accessibility: boolean;
   bubbleRunning: boolean;
+  bubbleVisible: boolean;
   speechRecognizerAvailable: boolean;
   onDeviceSpeechRecognizerAvailable: boolean;
 };
@@ -58,6 +59,7 @@ const defaultPermissions: AndroidPermissionSnapshot = {
   overlay: false,
   accessibility: false,
   bubbleRunning: false,
+  bubbleVisible: false,
   speechRecognizerAvailable: false,
   onDeviceSpeechRecognizerAvailable: false,
 };
@@ -188,6 +190,10 @@ export default function AndroidApp() {
   });
   const [permissions, setPermissions] =
     useState<AndroidPermissionSnapshot>(defaultPermissions);
+  const { models, currentModel } = useModelStore();
+  const activeDownloadedModel = models.find(
+    (model) => model.id === currentModel && model.is_downloaded,
+  );
 
   const refreshPermissions = useCallback(() => {
     const snapshot = safeBridge()?.permissionSnapshot();
@@ -214,7 +220,8 @@ export default function AndroidApp() {
     permissions.microphone &&
     permissions.overlay &&
     permissions.accessibility &&
-    permissions.onDeviceSpeechRecognizerAvailable;
+    permissions.onDeviceSpeechRecognizerAvailable &&
+    !!activeDownloadedModel;
 
   const title = t(`android.tabs.${activeTab}`);
 
@@ -241,10 +248,14 @@ export default function AndroidApp() {
           </button>
         </header>
 
-        {!allPermissionsReady ? (
+        {activeTab === "models" ? (
+          <ModelsTab />
+        ) : !allPermissionsReady ? (
           <AndroidOnboarding
             permissions={permissions}
             refreshPermissions={refreshPermissions}
+            hasDownloadedModel={!!activeDownloadedModel}
+            goToModels={() => setActiveTab("models")}
           />
         ) : activeTab === "home" ? (
           <HomeTab
@@ -254,8 +265,6 @@ export default function AndroidApp() {
           />
         ) : activeTab === "history" ? (
           <HistoryTab />
-        ) : activeTab === "models" ? (
-          <ModelsTab />
         ) : (
           <SettingsTab theme={theme} setTheme={setTheme} />
         )}
@@ -287,9 +296,13 @@ export default function AndroidApp() {
 function AndroidOnboarding({
   permissions,
   refreshPermissions,
+  hasDownloadedModel,
+  goToModels,
 }: {
   permissions: AndroidPermissionSnapshot;
   refreshPermissions: () => void;
+  hasDownloadedModel: boolean;
+  goToModels: () => void;
 }) {
   const { t } = useTranslation();
   const bridge = safeBridge();
@@ -328,7 +341,20 @@ function AndroidOnboarding({
         ? t("android.onboarding.speech.readyCallout")
         : t("android.onboarding.speech.missingCallout"),
     },
+    {
+      ready: hasDownloadedModel,
+      title: t("android.onboarding.model.title"),
+      description: t("android.onboarding.model.description"),
+      action: t("android.onboarding.model.action"),
+      onClick: goToModels,
+      callout: hasDownloadedModel
+        ? t("android.onboarding.model.readyCallout")
+        : t("android.onboarding.model.callout"),
+    },
   ];
+  const currentStepIndex = steps.findIndex((step) => !step.ready);
+  const currentStep =
+    steps[currentStepIndex >= 0 ? currentStepIndex : steps.length - 1];
 
   return (
     <section className="android-section">
@@ -341,43 +367,47 @@ function AndroidOnboarding({
       </div>
 
       <div className="android-permission-list">
-        {steps.map((step) => (
-          <div className="android-permission-row" key={step.title}>
-            <div className="android-permission-copy">
-              <h3>{step.title}</h3>
-              <p className="android-muted">{step.description}</p>
-              {step.callout && (
-                <div
-                  className={`android-callout ${
-                    step.ready
-                      ? "android-callout-trust"
-                      : "android-callout-warning"
-                  }`}
-                >
-                  {step.callout}
-                </div>
-              )}
-            </div>
-            {step.ready ? (
-              <Check aria-label={t("android.permissions.granted")} size={24} />
-            ) : step.action && step.onClick ? (
-              <button
-                type="button"
-                className="android-action android-primary-action"
-                onClick={() => {
-                  step.onClick();
-                  window.setTimeout(refreshPermissions, 600);
-                }}
+        <div className="android-permission-row">
+          <div className="android-permission-copy">
+            <span className="android-step-label">
+              {t("android.onboarding.step", {
+                current: currentStepIndex + 1,
+                total: steps.length,
+              })}
+            </span>
+            <h3>{currentStep.title}</h3>
+            <p className="android-muted">{currentStep.description}</p>
+            {currentStep.callout && (
+              <div
+                className={`android-callout ${
+                  currentStep.ready
+                    ? "android-callout-trust"
+                    : "android-callout-warning"
+                }`}
               >
-                {step.action}
-              </button>
-            ) : (
-              <span className="android-status-pill android-status-warning">
-                {t("android.permissions.unavailable")}
-              </span>
+                {currentStep.callout}
+              </div>
             )}
           </div>
-        ))}
+          {currentStep.ready ? (
+            <Check aria-label={t("android.permissions.granted")} size={24} />
+          ) : currentStep.action && currentStep.onClick ? (
+            <button
+              type="button"
+              className="android-action android-primary-action"
+              onClick={() => {
+                currentStep.onClick();
+                window.setTimeout(refreshPermissions, 600);
+              }}
+            >
+              {currentStep.action}
+            </button>
+          ) : (
+            <span className="android-status-pill android-status-warning">
+              {t("android.permissions.unavailable")}
+            </span>
+          )}
+        </div>
       </div>
     </section>
   );
@@ -447,10 +477,10 @@ function HomeTab({
         <div className="android-hero-row">
           <span>{t("android.home.bubble.toggle")}</span>
           <Switch
-            checked={permissions.bubbleRunning}
+            checked={permissions.bubbleVisible}
             label={t("android.home.bubble.toggle")}
             onClick={() =>
-              permissions.bubbleRunning
+              permissions.bubbleVisible
                 ? safeBridge()?.stopBubble()
                 : safeBridge()?.startBubble()
             }

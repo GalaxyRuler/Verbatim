@@ -913,6 +913,14 @@
         "description": "Verbatim starts dictation only when Android can recognize speech on this device.",
         "readyCallout": "Speech recognition stays on-device for this prototype.",
         "missingCallout": "Install an offline speech pack or use a device with on-device speech. Verbatim will not silently use remote speech."
+      },
+      "step": "Step {{current}} of {{total}}",
+      "model": {
+        "title": "Download a speech model",
+        "description": "Choose a local model so Android dictation uses Verbatim's offline transcription path.",
+        "action": "Choose model",
+        "callout": "Same local model requirement as desktop dictation. Downloads stay under your control.",
+        "readyCallout": "Local model is ready for offline dictation."
       }
     },
     "home": {

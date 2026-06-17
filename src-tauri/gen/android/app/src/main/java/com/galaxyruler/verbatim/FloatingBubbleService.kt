@@ -50,7 +50,7 @@ class FloatingBubbleService : Service() {
     super.onCreate()
     isRunning = true
     windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
-    showBubble()
+    updateBubbleVisibility()
   }
 
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -59,9 +59,11 @@ class FloatingBubbleService : Service() {
       return START_STICKY
     }
 
-    if (bubbleView == null) {
-      showBubble()
+    when (intent?.action) {
+      ACTION_INPUT_TARGET_ACTIVE -> inputTargetActive = true
+      ACTION_INPUT_TARGET_INACTIVE -> inputTargetActive = false
     }
+    updateBubbleVisibility()
     return START_STICKY
   }
 
@@ -76,12 +78,21 @@ class FloatingBubbleService : Service() {
     }
     bubbleView = null
     windowManager = null
+    isVisible = false
     isRunning = false
     super.onDestroy()
   }
 
+  private fun updateBubbleVisibility() {
+    if (inputTargetActive) {
+      showBubble()
+    } else {
+      hideBubble()
+    }
+  }
+
   private fun showBubble() {
-    if (!Settings.canDrawOverlays(this) || bubbleView != null) {
+    if (!inputTargetActive || !Settings.canDrawOverlays(this) || bubbleView != null) {
       return
     }
 
@@ -101,6 +112,26 @@ class FloatingBubbleService : Service() {
     layoutParams = params
     bubbleView = view
     windowManager?.addView(view, params)
+    isVisible = true
+  }
+
+  private fun hideBubble() {
+    if (bubbleView == null) {
+      isVisible = false
+      return
+    }
+
+    speechRecognizer?.cancel()
+    speechRecognizer?.destroy()
+    speechRecognizer = null
+    stopMicrophoneForeground()
+    recoveryText = null
+    bubbleState = BubbleState.IDLE
+    bubbleView?.let { view ->
+      windowManager?.removeView(view)
+    }
+    bubbleView = null
+    isVisible = false
   }
 
   private fun createBubbleView(): LinearLayout {
@@ -562,11 +593,43 @@ class FloatingBubbleService : Service() {
     private const val FOREGROUND_NOTIFICATION_ID = 4808
     private const val ACTION_DEBUG_INSERT_PROBE =
       "com.galaxyruler.verbatim.action.DEBUG_INSERT_PROBE"
+    private const val ACTION_INPUT_TARGET_ACTIVE =
+      "com.galaxyruler.verbatim.action.INPUT_TARGET_ACTIVE"
+    private const val ACTION_INPUT_TARGET_INACTIVE =
+      "com.galaxyruler.verbatim.action.INPUT_TARGET_INACTIVE"
     private const val DEBUG_INSERTION_TEXT = "Verbatim Android insertion probe"
+
+    @Volatile
+    private var inputTargetActive: Boolean = false
 
     @Volatile
     var isRunning: Boolean = false
       private set
+
+    @Volatile
+    var isVisible: Boolean = false
+      private set
+
+    fun setInputTargetActive(context: Context, active: Boolean) {
+      inputTargetActive = active
+      if (!active && !isRunning) {
+        return
+      }
+
+      val action = if (active) {
+        ACTION_INPUT_TARGET_ACTIVE
+      } else {
+        ACTION_INPUT_TARGET_INACTIVE
+      }
+      try {
+        context.startService(Intent(context, FloatingBubbleService::class.java).apply {
+          this.action = action
+        })
+      } catch (_: IllegalStateException) {
+        // Android may reject background service starts; the hidden coordinator
+        // will recover on the next app resume or explicit bubble action.
+      }
+    }
 
     fun nativeTranscriptHistory(context: Context): String =
       context

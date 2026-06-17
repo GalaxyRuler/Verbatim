@@ -2,12 +2,18 @@ package com.galaxyruler.verbatim
 
 import android.accessibilityservice.AccessibilityService
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.text.InputType
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityWindowInfo
 
 class VerbatimAccessibilityService : AccessibilityService() {
   private var focusedNode: AccessibilityNodeInfo? = null
+  private val mainHandler = Handler(Looper.getMainLooper())
+  private val shortRefreshRunnable = Runnable { refreshFocusedNode() }
+  private val longRefreshRunnable = Runnable { refreshFocusedNode() }
 
   override fun onServiceConnected() {
     instance = this
@@ -17,11 +23,15 @@ class VerbatimAccessibilityService : AccessibilityService() {
     event ?: return
     when (event.eventType) {
       AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
-      AccessibilityEvent.TYPE_WINDOWS_CHANGED -> clearFocusedNode()
+      AccessibilityEvent.TYPE_WINDOWS_CHANGED -> {
+        refreshFocusedNode()
+        scheduleBubbleRefresh()
+      }
       AccessibilityEvent.TYPE_VIEW_FOCUSED -> {
         val source = event.source ?: return
         if (isEditableNode(source)) {
           setFocusedNode(source)
+          scheduleBubbleRefresh()
         } else {
           clearFocusedNode()
         }
@@ -30,6 +40,7 @@ class VerbatimAccessibilityService : AccessibilityService() {
         val source = event.source ?: return
         if (isEditableNode(source)) {
           setFocusedNode(source)
+          scheduleBubbleRefresh()
         }
       }
     }
@@ -41,12 +52,14 @@ class VerbatimAccessibilityService : AccessibilityService() {
     if (instance === this) {
       instance = null
     }
+    mainHandler.removeCallbacks(shortRefreshRunnable)
+    mainHandler.removeCallbacks(longRefreshRunnable)
     clearFocusedNode()
     super.onDestroy()
   }
 
   private fun insertText(text: CharSequence): InsertResult {
-    val target = focusedEditableNode()
+    val target = findFocusedEditableNode()
       ?: return InsertResult.NO_TARGET
 
     if (isSensitiveNode(target)) {
@@ -67,7 +80,7 @@ class VerbatimAccessibilityService : AccessibilityService() {
     }
   }
 
-  private fun focusedEditableNode(): AccessibilityNodeInfo? {
+  private fun findFocusedEditableNode(): AccessibilityNodeInfo? {
     rootInActiveWindow
       ?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
       ?.takeIf { isEditableNode(it) }
@@ -87,15 +100,46 @@ class VerbatimAccessibilityService : AccessibilityService() {
     return null
   }
 
+  private fun refreshFocusedNode() {
+    val target = findFocusedEditableNode()
+    if (target == null) {
+      clearFocusedNode()
+    } else {
+      setFocusedNode(target)
+    }
+  }
+
+  private fun scheduleBubbleRefresh() {
+    mainHandler.removeCallbacks(shortRefreshRunnable)
+    mainHandler.removeCallbacks(longRefreshRunnable)
+    mainHandler.postDelayed(shortRefreshRunnable, 250)
+    mainHandler.postDelayed(longRefreshRunnable, 900)
+  }
+
   private fun setFocusedNode(node: AccessibilityNodeInfo) {
-    clearFocusedNode()
-    focusedNode = AccessibilityNodeInfo.obtain(node)
+    val next = AccessibilityNodeInfo.obtain(node)
+    focusedNode?.recycle()
+    focusedNode = next
+    updateBubbleTargetActive()
   }
 
   private fun clearFocusedNode() {
     focusedNode?.recycle()
     focusedNode = null
+    FloatingBubbleService.setInputTargetActive(this, false)
   }
+
+  private fun updateBubbleTargetActive() {
+    val target = focusedNode
+    val active = target != null &&
+      target.refresh() &&
+      isEditableNode(target) &&
+      isInputMethodVisible()
+    FloatingBubbleService.setInputTargetActive(this, active)
+  }
+
+  private fun isInputMethodVisible(): Boolean =
+    windows.any { window -> window.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD }
 
   private fun isEditableNode(node: AccessibilityNodeInfo): Boolean {
     if (node.isEditable) {

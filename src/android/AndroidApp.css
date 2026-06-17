@@ -323,6 +323,15 @@
   margin: 0;
 }
 
+.android-step-label {
+  color: var(--android-primary);
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 800;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+}
+
 .android-callout {
   border-radius: 18px;
   font-size: 14px;
