@@ -125,6 +125,13 @@ mod tests {
             adaptive_language_json: Some("{\"class\":\"MostlyLatin\"}".to_string()),
             adaptive_insertion_json: Some("{\"succeeded\":true}".to_string()),
             adaptive_parent_entry_id: None,
+            transform_action: None,
+            transform_original_text: None,
+            transform_result_text: None,
+            transform_target_language: None,
+            transform_provider_id: None,
+            transform_model: None,
+            transform_recovery_status: None,
         }
     }
 

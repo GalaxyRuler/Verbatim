@@ -7,6 +7,7 @@ pub mod models;
 pub mod snippets;
 pub mod transcript;
 pub mod transcription;
+pub mod transform;
 
 use crate::settings::{get_settings, write_settings, AppSettings, LogLevel};
 use crate::utils::cancel_current_operation;

@@ -1,4 +1,5 @@
 use log::{debug, info};
+use std::fmt;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -9,10 +10,60 @@ const POST_PASTE_POLL_INTERVAL: Duration = Duration::from_millis(150);
 const POST_PASTE_STABLE_EDIT_DELAY: Duration = Duration::from_millis(300);
 const POST_PASTE_LEARNING_WINDOW: Duration = Duration::from_secs(6);
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct FocusedTextSnapshot {
     pub target_id: String,
     pub text: String,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub enum FocusedTextSelection {
+    Selected(String),
+    Empty,
+    Unsupported(String),
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct FocusedTextSelectionSnapshot {
+    pub target_id: String,
+    pub text: String,
+    pub selection: FocusedTextSelection,
+}
+
+impl fmt::Debug for FocusedTextSnapshot {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("FocusedTextSnapshot")
+            .field("target_id", &self.target_id)
+            .field("text_len", &self.text.chars().count())
+            .finish()
+    }
+}
+
+impl fmt::Debug for FocusedTextSelection {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Selected(selected_text) => formatter
+                .debug_tuple("Selected")
+                .field(&format_args!("{} chars", selected_text.chars().count()))
+                .finish(),
+            Self::Empty => formatter.write_str("Empty"),
+            Self::Unsupported(reason) => {
+                formatter.debug_tuple("Unsupported").field(reason).finish()
+            }
+        }
+    }
+}
+
+impl fmt::Debug for FocusedTextSelectionSnapshot {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("FocusedTextSelectionSnapshot")
+            .field("target_id", &self.target_id)
+            .field("text_len", &self.text.chars().count())
+            .field("selection", &self.selection)
+            .finish()
+    }
 }
 
 pub fn maybe_spawn_auto_add_watcher(
@@ -42,6 +93,11 @@ pub fn capture_focused_text_snapshot() -> Option<FocusedTextSnapshot> {
             error
         })
         .ok()
+}
+
+#[allow(dead_code)]
+pub fn capture_focused_text_selection_snapshot() -> Result<FocusedTextSelectionSnapshot, String> {
+    capture_platform_focused_text_selection_snapshot()
 }
 
 fn watch_for_post_paste_correction(
@@ -289,9 +345,28 @@ fn capture_platform_focused_text_snapshot() -> Result<FocusedTextSnapshot, Strin
     Err("post-paste dictionary learning is not implemented on this platform yet".to_string())
 }
 
+#[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+fn capture_platform_focused_text_selection_snapshot() -> Result<FocusedTextSelectionSnapshot, String>
+{
+    Err("selected-text capture is not implemented on this platform yet".to_string())
+}
+
 #[cfg(target_os = "macos")]
 fn capture_platform_focused_text_snapshot() -> Result<FocusedTextSnapshot, String> {
     macos_focused_text::capture()
+}
+
+#[cfg(target_os = "macos")]
+fn capture_platform_focused_text_selection_snapshot() -> Result<FocusedTextSelectionSnapshot, String>
+{
+    let snapshot = macos_focused_text::capture()?;
+    Ok(FocusedTextSelectionSnapshot {
+        target_id: snapshot.target_id,
+        text: snapshot.text,
+        selection: FocusedTextSelection::Unsupported(
+            "selected-text capture is not implemented on macOS yet".to_string(),
+        ),
+    })
 }
 
 #[cfg(target_os = "linux")]
@@ -299,9 +374,28 @@ fn capture_platform_focused_text_snapshot() -> Result<FocusedTextSnapshot, Strin
     linux_focused_text::capture()
 }
 
+#[cfg(target_os = "linux")]
+fn capture_platform_focused_text_selection_snapshot() -> Result<FocusedTextSelectionSnapshot, String>
+{
+    let snapshot = linux_focused_text::capture()?;
+    Ok(FocusedTextSelectionSnapshot {
+        target_id: snapshot.target_id,
+        text: snapshot.text,
+        selection: FocusedTextSelection::Unsupported(
+            "selected-text capture is not implemented on Linux yet".to_string(),
+        ),
+    })
+}
+
 #[cfg(target_os = "windows")]
 fn capture_platform_focused_text_snapshot() -> Result<FocusedTextSnapshot, String> {
     windows_focused_text::capture()
+}
+
+#[cfg(target_os = "windows")]
+fn capture_platform_focused_text_selection_snapshot() -> Result<FocusedTextSelectionSnapshot, String>
+{
+    windows_focused_text::capture_with_selection()
 }
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
@@ -468,11 +562,15 @@ print(text, end="")
 
 #[cfg(target_os = "windows")]
 mod windows_focused_text {
-    use super::FocusedTextSnapshot;
+    use super::{FocusedTextSelection, FocusedTextSelectionSnapshot, FocusedTextSnapshot};
+    use std::ffi::c_void;
     use windows::Win32::Foundation::{RPC_E_CHANGED_MODE, S_FALSE, S_OK};
     use windows::Win32::System::Com::{
         CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
-        COINIT_APARTMENTTHREADED,
+        COINIT_APARTMENTTHREADED, SAFEARRAY,
+    };
+    use windows::Win32::System::Ole::{
+        SafeArrayDestroy, SafeArrayGetElement, SafeArrayGetLBound, SafeArrayGetUBound,
     };
     use windows::Win32::UI::Accessibility::{
         CUIAutomation, IUIAutomation, IUIAutomationElement, IUIAutomationTextPattern,
@@ -500,6 +598,31 @@ mod windows_focused_text {
             Ok(FocusedTextSnapshot {
                 target_id: target_id(&element),
                 text,
+            })
+        }
+    }
+
+    pub fn capture_with_selection() -> Result<FocusedTextSelectionSnapshot, String> {
+        let _com = ComApartment::initialize()?;
+
+        unsafe {
+            let automation: IUIAutomation = CoCreateInstance(
+                &CUIAutomation,
+                None::<&windows::core::IUnknown>,
+                CLSCTX_INPROC_SERVER,
+            )
+            .map_err(|error| format!("failed to create UI Automation client: {}", error))?;
+            let element = automation
+                .GetFocusedElement()
+                .map_err(|error| format!("failed to get focused element: {}", error))?;
+            let text = read_element_text(&element)
+                .ok_or_else(|| "focused element has no readable text pattern".to_string())?;
+            let selection = read_element_selection(&element);
+
+            Ok(FocusedTextSelectionSnapshot {
+                target_id: strict_target_id(&element)?,
+                text,
+                selection,
             })
         }
     }
@@ -558,6 +681,69 @@ mod windows_focused_text {
         None
     }
 
+    unsafe fn read_element_selection(element: &IUIAutomationElement) -> FocusedTextSelection {
+        let Ok(pattern) =
+            element.GetCurrentPatternAs::<IUIAutomationTextPattern>(UIA_TextPatternId)
+        else {
+            return FocusedTextSelection::Unsupported(
+                "focused element does not expose UI Automation TextPattern".to_string(),
+            );
+        };
+
+        let ranges = match pattern.GetSelection() {
+            Ok(ranges) => ranges,
+            Err(error) => {
+                return FocusedTextSelection::Unsupported(format!(
+                    "failed to read selected text ranges: {}",
+                    error
+                ));
+            }
+        };
+        let length = match ranges.Length() {
+            Ok(length) => length,
+            Err(error) => {
+                return FocusedTextSelection::Unsupported(format!(
+                    "failed to read selected text range count: {}",
+                    error
+                ));
+            }
+        };
+        if length <= 0 {
+            return FocusedTextSelection::Empty;
+        }
+
+        let mut parts = Vec::new();
+        for index in 0..length {
+            let range = match ranges.GetElement(index) {
+                Ok(range) => range,
+                Err(error) => {
+                    return FocusedTextSelection::Unsupported(format!(
+                        "failed to read selected text range: {}",
+                        error
+                    ));
+                }
+            };
+            let text = match range.GetText(MAX_UIA_TEXT_CHARS) {
+                Ok(text) => text.to_string(),
+                Err(error) => {
+                    return FocusedTextSelection::Unsupported(format!(
+                        "failed to read selected text: {}",
+                        error
+                    ));
+                }
+            };
+            if !text.trim().is_empty() {
+                parts.push(text);
+            }
+        }
+
+        if parts.is_empty() {
+            FocusedTextSelection::Empty
+        } else {
+            FocusedTextSelection::Selected(parts.join(""))
+        }
+    }
+
     unsafe fn target_id(element: &IUIAutomationElement) -> String {
         let process_id = element.CurrentProcessId().unwrap_or_default();
         let hwnd = element
@@ -574,6 +760,55 @@ mod windows_focused_text {
             .unwrap_or_default();
 
         format!("{process_id}|{hwnd}|{class_name}|{automation_id}")
+    }
+
+    unsafe fn strict_target_id(element: &IUIAutomationElement) -> Result<String, String> {
+        let runtime_id = runtime_id(element)?;
+        Ok(format!("{}|runtime:{runtime_id}", target_id(element)))
+    }
+
+    unsafe fn runtime_id(element: &IUIAutomationElement) -> Result<String, String> {
+        let safe_array = element
+            .GetRuntimeId()
+            .map_err(|error| format!("failed to read focused element runtime id: {}", error))?;
+        if safe_array.is_null() {
+            return Err("focused element runtime id is empty".to_string());
+        }
+
+        let _guard = SafeArrayGuard(safe_array);
+        let lower_bound = SafeArrayGetLBound(safe_array, 1)
+            .map_err(|error| format!("failed to read runtime id lower bound: {}", error))?;
+        let upper_bound = SafeArrayGetUBound(safe_array, 1)
+            .map_err(|error| format!("failed to read runtime id upper bound: {}", error))?;
+        if upper_bound < lower_bound {
+            return Err("focused element runtime id range is empty".to_string());
+        }
+
+        let mut values = Vec::new();
+        for index in lower_bound..=upper_bound {
+            let mut value = 0_i32;
+            SafeArrayGetElement(safe_array, &index, &mut value as *mut i32 as *mut c_void)
+                .map_err(|error| format!("failed to read runtime id element: {}", error))?;
+            values.push(value.to_string());
+        }
+
+        if values.is_empty() {
+            Err("focused element runtime id is empty".to_string())
+        } else {
+            Ok(values.join("."))
+        }
+    }
+
+    struct SafeArrayGuard(*mut SAFEARRAY);
+
+    impl Drop for SafeArrayGuard {
+        fn drop(&mut self) {
+            if !self.0.is_null() {
+                unsafe {
+                    let _ = SafeArrayDestroy(self.0);
+                }
+            }
+        }
     }
 }
 

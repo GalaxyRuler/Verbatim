@@ -525,6 +525,58 @@ fn restore_text_clipboard(app_handle: &AppHandle, text: &str) -> Result<(), Stri
     })
 }
 
+pub(crate) fn copy_text_for_recovery(
+    app_handle: &AppHandle,
+    text: &str,
+    reason: &str,
+) -> Result<(), String> {
+    write_text_clipboard(app_handle, text)
+        .map_err(|err| format!("failed to copy recovery text after {reason}: {err}"))
+}
+
+pub(crate) fn paste_exact_preserving_clipboard(
+    text: &str,
+    app_handle: &AppHandle,
+) -> Result<(), String> {
+    let settings = get_settings(app_handle);
+    let paste_method = settings.paste_method;
+    let paste_delay_ms = settings.paste_delay_ms;
+
+    info!(
+        "Using exact replacement paste method: {:?}, delay: {}ms",
+        paste_method, paste_delay_ms
+    );
+
+    let enigo_state = app_handle
+        .try_state::<EnigoState>()
+        .ok_or("Enigo state not initialized")?;
+    let mut enigo = enigo_state
+        .0
+        .lock()
+        .map_err(|e| format!("Failed to lock Enigo: {}", e))?;
+
+    match paste_method {
+        PasteMethod::None => Err("PasteMethod::None cannot replace selected text".to_string()),
+        PasteMethod::Direct => paste_direct(
+            &mut enigo,
+            text,
+            #[cfg(target_os = "linux")]
+            settings.typing_tool,
+        ),
+        PasteMethod::CtrlV | PasteMethod::CtrlShiftV | PasteMethod::ShiftInsert => {
+            paste_via_clipboard(&mut enigo, text, app_handle, &paste_method, paste_delay_ms)
+        }
+        PasteMethod::ExternalScript => {
+            let script_path = settings
+                .external_script_path
+                .as_ref()
+                .filter(|p| !p.is_empty())
+                .ok_or("External script path is not configured")?;
+            paste_via_external_script(text, script_path)
+        }
+    }
+}
+
 /// Pastes text using the clipboard: saves current content, writes text, sends paste keystroke, restores clipboard.
 fn paste_via_clipboard(
     enigo: &mut Enigo,

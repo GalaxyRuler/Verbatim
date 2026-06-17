@@ -18,11 +18,13 @@ mod overlay;
 pub mod portable;
 mod post_paste_learning;
 pub mod providers;
+mod selection;
 mod settings;
 mod shortcut;
 mod signal_handle;
 mod snippets;
 mod transcription_coordinator;
+mod transform_mode;
 mod tray;
 mod tray_i18n;
 mod utils;
@@ -470,6 +472,7 @@ pub fn run(cli_args: CliArgs) {
             commands::history::update_recording_retention_period,
             commands::transcript::copy_last_transcript,
             commands::transcript::paste_last_transcript,
+            commands::transform::transform_selected_text,
             helpers::clamshell::is_laptop,
         ])
         .events(collect_events![managers::history::HistoryUpdatePayload,]);

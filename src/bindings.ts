@@ -1065,6 +1065,14 @@ async pasteLastTranscript() : Promise<Result<boolean, string>> {
     else return { status: "error", error: e  as any };
 }
 },
+async transformSelectedText(action: TransformAction, targetLanguage: string | null) : Promise<Result<TransformCommandResult, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("transform_selected_text", { action, targetLanguage }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 /**
  * Stub implementation for non-macOS platforms
  * Always returns false since laptop detection is macOS-specific
@@ -1112,7 +1120,7 @@ export type DictionaryEntryUpdate = { phrase?: string | null; replacement_of?: s
 export type EngineType = "Whisper" | "Parakeet" | "Moonshine" | "MoonshineStreaming" | "SenseVoice" | "GigaAM" | "Canary" | "Cohere"
 export type FormattingLevel = "none" | "light" | "medium" | "high"
 export type GpuDeviceOption = { id: number; name: string; total_vram_mb: number }
-export type HistoryEntry = { id: number; file_name: string; timestamp: number; saved: boolean; title: string; transcription_text: string; post_processed_text: string | null; post_process_prompt: string | null; post_process_requested: boolean; adaptive_profile_id: string | null; adaptive_profile_name: string | null; adaptive_routing_json: string | null; adaptive_context_json: string | null; adaptive_language_json: string | null; adaptive_insertion_json: string | null; adaptive_parent_entry_id: number | null }
+export type HistoryEntry = { id: number; file_name: string; timestamp: number; saved: boolean; title: string; transcription_text: string; post_processed_text: string | null; post_process_prompt: string | null; post_process_requested: boolean; adaptive_profile_id: string | null; adaptive_profile_name: string | null; adaptive_routing_json: string | null; adaptive_context_json: string | null; adaptive_language_json: string | null; adaptive_insertion_json: string | null; adaptive_parent_entry_id: number | null; transform_action: string | null; transform_original_text: string | null; transform_result_text: string | null; transform_target_language: string | null; transform_provider_id: string | null; transform_model: string | null; transform_recovery_status: string | null }
 export type HistoryUpdatePayload = { action: "added"; entry: HistoryEntry } | { action: "updated"; entry: HistoryEntry } | { action: "deleted"; id: number } | { action: "toggled"; id: number }
 /**
  * Result of changing keyboard implementation
@@ -1146,6 +1154,9 @@ export type SnippetEntry = { id: string; trigger: string; content: string; creat
 export type SnippetEntryInput = { trigger: string; content: string }
 export type SnippetEntryUpdate = { trigger?: string | null; content?: string | null }
 export type SoundTheme = "marimba" | "pop" | "custom"
+export type TransformAction = "polish" | "make_concise" | "turn_into_list" | "translate_to_selected_language" | "prompt_engineer"
+export type TransformCommandResult = { status: TransformCommandStatus; history_entry_id: number; provider_id: string; model: string }
+export type TransformCommandStatus = "replaced" | "copied_for_recovery"
 export type TranslationRequestSettings = { source_language: string; target_language: string; route: TranslationRoute }
 export type TranslationRoute = "auto" | "direct_speech" | "text_after_transcription"
 export type TypingTool = "auto" | "wtype" | "kwtype" | "dotool" | "ydotool" | "xdotool"

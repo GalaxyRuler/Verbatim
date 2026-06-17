@@ -64,10 +64,11 @@ pub async fn paste_last_transcript(
     match receiver.recv().map_err(|err| err.to_string())? {
         Ok(()) => {}
         Err(err) => {
-            app_for_recovery
-                .clipboard()
-                .write_text(text_for_recovery)
-                .map_err(|clipboard_err| clipboard_err.to_string())?;
+            crate::clipboard::copy_text_for_recovery(
+                &app_for_recovery,
+                &text_for_recovery,
+                "paste last transcript failure",
+            )?;
             let _ = app_for_recovery.emit("paste-error", ());
             return Err(err);
         }

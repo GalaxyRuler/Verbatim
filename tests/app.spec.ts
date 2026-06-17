@@ -154,9 +154,16 @@ const expectTextFits = async (page: Page, selector: string) => {
 const installTauriMocks = async (
   page: Page,
   settingsOverrides: Partial<typeof baseSettings> = {},
+  historyEntries: Array<Record<string, unknown>> = [],
 ) => {
   await page.addInitScript(
-    ({ settings, profiles, models, localPostProcessingModels }) => {
+    ({
+      settings,
+      profiles,
+      models,
+      localPostProcessingModels,
+      initialHistoryEntries,
+    }) => {
       let appSettings = { ...settings };
       const callbacks = new Map<number, (payload?: unknown) => void>();
       const eventListeners = new Map<string, number[]>();
@@ -194,6 +201,9 @@ const installTauriMocks = async (
       let localModels = [
         ...((localPostProcessingModels as Array<Record<string, unknown>>) ??
           []),
+      ];
+      let historyRows = [
+        ...((initialHistoryEntries as Array<Record<string, unknown>>) ?? []),
       ];
       let nextDictionaryId = 1;
       let nextSnippetId = 1;
@@ -402,6 +412,38 @@ const installTauriMocks = async (
             case "copy_last_transcript":
             case "paste_last_transcript":
               return true;
+            case "get_history_entries": {
+              const cursor = args?.cursor as number | null | undefined;
+              const limit = (args?.limit as number | null | undefined) ?? 50;
+              const rows =
+                cursor === null || cursor === undefined
+                  ? historyRows
+                  : historyRows.filter((entry) => Number(entry.id) < cursor);
+              return {
+                entries: rows.slice(0, limit),
+                has_more: rows.length > limit,
+              };
+            }
+            case "toggle_history_entry_saved": {
+              const id = Number(args?.id);
+              historyRows = historyRows.map((entry) =>
+                Number(entry.id) === id
+                  ? { ...entry, saved: !entry.saved }
+                  : entry,
+              );
+              return null;
+            }
+            case "get_audio_file_path":
+              return "mock-audio.wav";
+            case "delete_history_entry":
+              historyRows = historyRows.filter(
+                (entry) => Number(entry.id) !== Number(args?.id),
+              );
+              return null;
+            case "retry_history_entry_transcription":
+              return null;
+            case "learn_custom_words_from_correction":
+              return ["CorrectedName"];
             case "list_local_llm_models":
               return localModels;
             case "download_local_llm_model": {
@@ -572,6 +614,7 @@ const installTauriMocks = async (
       profiles: adaptiveProfiles,
       models,
       localPostProcessingModels: localLlmModels,
+      initialHistoryEntries: historyEntries,
     },
   );
 };
@@ -918,6 +961,62 @@ test.describe("Verbatim App", () => {
     await page.getByText("Advanced").click();
     await expect(page.getByText("Custom Words")).toHaveCount(0);
     await expect(page.getByText("Dictionary")).toBeVisible();
+  });
+
+  test("transform history entries omit recording-only controls", async ({
+    page,
+  }) => {
+    await installTauriMocks(page, {}, [
+      {
+        id: 42,
+        file_name: "transform-42.txt",
+        timestamp: Date.now(),
+        saved: false,
+        title: "Polished selected text",
+        transcription_text: "Raw selected text",
+        post_processed_text: "Polished transform result",
+        post_process_prompt: null,
+        post_process_requested: false,
+        adaptive_profile_id: null,
+        adaptive_profile_name: null,
+        adaptive_routing_json: null,
+        adaptive_context_json: null,
+        adaptive_language_json: null,
+        adaptive_insertion_json: null,
+        adaptive_parent_entry_id: null,
+        transform_action: "polish",
+        transform_original_text: "Raw selected text",
+        transform_result_text: "Polished transform result",
+        transform_target_language: null,
+        transform_provider_id: "local-llm",
+        transform_model: "qwen2.5-0.5b",
+        transform_recovery_status: "replaced",
+      },
+    ]);
+    await page.goto("/");
+
+    await page.getByText("History").click();
+
+    await expect(page.getByText("Polished transform result")).toBeVisible();
+    await expect(page.getByText("Raw selected text")).toHaveCount(0);
+    await expect(
+      page.getByTitle("Copy transcription to clipboard"),
+    ).toBeVisible();
+    await expect(page.getByTitle("Save transcription")).toBeVisible();
+    await expect(page.getByTitle("Delete entry")).toBeVisible();
+    await expect(page.getByTitle("Learn dictionary correction")).toHaveCount(0);
+    await expect(page.getByTitle("Re-transcribe")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Play" })).toHaveCount(0);
+
+    const commandsInvoked = await page.evaluate(() => {
+      const win = window as typeof window & {
+        __VERBATIM_TEST_COMMANDS__: string[];
+      };
+      return win.__VERBATIM_TEST_COMMANDS__;
+    });
+    expect(commandsInvoked).not.toContain("get_audio_file_path");
+    expect(commandsInvoked).not.toContain("retry_history_entry_transcription");
+    expect(commandsInvoked).not.toContain("learn_custom_words_from_correction");
   });
 
   test("language guard toast can paste the last transcript anyway", async ({

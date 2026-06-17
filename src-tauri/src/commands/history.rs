@@ -13,6 +13,18 @@ fn should_retry_post_process(
     stored_post_process_requested && live_post_process_enabled
 }
 
+fn ensure_retriable_audio_entry(
+    entry: &crate::managers::history::HistoryEntry,
+) -> Result<(), String> {
+    if entry.transform_action.is_some() {
+        return Err(
+            "Transform history entries do not have recording audio to retranscribe".to_string(),
+        );
+    }
+
+    Ok(())
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn get_history_entries(
@@ -79,6 +91,7 @@ pub async fn retry_history_entry_transcription(
         .await
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("History entry {} not found", id))?;
+    ensure_retriable_audio_entry(&entry)?;
 
     let audio_path = history_manager.get_audio_file_path(&entry.file_name);
     let samples = crate::audio_toolkit::read_wav_samples(&audio_path)
@@ -172,5 +185,38 @@ mod tests {
         assert!(!should_retry_post_process(true, false));
         assert!(!should_retry_post_process(false, true));
         assert!(!should_retry_post_process(false, false));
+    }
+
+    #[test]
+    fn retry_transcription_rejects_transform_history_entries() {
+        let entry = crate::managers::history::HistoryEntry {
+            id: 1,
+            file_name: "transform-1.txt".to_string(),
+            timestamp: 1,
+            saved: false,
+            title: "Transform".to_string(),
+            transcription_text: "original".to_string(),
+            post_processed_text: Some("result".to_string()),
+            post_process_prompt: None,
+            post_process_requested: false,
+            adaptive_profile_id: None,
+            adaptive_profile_name: None,
+            adaptive_routing_json: None,
+            adaptive_context_json: None,
+            adaptive_language_json: None,
+            adaptive_insertion_json: None,
+            adaptive_parent_entry_id: None,
+            transform_action: Some("polish".to_string()),
+            transform_original_text: Some("original".to_string()),
+            transform_result_text: Some("result".to_string()),
+            transform_target_language: None,
+            transform_provider_id: Some("verbatim_local".to_string()),
+            transform_model: Some("model.gguf".to_string()),
+            transform_recovery_status: Some("replaced".to_string()),
+        };
+
+        let err = ensure_retriable_audio_entry(&entry).expect_err("transform row cannot retry");
+
+        assert!(err.contains("do not have recording audio"));
     }
 }
