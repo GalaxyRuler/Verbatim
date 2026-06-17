@@ -19,6 +19,8 @@ Verbatim is a cross-platform desktop application that provides simple, privacy-f
 
 Verbatim is a fork of [Handy](https://github.com/cjpais/Handy) by [CJ Pais](https://github.com/cjpais), carrying its open-source foundation forward under a new identity and direction. See [Acknowledgments](#acknowledgments).
 
+📖 **Documentation:** start with the [**User Guide**](docs/guide/): [installation](docs/guide/installation.md), [getting started](docs/guide/getting-started.md), [models](docs/guide/models.md), [privacy](docs/guide/privacy.md), [troubleshooting](docs/guide/troubleshooting.md), and [FAQ](docs/guide/faq.md).
+
 ## Why Verbatim?
 
 Verbatim exists to be a truly open source, extensible speech-to-text tool:
