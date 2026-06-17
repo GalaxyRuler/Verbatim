@@ -40,6 +40,8 @@ class FloatingBubbleService : Service() {
   private var speechRecognizer: SpeechRecognizer? = null
   private var bubbleState = BubbleState.IDLE
   private var foregroundActive = false
+  private var recoveryText: String? = null
+  private var failureMessageResId = R.string.bubble_failed
 
   override fun onCreate() {
     super.onCreate()
@@ -159,15 +161,18 @@ class FloatingBubbleService : Service() {
       BubbleState.IDLE -> renderIdle(view)
       BubbleState.RECORDING -> renderRecording(view)
       BubbleState.TRANSCRIBING -> renderTranscribing(view)
+      BubbleState.FAILED -> renderFailed(view)
     }
   }
 
   private fun renderIdle(view: LinearLayout) {
+    view.contentDescription = getString(R.string.bubble_idle)
     view.background = pillBackground("#24202A")
     view.addView(label(getString(R.string.bubble_idle), Color.WHITE, 16, true))
   }
 
   private fun renderRecording(view: LinearLayout) {
+    view.contentDescription = getString(R.string.bubble_recording)
     view.background = pillBackground("#3F1010")
     view.addView(label(getString(R.string.bubble_recording), Color.WHITE, 14, true))
     repeat(5) { index ->
@@ -193,6 +198,7 @@ class FloatingBubbleService : Service() {
   }
 
   private fun renderTranscribing(view: LinearLayout) {
+    view.contentDescription = getString(R.string.bubble_transcribing)
     view.background = pillBackground("#17345C")
     view.addView(label(getString(R.string.bubble_transcribing), Color.WHITE, 14, true))
     repeat(3) {
@@ -206,6 +212,27 @@ class FloatingBubbleService : Service() {
     }
   }
 
+  private fun renderFailed(view: LinearLayout) {
+    view.contentDescription = getString(failureMessageResId)
+    view.background = pillBackground("#4B1717")
+    view.addView(label(getString(failureMessageResId), Color.WHITE, 14, true))
+    val action = if (recoveryText.isNullOrBlank()) {
+      R.string.bubble_dismiss
+    } else {
+      R.string.bubble_retry_insert
+    }
+    view.addView(
+      label(getString(action), Color.rgb(65, 0, 2), 12, true).apply {
+        background = pillBackground("#FFDAD6")
+        setPadding(dp(10), dp(8), dp(10), dp(8))
+      },
+      LinearLayout.LayoutParams(
+        LinearLayout.LayoutParams.WRAP_CONTENT,
+        LinearLayout.LayoutParams.WRAP_CONTENT,
+      ).apply { marginStart = dp(10) },
+    )
+  }
+
   private fun handleBubbleTap() {
     when (bubbleState) {
       BubbleState.IDLE -> startListening()
@@ -215,6 +242,7 @@ class FloatingBubbleService : Service() {
         speechRecognizer?.stopListening()
       }
       BubbleState.TRANSCRIBING -> Unit
+      BubbleState.FAILED -> retryRecovery()
     }
   }
 
@@ -246,8 +274,7 @@ class FloatingBubbleService : Service() {
         }
         override fun onError(error: Int) {
           stopMicrophoneForeground()
-          bubbleState = BubbleState.IDLE
-          bubbleView?.let { renderBubble(it) }
+          showFailure(R.string.bubble_listen_failed, null)
           Toast.makeText(this@FloatingBubbleService, R.string.bubble_listen_failed, Toast.LENGTH_SHORT).show()
         }
         override fun onResults(results: Bundle?) {
@@ -360,23 +387,29 @@ class FloatingBubbleService : Service() {
   }
 
   private fun handleRecognizedText(text: String?) {
-    bubbleState = BubbleState.IDLE
-    bubbleView?.let { renderBubble(it) }
     if (text.isNullOrBlank()) {
+      showFailure(R.string.bubble_listen_failed, null)
       Toast.makeText(this, R.string.bubble_listen_failed, Toast.LENGTH_SHORT).show()
       return
     }
 
+    insertOrRecover(text)
+  }
+
+  private fun insertOrRecover(text: String) {
     when (VerbatimAccessibilityService.insert(text)) {
       VerbatimAccessibilityService.InsertResult.INSERTED -> {
+        resetToIdle()
         Toast.makeText(this, R.string.bubble_inserted, Toast.LENGTH_SHORT).show()
       }
       VerbatimAccessibilityService.InsertResult.SENSITIVE -> {
+        showFailure(R.string.bubble_sensitive_blocked, null)
         Toast.makeText(this, R.string.bubble_sensitive_blocked, Toast.LENGTH_LONG).show()
       }
       VerbatimAccessibilityService.InsertResult.FAILED,
       VerbatimAccessibilityService.InsertResult.NO_TARGET -> {
         copyForRecovery(text)
+        showFailure(R.string.bubble_recovery_copied, text)
         Toast.makeText(this, R.string.bubble_copied, Toast.LENGTH_LONG).show()
       }
     }
@@ -387,19 +420,31 @@ class FloatingBubbleService : Service() {
       return
     }
 
-    when (VerbatimAccessibilityService.insert(DEBUG_INSERTION_TEXT)) {
-      VerbatimAccessibilityService.InsertResult.INSERTED -> {
-        Toast.makeText(this, R.string.bubble_inserted, Toast.LENGTH_SHORT).show()
-      }
-      VerbatimAccessibilityService.InsertResult.SENSITIVE -> {
-        Toast.makeText(this, R.string.bubble_sensitive_blocked, Toast.LENGTH_LONG).show()
-      }
-      VerbatimAccessibilityService.InsertResult.FAILED,
-      VerbatimAccessibilityService.InsertResult.NO_TARGET -> {
-        copyForRecovery(DEBUG_INSERTION_TEXT)
-        Toast.makeText(this, R.string.bubble_copied, Toast.LENGTH_LONG).show()
-      }
+    insertOrRecover(DEBUG_INSERTION_TEXT)
+  }
+
+  private fun retryRecovery() {
+    val text = recoveryText
+    if (text.isNullOrBlank()) {
+      resetToIdle()
+      return
     }
+    bubbleState = BubbleState.TRANSCRIBING
+    bubbleView?.let { renderBubble(it) }
+    insertOrRecover(text)
+  }
+
+  private fun showFailure(messageResId: Int, recoverableText: String?) {
+    failureMessageResId = messageResId
+    recoveryText = recoverableText
+    bubbleState = BubbleState.FAILED
+    bubbleView?.let { renderBubble(it) }
+  }
+
+  private fun resetToIdle() {
+    recoveryText = null
+    bubbleState = BubbleState.IDLE
+    bubbleView?.let { renderBubble(it) }
   }
 
   private fun copyForRecovery(text: String) {
@@ -454,6 +499,7 @@ class FloatingBubbleService : Service() {
     IDLE,
     RECORDING,
     TRANSCRIBING,
+    FAILED,
   }
 
   companion object {

@@ -14,12 +14,23 @@ class VerbatimAccessibilityService : AccessibilityService() {
   }
 
   override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-    val source = event?.source ?: return
-    if (event.eventType == AccessibilityEvent.TYPE_VIEW_FOCUSED ||
-      event.eventType == AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED
-    ) {
-      if (isEditableNode(source)) {
-        focusedNode = AccessibilityNodeInfo.obtain(source)
+    event ?: return
+    when (event.eventType) {
+      AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
+      AccessibilityEvent.TYPE_WINDOWS_CHANGED -> clearFocusedNode()
+      AccessibilityEvent.TYPE_VIEW_FOCUSED -> {
+        val source = event.source ?: return
+        if (isEditableNode(source)) {
+          setFocusedNode(source)
+        } else {
+          clearFocusedNode()
+        }
+      }
+      AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED -> {
+        val source = event.source ?: return
+        if (isEditableNode(source)) {
+          setFocusedNode(source)
+        }
       }
     }
   }
@@ -30,8 +41,7 @@ class VerbatimAccessibilityService : AccessibilityService() {
     if (instance === this) {
       instance = null
     }
-    focusedNode?.recycle()
-    focusedNode = null
+    clearFocusedNode()
     super.onDestroy()
   }
 
@@ -64,7 +74,7 @@ class VerbatimAccessibilityService : AccessibilityService() {
       ?.let { return it }
 
     focusedNode
-      ?.takeIf { isEditableNode(it) }
+      ?.takeIf { it.refresh() && isEditableNode(it) }
       ?.let { return it }
 
     windows.forEach { window ->
@@ -75,6 +85,16 @@ class VerbatimAccessibilityService : AccessibilityService() {
     }
 
     return null
+  }
+
+  private fun setFocusedNode(node: AccessibilityNodeInfo) {
+    clearFocusedNode()
+    focusedNode = AccessibilityNodeInfo.obtain(node)
+  }
+
+  private fun clearFocusedNode() {
+    focusedNode?.recycle()
+    focusedNode = null
   }
 
   private fun isEditableNode(node: AccessibilityNodeInfo): Boolean {
