@@ -30,6 +30,7 @@ class MainActivity : TauriActivity() {
 
   override fun onResume() {
     super.onResume()
+    AndroidSpeechSupport.refreshOnDeviceSpeechSupport(this)
     if (hasOverlayPermission()) {
       startBubbleService()
     }
@@ -79,6 +80,14 @@ class MainActivity : TauriActivity() {
           android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S &&
             SpeechRecognizer.isOnDeviceRecognitionAvailable(activity),
         )
+        .put(
+          "onDeviceSpeechLanguageAvailable",
+          AndroidSpeechSupport.isLanguageAvailable(activity),
+        )
+        .put(
+          "onDeviceSpeechModelStatus",
+          AndroidSpeechSupport.currentStatus(activity),
+        )
         .toString()
 
     @JavascriptInterface
@@ -123,6 +132,11 @@ class MainActivity : TauriActivity() {
       activity.runOnUiThread {
         activity.startActivity(intent)
       }
+    }
+
+    @JavascriptInterface
+    fun requestSpeechModelDownload() {
+      AndroidSpeechSupport.requestModelDownload(activity)
     }
 
     @JavascriptInterface

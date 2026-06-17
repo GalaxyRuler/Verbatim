@@ -36,6 +36,13 @@ class VerbatimAccessibilityService : AccessibilityService() {
           clearFocusedNode()
         }
       }
+      AccessibilityEvent.TYPE_VIEW_CLICKED -> {
+        val source = event.source ?: return
+        if (isEditableNode(source)) {
+          setFocusedNode(source)
+          scheduleBubbleRefresh()
+        }
+      }
       AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED -> {
         val source = event.source ?: return
         if (isEditableNode(source)) {

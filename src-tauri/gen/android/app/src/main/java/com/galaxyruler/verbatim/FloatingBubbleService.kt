@@ -293,6 +293,13 @@ class FloatingBubbleService : Service() {
       return
     }
 
+    if (!AndroidSpeechSupport.isLanguageAvailable(this)) {
+      AndroidSpeechSupport.refreshOnDeviceSpeechSupport(this)
+      showFailure(R.string.bubble_speech_pack_missing, null)
+      Toast.makeText(this, R.string.bubble_speech_pack_download, Toast.LENGTH_LONG).show()
+      return
+    }
+
     if (!startMicrophoneForeground()) {
       return
     }
@@ -300,7 +307,9 @@ class FloatingBubbleService : Service() {
     speechRecognizer?.destroy()
     speechRecognizer = createSpeechRecognizer().apply {
       setRecognitionListener(object : RecognitionListener {
-        override fun onReadyForSpeech(params: Bundle?) = Unit
+        override fun onReadyForSpeech(params: Bundle?) {
+          AndroidSpeechSupport.markLanguageReady(this@FloatingBubbleService)
+        }
         override fun onBeginningOfSpeech() = Unit
         override fun onRmsChanged(rmsdB: Float) = Unit
         override fun onBufferReceived(buffer: ByteArray?) = Unit
@@ -310,12 +319,16 @@ class FloatingBubbleService : Service() {
         }
         override fun onError(error: Int) {
           stopMicrophoneForeground()
+          if (error == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE) {
+            AndroidSpeechSupport.markLanguageUnavailable(this@FloatingBubbleService)
+          }
           val message = speechErrorMessage(error)
           showFailure(message, null)
           Toast.makeText(this@FloatingBubbleService, message, Toast.LENGTH_SHORT).show()
         }
         override fun onResults(results: Bundle?) {
           stopMicrophoneForeground()
+          AndroidSpeechSupport.markLanguageReady(this@FloatingBubbleService)
           val text = results
             ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
             ?.firstOrNull()

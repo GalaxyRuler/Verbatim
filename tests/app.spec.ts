@@ -721,6 +721,8 @@ const installAndroidBridgeMock = async (
     bubbleVisible?: boolean;
     speechRecognizerAvailable: boolean;
     onDeviceSpeechRecognizerAvailable: boolean;
+    onDeviceSpeechLanguageAvailable?: boolean;
+    onDeviceSpeechModelStatus?: string;
   },
   nativeHistoryEntries: Array<Record<string, unknown>> = [],
 ) => {
@@ -733,16 +735,24 @@ const installAndroidBridgeMock = async (
           requestMicrophone: () => void;
           openOverlaySettings: () => void;
           openAccessibilitySettings: () => void;
+          requestSpeechModelDownload: () => void;
           startBubble: () => void;
           stopBubble: () => void;
         };
+        __VERBATIM_ANDROID_BRIDGE_CALLS__: string[];
       };
+      testWindow.__VERBATIM_ANDROID_BRIDGE_CALLS__ = [];
       testWindow.VerbatimAndroid = {
         permissionSnapshot: () => JSON.stringify(snapshot),
         nativeTranscriptHistory: () => JSON.stringify(nativeHistoryEntries),
         requestMicrophone: () => undefined,
         openOverlaySettings: () => undefined,
         openAccessibilitySettings: () => undefined,
+        requestSpeechModelDownload: () => {
+          testWindow.__VERBATIM_ANDROID_BRIDGE_CALLS__.push(
+            "requestSpeechModelDownload",
+          );
+        },
         startBubble: () => undefined,
         stopBubble: () => undefined,
       };
@@ -797,6 +807,50 @@ test.describe("Verbatim App", () => {
     ).toHaveCount(0);
   });
 
+  test("android setup requires a downloaded offline speech pack before bubble readiness", async ({
+    page,
+  }) => {
+    await installTauriMocks(page, {}, [], "android");
+    await installAndroidBridgeMock(page, {
+      microphone: true,
+      overlay: true,
+      accessibility: true,
+      bubbleRunning: true,
+      speechRecognizerAvailable: true,
+      onDeviceSpeechRecognizerAvailable: true,
+      onDeviceSpeechLanguageAvailable: false,
+      onDeviceSpeechModelStatus: "missing",
+    });
+
+    await page.goto("/");
+
+    await expect(
+      page.getByRole("heading", { name: "Set up mobile dictation" }),
+    ).toBeVisible();
+    await expect(page.getByText("Download offline speech pack")).toBeVisible();
+    await expect(
+      page.getByText(
+        "Install the local Android speech pack for your current language before dictation starts.",
+      ),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "Download pack" }).click();
+    await expect(
+      page.getByRole("heading", { name: "Tap mic to dictate anywhere" }),
+    ).toHaveCount(0);
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            (
+              window as typeof window & {
+                __VERBATIM_ANDROID_BRIDGE_CALLS__?: string[];
+              }
+            ).__VERBATIM_ANDROID_BRIDGE_CALLS__ ?? [],
+        ),
+      )
+      .toContain("requestSpeechModelDownload");
+  });
+
   test("android setup requires a downloaded local model before bubble readiness", async ({
     page,
   }) => {
@@ -815,6 +869,7 @@ test.describe("Verbatim App", () => {
       bubbleRunning: true,
       speechRecognizerAvailable: true,
       onDeviceSpeechRecognizerAvailable: true,
+      onDeviceSpeechLanguageAvailable: true,
     });
 
     await page.goto("/");
@@ -849,6 +904,7 @@ test.describe("Verbatim App", () => {
         bubbleRunning: true,
         speechRecognizerAvailable: true,
         onDeviceSpeechRecognizerAvailable: true,
+        onDeviceSpeechLanguageAvailable: true,
       },
       [
         {
@@ -866,6 +922,8 @@ test.describe("Verbatim App", () => {
     await expect(
       page.getByRole("heading", { name: "Tap mic to dictate anywhere" }),
     ).toBeVisible();
+    await expect(page.getByText("Bubble visibility")).toBeVisible();
+    await expect(page.getByText("Waiting for keyboard")).toBeVisible();
     await expect(page.getByText("Native Android transcript")).toBeVisible();
 
     await page.getByRole("button", { name: "History" }).click();

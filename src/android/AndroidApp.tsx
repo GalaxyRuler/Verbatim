@@ -29,6 +29,14 @@ import "./AndroidApp.css";
 
 type AndroidTab = "home" | "history" | "models" | "settings";
 type AndroidTheme = "system" | "light" | "dark";
+type AndroidSpeechModelStatus =
+  | "unknown"
+  | "ready"
+  | "missing"
+  | "pending"
+  | "downloading"
+  | "error"
+  | "unsupported";
 
 type AndroidPermissionSnapshot = {
   microphone: boolean;
@@ -38,6 +46,8 @@ type AndroidPermissionSnapshot = {
   bubbleVisible: boolean;
   speechRecognizerAvailable: boolean;
   onDeviceSpeechRecognizerAvailable: boolean;
+  onDeviceSpeechLanguageAvailable: boolean;
+  onDeviceSpeechModelStatus: AndroidSpeechModelStatus;
 };
 
 declare global {
@@ -48,6 +58,7 @@ declare global {
       requestMicrophone: () => void;
       openOverlaySettings: () => void;
       openAccessibilitySettings: () => void;
+      requestSpeechModelDownload: () => void;
       startBubble: () => void;
       stopBubble: () => void;
     };
@@ -62,6 +73,8 @@ const defaultPermissions: AndroidPermissionSnapshot = {
   bubbleVisible: false,
   speechRecognizerAvailable: false,
   onDeviceSpeechRecognizerAvailable: false,
+  onDeviceSpeechLanguageAvailable: false,
+  onDeviceSpeechModelStatus: "unknown",
 };
 
 const tabs: Array<{ id: AndroidTab; labelKey: string; icon: typeof Home }> = [
@@ -221,6 +234,7 @@ export default function AndroidApp() {
     permissions.overlay &&
     permissions.accessibility &&
     permissions.onDeviceSpeechRecognizerAvailable &&
+    permissions.onDeviceSpeechLanguageAvailable &&
     !!activeDownloadedModel;
 
   const title = t(`android.tabs.${activeTab}`);
@@ -306,6 +320,22 @@ function AndroidOnboarding({
 }) {
   const { t } = useTranslation();
   const bridge = safeBridge();
+  const speechPackCalloutKey = (() => {
+    switch (permissions.onDeviceSpeechModelStatus) {
+      case "ready":
+        return "android.onboarding.speechPack.readyCallout";
+      case "pending":
+        return "android.onboarding.speechPack.pendingCallout";
+      case "downloading":
+        return "android.onboarding.speechPack.downloadingCallout";
+      case "error":
+        return "android.onboarding.speechPack.errorCallout";
+      case "unsupported":
+        return "android.onboarding.speechPack.unsupportedCallout";
+      default:
+        return "android.onboarding.speechPack.callout";
+    }
+  })();
   const steps = [
     {
       ready: permissions.microphone,
@@ -340,6 +370,14 @@ function AndroidOnboarding({
       callout: permissions.onDeviceSpeechRecognizerAvailable
         ? t("android.onboarding.speech.readyCallout")
         : t("android.onboarding.speech.missingCallout"),
+    },
+    {
+      ready: permissions.onDeviceSpeechLanguageAvailable,
+      title: t("android.onboarding.speechPack.title"),
+      description: t("android.onboarding.speechPack.description"),
+      action: t("android.onboarding.speechPack.action"),
+      onClick: () => bridge?.requestSpeechModelDownload(),
+      callout: t(speechPackCalloutKey),
     },
     {
       ready: hasDownloadedModel,
@@ -453,7 +491,8 @@ function HomeTab({
     permissions.microphone &&
     permissions.overlay &&
     permissions.accessibility &&
-    permissions.onDeviceSpeechRecognizerAvailable;
+    permissions.onDeviceSpeechRecognizerAvailable &&
+    permissions.onDeviceSpeechLanguageAvailable;
 
   return (
     <>
@@ -475,16 +514,18 @@ function HomeTab({
         </div>
         <WaveformPreview />
         <div className="android-hero-row">
-          <span>{t("android.home.bubble.toggle")}</span>
-          <Switch
-            checked={permissions.bubbleVisible}
-            label={t("android.home.bubble.toggle")}
-            onClick={() =>
+          <span>{t("android.home.bubble.statusLabel")}</span>
+          <span
+            className={`android-status-pill ${
               permissions.bubbleVisible
-                ? safeBridge()?.stopBubble()
-                : safeBridge()?.startBubble()
-            }
-          />
+                ? "android-status-trust"
+                : "android-status-warning"
+            }`}
+          >
+            {permissions.bubbleVisible
+              ? t("android.home.bubble.visible")
+              : t("android.home.bubble.waiting")}
+          </span>
         </div>
       </section>
 

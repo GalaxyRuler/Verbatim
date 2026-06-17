@@ -406,6 +406,11 @@
   color: var(--android-warning);
 }
 
+.android-status-trust {
+  background: rgba(123, 216, 143, 0.16);
+  color: var(--android-success);
+}
+
 .android-settings-group {
   background: var(--android-surface);
   border: 1px solid var(--android-outline);

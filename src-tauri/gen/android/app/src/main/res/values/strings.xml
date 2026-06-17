@@ -18,6 +18,7 @@
     <string name="bubble_microphone_blocked">Mic unavailable</string>
     <string name="bubble_permission_missing">Enable microphone, overlay, and accessibility permissions in Verbatim.</string>
     <string name="bubble_speech_unavailable">On-device speech recognition is not available on this Android device.</string>
+    <string name="bubble_speech_pack_download">Open Verbatim setup and download the offline speech pack.</string>
     <string name="bubble_inserted">Inserted transcription.</string>
     <string name="bubble_copied">Could not insert text. Transcription copied.</string>
     <string name="bubble_sensitive_blocked">Verbatim skipped a sensitive field.</string>

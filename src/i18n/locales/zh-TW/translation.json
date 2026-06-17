@@ -921,15 +921,29 @@
         "action": "Choose model",
         "callout": "Same local model requirement as desktop dictation. Downloads stay under your control.",
         "readyCallout": "Local model is ready for offline dictation."
+      },
+      "speechPack": {
+        "title": "Download offline speech pack",
+        "description": "Install the local Android speech pack for your current language before dictation starts.",
+        "action": "Download pack",
+        "callout": "Verbatim will request Android's on-device model download and will not use remote speech recognition.",
+        "readyCallout": "Offline speech pack is ready for this device language.",
+        "pendingCallout": "Android scheduled the speech pack download. Keep the device online and try again after it finishes.",
+        "downloadingCallout": "Android is downloading the on-device speech pack.",
+        "errorCallout": "Android could not start the speech pack download. Check network or language settings and try again.",
+        "unsupportedCallout": "Android did not report a downloadable on-device speech pack for this language."
       }
     },
     "home": {
       "bubble": {
         "activeTitle": "Tap mic to dictate anywhere",
-        "activeSubtitle": "The floating bubble is ready over other apps.",
-        "inactiveTitle": "Tap to start dictation",
-        "inactiveSubtitle": "Finish setup to use the bubble outside Verbatim.",
-        "toggle": "Floating bubble"
+        "activeSubtitle": "The bubble appears only while a text field has the keyboard open.",
+        "inactiveTitle": "Keyboard bubble not ready",
+        "inactiveSubtitle": "Finish setup before the keyboard-triggered bubble can appear.",
+        "toggle": "Floating bubble",
+        "statusLabel": "Bubble visibility",
+        "visible": "Visible with keyboard",
+        "waiting": "Waiting for keyboard"
       },
       "modelMissing": "No model selected",
       "lastTranscript": {
