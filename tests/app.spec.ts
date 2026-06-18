@@ -1007,7 +1007,9 @@ test.describe("Verbatim App", () => {
       );
   });
 
-  test("android library manages dictionary and snippets", async ({ page }) => {
+  test("android settings opens dictionary and snippets library screens", async ({
+    page,
+  }) => {
     await installTauriMocks(
       page,
       {
@@ -1047,6 +1049,11 @@ test.describe("Verbatim App", () => {
 
     await page.goto("/");
 
+    await expect(page.getByRole("button", { name: "Dictionary" })).toHaveCount(
+      0,
+    );
+    await page.getByRole("button", { name: "Settings" }).click();
+    await page.getByRole("button", { name: "Advanced features" }).click();
     await page.getByRole("button", { name: "Dictionary" }).click();
     await expect(page.getByText("Kulaib")).toBeVisible();
     await expect(page.getByText("Corrects: club")).toBeVisible();
@@ -1080,6 +1087,15 @@ test.describe("Verbatim App", () => {
 
     await page.getByRole("button", { name: "Delete /addr" }).click();
     await expect(page.getByText("/addr")).toHaveCount(0);
+
+    await page.getByLabel("Cancel").click();
+    await expect(page.getByRole("button", { name: "Settings" })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Advanced features" }),
+    ).toBeVisible();
+    await expect(page.getByRole("button", { name: "Dictionary" })).toHaveCount(
+      0,
+    );
   });
 
   test("adaptive profiles can be enabled from experimental settings", async ({

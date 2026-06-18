@@ -7,6 +7,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import {
+  ArrowLeft,
   BookOpen,
   Check,
   Copy,
@@ -43,7 +44,7 @@ import { useSnippetsStore } from "@/stores/snippetsStore";
 import { formatDateTime } from "@/utils/dateFormat";
 import "./AndroidApp.css";
 
-type AndroidTab = "home" | "history" | "models" | "library" | "settings";
+type AndroidTab = "home" | "history" | "models" | "settings";
 type AndroidTheme = "system" | "light" | "dark";
 type LibrarySection = "dictionary" | "snippets";
 type AndroidSpeechModelStatus =
@@ -99,7 +100,6 @@ const tabs: Array<{ id: AndroidTab; labelKey: string; icon: typeof Home }> = [
   { id: "home", labelKey: "android.tabs.home", icon: Home },
   { id: "history", labelKey: "android.tabs.history", icon: History },
   { id: "models", labelKey: "android.tabs.models", icon: Cpu },
-  { id: "library", labelKey: "settings.dictionary.title", icon: BookOpen },
   { id: "settings", labelKey: "android.tabs.settings", icon: Settings },
 ];
 
@@ -261,8 +261,8 @@ const useAndroidTextFormatterSync = () => {
 export default function AndroidApp() {
   const { t, i18n } = useTranslation();
   const [activeTab, setActiveTab] = useState<AndroidTab>("home");
-  const [librarySection, setLibrarySection] =
-    useState<LibrarySection>("dictionary");
+  const [settingsLibrarySection, setSettingsLibrarySection] =
+    useState<LibrarySection | null>(null);
   const [theme, setTheme] = useState<AndroidTheme>(() => {
     const stored = window.localStorage.getItem("verbatim.android.theme");
     return stored === "light" || stored === "dark" || stored === "system"
@@ -303,20 +303,32 @@ export default function AndroidApp() {
     permissions.onDeviceSpeechLanguageAvailable;
 
   const activeTabSpec = tabs.find((tab) => tab.id === activeTab) ?? tabs[0];
-  const title =
-    activeTab === "library"
-      ? t(
-          librarySection === "dictionary"
-            ? "settings.dictionary.title"
-            : "settings.snippets.title",
-        )
-      : t(activeTabSpec.labelKey);
+  const title = settingsLibrarySection
+    ? t(
+        settingsLibrarySection === "dictionary"
+          ? "settings.dictionary.title"
+          : "settings.snippets.title",
+      )
+    : t(activeTabSpec.labelKey);
+  const showSettingsBack = activeTab === "settings" && !!settingsLibrarySection;
 
   return (
     <div className={`android-app android-theme-${theme}`}>
       <main className="android-shell">
         <header className="android-top-bar">
-          <h1>{activeTab === "home" ? t("common.appName") : title}</h1>
+          <div className="android-top-title">
+            {showSettingsBack && (
+              <button
+                type="button"
+                className="android-icon-button"
+                aria-label={t("common.cancel")}
+                onClick={() => setSettingsLibrarySection(null)}
+              >
+                <ArrowLeft size={22} />
+              </button>
+            )}
+            <h1>{activeTab === "home" ? t("common.appName") : title}</h1>
+          </div>
           <button
             type="button"
             className="android-icon-button"
@@ -337,11 +349,6 @@ export default function AndroidApp() {
 
         {activeTab === "models" ? (
           <ModelsTab />
-        ) : activeTab === "library" ? (
-          <LibraryTab
-            activeSection={librarySection}
-            setActiveSection={setLibrarySection}
-          />
         ) : !allPermissionsReady ? (
           <AndroidOnboarding
             permissions={permissions}
@@ -355,30 +362,44 @@ export default function AndroidApp() {
           />
         ) : activeTab === "history" ? (
           <HistoryTab />
+        ) : settingsLibrarySection ? (
+          <LibraryTab
+            activeSection={settingsLibrarySection}
+            setActiveSection={setSettingsLibrarySection}
+          />
         ) : (
-          <SettingsTab theme={theme} setTheme={setTheme} />
+          <SettingsTab
+            theme={theme}
+            setTheme={setTheme}
+            openLibrary={setSettingsLibrarySection}
+          />
         )}
       </main>
 
-      <nav className="android-nav" aria-label={t("android.tabs.navigation")}>
-        {tabs.map((tab) => {
-          const Icon = tab.icon;
-          const active = activeTab === tab.id;
-          return (
-            <button
-              type="button"
-              key={tab.id}
-              className={active ? "android-nav-active" : ""}
-              onClick={() => setActiveTab(tab.id)}
-            >
-              <span className="android-nav-icon">
-                <Icon size={22} />
-              </span>
-              <span>{t(tab.labelKey)}</span>
-            </button>
-          );
-        })}
-      </nav>
+      {!showSettingsBack && (
+        <nav className="android-nav" aria-label={t("android.tabs.navigation")}>
+          {tabs.map((tab) => {
+            const Icon = tab.icon;
+            const active = activeTab === tab.id;
+            return (
+              <button
+                type="button"
+                key={tab.id}
+                className={active ? "android-nav-active" : ""}
+                onClick={() => {
+                  setSettingsLibrarySection(null);
+                  setActiveTab(tab.id);
+                }}
+              >
+                <span className="android-nav-icon">
+                  <Icon size={22} />
+                </span>
+                <span>{t(tab.labelKey)}</span>
+              </button>
+            );
+          })}
+        </nav>
+      )}
     </div>
   );
 }
@@ -1521,9 +1542,11 @@ function ModelSection({
 function SettingsTab({
   theme,
   setTheme,
+  openLibrary,
 }: {
   theme: AndroidTheme;
   setTheme: (theme: AndroidTheme) => void;
+  openLibrary: (section: LibrarySection) => void;
 }) {
   const { t } = useTranslation();
   const {
@@ -1641,10 +1664,22 @@ function SettingsTab({
         </button>
         {advancedOpen && (
           <div className="android-settings-group" style={{ marginTop: 10 }}>
-            <div className="android-settings-row">
+            <button
+              type="button"
+              className="android-settings-row"
+              onClick={() => openLibrary("dictionary")}
+            >
               <span>{t("sidebar.dictionary")}</span>
               <BookOpen size={18} />
-            </div>
+            </button>
+            <button
+              type="button"
+              className="android-settings-row"
+              onClick={() => openLibrary("snippets")}
+            >
+              <span>{t("sidebar.snippets")}</span>
+              <Sparkles size={18} />
+            </button>
             <div className="android-settings-row">
               <span>{t("sidebar.postProcessing")}</span>
               <Sparkles size={18} />

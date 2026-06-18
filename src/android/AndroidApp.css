@@ -99,6 +99,17 @@
   margin: 0;
 }
 
+.android-top-title {
+  align-items: center;
+  display: flex;
+  gap: 4px;
+  min-width: 0;
+}
+
+.android-top-title h1 {
+  overflow-wrap: anywhere;
+}
+
 .android-icon-button {
   align-items: center;
   background: transparent;
@@ -501,10 +512,21 @@
 
 .android-settings-row {
   align-items: center;
+  background: transparent;
+  border: 0;
+  color: inherit;
   display: flex;
+  font: inherit;
   justify-content: space-between;
   min-height: 58px;
   padding: 0 16px;
+  text-align: left;
+  width: 100%;
+}
+
+.android-settings-row.android-panel {
+  background: var(--android-surface);
+  border: 1px solid var(--android-outline);
 }
 
 .android-settings-row + .android-settings-row {
@@ -566,7 +588,7 @@
   border-top: 1px solid var(--android-outline);
   bottom: 0;
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   left: 0;
   padding: 8px 8px 12px;
   position: fixed;
