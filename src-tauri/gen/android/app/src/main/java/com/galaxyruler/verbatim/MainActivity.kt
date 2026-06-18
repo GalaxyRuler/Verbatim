@@ -127,6 +127,23 @@ class MainActivity : TauriActivity() {
       FloatingBubbleService.setBubbleCorner(activity, corner)
 
     @JavascriptInterface
+    fun openExternalUrl(url: String): Boolean {
+      if (!allowedExternalUrls.contains(url)) {
+        return false
+      }
+
+      val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+      if (intent.resolveActivity(activity.packageManager) == null) {
+        return false
+      }
+
+      activity.runOnUiThread {
+        activity.startActivity(intent)
+      }
+      return true
+    }
+
+    @JavascriptInterface
     fun requestMicrophone() {
       activity.runOnUiThread {
         ActivityCompat.requestPermissions(
@@ -185,6 +202,13 @@ class MainActivity : TauriActivity() {
       activity.runOnUiThread {
         activity.stopBubbleService()
       }
+    }
+
+    companion object {
+      private val allowedExternalUrls = setOf(
+        "https://github.com/GalaxyRuler/Verbatim",
+        "https://github.com/cjpais/Handy",
+      )
     }
   }
 }

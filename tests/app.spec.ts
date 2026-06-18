@@ -920,6 +920,7 @@ const installAndroidBridgeMock = async (
           nativeTranscriptHistory: () => string;
           bubbleCornerSnapshot: () => string;
           setBubbleCorner: (corner: string) => string;
+          openExternalUrl: (url: string) => boolean;
           requestMicrophone: () => void;
           openOverlaySettings: () => void;
           openAccessibilitySettings: () => void;
@@ -943,6 +944,12 @@ const installAndroidBridgeMock = async (
             `setBubbleCorner:${corner}`,
           );
           return selectedBubbleCorner;
+        },
+        openExternalUrl: (url: string) => {
+          testWindow.__VERBATIM_ANDROID_BRIDGE_CALLS__.push(
+            `openExternalUrl:${url}`,
+          );
+          return true;
         },
         requestMicrophone: () => undefined,
         openOverlaySettings: () => undefined,
@@ -1592,6 +1599,55 @@ test.describe("Verbatim App", () => {
             }),
           ]),
         }),
+      );
+  });
+
+  test("android settings exposes about source and license details", async ({
+    page,
+  }) => {
+    await installTauriMocks(page, {}, [], "android");
+    await installAndroidBridgeMock(page, {
+      microphone: true,
+      overlay: true,
+      accessibility: true,
+      bubbleRunning: true,
+      speechRecognizerAvailable: true,
+      onDeviceSpeechRecognizerAvailable: true,
+      onDeviceSpeechLanguageAvailable: true,
+    });
+
+    await page.goto("/");
+    await page.getByRole("button", { name: "Settings" }).click();
+
+    await page.getByRole("button", { name: /^About/ }).click();
+    await expect(
+      page.getByRole("heading", { name: "About" }).first(),
+    ).toBeVisible();
+    await expect(page.getByText("MIT License Notice")).toBeVisible();
+    await expect(
+      page.getByText(/Portions of this app are derived from Handy/),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Whisper.cpp" }),
+    ).toBeVisible();
+
+    await page.getByRole("button", { name: /View on GitHub/ }).click();
+    await page.getByRole("button", { name: /View Handy on GitHub/ }).click();
+
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const win = window as typeof window & {
+            __VERBATIM_ANDROID_BRIDGE_CALLS__: string[];
+          };
+          return win.__VERBATIM_ANDROID_BRIDGE_CALLS__;
+        }),
+      )
+      .toEqual(
+        expect.arrayContaining([
+          "openExternalUrl:https://github.com/GalaxyRuler/Verbatim",
+          "openExternalUrl:https://github.com/cjpais/Handy",
+        ]),
       );
   });
 

@@ -14,8 +14,11 @@ import {
   ChevronRight,
   Copy,
   Cpu,
+  ExternalLink,
+  FileText,
   History,
   Home,
+  Info,
   Languages,
   MapPin,
   Mic,
@@ -33,7 +36,6 @@ import {
   Sun,
   Trash2,
   Volume1,
-  Volume2,
   X,
 } from "lucide-react";
 import {
@@ -67,7 +69,8 @@ type AndroidTheme = "system" | "light" | "dark";
 type LibrarySection = "dictionary" | "snippets";
 type SettingsSubscreen =
   | { type: "library"; section: LibrarySection }
-  | { type: "postProcessing" };
+  | { type: "postProcessing" }
+  | { type: "about" };
 type SettingsSheet =
   | "microphone"
   | "output"
@@ -125,6 +128,7 @@ declare global {
       stopBubble: () => void;
       bubbleCornerSnapshot?: () => string;
       setBubbleCorner?: (corner: AndroidBubbleCorner) => string;
+      openExternalUrl?: (url: string) => boolean;
     };
   }
 }
@@ -150,6 +154,8 @@ const tabs: Array<{ id: AndroidTab; labelKey: string; icon: typeof Home }> = [
 
 const ANDROID_EXCLUDED_POST_PROCESS_PROVIDERS = new Set(["apple_intelligence"]);
 const DEFAULT_DEVICE_VALUE = "Default";
+const VERBATIM_SOURCE_URL = "https://github.com/GalaxyRuler/Verbatim";
+const HANDY_SOURCE_URL = "https://github.com/cjpais/Handy";
 const androidBubbleCorners: AndroidBubbleCorner[] = [
   "top-left",
   "top-right",
@@ -158,6 +164,10 @@ const androidBubbleCorners: AndroidBubbleCorner[] = [
 ];
 
 const safeBridge = () => window.VerbatimAndroid;
+
+const openAndroidExternalUrl = (url: string) => {
+  safeBridge()?.openExternalUrl?.(url);
+};
 
 const isAndroidPostProcessProvider = (provider: PostProcessProvider) =>
   !ANDROID_EXCLUDED_POST_PROCESS_PROVIDERS.has(provider.id);
@@ -432,6 +442,9 @@ export default function AndroidApp() {
     if (settingsSubscreen.type === "postProcessing") {
       return t("settings.postProcessing.title");
     }
+    if (settingsSubscreen.type === "about") {
+      return t("settings.about.title");
+    }
     return t(
       settingsSubscreen.section === "dictionary"
         ? "settings.dictionary.title"
@@ -500,6 +513,8 @@ export default function AndroidApp() {
           />
         ) : settingsSubscreen?.type === "postProcessing" ? (
           <AndroidPostProcessingScreen />
+        ) : settingsSubscreen?.type === "about" ? (
+          <AndroidAboutScreen />
         ) : (
           <SettingsTab
             theme={theme}
@@ -510,6 +525,7 @@ export default function AndroidApp() {
             openPostProcessing={() =>
               setSettingsSubscreen({ type: "postProcessing" })
             }
+            openAbout={() => setSettingsSubscreen({ type: "about" })}
           />
         )}
       </main>
@@ -2169,11 +2185,13 @@ function SettingsTab({
   setTheme,
   openLibrary,
   openPostProcessing,
+  openAbout,
 }: {
   theme: AndroidTheme;
   setTheme: (theme: AndroidTheme) => void;
   openLibrary: (section: LibrarySection) => void;
   openPostProcessing: () => void;
+  openAbout: () => void;
 }) {
   const { t, i18n } = useTranslation();
   const {
@@ -2789,13 +2807,123 @@ function SettingsTab({
               {version || t("common.loading")}
             </span>
           </div>
-          <div className="android-settings-row">
+          <button
+            type="button"
+            className="android-settings-row"
+            onClick={openAbout}
+          >
+            <span>{t("settings.about.title")}</span>
+            <span className="android-muted">
+              {t("settings.about.acknowledgments.title")}
+            </span>
+            <Info size={18} />
+          </button>
+          <button
+            type="button"
+            className="android-settings-row"
+            onClick={() => openAndroidExternalUrl(VERBATIM_SOURCE_URL)}
+          >
             <span>{t("settings.about.sourceCode.title")}</span>
-            <Volume2 size={18} />
-          </div>
+            <span className="android-muted">
+              {t("settings.about.sourceCode.button")}
+            </span>
+            <ExternalLink size={18} />
+          </button>
         </div>
       </section>
       {renderSettingsSheet()}
+    </>
+  );
+}
+
+function AndroidAboutScreen() {
+  const { t } = useTranslation();
+  const [version, setVersion] = useState("");
+
+  useEffect(() => {
+    getDisplayVersion()
+      .then(setVersion)
+      .catch(() => setVersion("0.8.8"));
+  }, []);
+
+  return (
+    <>
+      <section className="android-section">
+        <div className="android-section-header">
+          <h2>{t("settings.about.title")}</h2>
+        </div>
+        <div className="android-settings-group">
+          <div className="android-settings-row">
+            <span>{t("settings.about.version.title")}</span>
+            <span className="android-muted">
+              {version || t("common.loading")}
+            </span>
+          </div>
+          <button
+            type="button"
+            className="android-settings-row"
+            onClick={() => openAndroidExternalUrl(VERBATIM_SOURCE_URL)}
+          >
+            <span>{t("settings.about.sourceCode.title")}</span>
+            <span className="android-muted">
+              {t("settings.about.sourceCode.button")}
+            </span>
+            <ExternalLink size={18} />
+          </button>
+        </div>
+      </section>
+
+      <section className="android-section">
+        <div className="android-section-header">
+          <h2>{t("settings.about.acknowledgments.title")}</h2>
+        </div>
+        <div className="android-card android-about-card">
+          <div className="android-card-header">
+            <div>
+              <h2>{t("settings.about.acknowledgments.handy.title")}</h2>
+              <p className="android-muted">
+                {t("settings.about.acknowledgments.handy.description")}
+              </p>
+            </div>
+            <Info size={20} />
+          </div>
+          <p>{t("settings.about.acknowledgments.handy.details")}</p>
+          <button
+            type="button"
+            className="android-action"
+            onClick={() => openAndroidExternalUrl(HANDY_SOURCE_URL)}
+          >
+            <ExternalLink size={17} />
+            <span>{t("settings.about.acknowledgments.handy.button")}</span>
+          </button>
+        </div>
+
+        <div className="android-card android-about-card">
+          <div className="android-card-header">
+            <div>
+              <h2>{t("settings.about.acknowledgments.license.title")}</h2>
+              <p className="android-muted">
+                {t("settings.about.acknowledgments.license.description")}
+              </p>
+            </div>
+            <FileText size={20} />
+          </div>
+          <p>{t("settings.about.acknowledgments.license.details")}</p>
+        </div>
+
+        <div className="android-card android-about-card">
+          <div className="android-card-header">
+            <div>
+              <h2>{t("settings.about.acknowledgments.whisper.title")}</h2>
+              <p className="android-muted">
+                {t("settings.about.acknowledgments.whisper.description")}
+              </p>
+            </div>
+            <Cpu size={20} />
+          </div>
+          <p>{t("settings.about.acknowledgments.whisper.details")}</p>
+        </div>
+      </section>
     </>
   );
 }
