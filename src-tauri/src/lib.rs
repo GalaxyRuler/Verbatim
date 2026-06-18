@@ -11,6 +11,7 @@ mod dictionary;
 mod dictionary_learning;
 mod helpers;
 mod input;
+mod insertion;
 mod llm_client;
 pub mod local_llm;
 mod managers;

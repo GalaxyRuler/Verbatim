@@ -1162,7 +1162,16 @@ fn receipt_from_result(
     }
 }
 
+#[allow(dead_code)]
 pub fn paste(text: String, app_handle: AppHandle) -> Result<(), String> {
+    paste_with_auto_learn(text, app_handle, true)
+}
+
+fn paste_with_auto_learn(
+    text: String,
+    app_handle: AppHandle,
+    auto_learn_eligible: bool,
+) -> Result<(), String> {
     let settings = get_settings(&app_handle);
     let paste_method = settings.paste_method;
     let paste_delay_ms = settings.paste_delay_ms;
@@ -1174,12 +1183,14 @@ pub fn paste(text: String, app_handle: AppHandle) -> Result<(), String> {
         text
     };
 
-    let before_paste_snapshot =
-        if settings.auto_add_dictionary_words && paste_method != PasteMethod::None {
-            crate::post_paste_learning::capture_focused_text_snapshot()
-        } else {
-            None
-        };
+    let before_paste_snapshot = if auto_learn_eligible
+        && settings.auto_add_dictionary_words
+        && paste_method != PasteMethod::None
+    {
+        crate::post_paste_learning::capture_focused_text_snapshot()
+    } else {
+        None
+    };
 
     info!(
         "Using paste method: {:?}, delay: {}ms",
@@ -1240,7 +1251,10 @@ pub fn paste(text: String, app_handle: AppHandle) -> Result<(), String> {
             .map_err(|e| format!("Failed to copy to clipboard: {}", e))?;
     }
 
-    if settings.auto_add_dictionary_words && paste_method != PasteMethod::None {
+    if auto_learn_eligible
+        && settings.auto_add_dictionary_words
+        && paste_method != PasteMethod::None
+    {
         crate::post_paste_learning::maybe_spawn_auto_add_watcher(
             app_handle.clone(),
             text,
@@ -1251,14 +1265,24 @@ pub fn paste(text: String, app_handle: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+#[allow(dead_code)]
 pub fn paste_with_receipt(
     text: String,
     app_handle: AppHandle,
     target_verified: bool,
 ) -> InsertionReceipt {
+    paste_with_receipt_with_auto_learn(text, app_handle, target_verified, true)
+}
+
+pub fn paste_with_receipt_with_auto_learn(
+    text: String,
+    app_handle: AppHandle,
+    target_verified: bool,
+    auto_learn_eligible: bool,
+) -> InsertionReceipt {
     let settings = get_settings(&app_handle);
     let paste_method = settings.paste_method;
-    let result = paste(text, app_handle);
+    let result = paste_with_auto_learn(text, app_handle, auto_learn_eligible);
     receipt_from_result(paste_method, target_verified, result)
 }
 

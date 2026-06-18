@@ -76,31 +76,44 @@ pub async fn paste_last_transcript(
     }
 
     let app_for_paste = app.clone();
-    let app_for_recovery = app.clone();
-    let text_for_recovery = text.clone();
     let (sender, receiver) = std::sync::mpsc::channel();
 
     app.run_on_main_thread(move || {
-        let result = crate::clipboard::paste(text, app_for_paste);
-        if let Err(err) = &result {
-            log::error!("Failed to paste last transcript: {}", err);
+        let outcome = crate::insertion::resolve_insertion_attempt(
+            crate::insertion::InsertionAttempt::paste_last_transcript(text),
+            |request| {
+                crate::clipboard::paste_with_receipt_with_auto_learn(
+                    request.text,
+                    app_for_paste.clone(),
+                    request.target_verified,
+                    request.auto_learn_eligible,
+                )
+            },
+        );
+        if !outcome.receipt.succeeded {
+            log::error!(
+                "Failed to paste last transcript: {:?}",
+                outcome.receipt.error.as_deref()
+            );
         }
-        let _ = sender.send(result);
+        let _ = sender.send(outcome);
     })
     .map_err(|err| err.to_string())?;
 
-    match receiver.recv().map_err(|err| err.to_string())? {
-        Ok(()) => {}
-        Err(err) => {
-            crate::clipboard::copy_text_for_recovery(
-                &app_for_recovery,
-                &text_for_recovery,
-                "paste last transcript failure",
-            )?;
-            let _ = app_for_recovery.emit("paste-error", ());
-            return Err(err);
-        }
+    let outcome = receiver.recv().map_err(|err| err.to_string())?;
+    if let Some(recovery) = &outcome.recovery_copy {
+        crate::clipboard::copy_text_for_recovery(&app, &recovery.text, recovery.reason)?;
+    }
+    if outcome.emit_paste_error {
+        let _ = app.emit("paste-error", ());
     }
 
-    Ok(true)
+    if outcome.receipt.succeeded {
+        Ok(true)
+    } else {
+        Err(outcome
+            .receipt
+            .error
+            .unwrap_or_else(|| "Failed to paste last transcript".to_string()))
+    }
 }

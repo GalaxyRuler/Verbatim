@@ -129,16 +129,6 @@ fn transcription_completed_log_message(
     )
 }
 
-fn language_guard_receipt(target_verified: bool) -> crate::adaptive::types::InsertionReceipt {
-    crate::adaptive::types::InsertionReceipt {
-        attempted: false,
-        succeeded: false,
-        method: crate::adaptive::types::InsertionMethod::None,
-        target_verified,
-        error: Some("language guard blocked paste".to_string()),
-    }
-}
-
 fn native_translation_allows_language_guard_bypass(
     settings: &AppSettings,
     model_supports_translation: bool,
@@ -692,16 +682,6 @@ fn adaptive_target_verified(
         || current_context.target_fingerprint == original_context.target_fingerprint
 }
 
-fn skipped_wrong_target_receipt() -> crate::adaptive::types::InsertionReceipt {
-    crate::adaptive::types::InsertionReceipt {
-        attempted: false,
-        succeeded: false,
-        method: crate::adaptive::types::InsertionMethod::None,
-        target_verified: false,
-        error: Some("target changed before insertion".to_string()),
-    }
-}
-
 fn prepare_adaptive_paste_text(
     final_text: &str,
     context: &crate::adaptive::types::CapturedContext,
@@ -894,19 +874,6 @@ mod adaptive_action_tests {
         assert!(should_verify_adaptive_target(&context_with_fingerprint(
             Some("notepad|edit")
         )));
-    }
-
-    #[test]
-    fn wrong_target_receipt_is_not_attempted() {
-        let receipt = skipped_wrong_target_receipt();
-        assert!(!receipt.attempted);
-        assert!(!receipt.succeeded);
-        assert!(!receipt.target_verified);
-        assert_eq!(receipt.method, InsertionMethod::None);
-        assert_eq!(
-            receipt.error.as_deref(),
-            Some("target changed before insertion")
-        );
     }
 
     #[test]
@@ -1190,6 +1157,27 @@ mod adaptive_action_tests {
 
         settings.context_awareness_enabled = true;
         assert!(should_capture_adaptive_context(&settings));
+    }
+
+    #[test]
+    fn adaptive_guard_block_outcome_is_not_attempted_and_keeps_feedback() {
+        let attempt = crate::insertion::InsertionAttempt::adaptive_guard_blocked();
+
+        let outcome = crate::insertion::resolve_insertion_attempt(attempt, |_| {
+            panic!("guarded insertion must not paste")
+        });
+
+        assert!(!outcome.receipt.attempted);
+        assert!(!outcome.receipt.succeeded);
+        assert_eq!(outcome.receipt.method, InsertionMethod::None);
+        assert!(outcome.receipt.target_verified);
+        assert_eq!(
+            outcome.receipt.error.as_deref(),
+            Some("language guard blocked paste")
+        );
+        assert!(outcome.emit_paste_error);
+        assert!(!outcome.emit_inserted);
+        assert!(outcome.recovery_copy.is_none());
     }
 }
 
@@ -1510,13 +1498,13 @@ impl ShortcutAction for TranscribeAction {
                                         } else {
                                             true
                                         };
-                                        let receipt = if target_verified {
+                                        let attempt = if target_verified {
                                             if language_guard_blocks(
                                                 &ah_clone,
                                                 &settings_for_guard,
                                                 &final_text,
                                             ) {
-                                                language_guard_receipt(true)
+                                                crate::insertion::InsertionAttempt::adaptive_guard_blocked()
                                             } else {
                                                 let paste_text = prepare_adaptive_paste_text(
                                                     &final_text,
@@ -1527,28 +1515,36 @@ impl ShortcutAction for TranscribeAction {
                                                     &final_text,
                                                     &original_context,
                                                 );
-                                                let receipt = utils::paste_with_receipt(
-                                                    paste_text.clone(),
-                                                    ah_clone.clone(),
-                                                    true,
-                                                );
-                                                if !receipt.succeeded && receipt.attempted {
-                                                    copy_text_to_clipboard(
-                                                        &ah_clone,
-                                                        &paste_text,
-                                                        "adaptive paste failure",
-                                                    );
-                                                }
-                                                receipt
+                                                crate::insertion::InsertionAttempt::adaptive_ready(paste_text)
                                             }
                                         } else {
                                             error!(
                                                 "Adaptive paste skipped because the foreground target changed before insertion"
                                             );
-                                            let _ = ah_clone.emit("paste-error", ());
-                                            skipped_wrong_target_receipt()
+                                            crate::insertion::InsertionAttempt::adaptive_target_changed()
                                         };
-                                        if receipt.succeeded {
+
+                                        let outcome = crate::insertion::resolve_insertion_attempt(
+                                            attempt,
+                                            |request| {
+                                                utils::paste_with_receipt_with_auto_learn(
+                                                    request.text,
+                                                    ah_clone.clone(),
+                                                    request.target_verified,
+                                                    request.auto_learn_eligible,
+                                                )
+                                            },
+                                        );
+                                        if let Some(recovery) = &outcome.recovery_copy {
+                                            copy_text_to_clipboard(
+                                                &ah_clone,
+                                                &recovery.text,
+                                                recovery.reason,
+                                            );
+                                        }
+                                        let receipt = outcome.receipt;
+
+                                        if outcome.emit_inserted {
                                             debug!(
                                                 "Text pasted successfully in {:?}",
                                                 paste_time.elapsed()
@@ -1557,10 +1553,11 @@ impl ShortcutAction for TranscribeAction {
                                                 &ah_clone,
                                                 "inserted",
                                             );
-                                        } else {
+                                        }
+                                        if outcome.emit_paste_error {
                                             error!(
                                                 "Failed to paste transcription: {:?}",
-                                                receipt.error
+                                                receipt.error.as_deref()
                                             );
                                             let _ = ah_clone.emit("paste-error", ());
                                         }
@@ -1618,32 +1615,48 @@ impl ShortcutAction for TranscribeAction {
                                     let final_text = processed.final_text;
                                     let settings_for_guard = settings.clone();
                                     ah.run_on_main_thread(move || {
-                                        if !language_guard_blocks(
+                                        let attempt = if language_guard_blocks(
                                             &ah_clone,
                                             &settings_for_guard,
                                             &final_text,
                                         ) {
-                                            match utils::paste(final_text.clone(), ah_clone.clone())
-                                            {
-                                                Ok(()) => {
-                                                    debug!(
-                                                        "Text pasted successfully in {:?}",
-                                                        paste_time.elapsed()
-                                                    );
-                                                    utils::emit_overlay_state_changed(
-                                                        &ah_clone, "inserted",
-                                                    );
-                                                }
-                                                Err(e) => {
-                                                    error!("Failed to paste transcription: {}", e);
-                                                    copy_text_to_clipboard(
-                                                        &ah_clone,
-                                                        &final_text,
-                                                        "paste failure",
-                                                    );
-                                                    let _ = ah_clone.emit("paste-error", ());
-                                                }
-                                            }
+                                            crate::insertion::InsertionAttempt::classic_guard_blocked()
+                                        } else {
+                                            crate::insertion::InsertionAttempt::classic_ready(final_text)
+                                        };
+                                        let outcome = crate::insertion::resolve_insertion_attempt(
+                                            attempt,
+                                            |request| {
+                                                utils::paste_with_receipt_with_auto_learn(
+                                                    request.text,
+                                                    ah_clone.clone(),
+                                                    request.target_verified,
+                                                    request.auto_learn_eligible,
+                                                )
+                                            },
+                                        );
+                                        if let Some(recovery) = &outcome.recovery_copy {
+                                            copy_text_to_clipboard(
+                                                &ah_clone,
+                                                &recovery.text,
+                                                recovery.reason,
+                                            );
+                                        }
+                                        if outcome.emit_inserted {
+                                            debug!(
+                                                "Text pasted successfully in {:?}",
+                                                paste_time.elapsed()
+                                            );
+                                            utils::emit_overlay_state_changed(
+                                                &ah_clone, "inserted",
+                                            );
+                                        }
+                                        if outcome.emit_paste_error {
+                                            error!(
+                                                "Failed to paste transcription: {:?}",
+                                                outcome.receipt.error.as_deref()
+                                            );
+                                            let _ = ah_clone.emit("paste-error", ());
                                         }
                                         utils::hide_recording_overlay(&ah_clone);
                                         change_tray_icon(&ah_clone, TrayIconState::Idle);
