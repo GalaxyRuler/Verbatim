@@ -286,6 +286,7 @@
 }
 
 .android-actions {
+  flex-wrap: wrap;
   gap: 8px;
   margin-top: 14px;
 }
@@ -433,7 +434,8 @@
 }
 
 .android-field input,
-.android-field textarea {
+.android-field textarea,
+.android-field select {
   background: var(--android-surface-variant);
   border: 1px solid transparent;
   border-radius: 14px;
@@ -445,14 +447,31 @@
   width: 100%;
 }
 
+.android-field select {
+  appearance: none;
+}
+
 .android-field textarea {
   min-height: 104px;
   resize: vertical;
 }
 
 .android-field input:focus,
-.android-field textarea:focus {
+.android-field textarea:focus,
+.android-field select:focus {
   border-color: var(--android-primary);
+}
+
+.android-field input:disabled,
+.android-field select:disabled {
+  opacity: 0.66;
+}
+
+.android-field-row {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) 44px;
 }
 
 .android-error-text {
@@ -501,6 +520,28 @@
 .android-status-trust {
   background: rgba(123, 216, 143, 0.16);
   color: var(--android-success);
+}
+
+.android-post-process-summary {
+  display: grid;
+  gap: 14px;
+}
+
+.android-post-process-option {
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  width: 100%;
+}
+
+.android-post-process-option:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.android-active-option {
+  border-color: var(--android-primary);
+  box-shadow: inset 0 0 0 1px var(--android-primary);
 }
 
 .android-settings-group {

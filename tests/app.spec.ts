@@ -278,6 +278,7 @@ const installTauriMocks = async (
       ];
       let nextDictionaryId = 1;
       let nextSnippetId = 1;
+      let nextPromptId = 1;
       const syncDictionarySettings = () => {
         appSettings = {
           ...appSettings,
@@ -623,6 +624,125 @@ const installTauriMocks = async (
                 post_process_enabled: Boolean(args?.enabled),
               };
               return null;
+            case "set_post_process_provider":
+              appSettings = {
+                ...appSettings,
+                post_process_provider_id: String(args?.providerId ?? ""),
+              };
+              return null;
+            case "change_post_process_base_url_setting": {
+              const providerId = String(args?.providerId ?? "");
+              const baseUrl = String(args?.baseUrl ?? "");
+              appSettings = {
+                ...appSettings,
+                post_process_providers: (
+                  (appSettings.post_process_providers as Array<
+                    Record<string, unknown>
+                  >) ?? []
+                ).map((provider) =>
+                  provider.id === providerId
+                    ? { ...provider, base_url: baseUrl }
+                    : provider,
+                ),
+                post_process_models: {
+                  ...((appSettings.post_process_models as Record<
+                    string,
+                    string
+                  >) ?? {}),
+                  [providerId]: "",
+                },
+              };
+              return null;
+            }
+            case "change_post_process_api_key_setting": {
+              const providerId = String(args?.providerId ?? "");
+              appSettings = {
+                ...appSettings,
+                post_process_api_keys: {
+                  ...((appSettings.post_process_api_keys as Record<
+                    string,
+                    string
+                  >) ?? {}),
+                  [providerId]: String(args?.apiKey ?? ""),
+                },
+              };
+              return null;
+            }
+            case "change_post_process_model_setting": {
+              const providerId = String(args?.providerId ?? "");
+              appSettings = {
+                ...appSettings,
+                post_process_models: {
+                  ...((appSettings.post_process_models as Record<
+                    string,
+                    string
+                  >) ?? {}),
+                  [providerId]: String(args?.model ?? ""),
+                },
+              };
+              return null;
+            }
+            case "fetch_post_process_models": {
+              const providerId = String(args?.providerId ?? "");
+              return providerId === "anthropic"
+                ? ["claude-3-5-haiku-latest", "claude-3-5-sonnet-latest"]
+                : ["gpt-4o-mini", "gpt-4.1-mini"];
+            }
+            case "set_post_process_selected_prompt":
+              appSettings = {
+                ...appSettings,
+                post_process_selected_prompt_id: String(args?.id ?? ""),
+              };
+              return null;
+            case "add_post_process_prompt": {
+              const prompt = {
+                id: `prompt_test_${nextPromptId++}`,
+                name: String(args?.name ?? ""),
+                prompt: String(args?.prompt ?? ""),
+              };
+              appSettings = {
+                ...appSettings,
+                post_process_prompts: [
+                  ...((appSettings.post_process_prompts as Array<
+                    Record<string, unknown>
+                  >) ?? []),
+                  prompt,
+                ],
+              };
+              return prompt;
+            }
+            case "update_post_process_prompt": {
+              const id = String(args?.id ?? "");
+              appSettings = {
+                ...appSettings,
+                post_process_prompts: (
+                  (appSettings.post_process_prompts as Array<
+                    Record<string, unknown>
+                  >) ?? []
+                ).map((prompt) =>
+                  prompt.id === id
+                    ? {
+                        ...prompt,
+                        name: String(args?.name ?? ""),
+                        prompt: String(args?.prompt ?? ""),
+                      }
+                    : prompt,
+                ),
+              };
+              return null;
+            }
+            case "delete_post_process_prompt": {
+              const id = String(args?.id ?? "");
+              appSettings = {
+                ...appSettings,
+                post_process_prompts: (
+                  (appSettings.post_process_prompts as Array<
+                    Record<string, unknown>
+                  >) ?? []
+                ).filter((prompt) => prompt.id !== id),
+              };
+              return null;
+            }
             case "change_adaptive_profiles_enabled_setting":
               appSettings = {
                 ...appSettings,
@@ -1096,6 +1216,165 @@ test.describe("Verbatim App", () => {
     await expect(page.getByRole("button", { name: "Dictionary" })).toHaveCount(
       0,
     );
+  });
+
+  test("android settings opens post-processing screen", async ({ page }) => {
+    await installTauriMocks(
+      page,
+      {
+        post_process_enabled: true,
+        post_process_provider_id: "openai",
+        post_process_providers: [
+          {
+            id: "openai",
+            label: "OpenAI",
+            base_url: "https://api.openai.com/v1",
+            allow_base_url_edit: false,
+            models_endpoint: null,
+            supports_structured_output: true,
+          },
+          {
+            id: "anthropic",
+            label: "Claude",
+            base_url: "https://api.anthropic.com/v1",
+            allow_base_url_edit: false,
+            models_endpoint: null,
+            supports_structured_output: true,
+          },
+          {
+            id: "custom",
+            label: "Custom",
+            base_url: "http://127.0.0.1:11434/v1",
+            allow_base_url_edit: true,
+            models_endpoint: null,
+            supports_structured_output: false,
+          },
+          {
+            id: "apple_intelligence",
+            label: "Apple Intelligence",
+            base_url: "apple-intelligence://local",
+            allow_base_url_edit: false,
+            models_endpoint: null,
+            supports_structured_output: true,
+          },
+        ],
+        post_process_api_keys: {
+          openai: "test-openai-key",
+          anthropic: "test-claude-key",
+        },
+        post_process_models: {
+          openai: "gpt-4o-mini",
+          anthropic: "claude-3-5-haiku-latest",
+        },
+        post_process_prompts: [
+          {
+            id: "prompt_clean",
+            name: "Clean up",
+            prompt: "Clean up {transcription}",
+          },
+        ],
+        post_process_selected_prompt_id: "prompt_clean",
+      },
+      [],
+      "android",
+    );
+    await installAndroidBridgeMock(page, {
+      microphone: true,
+      overlay: true,
+      accessibility: true,
+      bubbleRunning: true,
+      speechRecognizerAvailable: true,
+      onDeviceSpeechRecognizerAvailable: true,
+      onDeviceSpeechLanguageAvailable: true,
+    });
+
+    await page.goto("/");
+
+    await page.getByRole("button", { name: "Settings" }).click();
+    await page.getByRole("button", { name: "Advanced features" }).click();
+    await page.getByRole("button", { name: "Post Process" }).click();
+
+    await expect(
+      page.getByRole("heading", { name: "Post Process", exact: true }),
+    ).toBeVisible();
+    await expect(page.getByRole("button", { name: "Home" })).toHaveCount(0);
+    await expect(page.getByText("Apple Intelligence")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /OpenAI/ })).toBeVisible();
+    await expect(page.getByLabel("API Key")).toHaveValue("test-openai-key");
+    const modelField = page.getByRole("combobox", {
+      name: "Model",
+      exact: true,
+    });
+    await expect(modelField).toHaveValue("gpt-4o-mini");
+    await expect(page.getByLabel("Selected Prompt")).toHaveValue(
+      "prompt_clean",
+    );
+
+    await page.getByRole("button", { name: /Claude/ }).click();
+    await expect(modelField).toHaveValue("claude-3-5-haiku-latest");
+    await page.getByRole("button", { name: "Refresh models" }).click();
+    await modelField.fill("claude-3-5-sonnet-latest");
+    await page.getByLabel("API Key").click();
+    await expect(modelField).toHaveValue("claude-3-5-sonnet-latest");
+
+    await page.getByRole("button", { name: "Create New Prompt" }).click();
+    await expect(
+      page.getByRole("heading", { name: "Create New Prompt" }),
+    ).toBeVisible();
+    await page.getByLabel("Prompt Label").fill("Android polish");
+    await page
+      .getByLabel("Prompt Instructions")
+      .fill("Polish {transcription} for mobile.");
+    await page.getByRole("button", { name: "Save" }).click();
+    await expect(page.getByLabel("Selected Prompt")).toHaveValue(
+      "prompt_test_1",
+    );
+
+    await expect
+      .poll(async () =>
+        page.evaluate(() => {
+          const win = window as typeof window & {
+            __VERBATIM_TEST_COMMANDS__: string[];
+            __VERBATIM_TEST_INVOKES__: Array<{
+              cmd: string;
+              args?: Record<string, unknown>;
+            }>;
+          };
+          return {
+            commands: win.__VERBATIM_TEST_COMMANDS__,
+            invokes: win.__VERBATIM_TEST_INVOKES__,
+          };
+        }),
+      )
+      .toEqual(
+        expect.objectContaining({
+          commands: expect.arrayContaining([
+            "set_post_process_provider",
+            "fetch_post_process_models",
+            "change_post_process_model_setting",
+            "add_post_process_prompt",
+            "set_post_process_selected_prompt",
+          ]),
+          invokes: expect.arrayContaining([
+            expect.objectContaining({
+              cmd: "change_post_process_model_setting",
+              args: {
+                providerId: "anthropic",
+                model: "claude-3-5-sonnet-latest",
+              },
+            }),
+          ]),
+        }),
+      );
+
+    await page.getByLabel("Cancel").click();
+    await expect(
+      page.getByRole("button", { name: "Advanced features" }),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "Advanced features" }).click();
+    await expect(
+      page.getByRole("button", { name: "Post Process" }),
+    ).toBeVisible();
   });
 
   test("adaptive profiles can be enabled from experimental settings", async ({

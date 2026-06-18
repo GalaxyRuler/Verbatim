@@ -18,6 +18,7 @@ import {
   MicOff,
   Moon,
   Pencil,
+  RefreshCw,
   Search,
   Settings,
   Share2,
@@ -33,7 +34,9 @@ import {
   commands,
   type DictionaryEntry,
   type HistoryEntry,
+  type LLMPrompt,
   type ModelInfo,
+  type PostProcessProvider,
   type SnippetEntry,
 } from "@/bindings";
 import { useSettings } from "@/hooks/useSettings";
@@ -47,6 +50,12 @@ import "./AndroidApp.css";
 type AndroidTab = "home" | "history" | "models" | "settings";
 type AndroidTheme = "system" | "light" | "dark";
 type LibrarySection = "dictionary" | "snippets";
+type SettingsSubscreen =
+  | { type: "library"; section: LibrarySection }
+  | { type: "postProcessing" };
+type PromptEditorState =
+  | { mode: "create" }
+  | { mode: "edit"; prompt: LLMPrompt };
 type AndroidSpeechModelStatus =
   | "unknown"
   | "ready"
@@ -103,7 +112,12 @@ const tabs: Array<{ id: AndroidTab; labelKey: string; icon: typeof Home }> = [
   { id: "settings", labelKey: "android.tabs.settings", icon: Settings },
 ];
 
+const ANDROID_EXCLUDED_POST_PROCESS_PROVIDERS = new Set(["apple_intelligence"]);
+
 const safeBridge = () => window.VerbatimAndroid;
+
+const isAndroidPostProcessProvider = (provider: PostProcessProvider) =>
+  !ANDROID_EXCLUDED_POST_PROCESS_PROVIDERS.has(provider.id);
 
 const parsePermissions = (value: string): AndroidPermissionSnapshot => {
   try {
@@ -261,8 +275,8 @@ const useAndroidTextFormatterSync = () => {
 export default function AndroidApp() {
   const { t, i18n } = useTranslation();
   const [activeTab, setActiveTab] = useState<AndroidTab>("home");
-  const [settingsLibrarySection, setSettingsLibrarySection] =
-    useState<LibrarySection | null>(null);
+  const [settingsSubscreen, setSettingsSubscreen] =
+    useState<SettingsSubscreen | null>(null);
   const [theme, setTheme] = useState<AndroidTheme>(() => {
     const stored = window.localStorage.getItem("verbatim.android.theme");
     return stored === "light" || stored === "dark" || stored === "system"
@@ -303,14 +317,19 @@ export default function AndroidApp() {
     permissions.onDeviceSpeechLanguageAvailable;
 
   const activeTabSpec = tabs.find((tab) => tab.id === activeTab) ?? tabs[0];
-  const title = settingsLibrarySection
-    ? t(
-        settingsLibrarySection === "dictionary"
-          ? "settings.dictionary.title"
-          : "settings.snippets.title",
-      )
-    : t(activeTabSpec.labelKey);
-  const showSettingsBack = activeTab === "settings" && !!settingsLibrarySection;
+  const settingsSubscreenTitle = useMemo(() => {
+    if (!settingsSubscreen) return null;
+    if (settingsSubscreen.type === "postProcessing") {
+      return t("settings.postProcessing.title");
+    }
+    return t(
+      settingsSubscreen.section === "dictionary"
+        ? "settings.dictionary.title"
+        : "settings.snippets.title",
+    );
+  }, [settingsSubscreen, t]);
+  const title = settingsSubscreenTitle ?? t(activeTabSpec.labelKey);
+  const showSettingsBack = activeTab === "settings" && !!settingsSubscreen;
 
   return (
     <div className={`android-app android-theme-${theme}`}>
@@ -322,7 +341,7 @@ export default function AndroidApp() {
                 type="button"
                 className="android-icon-button"
                 aria-label={t("common.cancel")}
-                onClick={() => setSettingsLibrarySection(null)}
+                onClick={() => setSettingsSubscreen(null)}
               >
                 <ArrowLeft size={22} />
               </button>
@@ -362,16 +381,25 @@ export default function AndroidApp() {
           />
         ) : activeTab === "history" ? (
           <HistoryTab />
-        ) : settingsLibrarySection ? (
+        ) : settingsSubscreen?.type === "library" ? (
           <LibraryTab
-            activeSection={settingsLibrarySection}
-            setActiveSection={setSettingsLibrarySection}
+            activeSection={settingsSubscreen.section}
+            setActiveSection={(section) =>
+              setSettingsSubscreen({ type: "library", section })
+            }
           />
+        ) : settingsSubscreen?.type === "postProcessing" ? (
+          <AndroidPostProcessingScreen />
         ) : (
           <SettingsTab
             theme={theme}
             setTheme={setTheme}
-            openLibrary={setSettingsLibrarySection}
+            openLibrary={(section) =>
+              setSettingsSubscreen({ type: "library", section })
+            }
+            openPostProcessing={() =>
+              setSettingsSubscreen({ type: "postProcessing" })
+            }
           />
         )}
       </main>
@@ -387,7 +415,7 @@ export default function AndroidApp() {
                 key={tab.id}
                 className={active ? "android-nav-active" : ""}
                 onClick={() => {
-                  setSettingsLibrarySection(null);
+                  setSettingsSubscreen(null);
                   setActiveTab(tab.id);
                 }}
               >
@@ -1539,14 +1567,503 @@ function ModelSection({
   );
 }
 
+function AndroidPostProcessingScreen() {
+  const { t } = useTranslation();
+  const {
+    settings,
+    updateSetting,
+    setPostProcessProvider,
+    updatePostProcessBaseUrl,
+    updatePostProcessApiKey,
+    updatePostProcessModel,
+    fetchPostProcessModels,
+    postProcessModelOptions,
+    refreshSettings,
+    isUpdating,
+  } = useSettings();
+  const [promptEditor, setPromptEditor] = useState<PromptEditorState | null>(
+    null,
+  );
+
+  const providers = useMemo(
+    () =>
+      (settings?.post_process_providers ?? []).filter(
+        isAndroidPostProcessProvider,
+      ),
+    [settings?.post_process_providers],
+  );
+  const selectedProvider = useMemo(
+    () =>
+      providers.find(
+        (provider) => provider.id === settings?.post_process_provider_id,
+      ) ?? providers[0],
+    [providers, settings?.post_process_provider_id],
+  );
+  const selectedProviderId = selectedProvider?.id ?? "";
+  const selectedProviderBaseUrl = selectedProvider?.base_url ?? "";
+  const postProcessingEnabled = !!settings?.post_process_enabled;
+  const prompts = settings?.post_process_prompts ?? [];
+  const selectedPromptId = settings?.post_process_selected_prompt_id ?? "";
+  const selectedPrompt =
+    prompts.find((prompt) => prompt.id === selectedPromptId) ?? null;
+  const configuredModel =
+    settings?.post_process_models?.[selectedProviderId] ?? "";
+  const configuredApiKey =
+    settings?.post_process_api_keys?.[selectedProviderId] ?? "";
+  const modelOptions = useMemo(() => {
+    const seen = new Set<string>();
+    const options: string[] = [];
+    const addOption = (value: string | null | undefined) => {
+      const trimmed = value?.trim();
+      if (!trimmed || seen.has(trimmed)) return;
+      seen.add(trimmed);
+      options.push(trimmed);
+    };
+    for (const option of postProcessModelOptions[selectedProviderId] ?? []) {
+      addOption(option);
+    }
+    addOption(configuredModel);
+    return options;
+  }, [configuredModel, postProcessModelOptions, selectedProviderId]);
+  const [baseUrlDraft, setBaseUrlDraft] = useState(selectedProviderBaseUrl);
+  const [apiKeyDraft, setApiKeyDraft] = useState(configuredApiKey);
+  const [modelDraft, setModelDraft] = useState(configuredModel);
+  const modelOptionsId = `android-post-process-models-${
+    selectedProviderId || "none"
+  }`;
+  const modelInputLabel = t("settings.postProcessing.api.model.title");
+
+  useEffect(() => {
+    setBaseUrlDraft(selectedProviderBaseUrl);
+  }, [selectedProviderBaseUrl, selectedProviderId]);
+
+  useEffect(() => {
+    setApiKeyDraft(configuredApiKey);
+  }, [configuredApiKey, selectedProviderId]);
+
+  useEffect(() => {
+    setModelDraft(configuredModel);
+  }, [configuredModel, selectedProviderId]);
+
+  const handleProviderSelect = async (provider: PostProcessProvider) => {
+    if (provider.id === selectedProviderId) return;
+    await setPostProcessProvider(provider.id);
+    if (
+      (settings?.post_process_api_keys?.[provider.id] ?? "").trim() ||
+      provider.base_url.trim()
+    ) {
+      void fetchPostProcessModels(provider.id);
+    }
+  };
+
+  const handleBaseUrlBlur = async () => {
+    const trimmed = baseUrlDraft.trim();
+    if (
+      !selectedProvider?.allow_base_url_edit ||
+      trimmed === selectedProviderBaseUrl
+    ) {
+      return;
+    }
+    await updatePostProcessBaseUrl(selectedProvider.id, trimmed);
+  };
+
+  const handleApiKeyBlur = async () => {
+    const trimmed = apiKeyDraft.trim();
+    if (!selectedProviderId || trimmed === configuredApiKey) return;
+    await updatePostProcessApiKey(selectedProviderId, trimmed);
+  };
+
+  const handleModelBlur = async () => {
+    const trimmed = modelDraft.trim();
+    if (!selectedProviderId || trimmed === configuredModel) return;
+    await updatePostProcessModel(selectedProviderId, trimmed);
+  };
+
+  if (promptEditor) {
+    return (
+      <AndroidPostProcessPromptEditor
+        editor={promptEditor}
+        selectedPromptId={selectedPromptId}
+        refreshSettings={refreshSettings}
+        onClose={() => setPromptEditor(null)}
+      />
+    );
+  }
+
+  return (
+    <>
+      <section className="android-section">
+        <div className="android-card android-panel android-post-process-summary">
+          <div className="android-card-header">
+            <div className="android-library-main">
+              <h2>{t("settings.debug.postProcessingToggle.label")}</h2>
+              <p className="android-muted">
+                {t("settings.debug.postProcessingToggle.description")}
+              </p>
+            </div>
+            <Switch
+              checked={postProcessingEnabled}
+              label={t("settings.debug.postProcessingToggle.label")}
+              onClick={() =>
+                updateSetting("post_process_enabled", !postProcessingEnabled)
+              }
+            />
+          </div>
+          <span
+            className={`android-status-pill ${
+              postProcessingEnabled
+                ? "android-status-trust"
+                : "android-status-warning"
+            }`}
+          >
+            {t(postProcessingEnabled ? "common.enabled" : "common.disabled")}
+          </span>
+        </div>
+      </section>
+
+      <section className="android-section">
+        <div className="android-section-header">
+          <h2>{t("settings.postProcessing.api.provider.title")}</h2>
+        </div>
+        <div className="android-list">
+          {providers.map((provider) => {
+            const active = provider.id === selectedProviderId;
+            return (
+              <button
+                key={provider.id}
+                type="button"
+                className={`android-list-row android-post-process-option ${
+                  active ? "android-active-option" : ""
+                }`}
+                aria-pressed={active}
+                disabled={isUpdating("post_process_provider_id")}
+                onClick={() => void handleProviderSelect(provider)}
+              >
+                <div className="android-library-main">
+                  <h3>{provider.label}</h3>
+                  <p className="android-muted">{provider.base_url}</p>
+                </div>
+                {active && <Check size={18} />}
+              </button>
+            );
+          })}
+          {providers.length === 0 && (
+            <div className="android-list-row">
+              <p className="android-muted">{t("common.noOptionsFound")}</p>
+            </div>
+          )}
+        </div>
+      </section>
+
+      {selectedProvider && (
+        <section className="android-section">
+          <div className="android-section-header">
+            <h2>{t("settings.postProcessing.api.title")}</h2>
+          </div>
+          <div className="android-library-form">
+            <label className="android-field">
+              <span>{t("settings.postProcessing.api.baseUrl.title")}</span>
+              <input
+                type="url"
+                value={baseUrlDraft}
+                aria-label={t("settings.postProcessing.api.baseUrl.title")}
+                disabled={!selectedProvider.allow_base_url_edit}
+                onChange={(event) => setBaseUrlDraft(event.target.value)}
+                onBlur={() => void handleBaseUrlBlur()}
+                placeholder={t(
+                  "settings.postProcessing.api.baseUrl.placeholder",
+                )}
+              />
+            </label>
+            <label className="android-field">
+              <span>{t("settings.postProcessing.api.apiKey.title")}</span>
+              <input
+                type="password"
+                value={apiKeyDraft}
+                aria-label={t("settings.postProcessing.api.apiKey.title")}
+                autoComplete="off"
+                onChange={(event) => setApiKeyDraft(event.target.value)}
+                onBlur={() => void handleApiKeyBlur()}
+                placeholder={t(
+                  "settings.postProcessing.api.apiKey.placeholder",
+                )}
+              />
+            </label>
+            <div className="android-field">
+              <span>{modelInputLabel}</span>
+              <div className="android-field-row">
+                <input
+                  value={modelDraft}
+                  aria-label={modelInputLabel}
+                  list={modelOptionsId}
+                  onChange={(event) => setModelDraft(event.target.value)}
+                  onBlur={() => void handleModelBlur()}
+                  placeholder={t(
+                    modelOptions.length > 0
+                      ? "settings.postProcessing.api.model.placeholderWithOptions"
+                      : "settings.postProcessing.api.model.placeholderNoOptions",
+                  )}
+                />
+                <button
+                  type="button"
+                  className="android-icon-button"
+                  aria-label={t(
+                    "settings.postProcessing.api.model.refreshModels",
+                  )}
+                  disabled={
+                    !selectedProviderId ||
+                    isUpdating(
+                      `post_process_models_fetch:${selectedProviderId}`,
+                    )
+                  }
+                  onClick={() =>
+                    void fetchPostProcessModels(selectedProviderId)
+                  }
+                >
+                  <RefreshCw size={18} />
+                </button>
+              </div>
+              <datalist id={modelOptionsId}>
+                {modelOptions.map((option) => (
+                  <option key={option} value={option} />
+                ))}
+              </datalist>
+            </div>
+          </div>
+        </section>
+      )}
+
+      <section className="android-section">
+        <div className="android-section-header">
+          <h2>{t("settings.postProcessing.prompts.title")}</h2>
+        </div>
+        <div className="android-library-form">
+          <label className="android-field">
+            <span>
+              {t("settings.postProcessing.prompts.selectedPrompt.title")}
+            </span>
+            <select
+              value={selectedPromptId}
+              aria-label={t(
+                "settings.postProcessing.prompts.selectedPrompt.title",
+              )}
+              onChange={(event) =>
+                updateSetting(
+                  "post_process_selected_prompt_id",
+                  event.target.value,
+                )
+              }
+            >
+              <option value="">
+                {prompts.length === 0
+                  ? t("settings.postProcessing.prompts.noPrompts")
+                  : t("settings.postProcessing.prompts.selectPrompt")}
+              </option>
+              {prompts.map((prompt) => (
+                <option key={prompt.id} value={prompt.id}>
+                  {prompt.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="android-actions">
+            <button
+              type="button"
+              className="android-action android-primary-action"
+              onClick={() => setPromptEditor({ mode: "create" })}
+            >
+              <Sparkles size={17} />
+              <span>{t("settings.postProcessing.prompts.createNew")}</span>
+            </button>
+            {selectedPrompt && (
+              <button
+                type="button"
+                className="android-action"
+                onClick={() =>
+                  setPromptEditor({ mode: "edit", prompt: selectedPrompt })
+                }
+              >
+                <Pencil size={17} />
+                <span>{t("common.edit")}</span>
+              </button>
+            )}
+          </div>
+        </div>
+      </section>
+    </>
+  );
+}
+
+function AndroidPostProcessPromptEditor({
+  editor,
+  selectedPromptId,
+  refreshSettings,
+  onClose,
+}: {
+  editor: PromptEditorState;
+  selectedPromptId: string;
+  refreshSettings: () => Promise<void>;
+  onClose: () => void;
+}) {
+  const { t } = useTranslation();
+  const [name, setName] = useState(
+    editor.mode === "edit" ? editor.prompt.name : "",
+  );
+  const [prompt, setPrompt] = useState(
+    editor.mode === "edit" ? editor.prompt.prompt : "",
+  );
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleSave = async (event: FormEvent) => {
+    event.preventDefault();
+    const nextName = name.trim();
+    const nextPrompt = prompt.trim();
+    if (!nextName || !nextPrompt) return;
+
+    setIsSaving(true);
+    setError("");
+    try {
+      if (editor.mode === "edit") {
+        const result = await commands.updatePostProcessPrompt(
+          editor.prompt.id,
+          nextName,
+          nextPrompt,
+        );
+        if (result.status === "error") {
+          setError(result.error);
+          return;
+        }
+      } else {
+        const result = await commands.addPostProcessPrompt(
+          nextName,
+          nextPrompt,
+        );
+        if (result.status === "error") {
+          setError(result.error);
+          return;
+        }
+        await commands.setPostProcessSelectedPrompt(result.data.id);
+      }
+      await refreshSettings();
+      onClose();
+    } catch (saveError) {
+      setError(
+        saveError instanceof Error ? saveError.message : String(saveError),
+      );
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (editor.mode !== "edit") return;
+
+    setIsSaving(true);
+    setError("");
+    try {
+      const result = await commands.deletePostProcessPrompt(editor.prompt.id);
+      if (result.status === "error") {
+        setError(result.error);
+        return;
+      }
+      if (selectedPromptId === editor.prompt.id) {
+        await commands.setPostProcessSelectedPrompt("");
+      }
+      await refreshSettings();
+      onClose();
+    } catch (deleteError) {
+      setError(
+        deleteError instanceof Error
+          ? deleteError.message
+          : String(deleteError),
+      );
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <section className="android-section android-post-process-editor">
+      <div className="android-section-header">
+        <h2>
+          {editor.mode === "edit"
+            ? t("common.edit")
+            : t("settings.postProcessing.prompts.createNew")}
+        </h2>
+      </div>
+      <form className="android-library-form" onSubmit={handleSave}>
+        <label className="android-field">
+          <span>{t("settings.postProcessing.prompts.promptLabel")}</span>
+          <input
+            value={name}
+            maxLength={80}
+            onChange={(event) => setName(event.target.value)}
+            placeholder={t(
+              "settings.postProcessing.prompts.promptLabelPlaceholder",
+            )}
+          />
+        </label>
+        <label className="android-field">
+          <span>{t("settings.postProcessing.prompts.promptInstructions")}</span>
+          <textarea
+            value={prompt}
+            onChange={(event) => setPrompt(event.target.value)}
+            placeholder={t(
+              "settings.postProcessing.prompts.promptInstructionsPlaceholder",
+            )}
+          />
+        </label>
+        {error && (
+          <p className="android-error-text" role="alert">
+            {error}
+          </p>
+        )}
+        <div className="android-actions">
+          <button
+            type="submit"
+            className="android-action android-primary-action"
+            disabled={isSaving || !name.trim() || !prompt.trim()}
+          >
+            <Check size={17} />
+            <span>{t("common.save")}</span>
+          </button>
+          <button
+            type="button"
+            className="android-action"
+            disabled={isSaving}
+            onClick={onClose}
+          >
+            <X size={17} />
+            <span>{t("common.cancel")}</span>
+          </button>
+          {editor.mode === "edit" && (
+            <button
+              type="button"
+              className="android-action"
+              disabled={isSaving}
+              onClick={() => void handleDelete()}
+            >
+              <Trash2 size={17} />
+              <span>{t("common.delete")}</span>
+            </button>
+          )}
+        </div>
+      </form>
+    </section>
+  );
+}
+
 function SettingsTab({
   theme,
   setTheme,
   openLibrary,
+  openPostProcessing,
 }: {
   theme: AndroidTheme;
   setTheme: (theme: AndroidTheme) => void;
   openLibrary: (section: LibrarySection) => void;
+  openPostProcessing: () => void;
 }) {
   const { t } = useTranslation();
   const {
@@ -1680,10 +2197,14 @@ function SettingsTab({
               <span>{t("sidebar.snippets")}</span>
               <Sparkles size={18} />
             </button>
-            <div className="android-settings-row">
+            <button
+              type="button"
+              className="android-settings-row"
+              onClick={openPostProcessing}
+            >
               <span>{t("sidebar.postProcessing")}</span>
               <Sparkles size={18} />
-            </div>
+            </button>
             <div className="android-settings-row">
               <span>{t("settings.debug.historyLimit.title")}</span>
               <span className="android-muted">
