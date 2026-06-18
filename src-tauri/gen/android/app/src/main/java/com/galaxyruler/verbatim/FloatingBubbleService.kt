@@ -532,20 +532,25 @@ class FloatingBubbleService : Service() {
   }
 
   private fun handleRecognizedText(text: String?) {
-    if (text.isNullOrBlank()) {
+    val rawText = text?.trim()
+    if (rawText.isNullOrBlank()) {
       showFailure(R.string.bubble_listen_failed, null)
       Toast.makeText(this, R.string.bubble_listen_failed, Toast.LENGTH_SHORT).show()
       return
     }
 
-    insertOrRecover(text)
+    insertOrRecover(applyNativeTextFormatter(rawText), rawText)
   }
 
-  private fun insertOrRecover(text: String, shouldRecord: Boolean = true) {
+  private fun insertOrRecover(
+    text: String,
+    rawText: String = text,
+    shouldRecord: Boolean = true,
+  ) {
     when (VerbatimAccessibilityService.insert(text)) {
       VerbatimAccessibilityService.InsertResult.INSERTED -> {
         if (shouldRecord) {
-          recordTranscript(text, HISTORY_STATUS_INSERTED)
+          recordTranscript(rawText, text, HISTORY_STATUS_INSERTED)
         }
         showInserted()
         Toast.makeText(this, R.string.bubble_inserted, Toast.LENGTH_SHORT).show()
@@ -558,7 +563,7 @@ class FloatingBubbleService : Service() {
       VerbatimAccessibilityService.InsertResult.NO_TARGET -> {
         copyForRecovery(text)
         if (shouldRecord) {
-          recordTranscript(text, HISTORY_STATUS_COPIED)
+          recordTranscript(rawText, text, HISTORY_STATUS_COPIED)
         }
         showFailure(R.string.bubble_recovery_copied, text)
         Toast.makeText(this, R.string.bubble_copied, Toast.LENGTH_LONG).show()
@@ -585,7 +590,7 @@ class FloatingBubbleService : Service() {
       return
     }
 
-    insertOrRecover(DEBUG_INSERTION_TEXT)
+    insertOrRecover(applyNativeTextFormatter(DEBUG_INSERTION_TEXT), DEBUG_INSERTION_TEXT)
   }
 
   private fun retryRecovery() {
@@ -598,6 +603,90 @@ class FloatingBubbleService : Service() {
     bubbleView?.let { renderBubble(it) }
     insertOrRecover(text, shouldRecord = false)
   }
+
+  private fun applyNativeTextFormatter(text: String): String {
+    val snapshot = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+      .getString(TEXT_FORMATTER_KEY, null)
+      ?: return text
+
+    return try {
+      val config = JSONObject(snapshot)
+      val dictionaryRules = mutableListOf<ReplacementRule>()
+      val dictionaryEntries = config.optJSONArray("dictionary_entries")
+      if (dictionaryEntries != null) {
+        for (index in 0 until dictionaryEntries.length()) {
+          val entry = dictionaryEntries.optJSONObject(index) ?: continue
+          val from = entry.optString("replacement_of").trim()
+          val to = entry.optString("phrase").trim()
+          if (from.isNotBlank() && to.isNotBlank()) {
+            dictionaryRules.add(ReplacementRule(from, to))
+          }
+        }
+      }
+
+      val snippetRules = mutableListOf<ReplacementRule>()
+      val snippets = config.optJSONArray("snippets")
+      if (snippets != null) {
+        for (index in 0 until snippets.length()) {
+          val entry = snippets.optJSONObject(index) ?: continue
+          val from = entry.optString("trigger").trim()
+          val to = entry.optString("content")
+          if (from.isNotBlank() && to.isNotBlank()) {
+            snippetRules.add(ReplacementRule(from, to))
+          }
+        }
+      }
+
+      applyReplacementRules(
+        applyReplacementRules(text, dictionaryRules),
+        snippetRules,
+      )
+    } catch (_: Exception) {
+      text
+    }
+  }
+
+  private fun applyReplacementRules(
+    text: String,
+    rules: List<ReplacementRule>,
+  ): String =
+    rules
+      .sortedByDescending { it.from.length }
+      .fold(text) { current, rule ->
+        applyBoundedReplacement(current, rule.from, rule.to)
+      }
+
+  private fun applyBoundedReplacement(text: String, from: String, to: String): String {
+    if (from.isEmpty()) {
+      return text
+    }
+
+    val output = StringBuilder()
+    var cursor = 0
+    while (cursor < text.length) {
+      val matchStart = text.indexOf(from, cursor, ignoreCase = true)
+      if (matchStart < 0) {
+        output.append(text.substring(cursor))
+        break
+      }
+
+      val matchEnd = matchStart + from.length
+      if (isRuleBoundary(text, matchStart - 1) && isRuleBoundary(text, matchEnd)) {
+        output.append(text.substring(cursor, matchStart))
+        output.append(to)
+      } else {
+        output.append(text.substring(cursor, matchEnd))
+      }
+      cursor = matchEnd
+    }
+
+    return output.toString()
+  }
+
+  private fun isRuleBoundary(text: String, index: Int): Boolean =
+    index < 0 ||
+      index >= text.length ||
+      (!text[index].isLetterOrDigit() && text[index] != '_')
 
   private fun showFailure(messageResId: Int, recoverableText: String?) {
     failureMessageResId = messageResId
@@ -619,14 +708,18 @@ class FloatingBubbleService : Service() {
     )
   }
 
-  private fun recordTranscript(text: String, status: String) {
+  private fun recordTranscript(rawText: String, insertedText: String, status: String) {
     try {
       val now = System.currentTimeMillis()
       val entry = JSONObject()
         .put("id", now)
         .put("timestamp", now)
         .put("title", getString(R.string.android_history_title))
-        .put("transcription_text", text)
+        .put("transcription_text", rawText)
+        .put(
+          "post_processed_text",
+          if (insertedText == rawText) JSONObject.NULL else insertedText,
+        )
         .put("insertion_status", status)
 
       val stored = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
@@ -696,10 +789,17 @@ class FloatingBubbleService : Service() {
     FAILED,
   }
 
+  private data class ReplacementRule(
+    val from: String,
+    val to: String,
+  )
+
   companion object {
     private const val PREFS_NAME = "verbatim_android"
     private const val ANDROID_HISTORY_KEY = "native_transcript_history"
+    private const val TEXT_FORMATTER_KEY = "native_text_formatter_snapshot"
     private const val ANDROID_HISTORY_LIMIT = 30
+    private const val MAX_TEXT_FORMATTER_SNAPSHOT_CHARS = 256 * 1024
     private const val INSERTED_STATE_MS = 1800L
     private const val HISTORY_STATUS_INSERTED = "inserted"
     private const val HISTORY_STATUS_COPIED = "copied"
@@ -752,6 +852,23 @@ class FloatingBubbleService : Service() {
       context
         .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         .getString(ANDROID_HISTORY_KEY, "[]") ?: "[]"
+
+    fun syncTextFormatter(context: Context, snapshot: String) {
+      if (snapshot.length > MAX_TEXT_FORMATTER_SNAPSHOT_CHARS) {
+        return
+      }
+
+      try {
+        JSONObject(snapshot)
+        context
+          .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+          .edit()
+          .putString(TEXT_FORMATTER_KEY, snapshot)
+          .apply()
+      } catch (_: Exception) {
+        // The formatter snapshot is optional and must never expose transcript text in logs.
+      }
+    }
 
     fun startDebugInsertionProbe(context: Context) {
       if (!BuildConfig.DEBUG) {

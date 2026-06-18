@@ -736,12 +736,15 @@ const installAndroidBridgeMock = async (
           openOverlaySettings: () => void;
           openAccessibilitySettings: () => void;
           requestSpeechModelDownload: () => void;
+          syncTextFormatter: (snapshot: string) => void;
           startBubble: () => void;
           stopBubble: () => void;
         };
         __VERBATIM_ANDROID_BRIDGE_CALLS__: string[];
+        __VERBATIM_ANDROID_FORMATTER_SNAPSHOTS__: string[];
       };
       testWindow.__VERBATIM_ANDROID_BRIDGE_CALLS__ = [];
+      testWindow.__VERBATIM_ANDROID_FORMATTER_SNAPSHOTS__ = [];
       testWindow.VerbatimAndroid = {
         permissionSnapshot: () => JSON.stringify(snapshot),
         nativeTranscriptHistory: () => JSON.stringify(nativeHistoryEntries),
@@ -751,6 +754,11 @@ const installAndroidBridgeMock = async (
         requestSpeechModelDownload: () => {
           testWindow.__VERBATIM_ANDROID_BRIDGE_CALLS__.push(
             "requestSpeechModelDownload",
+          );
+        },
+        syncTextFormatter: (formatterSnapshot: string) => {
+          testWindow.__VERBATIM_ANDROID_FORMATTER_SNAPSHOTS__.push(
+            formatterSnapshot,
           );
         },
         startBubble: () => undefined,
@@ -903,7 +911,8 @@ test.describe("Verbatim App", () => {
           id: 101,
           timestamp: 1781740000000,
           title: "Android dictation",
-          transcription_text: "Native Android transcript",
+          transcription_text: "Native Android raw transcript",
+          post_processed_text: "Native Android formatted transcript",
           insertion_status: "inserted",
         },
       ],
@@ -916,10 +925,86 @@ test.describe("Verbatim App", () => {
     ).toBeVisible();
     await expect(page.getByText("Bubble visibility")).toBeVisible();
     await expect(page.getByText("Waiting for keyboard")).toBeVisible();
-    await expect(page.getByText("Native Android transcript")).toBeVisible();
+    await expect(
+      page.getByText("Native Android formatted transcript"),
+    ).toBeVisible();
 
     await page.getByRole("button", { name: "History" }).click();
-    await expect(page.getByText("Native Android transcript")).toBeVisible();
+    await expect(
+      page.getByText("Native Android formatted transcript"),
+    ).toBeVisible();
+  });
+
+  test("android shell syncs formatter rules to native bridge", async ({
+    page,
+  }) => {
+    await installTauriMocks(
+      page,
+      {
+        dictionary_entries: [
+          {
+            id: "dict_android_1",
+            phrase: "Kulaib",
+            replacement_of: "club",
+            source: "manual",
+            priority: "starred",
+            created_at_ms: 1,
+            updated_at_ms: 2,
+          },
+        ],
+        snippets: [
+          {
+            id: "snippet_android_1",
+            trigger: "/sig",
+            content: "Sent from Verbatim Android",
+            created_at_ms: 1,
+            updated_at_ms: 2,
+          },
+        ],
+      },
+      [],
+      "android",
+    );
+    await installAndroidBridgeMock(page, {
+      microphone: true,
+      overlay: true,
+      accessibility: true,
+      bubbleRunning: true,
+      speechRecognizerAvailable: true,
+      onDeviceSpeechRecognizerAvailable: true,
+      onDeviceSpeechLanguageAvailable: true,
+    });
+
+    await page.goto("/");
+
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const win = window as typeof window & {
+            __VERBATIM_ANDROID_FORMATTER_SNAPSHOTS__?: string[];
+          };
+          const lastSnapshot =
+            win.__VERBATIM_ANDROID_FORMATTER_SNAPSHOTS__?.at(-1);
+          return lastSnapshot ? JSON.parse(lastSnapshot) : null;
+        }),
+      )
+      .toEqual(
+        expect.objectContaining({
+          dictionary_entries: expect.arrayContaining([
+            expect.objectContaining({
+              phrase: "Kulaib",
+              replacement_of: "club",
+              priority: "starred",
+            }),
+          ]),
+          snippets: expect.arrayContaining([
+            expect.objectContaining({
+              trigger: "/sig",
+              content: "Sent from Verbatim Android",
+            }),
+          ]),
+        }),
+      );
   });
 
   test("android library manages dictionary and snippets", async ({ page }) => {

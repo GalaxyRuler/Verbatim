@@ -114,6 +114,11 @@ class MainActivity : TauriActivity() {
       FloatingBubbleService.nativeTranscriptHistory(activity)
 
     @JavascriptInterface
+    fun syncTextFormatter(snapshot: String) {
+      FloatingBubbleService.syncTextFormatter(activity, snapshot)
+    }
+
+    @JavascriptInterface
     fun requestMicrophone() {
       activity.runOnUiThread {
         ActivityCompat.requestPermissions(

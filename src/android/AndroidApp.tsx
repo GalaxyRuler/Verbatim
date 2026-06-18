@@ -72,6 +72,7 @@ declare global {
     VerbatimAndroid?: {
       permissionSnapshot: () => string;
       nativeTranscriptHistory?: () => string;
+      syncTextFormatter?: (snapshot: string) => void;
       requestMicrophone: () => void;
       openOverlaySettings: () => void;
       openAccessibilitySettings: () => void;
@@ -133,7 +134,11 @@ const historyEntryFromAndroidSnapshot = (
     saved: false,
     title: typeof entry.title === "string" ? entry.title : "",
     transcription_text: text,
-    post_processed_text: null,
+    post_processed_text:
+      typeof entry.post_processed_text === "string" &&
+      entry.post_processed_text.trim().length > 0
+        ? entry.post_processed_text
+        : null,
     post_process_prompt: null,
     post_process_requested: false,
     adaptive_profile_id: null,
@@ -152,6 +157,9 @@ const historyEntryFromAndroidSnapshot = (
     transform_recovery_status: null,
   };
 };
+
+const historyDisplayText = (entry: HistoryEntry): string =>
+  entry.post_processed_text || entry.transcription_text;
 
 const readAndroidNativeHistory = (): HistoryEntry[] => {
   const snapshot = safeBridge()?.nativeTranscriptHistory?.();
@@ -210,6 +218,46 @@ const WaveformPreview = () => (
   </div>
 );
 
+const useAndroidTextFormatterSync = () => {
+  const dictionaryEntries = useDictionaryStore((store) => store.entries);
+  const loadDictionaryEntries = useDictionaryStore(
+    (store) => store.loadEntries,
+  );
+  const snippetEntries = useSnippetsStore((store) => store.entries);
+  const loadSnippetEntries = useSnippetsStore((store) => store.loadEntries);
+
+  useEffect(() => {
+    if (!safeBridge()?.syncTextFormatter) {
+      return;
+    }
+
+    void Promise.all([loadDictionaryEntries(), loadSnippetEntries()]).catch(
+      () => undefined,
+    );
+  }, [loadDictionaryEntries, loadSnippetEntries]);
+
+  useEffect(() => {
+    const bridge = safeBridge();
+    if (!bridge?.syncTextFormatter) {
+      return;
+    }
+
+    bridge.syncTextFormatter(
+      JSON.stringify({
+        dictionary_entries: dictionaryEntries.map((entry) => ({
+          phrase: entry.phrase,
+          replacement_of: entry.replacement_of ?? null,
+          priority: entry.priority ?? "normal",
+        })),
+        snippets: snippetEntries.map((entry) => ({
+          trigger: entry.trigger,
+          content: entry.content,
+        })),
+      }),
+    );
+  }, [dictionaryEntries, snippetEntries]);
+};
+
 export default function AndroidApp() {
   const { t, i18n } = useTranslation();
   const [activeTab, setActiveTab] = useState<AndroidTab>("home");
@@ -223,6 +271,8 @@ export default function AndroidApp() {
   });
   const [permissions, setPermissions] =
     useState<AndroidPermissionSnapshot>(defaultPermissions);
+
+  useAndroidTextFormatterSync();
 
   const refreshPermissions = useCallback(() => {
     const snapshot = safeBridge()?.permissionSnapshot();
@@ -571,8 +621,9 @@ function HomeTab({
           </button>
         </div>
         <p className="android-transcript">
-          {lastEntry?.transcription_text ||
-            t("android.home.lastTranscript.empty")}
+          {lastEntry
+            ? historyDisplayText(lastEntry)
+            : t("android.home.lastTranscript.empty")}
         </p>
         {lastEntry && (
           <div className="android-actions">
@@ -580,7 +631,7 @@ function HomeTab({
               type="button"
               className="android-action"
               onClick={() =>
-                navigator.clipboard.writeText(lastEntry.transcription_text)
+                navigator.clipboard.writeText(historyDisplayText(lastEntry))
               }
             >
               <Copy size={17} />
@@ -622,7 +673,7 @@ function HistoryTab() {
   }, [loadEntries]);
 
   const filteredEntries = entries.filter((entry) =>
-    entry.transcription_text.toLowerCase().includes(search.toLowerCase()),
+    historyDisplayText(entry).toLowerCase().includes(search.toLowerCase()),
   );
 
   return (
@@ -661,7 +712,9 @@ function HistoryTab() {
                     fill={entry.saved ? "currentColor" : "none"}
                   />
                 </div>
-                <p className="android-transcript">{entry.transcription_text}</p>
+                <p className="android-transcript">
+                  {historyDisplayText(entry)}
+                </p>
                 {expanded && (
                   <div className="android-actions">
                     <button
@@ -669,7 +722,9 @@ function HistoryTab() {
                       className="android-action"
                       onClick={(event) => {
                         event.stopPropagation();
-                        navigator.clipboard.writeText(entry.transcription_text);
+                        navigator.clipboard.writeText(
+                          historyDisplayText(entry),
+                        );
                       }}
                     >
                       <Copy size={17} />
