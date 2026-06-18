@@ -1401,6 +1401,34 @@ test.describe("Verbatim App", () => {
     );
   });
 
+  test("docked pill stays collapsed on hover and expands only on click", async ({
+    page,
+  }) => {
+    await installTauriMocks(page);
+    await page.goto("/src/overlay/index.html");
+
+    await page.evaluate(() => {
+      const win = window as typeof window & {
+        __VERBATIM_TEST_EMIT_EVENT__: (
+          event: string,
+          payload?: unknown,
+        ) => void;
+      };
+      win.__VERBATIM_TEST_EMIT_EVENT__("show-docked-overlay");
+    });
+
+    const overlay = page.getByTestId("recording-overlay");
+    const expandButton = page.getByRole("button", { name: "Expand pill" });
+
+    await expect(overlay).toHaveClass(/docked-collapsed/);
+    await expandButton.hover();
+    await expect(overlay).toHaveClass(/docked-collapsed/);
+    await expect(overlay).toHaveCSS("width", "44px");
+
+    await expandButton.click();
+    await expect(overlay).toHaveClass(/docked-expanded/);
+  });
+
   test("docked pill initializes visible when already enabled", async ({
     page,
   }) => {

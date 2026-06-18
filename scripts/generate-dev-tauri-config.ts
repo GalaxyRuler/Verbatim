@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, stat, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { parseArgs } from "node:util";
 
@@ -42,7 +42,20 @@ const config = {
 };
 
 const outputPath = resolve(output);
-await mkdir(dirname(outputPath), { recursive: true });
+const outputDirectory = dirname(outputPath);
+try {
+  const outputDirectoryStat = await stat(outputDirectory);
+  if (!outputDirectoryStat.isDirectory()) {
+    throw new Error(
+      `Output parent path is not a directory: ${outputDirectory}`,
+    );
+  }
+} catch (error) {
+  if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+    throw error;
+  }
+  await mkdir(outputDirectory, { recursive: true });
+}
 await writeFile(outputPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
 
 console.log(`DevConfig=${outputPath}`);

@@ -667,11 +667,6 @@ const RecordingOverlay: React.FC = () => {
             : "docked-collapsed"
           : ""
       }`}
-      onMouseEnter={() => {
-        if (isDockedCollapsed) {
-          setIsDockedExpanded(true);
-        }
-      }}
       onMouseLeave={() => {
         if (isDocked && state === "idle" && !isLanguagePickerOpen) {
           setIsDockedExpanded(false);
