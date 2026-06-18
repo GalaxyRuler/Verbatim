@@ -159,8 +159,20 @@ jobs:
       - name: install dependencies (ubuntu 22.04)
         if: contains(inputs.platform, 'ubuntu-22.04') && !contains(inputs.platform, 'arm')
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libasound2-dev libopenblas-dev libx11-dev libxtst-dev libxrandr-dev libgtk-layer-shell0 libgtk-layer-shell-dev
+          export DEBIAN_FRONTEND=noninteractive
+          sudo apt-get -o Acquire::Retries=3 update
+          timeout 15m sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libasound2-dev \
+            libopenblas-dev \
+            libx11-dev \
+            libxtst-dev \
+            libxrandr-dev \
+            libgtk-layer-shell0 \
+            libgtk-layer-shell-dev
 
       - name: Verify gtk-layer-shell runtime dependency (Ubuntu)
         if: contains(inputs.platform, 'ubuntu')
