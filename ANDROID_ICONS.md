@@ -8,10 +8,9 @@ Android launcher icons are maintained from the master SVGs in
 - `verbatim-icon-foreground.svg` renders `ic_launcher_foreground.png` and is
   also the visual source for the monochrome/themed icon layer.
 
-The square icon uses the first five bars from the Verbatim mark, scaled and
-centered as a standalone symbol. The full Verbatim lockup is too wide for a
-square launcher icon and should stay in surfaces that can support its aspect
-ratio.
+The square icon uses a dictation-bubble symbol with the first five pulse bars
+from the Verbatim mark. The full Verbatim lockup is too wide for a square
+launcher icon and should stay in surfaces that can support its aspect ratio.
 
 Regenerate Android PNGs with:
 

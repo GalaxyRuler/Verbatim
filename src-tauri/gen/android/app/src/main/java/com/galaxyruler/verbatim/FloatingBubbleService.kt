@@ -14,6 +14,7 @@ import android.content.pm.ServiceInfo
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.PixelFormat
 import android.graphics.RectF
 import android.graphics.drawable.GradientDrawable
@@ -850,6 +851,28 @@ class FloatingBubbleService : Service() {
       color = Color.WHITE
       style = Paint.Style.FILL
     }
+    private val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+      color = Color.WHITE
+      style = Paint.Style.STROKE
+      strokeWidth = 8f
+      strokeJoin = Paint.Join.ROUND
+      strokeCap = Paint.Cap.ROUND
+    }
+    private val bubblePath = Path().apply {
+      moveTo(30f, 26f)
+      lineTo(78f, 26f)
+      cubicTo(87f, 26f, 94f, 33f, 94f, 42f)
+      lineTo(94f, 62f)
+      cubicTo(94f, 71f, 87f, 78f, 78f, 78f)
+      lineTo(56f, 78f)
+      lineTo(39f, 91f)
+      lineTo(39f, 78f)
+      lineTo(30f, 78f)
+      cubicTo(21f, 78f, 14f, 71f, 14f, 62f)
+      lineTo(14f, 42f)
+      cubicTo(14f, 33f, 21f, 26f, 30f, 26f)
+      close()
+    }
 
     override fun onDraw(canvas: Canvas) {
       super.onDraw(canvas)
@@ -865,11 +888,12 @@ class FloatingBubbleService : Service() {
       )
       canvas.scale(scale, scale)
 
-      drawBar(canvas, 8.1f, 41.25f, 10.2f, 25.5f, 5.1f)
-      drawBar(canvas, 28.5f, 24.675f, 10.2f, 58.65f, 5.1f)
-      drawBar(canvas, 48.9f, 10.65f, 10.2f, 86.7f, 5.1f)
-      drawBar(canvas, 69.3f, 24.675f, 10.2f, 58.65f, 5.1f)
-      drawBar(canvas, 89.7f, 36.15f, 10.2f, 35.7f, 5.1f)
+      canvas.drawPath(bubblePath, strokePaint)
+      drawBar(canvas, 32f, 48f, 6f, 12f, 3f)
+      drawBar(canvas, 43f, 40f, 6f, 28f, 3f)
+      drawBar(canvas, 54f, 34f, 6f, 40f, 3f)
+      drawBar(canvas, 65f, 40f, 6f, 28f, 3f)
+      drawBar(canvas, 76f, 46f, 6f, 16f, 3f)
 
       canvas.restore()
     }

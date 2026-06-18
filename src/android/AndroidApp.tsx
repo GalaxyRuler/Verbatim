@@ -355,12 +355,19 @@ const VerbatimBubbleGlyph = ({
     width={width}
     xmlns="http://www.w3.org/2000/svg"
   >
+    <path
+      d="M30 26H78C87 26 94 33 94 42V62C94 71 87 78 78 78H56L39 91V78H30C21 78 14 71 14 62V42C14 33 21 26 30 26Z"
+      fill="none"
+      stroke="currentColor"
+      strokeLinejoin="round"
+      strokeWidth={8}
+    />
     <g fill="currentColor">
-      <rect x="8.1" y="41.25" width="10.2" height="25.5" rx="5.1" />
-      <rect x="28.5" y="24.675" width="10.2" height="58.65" rx="5.1" />
-      <rect x="48.9" y="10.65" width="10.2" height="86.7" rx="5.1" />
-      <rect x="69.3" y="24.675" width="10.2" height="58.65" rx="5.1" />
-      <rect x="89.7" y="36.15" width="10.2" height="35.7" rx="5.1" />
+      <rect x="32" y="48" width="6" height="12" rx="3" />
+      <rect x="43" y="40" width="6" height="28" rx="3" />
+      <rect x="54" y="34" width="6" height="40" rx="3" />
+      <rect x="65" y="40" width="6" height="28" rx="3" />
+      <rect x="76" y="46" width="6" height="16" rx="3" />
     </g>
   </svg>
 );
