@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  type FormEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 import {
   BookOpen,
@@ -10,6 +16,7 @@ import {
   Mic,
   MicOff,
   Moon,
+  Pencil,
   Search,
   Settings,
   Share2,
@@ -19,16 +26,26 @@ import {
   Sun,
   Trash2,
   Volume2,
+  X,
 } from "lucide-react";
-import { commands, type HistoryEntry, type ModelInfo } from "@/bindings";
+import {
+  commands,
+  type DictionaryEntry,
+  type HistoryEntry,
+  type ModelInfo,
+  type SnippetEntry,
+} from "@/bindings";
 import { useSettings } from "@/hooks/useSettings";
 import { getDisplayVersion } from "@/lib/appVersion";
+import { useDictionaryStore } from "@/stores/dictionaryStore";
 import { useModelStore } from "@/stores/modelStore";
+import { useSnippetsStore } from "@/stores/snippetsStore";
 import { formatDateTime } from "@/utils/dateFormat";
 import "./AndroidApp.css";
 
-type AndroidTab = "home" | "history" | "models" | "settings";
+type AndroidTab = "home" | "history" | "models" | "library" | "settings";
 type AndroidTheme = "system" | "light" | "dark";
+type LibrarySection = "dictionary" | "snippets";
 type AndroidSpeechModelStatus =
   | "unknown"
   | "ready"
@@ -81,6 +98,7 @@ const tabs: Array<{ id: AndroidTab; labelKey: string; icon: typeof Home }> = [
   { id: "home", labelKey: "android.tabs.home", icon: Home },
   { id: "history", labelKey: "android.tabs.history", icon: History },
   { id: "models", labelKey: "android.tabs.models", icon: Cpu },
+  { id: "library", labelKey: "settings.dictionary.title", icon: BookOpen },
   { id: "settings", labelKey: "android.tabs.settings", icon: Settings },
 ];
 
@@ -195,6 +213,8 @@ const WaveformPreview = () => (
 export default function AndroidApp() {
   const { t, i18n } = useTranslation();
   const [activeTab, setActiveTab] = useState<AndroidTab>("home");
+  const [librarySection, setLibrarySection] =
+    useState<LibrarySection>("dictionary");
   const [theme, setTheme] = useState<AndroidTheme>(() => {
     const stored = window.localStorage.getItem("verbatim.android.theme");
     return stored === "light" || stored === "dark" || stored === "system"
@@ -232,7 +252,15 @@ export default function AndroidApp() {
     permissions.onDeviceSpeechRecognizerAvailable &&
     permissions.onDeviceSpeechLanguageAvailable;
 
-  const title = t(`android.tabs.${activeTab}`);
+  const activeTabSpec = tabs.find((tab) => tab.id === activeTab) ?? tabs[0];
+  const title =
+    activeTab === "library"
+      ? t(
+          librarySection === "dictionary"
+            ? "settings.dictionary.title"
+            : "settings.snippets.title",
+        )
+      : t(activeTabSpec.labelKey);
 
   return (
     <div className={`android-app android-theme-${theme}`}>
@@ -259,6 +287,11 @@ export default function AndroidApp() {
 
         {activeTab === "models" ? (
           <ModelsTab />
+        ) : activeTab === "library" ? (
+          <LibraryTab
+            activeSection={librarySection}
+            setActiveSection={setLibrarySection}
+          />
         ) : !allPermissionsReady ? (
           <AndroidOnboarding
             permissions={permissions}
@@ -658,6 +691,603 @@ function HistoryTab() {
         )}
       </div>
     </section>
+  );
+}
+
+function LibraryTab({
+  activeSection,
+  setActiveSection,
+}: {
+  activeSection: LibrarySection;
+  setActiveSection: (section: LibrarySection) => void;
+}) {
+  const { t } = useTranslation();
+  const [search, setSearch] = useState("");
+
+  useEffect(() => {
+    setSearch("");
+  }, [activeSection]);
+
+  return (
+    <>
+      <section className="android-section">
+        <div
+          className="android-segments android-library-tabs"
+          role="tablist"
+          aria-label={t("settings.dictionary.title")}
+        >
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeSection === "dictionary"}
+            className={`android-segment ${
+              activeSection === "dictionary" ? "android-segment-active" : ""
+            }`}
+            onClick={() => setActiveSection("dictionary")}
+          >
+            {t("settings.dictionary.title")}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeSection === "snippets"}
+            className={`android-segment ${
+              activeSection === "snippets" ? "android-segment-active" : ""
+            }`}
+            onClick={() => setActiveSection("snippets")}
+          >
+            {t("settings.snippets.title")}
+          </button>
+        </div>
+      </section>
+
+      <section className="android-section">
+        <input
+          className="android-search"
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder={t(
+            activeSection === "dictionary"
+              ? "settings.dictionary.search"
+              : "settings.snippets.search",
+          )}
+          aria-label={t(
+            activeSection === "dictionary"
+              ? "settings.dictionary.search"
+              : "settings.snippets.search",
+          )}
+        />
+      </section>
+
+      {activeSection === "dictionary" ? (
+        <AndroidDictionaryPanel search={search} />
+      ) : (
+        <AndroidSnippetsPanel search={search} />
+      )}
+    </>
+  );
+}
+
+function AndroidDictionaryPanel({ search }: { search: string }) {
+  const { t } = useTranslation();
+  const {
+    entries,
+    isLoading,
+    updatingIds,
+    loadEntries,
+    addEntry,
+    updateEntry,
+    deleteEntry,
+  } = useDictionaryStore();
+  const [phrase, setPhrase] = useState("");
+  const [replacementOf, setReplacementOf] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    loadEntries().catch(() => {
+      setError(t("settings.dictionary.errors.load"));
+    });
+  }, [loadEntries, t]);
+
+  const filteredEntries = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    if (!query) return entries;
+
+    return entries.filter((entry) =>
+      [entry.phrase, entry.replacement_of ?? ""].some((value) =>
+        value.toLowerCase().includes(query),
+      ),
+    );
+  }, [entries, search]);
+
+  const resetForm = () => {
+    setPhrase("");
+    setReplacementOf("");
+    setEditingId(null);
+  };
+
+  const handleSubmit = async (event: FormEvent) => {
+    event.preventDefault();
+    const nextPhrase = phrase.trim();
+    if (!nextPhrase || nextPhrase.length > 120) return;
+
+    try {
+      setError("");
+      const input = {
+        phrase: nextPhrase,
+        replacement_of: replacementOf.trim() || null,
+      };
+      if (editingId) {
+        await updateEntry(editingId, input);
+      } else {
+        await addEntry(input);
+      }
+      resetForm();
+    } catch {
+      setError(
+        t(
+          editingId
+            ? "settings.dictionary.errors.update"
+            : "settings.dictionary.errors.add",
+        ),
+      );
+    }
+  };
+
+  const handleEdit = (entry: DictionaryEntry) => {
+    setPhrase(entry.phrase);
+    setReplacementOf(entry.replacement_of ?? "");
+    setEditingId(entry.id);
+    setError("");
+  };
+
+  const handleDelete = async (entry: DictionaryEntry) => {
+    try {
+      setError("");
+      await deleteEntry(entry.id);
+      if (editingId === entry.id) {
+        resetForm();
+      }
+    } catch {
+      setError(t("settings.dictionary.errors.delete"));
+    }
+  };
+
+  const handleToggleStar = async (entry: DictionaryEntry) => {
+    try {
+      setError("");
+      await updateEntry(entry.id, {
+        priority: entry.priority === "starred" ? "normal" : "starred",
+      });
+    } catch {
+      setError(t("settings.dictionary.errors.update"));
+    }
+  };
+
+  return (
+    <section className="android-section">
+      <div className="android-section-header">
+        <h2>{t("settings.dictionary.title")}</h2>
+        <span className="android-badge">
+          {t("settings.dictionary.counts.total", { count: entries.length })}
+        </span>
+      </div>
+
+      <form className="android-library-form" onSubmit={handleSubmit}>
+        <label className="android-field">
+          <span>{t("settings.dictionary.phrase")}</span>
+          <input
+            value={phrase}
+            onChange={(event) => setPhrase(event.target.value)}
+            maxLength={120}
+          />
+        </label>
+        <label className="android-field">
+          <span>{t("settings.dictionary.replacementOf")}</span>
+          <input
+            value={replacementOf}
+            onChange={(event) => setReplacementOf(event.target.value)}
+            maxLength={120}
+            placeholder={t("settings.dictionary.replacementPlaceholder")}
+          />
+        </label>
+        <div className="android-actions">
+          <button
+            type="submit"
+            className="android-action android-primary-action"
+            disabled={phrase.trim().length === 0}
+          >
+            <Check size={17} />
+            <span>
+              {editingId
+                ? t("settings.dictionary.save")
+                : t("settings.dictionary.add")}
+            </span>
+          </button>
+          {editingId && (
+            <button
+              type="button"
+              className="android-action"
+              onClick={resetForm}
+            >
+              <X size={17} />
+              <span>{t("settings.dictionary.cancel")}</span>
+            </button>
+          )}
+        </div>
+      </form>
+
+      {error && (
+        <p className="android-error-text" role="alert">
+          {error}
+        </p>
+      )}
+
+      <AndroidDictionaryList
+        entries={filteredEntries}
+        totalCount={entries.length}
+        isLoading={isLoading}
+        updatingIds={updatingIds}
+        onEdit={handleEdit}
+        onDelete={handleDelete}
+        onToggleStar={handleToggleStar}
+      />
+    </section>
+  );
+}
+
+function AndroidDictionaryList({
+  entries,
+  totalCount,
+  isLoading,
+  updatingIds,
+  onEdit,
+  onDelete,
+  onToggleStar,
+}: {
+  entries: DictionaryEntry[];
+  totalCount: number;
+  isLoading: boolean;
+  updatingIds: Set<string>;
+  onEdit: (entry: DictionaryEntry) => void;
+  onDelete: (entry: DictionaryEntry) => void;
+  onToggleStar: (entry: DictionaryEntry) => void;
+}) {
+  const { t } = useTranslation();
+
+  if (isLoading) {
+    return (
+      <div className="android-card android-panel">
+        <p className="android-muted">{t("common.loading")}</p>
+      </div>
+    );
+  }
+
+  if (entries.length === 0) {
+    return (
+      <div className="android-card android-panel">
+        <p className="android-muted">
+          {totalCount === 0
+            ? t("settings.dictionary.empty")
+            : t("settings.dictionary.noResults")}
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="android-list android-library-list">
+      {entries.map((entry) => {
+        const isUpdating = updatingIds.has(entry.id);
+        const isStarred = entry.priority === "starred";
+        const source = entry.source ?? "manual";
+
+        return (
+          <article key={entry.id} className="android-library-card">
+            <div className="android-card-header">
+              <div className="android-library-main">
+                <h2>{entry.phrase}</h2>
+                <div className="android-chip-row">
+                  <span className="android-badge">
+                    {t(`settings.dictionary.source.${source}`)}
+                  </span>
+                  {entry.replacement_of && (
+                    <span className="android-muted">
+                      {t("settings.dictionary.corrects", {
+                        replacement: entry.replacement_of,
+                      })}
+                    </span>
+                  )}
+                </div>
+              </div>
+              <button
+                type="button"
+                className="android-icon-button"
+                disabled={isUpdating}
+                onClick={() => onToggleStar(entry)}
+                aria-label={t(
+                  isStarred
+                    ? "settings.dictionary.unstarEntry"
+                    : "settings.dictionary.starEntry",
+                  { phrase: entry.phrase },
+                )}
+              >
+                <Star size={18} fill={isStarred ? "currentColor" : "none"} />
+              </button>
+            </div>
+            <div className="android-actions">
+              <button
+                type="button"
+                className="android-action"
+                disabled={isUpdating}
+                onClick={() => onEdit(entry)}
+                aria-label={t("settings.dictionary.editEntry", {
+                  phrase: entry.phrase,
+                })}
+              >
+                <Pencil size={17} />
+                <span>{t("common.edit")}</span>
+              </button>
+              <button
+                type="button"
+                className="android-action"
+                disabled={isUpdating}
+                onClick={() => onDelete(entry)}
+                aria-label={t("settings.dictionary.deleteEntry", {
+                  phrase: entry.phrase,
+                })}
+              >
+                <Trash2 size={17} />
+                <span>{t("common.delete")}</span>
+              </button>
+            </div>
+          </article>
+        );
+      })}
+    </div>
+  );
+}
+
+function AndroidSnippetsPanel({ search }: { search: string }) {
+  const { t } = useTranslation();
+  const {
+    entries,
+    isLoading,
+    updatingIds,
+    loadEntries,
+    addEntry,
+    updateEntry,
+    deleteEntry,
+  } = useSnippetsStore();
+  const [trigger, setTrigger] = useState("");
+  const [content, setContent] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    loadEntries().catch(() => {
+      setError(t("settings.snippets.errors.load"));
+    });
+  }, [loadEntries, t]);
+
+  const filteredEntries = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    if (!query) return entries;
+
+    return entries.filter((entry) =>
+      [entry.trigger, entry.content].some((value) =>
+        value.toLowerCase().includes(query),
+      ),
+    );
+  }, [entries, search]);
+
+  const resetForm = () => {
+    setTrigger("");
+    setContent("");
+    setEditingId(null);
+  };
+
+  const handleSubmit = async (event: FormEvent) => {
+    event.preventDefault();
+    const nextTrigger = trigger.trim();
+    const nextContent = content.trim();
+    if (!nextTrigger || !nextContent || nextTrigger.length > 120) return;
+
+    try {
+      setError("");
+      const input = { trigger: nextTrigger, content: nextContent };
+      if (editingId) {
+        await updateEntry(editingId, input);
+      } else {
+        await addEntry(input);
+      }
+      resetForm();
+    } catch {
+      setError(
+        t(
+          editingId
+            ? "settings.snippets.errors.update"
+            : "settings.snippets.errors.add",
+        ),
+      );
+    }
+  };
+
+  const handleEdit = (entry: SnippetEntry) => {
+    setTrigger(entry.trigger);
+    setContent(entry.content);
+    setEditingId(entry.id);
+    setError("");
+  };
+
+  const handleDelete = async (entry: SnippetEntry) => {
+    try {
+      setError("");
+      await deleteEntry(entry.id);
+      if (editingId === entry.id) {
+        resetForm();
+      }
+    } catch {
+      setError(t("settings.snippets.errors.delete"));
+    }
+  };
+
+  return (
+    <section className="android-section">
+      <div className="android-section-header">
+        <h2>{t("settings.snippets.title")}</h2>
+        <span className="android-badge">
+          {t("settings.snippets.counts.total", { count: entries.length })}
+        </span>
+      </div>
+
+      <form className="android-library-form" onSubmit={handleSubmit}>
+        <label className="android-field">
+          <span>{t("settings.snippets.trigger")}</span>
+          <input
+            value={trigger}
+            onChange={(event) => setTrigger(event.target.value)}
+            maxLength={120}
+          />
+        </label>
+        <label className="android-field">
+          <span>{t("settings.snippets.content")}</span>
+          <textarea
+            value={content}
+            onChange={(event) => setContent(event.target.value)}
+            rows={4}
+            maxLength={4000}
+          />
+        </label>
+        <div className="android-actions">
+          <button
+            type="submit"
+            className="android-action android-primary-action"
+            disabled={
+              trigger.trim().length === 0 || content.trim().length === 0
+            }
+          >
+            <Check size={17} />
+            <span>
+              {editingId
+                ? t("settings.snippets.save")
+                : t("settings.snippets.add")}
+            </span>
+          </button>
+          {editingId && (
+            <button
+              type="button"
+              className="android-action"
+              onClick={resetForm}
+            >
+              <X size={17} />
+              <span>{t("settings.snippets.cancel")}</span>
+            </button>
+          )}
+        </div>
+      </form>
+
+      {error && (
+        <p className="android-error-text" role="alert">
+          {error}
+        </p>
+      )}
+
+      <AndroidSnippetList
+        entries={filteredEntries}
+        totalCount={entries.length}
+        isLoading={isLoading}
+        updatingIds={updatingIds}
+        onEdit={handleEdit}
+        onDelete={handleDelete}
+      />
+    </section>
+  );
+}
+
+function AndroidSnippetList({
+  entries,
+  totalCount,
+  isLoading,
+  updatingIds,
+  onEdit,
+  onDelete,
+}: {
+  entries: SnippetEntry[];
+  totalCount: number;
+  isLoading: boolean;
+  updatingIds: Set<string>;
+  onEdit: (entry: SnippetEntry) => void;
+  onDelete: (entry: SnippetEntry) => void;
+}) {
+  const { t } = useTranslation();
+
+  if (isLoading) {
+    return (
+      <div className="android-card android-panel">
+        <p className="android-muted">{t("common.loading")}</p>
+      </div>
+    );
+  }
+
+  if (entries.length === 0) {
+    return (
+      <div className="android-card android-panel">
+        <p className="android-muted">
+          {totalCount === 0
+            ? t("settings.snippets.empty")
+            : t("settings.snippets.noResults")}
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="android-list android-library-list">
+      {entries.map((entry) => {
+        const isUpdating = updatingIds.has(entry.id);
+        const preview = entry.content.replace(/\s+/g, " ").trim();
+
+        return (
+          <article key={entry.id} className="android-library-card">
+            <div className="android-card-header">
+              <div className="android-library-main">
+                <h2>{entry.trigger}</h2>
+                <p className="android-muted">{preview}</p>
+              </div>
+              <Sparkles size={18} />
+            </div>
+            <div className="android-actions">
+              <button
+                type="button"
+                className="android-action"
+                disabled={isUpdating}
+                onClick={() => onEdit(entry)}
+                aria-label={t("settings.snippets.editEntry", {
+                  trigger: entry.trigger,
+                })}
+              >
+                <Pencil size={17} />
+                <span>{t("common.edit")}</span>
+              </button>
+              <button
+                type="button"
+                className="android-action"
+                disabled={isUpdating}
+                onClick={() => onDelete(entry)}
+                aria-label={t("settings.snippets.deleteEntry", {
+                  trigger: entry.trigger,
+                })}
+              >
+                <Trash2 size={17} />
+                <span>{t("common.delete")}</span>
+              </button>
+            </div>
+          </article>
+        );
+      })}
+    </div>
   );
 }
 

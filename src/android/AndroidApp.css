@@ -298,6 +298,12 @@
   color: var(--android-on-primary);
 }
 
+.android-action:disabled,
+.android-icon-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
 .android-permission-list,
 .android-list {
   display: grid;
@@ -376,6 +382,81 @@
   border: 1px solid var(--android-outline);
   border-radius: 20px;
   padding: 14px;
+}
+
+.android-library-card {
+  background: var(--android-surface);
+  border: 1px solid var(--android-outline);
+  border-radius: 20px;
+  padding: 14px;
+}
+
+.android-library-main {
+  min-width: 0;
+}
+
+.android-library-main h2,
+.android-library-main p {
+  overflow-wrap: anywhere;
+}
+
+.android-library-form {
+  background: var(--android-surface);
+  border: 1px solid var(--android-outline);
+  border-radius: 20px;
+  display: grid;
+  gap: 12px;
+  margin-bottom: 14px;
+  padding: 14px;
+}
+
+.android-field {
+  display: grid;
+  gap: 6px;
+}
+
+.android-field span {
+  color: var(--android-secondary-text);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.android-field input,
+.android-field textarea {
+  background: var(--android-surface-variant);
+  border: 1px solid transparent;
+  border-radius: 14px;
+  color: inherit;
+  font: inherit;
+  min-height: 46px;
+  outline: 0;
+  padding: 11px 12px;
+  width: 100%;
+}
+
+.android-field textarea {
+  min-height: 104px;
+  resize: vertical;
+}
+
+.android-field input:focus,
+.android-field textarea:focus {
+  border-color: var(--android-primary);
+}
+
+.android-error-text {
+  color: var(--android-error);
+  font-size: 13px;
+  font-weight: 700;
+  margin: 0 0 12px;
+}
+
+.android-library-tabs {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.android-library-list {
+  gap: 12px;
 }
 
 .android-model-card.android-active-model {
@@ -485,7 +566,7 @@
   border-top: 1px solid var(--android-outline);
   bottom: 0;
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   left: 0;
   padding: 8px 8px 12px;
   position: fixed;
@@ -499,11 +580,13 @@
   color: var(--android-secondary-text);
   display: flex;
   flex-direction: column;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
   gap: 4px;
   min-height: 64px;
   justify-content: center;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .android-nav-icon {
@@ -512,7 +595,7 @@
   display: inline-flex;
   height: 32px;
   justify-content: center;
-  width: 64px;
+  width: min(56px, 100%);
 }
 
 .android-nav-active {

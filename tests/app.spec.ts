@@ -922,6 +922,81 @@ test.describe("Verbatim App", () => {
     await expect(page.getByText("Native Android transcript")).toBeVisible();
   });
 
+  test("android library manages dictionary and snippets", async ({ page }) => {
+    await installTauriMocks(
+      page,
+      {
+        dictionary_entries: [
+          {
+            id: "dict_android_1",
+            phrase: "Kulaib",
+            replacement_of: "club",
+            source: "manual",
+            priority: "starred",
+            created_at_ms: 1,
+            updated_at_ms: 2,
+          },
+        ],
+        snippets: [
+          {
+            id: "snippet_android_1",
+            trigger: "/sig",
+            content: "Sent from Verbatim Android",
+            created_at_ms: 1,
+            updated_at_ms: 2,
+          },
+        ],
+      },
+      [],
+      "android",
+    );
+    await installAndroidBridgeMock(page, {
+      microphone: true,
+      overlay: true,
+      accessibility: true,
+      bubbleRunning: true,
+      speechRecognizerAvailable: true,
+      onDeviceSpeechRecognizerAvailable: true,
+      onDeviceSpeechLanguageAvailable: true,
+    });
+
+    await page.goto("/");
+
+    await page.getByRole("button", { name: "Dictionary" }).click();
+    await expect(page.getByText("Kulaib")).toBeVisible();
+    await expect(page.getByText("Corrects: club")).toBeVisible();
+
+    await page.getByLabel("Word or phrase").fill("Verbatim Android");
+    await page.getByLabel("Correct when Verbatim writes").fill("Handy Android");
+    await page.getByRole("button", { name: "Add entry" }).click();
+    await expect(page.getByText("Verbatim Android")).toBeVisible();
+
+    await page.getByRole("button", { name: "Edit Kulaib" }).click();
+    await page.getByLabel("Word or phrase").fill("Kulaib updated");
+    await page.getByRole("button", { name: "Save entry" }).click();
+    await expect(page.getByText("Kulaib updated")).toBeVisible();
+
+    await page.getByRole("button", { name: "Delete Kulaib updated" }).click();
+    await expect(page.getByText("Kulaib updated")).toHaveCount(0);
+
+    await page.getByRole("tab", { name: "Snippets" }).click();
+    await expect(page.getByText("/sig")).toBeVisible();
+    await expect(page.getByText("Sent from Verbatim Android")).toBeVisible();
+
+    await page.getByLabel("Trigger phrase").fill("/addr");
+    await page.getByLabel("Snippet content").fill("Android address block");
+    await page.getByRole("button", { name: "Add snippet" }).click();
+    await expect(page.getByText("/addr")).toBeVisible();
+
+    await page.getByRole("button", { name: "Edit /addr" }).click();
+    await page.getByLabel("Snippet content").fill("Updated Android address");
+    await page.getByRole("button", { name: "Save snippet" }).click();
+    await expect(page.getByText("Updated Android address")).toBeVisible();
+
+    await page.getByRole("button", { name: "Delete /addr" }).click();
+    await expect(page.getByText("/addr")).toHaveCount(0);
+  });
+
   test("adaptive profiles can be enabled from experimental settings", async ({
     page,
   }) => {
