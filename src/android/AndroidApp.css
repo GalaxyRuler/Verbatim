@@ -175,6 +175,18 @@
   margin: 4px 0 0;
 }
 
+.android-hero-brand-icon {
+  align-items: center;
+  background: var(--android-primary);
+  border-radius: 14px;
+  color: var(--android-on-primary);
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 44px;
+  justify-content: center;
+  width: 44px;
+}
+
 .android-bubble-preview {
   align-items: center;
   background: #24202a;
@@ -185,6 +197,10 @@
   min-height: 52px;
   padding: 8px 10px 8px 16px;
   width: fit-content;
+}
+
+.android-bubble-glyph {
+  color: #ffffff;
 }
 
 .android-wave {

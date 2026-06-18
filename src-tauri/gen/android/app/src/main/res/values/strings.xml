@@ -1,8 +1,8 @@
 <resources>
     <string name="app_name">Verbatim</string>
     <string name="main_activity_title">Verbatim</string>
-    <string name="verbatim_accessibility_description">Insert Verbatim transcriptions into the focused text field when you tap the floating mic bubble.</string>
-    <string name="bubble_idle">Mic</string>
+    <string name="verbatim_accessibility_description">Insert Verbatim transcriptions into the focused text field when you tap the floating Verbatim bubble.</string>
+    <string name="bubble_idle">Start Verbatim dictation</string>
     <string name="bubble_recording">Recording</string>
     <string name="bubble_stop">Stop</string>
     <string name="bubble_transcribing">Transcribing</string>
@@ -26,6 +26,6 @@
     <string name="bubble_listen_failed">Dictation failed. Try again.</string>
     <string name="android_history_title">Android dictation</string>
     <string name="bubble_clip_label">Verbatim transcript</string>
-    <string name="bubble_notification_text">Listening through the floating mic bubble.</string>
+    <string name="bubble_notification_text">Listening through the floating Verbatim bubble.</string>
     <string name="bubble_foreground_failed">Could not start Android microphone service.</string>
 </resources>

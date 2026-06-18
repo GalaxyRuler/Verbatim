@@ -11,8 +11,11 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Paint
 import android.graphics.PixelFormat
+import android.graphics.RectF
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Bundle
@@ -180,7 +183,6 @@ class FloatingBubbleService : Service() {
     val view = LinearLayout(this).apply {
       orientation = LinearLayout.HORIZONTAL
       gravity = Gravity.CENTER
-      setPadding(dp(16), dp(10), dp(10), dp(10))
       background = pillBackground("#24202A")
       contentDescription = getString(R.string.bubble_idle)
       elevation = dp(8).toFloat()
@@ -281,12 +283,21 @@ class FloatingBubbleService : Service() {
 
   private fun renderIdle(view: LinearLayout) {
     view.contentDescription = getString(R.string.bubble_idle)
-    view.background = pillBackground("#24202A")
-    view.addView(label(getString(R.string.bubble_idle), Color.WHITE, 16, true))
+    view.background = roundedBackground("#2563EB", 15)
+    view.minimumWidth = dp(52)
+    view.minimumHeight = dp(52)
+    view.setPadding(dp(11), dp(14), dp(11), dp(14))
+    view.addView(
+      VerbatimBubbleIconView(this),
+      LinearLayout.LayoutParams(dp(30), dp(14)),
+    )
   }
 
   private fun renderRecording(view: LinearLayout) {
     view.contentDescription = getString(R.string.bubble_recording)
+    view.minimumWidth = 0
+    view.minimumHeight = 0
+    view.setPadding(dp(16), dp(10), dp(10), dp(10))
     view.background = pillBackground("#3F1010")
     view.addView(label(getString(R.string.bubble_recording), Color.WHITE, 14, true))
     repeat(5) { index ->
@@ -313,6 +324,9 @@ class FloatingBubbleService : Service() {
 
   private fun renderTranscribing(view: LinearLayout) {
     view.contentDescription = getString(R.string.bubble_transcribing)
+    view.minimumWidth = 0
+    view.minimumHeight = 0
+    view.setPadding(dp(16), dp(10), dp(10), dp(10))
     view.background = pillBackground("#17345C")
     view.addView(label(getString(R.string.bubble_transcribing), Color.WHITE, 14, true))
     repeat(3) {
@@ -328,12 +342,18 @@ class FloatingBubbleService : Service() {
 
   private fun renderInserted(view: LinearLayout) {
     view.contentDescription = getString(R.string.bubble_inserted_short)
+    view.minimumWidth = 0
+    view.minimumHeight = 0
+    view.setPadding(dp(16), dp(10), dp(10), dp(10))
     view.background = pillBackground("#133B1E")
     view.addView(label(getString(R.string.bubble_inserted_short), Color.WHITE, 14, true))
   }
 
   private fun renderFailed(view: LinearLayout) {
     view.contentDescription = getString(failureMessageResId)
+    view.minimumWidth = 0
+    view.minimumHeight = 0
+    view.setPadding(dp(16), dp(10), dp(10), dp(10))
     view.background = pillBackground("#4B1717")
     view.addView(label(getString(failureMessageResId), Color.WHITE, 14, true))
     val action = if (recoveryText.isNullOrBlank()) {
@@ -770,6 +790,12 @@ class FloatingBubbleService : Service() {
       cornerRadius = dp(999).toFloat()
     }
 
+  private fun roundedBackground(color: String, radiusDp: Int): GradientDrawable =
+    GradientDrawable().apply {
+      setColor(Color.parseColor(color))
+      cornerRadius = dp(radiusDp).toFloat()
+    }
+
   private fun dp(value: Int): Int =
     (value * resources.displayMetrics.density).toInt()
 
@@ -818,6 +844,63 @@ class FloatingBubbleService : Service() {
     val from: String,
     val to: String,
   )
+
+  private class VerbatimBubbleIconView(context: Context) : View(context) {
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+      color = Color.WHITE
+      style = Paint.Style.FILL
+    }
+
+    override fun onDraw(canvas: Canvas) {
+      super.onDraw(canvas)
+      val scale = min(width / MARK_WIDTH, height / MARK_HEIGHT)
+      if (scale <= 0f) {
+        return
+      }
+
+      canvas.save()
+      canvas.translate(
+        (width - MARK_WIDTH * scale) / 2f,
+        (height - MARK_HEIGHT * scale) / 2f,
+      )
+      canvas.scale(scale, scale)
+
+      drawBar(canvas, 18f, 38f, 8f, 20f, 4f)
+      drawBar(canvas, 34f, 25f, 8f, 46f, 4f)
+      drawBar(canvas, 50f, 14f, 8f, 68f, 4f)
+      drawBar(canvas, 66f, 25f, 8f, 46f, 4f)
+      drawBar(canvas, 82f, 34f, 8f, 28f, 4f)
+      drawBar(canvas, 98f, 39f, 8f, 18f, 4f)
+      drawBar(canvas, 114f, 43f, 8f, 10f, 4f)
+      listOf(136f, 154f, 172f, 190f, 208f).forEach { x ->
+        canvas.drawCircle(x, 48f, 4f, paint)
+      }
+      drawBar(canvas, 232f, 16f, 7f, 64f, 3.5f)
+
+      canvas.restore()
+    }
+
+    private fun drawBar(
+      canvas: Canvas,
+      x: Float,
+      y: Float,
+      width: Float,
+      height: Float,
+      radius: Float,
+    ) {
+      canvas.drawRoundRect(
+        RectF(x, y, x + width, y + height),
+        radius,
+        radius,
+        paint,
+      )
+    }
+
+    companion object {
+      private const val MARK_WIDTH = 256f
+      private const val MARK_HEIGHT = 96f
+    }
+  }
 
   companion object {
     private const val PREFS_NAME = "verbatim_android"

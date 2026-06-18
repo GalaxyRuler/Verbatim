@@ -890,14 +890,14 @@
     },
     "onboarding": {
       "title": "Set up mobile dictation",
-      "subtitle": "Enable the Android permissions Verbatim needs before the floating mic bubble can type for you.",
+      "subtitle": "Enable the Android permissions Verbatim needs before the floating Verbatim bubble can type for you.",
       "microphone": {
         "title": "Let Verbatim hear you",
         "description": "Verbatim needs your microphone to transcribe what you say.",
         "action": "Allow microphone"
       },
       "overlay": {
-        "title": "Show the mic bubble",
+        "title": "Show the Verbatim bubble",
         "description": "The bubble floats over your other apps so you can dictate without switching away.",
         "action": "Open Settings",
         "callout": "Opens system Settings. Toggle 'Allow display over other apps' and return to Verbatim."
@@ -936,7 +936,7 @@
     },
     "home": {
       "bubble": {
-        "activeTitle": "Tap mic to dictate anywhere",
+        "activeTitle": "Tap the Verbatim bubble to dictate anywhere",
         "activeSubtitle": "The bubble appears only while a text field has the keyboard open.",
         "inactiveTitle": "Keyboard bubble not ready",
         "inactiveSubtitle": "Finish setup before the keyboard-triggered bubble can appear.",

@@ -21,7 +21,6 @@ import {
   Info,
   Languages,
   MapPin,
-  Mic,
   MicOff,
   Moon,
   Music,
@@ -338,9 +337,45 @@ const Switch = ({
   </button>
 );
 
+const VerbatimBubbleGlyph = ({
+  width = 32,
+  height = 12,
+  className,
+}: {
+  width?: number;
+  height?: number;
+  className?: string;
+}) => (
+  <svg
+    aria-hidden="true"
+    className={className}
+    fill="none"
+    height={height}
+    viewBox="0 0 256 96"
+    width={width}
+    xmlns="http://www.w3.org/2000/svg"
+  >
+    <g fill="currentColor">
+      <rect x="18" y="38" width="8" height="20" rx="4" />
+      <rect x="34" y="25" width="8" height="46" rx="4" />
+      <rect x="50" y="14" width="8" height="68" rx="4" />
+      <rect x="66" y="25" width="8" height="46" rx="4" />
+      <rect x="82" y="34" width="8" height="28" rx="4" />
+      <rect x="98" y="39" width="8" height="18" rx="4" />
+      <rect x="114" y="43" width="8" height="10" rx="4" />
+      <circle cx="136" cy="48" r="4" />
+      <circle cx="154" cy="48" r="4" />
+      <circle cx="172" cy="48" r="4" />
+      <circle cx="190" cy="48" r="4" />
+      <circle cx="208" cy="48" r="4" />
+      <rect x="232" y="16" width="7" height="64" rx="3.5" />
+    </g>
+  </svg>
+);
+
 const WaveformPreview = () => (
   <div className="android-bubble-preview" aria-hidden="true">
-    <Mic size={20} />
+    <VerbatimBubbleGlyph className="android-bubble-glyph" />
     <div className="android-wave">
       <span />
       <span />
@@ -747,7 +782,13 @@ function HomeTab({
                 : t("android.home.bubble.inactiveSubtitle")}
             </p>
           </div>
-          {bubbleReady ? <Mic size={28} /> : <MicOff size={28} />}
+          {bubbleReady ? (
+            <span className="android-hero-brand-icon" aria-hidden="true">
+              <VerbatimBubbleGlyph width={30} height={12} />
+            </span>
+          ) : (
+            <MicOff size={28} />
+          )}
         </div>
         <WaveformPreview />
         <div className="android-hero-row">

@@ -1014,7 +1014,9 @@ test.describe("Verbatim App", () => {
     ).toBeVisible();
     await expect(page.getByText("Unavailable")).toBeVisible();
     await expect(
-      page.getByRole("heading", { name: "Tap mic to dictate anywhere" }),
+      page.getByRole("heading", {
+        name: "Tap the Verbatim bubble to dictate anywhere",
+      }),
     ).toHaveCount(0);
   });
 
@@ -1046,7 +1048,9 @@ test.describe("Verbatim App", () => {
     ).toBeVisible();
     await page.getByRole("button", { name: "Download pack" }).click();
     await expect(
-      page.getByRole("heading", { name: "Tap mic to dictate anywhere" }),
+      page.getByRole("heading", {
+        name: "Tap the Verbatim bubble to dictate anywhere",
+      }),
     ).toHaveCount(0);
     await expect
       .poll(() =>
@@ -1089,7 +1093,9 @@ test.describe("Verbatim App", () => {
       page.getByRole("heading", { name: "Set up mobile dictation" }),
     ).toHaveCount(0);
     await expect(
-      page.getByRole("heading", { name: "Tap mic to dictate anywhere" }),
+      page.getByRole("heading", {
+        name: "Tap the Verbatim bubble to dictate anywhere",
+      }),
     ).toBeVisible();
     await expect(page.getByText("Bubble visibility")).toBeVisible();
   });
@@ -1124,7 +1130,9 @@ test.describe("Verbatim App", () => {
     await page.goto("/");
 
     await expect(
-      page.getByRole("heading", { name: "Tap mic to dictate anywhere" }),
+      page.getByRole("heading", {
+        name: "Tap the Verbatim bubble to dictate anywhere",
+      }),
     ).toBeVisible();
     await expect(page.getByText("Bubble visibility")).toBeVisible();
     await expect(page.getByText("Waiting for keyboard")).toBeVisible();
