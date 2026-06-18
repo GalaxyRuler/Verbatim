@@ -26,8 +26,6 @@
     "evaluate:local-post-processing": "bun scripts/evaluate-local-post-processing.ts",
     "update:readme-release": "bun scripts/update-readme-release.ts",
     "check:readme-release": "bun scripts/update-readme-release.ts --check",
-    "build:website": "bun scripts/build-website-release.ts",
-    "check:website-release": "bun scripts/build-website-release.ts --check",
     "postinstall": "bun scripts/check-nix-deps.ts"
   },
   "dependencies": {
