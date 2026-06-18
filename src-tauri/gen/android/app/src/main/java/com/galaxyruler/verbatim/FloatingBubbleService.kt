@@ -48,6 +48,7 @@ class FloatingBubbleService : Service() {
 
   override fun onCreate() {
     super.onCreate()
+    instance = this
     isRunning = true
     windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
     updateBubbleVisibility()
@@ -80,6 +81,9 @@ class FloatingBubbleService : Service() {
     windowManager = null
     isVisible = false
     isRunning = false
+    if (instance === this) {
+      instance = null
+    }
     super.onDestroy()
   }
 
@@ -645,6 +649,9 @@ class FloatingBubbleService : Service() {
     private const val DEBUG_INSERTION_TEXT = "Verbatim Android insertion probe"
 
     @Volatile
+    private var instance: FloatingBubbleService? = null
+
+    @Volatile
     private var inputTargetActive: Boolean = false
 
     @Volatile
@@ -680,5 +687,19 @@ class FloatingBubbleService : Service() {
       context
         .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         .getString(ANDROID_HISTORY_KEY, "[]") ?: "[]"
+
+    fun startDebugInsertionProbe(context: Context) {
+      if (!BuildConfig.DEBUG) {
+        return
+      }
+
+      instance?.insertDebugProbe() ?: try {
+        context.startService(Intent(context, FloatingBubbleService::class.java).apply {
+          action = ACTION_DEBUG_INSERT_PROBE
+        })
+      } catch (_: IllegalStateException) {
+        // Debug-only adb hook; production builds do not register its receiver.
+      }
+    }
   }
 }
