@@ -1,0 +1,90 @@
+name: "Deploy Verbatim Website"
+
+on:
+  release:
+    types: [published, edited]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-verbatim-website
+  cancel-in-progress: true
+
+env:
+  CLOUDFLARE_ACCOUNT_ID: "87afd26ec9aefe839810333ff6eab6a7"
+  CLOUDFLARE_PAGES_PROJECT: "verbatim-site"
+  WEBSITE_ORIGIN: "https://verbatim.alkulaib.io"
+
+jobs:
+  build-website:
+    if: github.event_name != 'release' || github.event.release.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Generate bilingual website
+        run: bun run build:website
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+      - name: Check generated website
+        run: bun run check:website-release
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+      - name: Upload website artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: verbatim-website
+          path: website/dist
+          if-no-files-found: error
+
+  deploy-cloudflare-pages:
+    needs: build-website
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - name: Check Cloudflare token
+        id: token
+        shell: bash
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "::warning::CLOUDFLARE_API_TOKEN is not configured; website deploy skipped."
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download website artifact
+        if: steps.token.outputs.present == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: verbatim-website
+          path: website-dist
+
+      - name: Deploy to Cloudflare Pages
+        if: steps.token.outputs.present == 'true'
+        run: |
+          npx wrangler@latest pages deploy website-dist \
+            --project-name="$CLOUDFLARE_PAGES_PROJECT" \
+            --branch=main \
+            --commit-dirty=true
+
+      - name: Verify live English page
+        if: steps.token.outputs.present == 'true'
+        run: |
+          curl --fail --silent --show-error "$WEBSITE_ORIGIN/en/" | grep -F "Latest published release"
+
+      - name: Verify live Arabic page
+        if: steps.token.outputs.present == 'true'
+        run: |
+          curl --fail --silent --show-error "$WEBSITE_ORIGIN/ar/" | grep -F "أحدث إصدار منشور"
