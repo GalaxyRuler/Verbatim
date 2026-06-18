@@ -16,7 +16,9 @@ import android.graphics.PixelFormat
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.provider.Settings
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
@@ -24,6 +26,7 @@ import android.speech.SpeechRecognizer
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 import android.view.WindowManager
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -45,6 +48,7 @@ class FloatingBubbleService : Service() {
   private var foregroundActive = false
   private var recoveryText: String? = null
   private var failureMessageResId = R.string.bubble_failed
+  private val mainHandler = Handler(Looper.getMainLooper())
 
   override fun onCreate() {
     super.onCreate()
@@ -157,6 +161,7 @@ class FloatingBubbleService : Service() {
       return
     }
 
+    mainHandler.removeCallbacksAndMessages(null)
     speechRecognizer?.cancel()
     speechRecognizer?.destroy()
     speechRecognizer = null
@@ -191,6 +196,8 @@ class FloatingBubbleService : Service() {
     var startX = 0
     var startY = 0
     var dragging = false
+    var longPressActive = false
+    var longPressRunnable: Runnable? = null
 
     view.setOnTouchListener { _, event ->
       val params = layoutParams ?: return@setOnTouchListener false
@@ -201,22 +208,56 @@ class FloatingBubbleService : Service() {
           startX = params.x
           startY = params.y
           dragging = false
+          longPressActive = false
+          longPressRunnable = Runnable {
+            if (!dragging && bubbleState == BubbleState.IDLE) {
+              longPressActive = true
+              startListening()
+            }
+          }.also { runnable ->
+            mainHandler.postDelayed(
+              runnable,
+              ViewConfiguration.getLongPressTimeout().toLong(),
+            )
+          }
           true
         }
         MotionEvent.ACTION_MOVE -> {
           val deltaX = event.rawX - downRawX
           val deltaY = event.rawY - downRawY
           dragging = dragging || abs(deltaX) > dp(6) || abs(deltaY) > dp(6)
+          if (dragging) {
+            longPressRunnable?.let(mainHandler::removeCallbacks)
+            longPressRunnable = null
+          }
           params.x = startX + deltaX.toInt()
           params.y = startY + deltaY.toInt()
           windowManager?.updateViewLayout(view, params)
           true
         }
         MotionEvent.ACTION_UP -> {
+          longPressRunnable?.let(mainHandler::removeCallbacks)
+          longPressRunnable = null
           saveCoordinate("bubble_x", params.x)
           saveCoordinate("bubble_y", params.y)
-          if (!dragging) {
+          if (longPressActive) {
+            if (bubbleState == BubbleState.RECORDING) {
+              bubbleState = BubbleState.TRANSCRIBING
+              bubbleView?.let { renderBubble(it) }
+              speechRecognizer?.stopListening()
+            }
+          } else if (!dragging) {
             handleBubbleTap()
+          }
+          true
+        }
+        MotionEvent.ACTION_CANCEL -> {
+          longPressRunnable?.let(mainHandler::removeCallbacks)
+          longPressRunnable = null
+          if (longPressActive && bubbleState == BubbleState.RECORDING) {
+            speechRecognizer?.cancel()
+            stopMicrophoneForeground()
+            resetToIdle()
           }
           true
         }
@@ -231,6 +272,7 @@ class FloatingBubbleService : Service() {
       BubbleState.IDLE -> renderIdle(view)
       BubbleState.RECORDING -> renderRecording(view)
       BubbleState.TRANSCRIBING -> renderTranscribing(view)
+      BubbleState.INSERTED -> renderInserted(view)
       BubbleState.FAILED -> renderFailed(view)
     }
   }
@@ -282,6 +324,12 @@ class FloatingBubbleService : Service() {
     }
   }
 
+  private fun renderInserted(view: LinearLayout) {
+    view.contentDescription = getString(R.string.bubble_inserted_short)
+    view.background = pillBackground("#133B1E")
+    view.addView(label(getString(R.string.bubble_inserted_short), Color.WHITE, 14, true))
+  }
+
   private fun renderFailed(view: LinearLayout) {
     view.contentDescription = getString(failureMessageResId)
     view.background = pillBackground("#4B1717")
@@ -312,6 +360,7 @@ class FloatingBubbleService : Service() {
         speechRecognizer?.stopListening()
       }
       BubbleState.TRANSCRIBING -> Unit
+      BubbleState.INSERTED -> resetToIdle()
       BubbleState.FAILED -> retryRecovery()
     }
   }
@@ -498,7 +547,7 @@ class FloatingBubbleService : Service() {
         if (shouldRecord) {
           recordTranscript(text, HISTORY_STATUS_INSERTED)
         }
-        resetToIdle()
+        showInserted()
         Toast.makeText(this, R.string.bubble_inserted, Toast.LENGTH_SHORT).show()
       }
       VerbatimAccessibilityService.InsertResult.SENSITIVE -> {
@@ -515,6 +564,20 @@ class FloatingBubbleService : Service() {
         Toast.makeText(this, R.string.bubble_copied, Toast.LENGTH_LONG).show()
       }
     }
+  }
+
+  private fun showInserted() {
+    recoveryText = null
+    bubbleState = BubbleState.INSERTED
+    bubbleView?.let { renderBubble(it) }
+    mainHandler.postDelayed(
+      {
+        if (bubbleState == BubbleState.INSERTED) {
+          resetToIdle()
+        }
+      },
+      INSERTED_STATE_MS,
+    )
   }
 
   private fun insertDebugProbe() {
@@ -629,6 +692,7 @@ class FloatingBubbleService : Service() {
     IDLE,
     RECORDING,
     TRANSCRIBING,
+    INSERTED,
     FAILED,
   }
 
@@ -636,6 +700,7 @@ class FloatingBubbleService : Service() {
     private const val PREFS_NAME = "verbatim_android"
     private const val ANDROID_HISTORY_KEY = "native_transcript_history"
     private const val ANDROID_HISTORY_LIMIT = 30
+    private const val INSERTED_STATE_MS = 1800L
     private const val HISTORY_STATUS_INSERTED = "inserted"
     private const val HISTORY_STATUS_COPIED = "copied"
     private const val NOTIFICATION_CHANNEL_ID = "verbatim_dictation"

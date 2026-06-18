@@ -6,6 +6,7 @@
     <string name="bubble_recording">Recording</string>
     <string name="bubble_stop">Stop</string>
     <string name="bubble_transcribing">Transcribing</string>
+    <string name="bubble_inserted_short">Inserted</string>
     <string name="bubble_failed">Needs attention</string>
     <string name="bubble_retry_insert">Retry</string>
     <string name="bubble_dismiss">Dismiss</string>
