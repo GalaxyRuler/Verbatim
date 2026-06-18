@@ -1,11 +1,11 @@
 <svg viewBox="0 0 108 108" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Verbatim round launcher icon">
   <circle cx="54" cy="54" r="54" fill="#2563EB" />
-  <path d="M30 26H78C87 26 94 33 94 42V62C94 71 87 78 78 78H56L39 91V78H30C21 78 14 71 14 62V42C14 33 21 26 30 26Z" fill="none" stroke="#FFFFFF" stroke-width="8" stroke-linejoin="round" />
-  <g fill="#FFFFFF">
-    <rect x="32" y="48" width="6" height="12" rx="3" />
-    <rect x="43" y="40" width="6" height="28" rx="3" />
-    <rect x="54" y="34" width="6" height="40" rx="3" />
-    <rect x="65" y="40" width="6" height="28" rx="3" />
-    <rect x="76" y="46" width="6" height="16" rx="3" />
+  <path d="M30 32H76C85 32 91 39 91 47V60C91 69 85 76 76 76H57L42 86C39 88 35 86 35 82V76H30C21 76 15 69 15 60V47C15 39 21 32 30 32Z" fill="#FFFFFF" />
+  <g fill="#2563EB">
+    <rect x="37" y="50" width="5" height="10" rx="2.5" />
+    <rect x="46" y="44" width="5" height="22" rx="2.5" />
+    <rect x="56" y="39" width="5" height="32" rx="2.5" />
+    <rect x="65" y="44" width="5" height="22" rx="2.5" />
+    <rect x="75" y="49" width="5" height="14" rx="2.5" />
   </g>
 </svg>

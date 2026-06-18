@@ -851,26 +851,24 @@ class FloatingBubbleService : Service() {
       color = Color.WHITE
       style = Paint.Style.FILL
     }
-    private val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-      color = Color.WHITE
-      style = Paint.Style.STROKE
-      strokeWidth = 8f
-      strokeJoin = Paint.Join.ROUND
-      strokeCap = Paint.Cap.ROUND
+    private val barPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+      color = Color.parseColor("#2563EB")
+      style = Paint.Style.FILL
     }
     private val bubblePath = Path().apply {
-      moveTo(30f, 26f)
-      lineTo(78f, 26f)
-      cubicTo(87f, 26f, 94f, 33f, 94f, 42f)
-      lineTo(94f, 62f)
-      cubicTo(94f, 71f, 87f, 78f, 78f, 78f)
-      lineTo(56f, 78f)
-      lineTo(39f, 91f)
-      lineTo(39f, 78f)
-      lineTo(30f, 78f)
-      cubicTo(21f, 78f, 14f, 71f, 14f, 62f)
-      lineTo(14f, 42f)
-      cubicTo(14f, 33f, 21f, 26f, 30f, 26f)
+      moveTo(30f, 32f)
+      lineTo(76f, 32f)
+      cubicTo(85f, 32f, 91f, 39f, 91f, 47f)
+      lineTo(91f, 60f)
+      cubicTo(91f, 69f, 85f, 76f, 76f, 76f)
+      lineTo(57f, 76f)
+      lineTo(42f, 86f)
+      cubicTo(39f, 88f, 35f, 86f, 35f, 82f)
+      lineTo(35f, 76f)
+      lineTo(30f, 76f)
+      cubicTo(21f, 76f, 15f, 69f, 15f, 60f)
+      lineTo(15f, 47f)
+      cubicTo(15f, 39f, 21f, 32f, 30f, 32f)
       close()
     }
 
@@ -888,12 +886,12 @@ class FloatingBubbleService : Service() {
       )
       canvas.scale(scale, scale)
 
-      canvas.drawPath(bubblePath, strokePaint)
-      drawBar(canvas, 32f, 48f, 6f, 12f, 3f)
-      drawBar(canvas, 43f, 40f, 6f, 28f, 3f)
-      drawBar(canvas, 54f, 34f, 6f, 40f, 3f)
-      drawBar(canvas, 65f, 40f, 6f, 28f, 3f)
-      drawBar(canvas, 76f, 46f, 6f, 16f, 3f)
+      canvas.drawPath(bubblePath, paint)
+      drawBar(canvas, 37f, 50f, 5f, 10f, 2.5f)
+      drawBar(canvas, 46f, 44f, 5f, 22f, 2.5f)
+      drawBar(canvas, 56f, 39f, 5f, 32f, 2.5f)
+      drawBar(canvas, 65f, 44f, 5f, 22f, 2.5f)
+      drawBar(canvas, 75f, 49f, 5f, 14f, 2.5f)
 
       canvas.restore()
     }
@@ -910,7 +908,7 @@ class FloatingBubbleService : Service() {
         RectF(x, y, x + width, y + height),
         radius,
         radius,
-        paint,
+        barPaint,
       )
     }
 
