@@ -843,7 +843,7 @@ test.describe("Verbatim App", () => {
     await expect(page.getByText("Unassigned")).toHaveCount(5);
   });
 
-  test("general settings hide selected-text transform shortcuts off Windows", async ({
+  test("general settings show selected-text transform shortcuts on Linux", async ({
     page,
   }) => {
     await installTauriMocks(
@@ -858,8 +858,8 @@ test.describe("Verbatim App", () => {
 
     await expect(
       page.getByRole("heading", { name: "Transform Selected Text" }),
-    ).toHaveCount(0);
-    await expect(page.getByText("Polish selected text")).toHaveCount(0);
+    ).toBeVisible();
+    await expect(page.getByText("Polish selected text")).toBeVisible();
   });
 
   test("formatting level can be changed from advanced transcription settings", async ({

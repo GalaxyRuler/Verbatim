@@ -18,7 +18,8 @@ export const GeneralSettings: React.FC = () => {
   const pushToTalk = getSetting("push_to_talk");
   const osType = type();
   const isLinux = osType === "linux";
-  const supportsSelectedTextTransforms = osType === "windows";
+  const supportsSelectedTextTransforms =
+    osType === "windows" || osType === "macos" || osType === "linux";
   return (
     <div className="max-w-3xl w-full mx-auto space-y-6">
       <SettingsGroup title={t("settings.general.title")}>
