@@ -125,6 +125,7 @@ const baseSettings = {
   bindings: {},
   push_to_talk: false,
   audio_feedback: false,
+  audio_feedback_volume: 0.5,
   start_hidden: false,
   autostart_enabled: false,
   update_checks_enabled: false,
@@ -275,6 +276,14 @@ const installTauriMocks = async (
       ];
       let historyRows = [
         ...((initialHistoryEntries as Array<Record<string, unknown>>) ?? []),
+      ];
+      const availableMicrophones = [
+        { index: "default", name: "Default", is_default: true },
+        { index: "studio", name: "Studio Mic", is_default: false },
+      ];
+      const availableOutputDevices = [
+        { index: "default", name: "Default", is_default: true },
+        { index: "headphones", name: "Headphones", is_default: false },
       ];
       let nextDictionaryId = 1;
       let nextSnippetId = 1;
@@ -602,8 +611,63 @@ const installTauriMocks = async (
             case "initialize_shortcuts":
               return null;
             case "get_available_microphones":
+              return availableMicrophones;
             case "get_available_output_devices":
-              return [];
+              return availableOutputDevices;
+            case "change_audio_feedback_setting":
+              appSettings = {
+                ...appSettings,
+                audio_feedback: Boolean(args?.enabled),
+              };
+              return null;
+            case "change_audio_feedback_volume_setting":
+              appSettings = {
+                ...appSettings,
+                audio_feedback_volume: Number(args?.volume),
+              };
+              return null;
+            case "set_selected_microphone":
+              appSettings = {
+                ...appSettings,
+                selected_microphone:
+                  args?.deviceName === "default"
+                    ? "Default"
+                    : String(args?.deviceName ?? "Default"),
+              };
+              return null;
+            case "set_selected_output_device":
+              appSettings = {
+                ...appSettings,
+                selected_output_device:
+                  args?.deviceName === "default"
+                    ? "Default"
+                    : String(args?.deviceName ?? "Default"),
+              };
+              return null;
+            case "change_sound_theme_setting":
+              appSettings = {
+                ...appSettings,
+                sound_theme: String(args?.theme ?? "marimba"),
+              };
+              return null;
+            case "change_app_language_setting":
+              appSettings = {
+                ...appSettings,
+                app_language: String(args?.language ?? "en"),
+              };
+              return null;
+            case "update_history_limit":
+              appSettings = {
+                ...appSettings,
+                history_limit: Number(args?.limit),
+              };
+              return null;
+            case "update_recording_retention_period":
+              appSettings = {
+                ...appSettings,
+                recording_retention_period: String(args?.period ?? "never"),
+              };
+              return null;
             case "get_adaptive_profiles":
               return profiles;
             case "change_experimental_enabled_setting":
@@ -845,13 +909,17 @@ const installAndroidBridgeMock = async (
     onDeviceSpeechModelStatus?: string;
   },
   nativeHistoryEntries: Array<Record<string, unknown>> = [],
+  bubbleCorner = "top-right",
 ) => {
   await page.addInitScript(
-    ({ snapshot, nativeHistoryEntries }) => {
+    ({ snapshot, nativeHistoryEntries, bubbleCorner }) => {
+      let selectedBubbleCorner = bubbleCorner;
       const testWindow = window as typeof window & {
         VerbatimAndroid: {
           permissionSnapshot: () => string;
           nativeTranscriptHistory: () => string;
+          bubbleCornerSnapshot: () => string;
+          setBubbleCorner: (corner: string) => string;
           requestMicrophone: () => void;
           openOverlaySettings: () => void;
           openAccessibilitySettings: () => void;
@@ -868,6 +936,14 @@ const installAndroidBridgeMock = async (
       testWindow.VerbatimAndroid = {
         permissionSnapshot: () => JSON.stringify(snapshot),
         nativeTranscriptHistory: () => JSON.stringify(nativeHistoryEntries),
+        bubbleCornerSnapshot: () => selectedBubbleCorner,
+        setBubbleCorner: (corner: string) => {
+          selectedBubbleCorner = corner;
+          testWindow.__VERBATIM_ANDROID_BRIDGE_CALLS__.push(
+            `setBubbleCorner:${corner}`,
+          );
+          return selectedBubbleCorner;
+        },
         requestMicrophone: () => undefined,
         openOverlaySettings: () => undefined,
         openAccessibilitySettings: () => undefined,
@@ -885,7 +961,7 @@ const installAndroidBridgeMock = async (
         stopBubble: () => undefined,
       };
     },
-    { snapshot, nativeHistoryEntries },
+    { snapshot, nativeHistoryEntries, bubbleCorner },
   );
 };
 
@@ -1375,6 +1451,148 @@ test.describe("Verbatim App", () => {
     await expect(
       page.getByRole("button", { name: "Post Process" }),
     ).toBeVisible();
+  });
+
+  test("android settings expose mobile configuration sheets", async ({
+    page,
+  }) => {
+    await installTauriMocks(
+      page,
+      {
+        audio_feedback: true,
+        audio_feedback_volume: 0.25,
+        selected_microphone: "Default",
+        selected_output_device: "Default",
+        history_limit: 100,
+        recording_retention_period: "never",
+        sound_theme: "marimba",
+        app_language: "en",
+      },
+      [],
+      "android",
+    );
+    await installAndroidBridgeMock(
+      page,
+      {
+        microphone: true,
+        overlay: true,
+        accessibility: true,
+        bubbleRunning: true,
+        speechRecognizerAvailable: true,
+        onDeviceSpeechRecognizerAvailable: true,
+        onDeviceSpeechLanguageAvailable: true,
+      },
+      [],
+      "top-right",
+    );
+
+    await page.goto("/");
+    await page.getByRole("button", { name: "Settings" }).click();
+
+    await page.getByRole("button", { name: /Microphone/ }).click();
+    await expect(
+      page.getByRole("dialog", { name: "Microphone" }),
+    ).toBeVisible();
+    await page.getByRole("button", { name: /Studio Mic/ }).click();
+    await expect(page.getByText("Studio Mic")).toBeVisible();
+
+    const volumeSlider = page.getByLabel("Volume");
+    await volumeSlider.focus();
+    await volumeSlider.press("End");
+    await expect(page.getByText("100%")).toBeVisible();
+
+    await page.getByRole("button", { name: /Bubble position/ }).click();
+    await expect(
+      page.getByRole("dialog", { name: "Bubble position" }),
+    ).toBeVisible();
+    await page.getByRole("button", { name: /Bottom right/ }).click();
+    await expect(page.getByText("Bottom right")).toBeVisible();
+
+    await page.getByRole("button", { name: /Application Language/ }).click();
+    const languageDialog = page.getByRole("dialog", {
+      name: "Application Language",
+    });
+    await expect(languageDialog).toBeVisible();
+    await expect(
+      languageDialog.getByRole("button", { name: /English/ }),
+    ).toBeVisible();
+    await page.getByLabel("Cancel").click();
+
+    await page.getByRole("button", { name: "Advanced features" }).click();
+    await page.getByRole("button", { name: /History Limit/ }).click();
+    await page.getByRole("spinbutton", { name: "History Limit" }).fill("250");
+    await page.getByRole("button", { name: "Save" }).click();
+    await expect(page.getByText("250 entries")).toBeVisible();
+
+    await page.getByRole("button", { name: /Auto-Delete Recordings/ }).click();
+    await page.getByRole("button", { name: "After 3 days" }).click();
+    await expect(page.getByText("After 3 days")).toBeVisible();
+
+    await page.getByRole("button", { name: /Sound Theme/ }).click();
+    await page.getByRole("button", { name: "Pop" }).click();
+    await expect(page.getByText("Pop")).toBeVisible();
+
+    await page.getByRole("button", { name: /Output Device/ }).click();
+    await page.getByRole("button", { name: /Headphones/ }).click();
+    await expect(page.getByText("Headphones")).toBeVisible();
+
+    await expect
+      .poll(async () =>
+        page.evaluate(() => {
+          const win = window as typeof window & {
+            __VERBATIM_ANDROID_BRIDGE_CALLS__: string[];
+            __VERBATIM_TEST_COMMANDS__: string[];
+            __VERBATIM_TEST_INVOKES__: Array<{
+              cmd: string;
+              args?: Record<string, unknown>;
+            }>;
+          };
+          return {
+            bridge: win.__VERBATIM_ANDROID_BRIDGE_CALLS__,
+            commands: win.__VERBATIM_TEST_COMMANDS__,
+            invokes: win.__VERBATIM_TEST_INVOKES__,
+          };
+        }),
+      )
+      .toEqual(
+        expect.objectContaining({
+          bridge: expect.arrayContaining(["setBubbleCorner:bottom-right"]),
+          commands: expect.arrayContaining([
+            "set_selected_microphone",
+            "change_audio_feedback_volume_setting",
+            "update_history_limit",
+            "update_recording_retention_period",
+            "change_sound_theme_setting",
+            "set_selected_output_device",
+          ]),
+          invokes: expect.arrayContaining([
+            expect.objectContaining({
+              cmd: "set_selected_microphone",
+              args: { deviceName: "Studio Mic" },
+            }),
+            expect.objectContaining({
+              cmd: "change_audio_feedback_volume_setting",
+              args: { volume: 1 },
+            }),
+            expect.objectContaining({
+              cmd: "update_history_limit",
+              args: { limit: 250 },
+            }),
+            expect.objectContaining({
+              cmd: "update_recording_retention_period",
+              args: { period: "days3" },
+            }),
+            expect.objectContaining({
+              cmd: "change_sound_theme_setting",
+              args: { theme: "pop" },
+            }),
+            expect.objectContaining({
+              cmd: "set_selected_output_device",
+              args: { deviceName: "Headphones" },
+            }),
+          ]),
+        }),
+      );
   });
 
   test("adaptive profiles can be enabled from experimental settings", async ({

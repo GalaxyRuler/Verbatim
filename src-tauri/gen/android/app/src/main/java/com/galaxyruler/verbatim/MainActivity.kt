@@ -119,6 +119,14 @@ class MainActivity : TauriActivity() {
     }
 
     @JavascriptInterface
+    fun bubbleCornerSnapshot(): String =
+      FloatingBubbleService.bubbleCornerSnapshot(activity)
+
+    @JavascriptInterface
+    fun setBubbleCorner(corner: String): String =
+      FloatingBubbleService.setBubbleCorner(activity, corner)
+
+    @JavascriptInterface
     fun requestMicrophone() {
       activity.runOnUiThread {
         ActivityCompat.requestPermissions(

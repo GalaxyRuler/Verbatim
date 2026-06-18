@@ -966,10 +966,23 @@
       "appearance": "Appearance",
       "advanced": "Advanced features",
       "percent": "{{value}}%",
+      "refreshDevices": "Refresh devices",
       "theme": {
         "system": "System",
         "light": "Light",
         "dark": "Dark"
+      },
+      "bubblePosition": {
+        "title": "Bubble position",
+        "topLeft": "Top left",
+        "topRight": "Top right",
+        "bottomLeft": "Bottom left",
+        "bottomRight": "Bottom right"
+      },
+      "soundTheme": {
+        "marimba": "Marimba",
+        "pop": "Pop",
+        "custom": "Custom"
       }
     }
   }

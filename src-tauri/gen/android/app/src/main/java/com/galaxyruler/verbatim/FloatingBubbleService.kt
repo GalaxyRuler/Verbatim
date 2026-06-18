@@ -37,6 +37,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.Locale
 import kotlin.math.abs
+import kotlin.math.max
 import kotlin.math.min
 
 class FloatingBubbleService : Service() {
@@ -113,8 +114,8 @@ class FloatingBubbleService : Service() {
       PixelFormat.TRANSLUCENT,
     ).apply {
       gravity = Gravity.TOP or Gravity.START
-      x = loadCoordinate("bubble_x", dp(20))
-      y = loadCoordinate("bubble_y", dp(140))
+      x = loadCoordinate(BUBBLE_X_KEY, dp(20))
+      y = loadCoordinate(BUBBLE_Y_KEY, dp(140))
     }
 
     if (addBubbleView(view, params)) {
@@ -238,8 +239,9 @@ class FloatingBubbleService : Service() {
         MotionEvent.ACTION_UP -> {
           longPressRunnable?.let(mainHandler::removeCallbacks)
           longPressRunnable = null
-          saveCoordinate("bubble_x", params.x)
-          saveCoordinate("bubble_y", params.y)
+          saveCoordinate(BUBBLE_X_KEY, params.x)
+          saveCoordinate(BUBBLE_Y_KEY, params.y)
+          saveBubbleCorner(nearestCorner(params.x, params.y))
           if (longPressActive) {
             if (bubbleState == BubbleState.RECORDING) {
               bubbleState = BubbleState.TRANSCRIBING
@@ -781,6 +783,29 @@ class FloatingBubbleService : Service() {
       .apply()
   }
 
+  private fun moveBubbleToCorner(corner: String) {
+    val view = bubbleView ?: return
+    val params = layoutParams ?: return
+    val (nextX, nextY) = coordinatesForCorner(this, corner)
+    params.x = nextX
+    params.y = nextY
+    windowManager?.updateViewLayout(view, params)
+  }
+
+  private fun saveBubbleCorner(corner: String) {
+    getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+      .edit()
+      .putString(BUBBLE_CORNER_KEY, corner)
+      .apply()
+  }
+
+  private fun nearestCorner(x: Int, y: Int): String {
+    val metrics = resources.displayMetrics
+    val horizontal = if (x < metrics.widthPixels / 2) "left" else "right"
+    val vertical = if (y < metrics.heightPixels / 2) "top" else "bottom"
+    return "$vertical-$horizontal"
+  }
+
   private enum class BubbleState {
     IDLE,
     RECORDING,
@@ -798,6 +823,13 @@ class FloatingBubbleService : Service() {
     private const val PREFS_NAME = "verbatim_android"
     private const val ANDROID_HISTORY_KEY = "native_transcript_history"
     private const val TEXT_FORMATTER_KEY = "native_text_formatter_snapshot"
+    private const val BUBBLE_X_KEY = "bubble_x"
+    private const val BUBBLE_Y_KEY = "bubble_y"
+    private const val BUBBLE_CORNER_KEY = "bubble_corner"
+    private const val CORNER_TOP_LEFT = "top-left"
+    private const val CORNER_TOP_RIGHT = "top-right"
+    private const val CORNER_BOTTOM_LEFT = "bottom-left"
+    private const val CORNER_BOTTOM_RIGHT = "bottom-right"
     private const val ANDROID_HISTORY_LIMIT = 30
     private const val MAX_TEXT_FORMATTER_SNAPSHOT_CHARS = 256 * 1024
     private const val INSERTED_STATE_MS = 1800L
@@ -870,6 +902,37 @@ class FloatingBubbleService : Service() {
       }
     }
 
+    fun bubbleCornerSnapshot(context: Context): String {
+      val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+      val savedCorner = prefs.getString(BUBBLE_CORNER_KEY, null)
+      if (savedCorner != null) {
+        return normalizeCorner(savedCorner)
+      }
+
+      val defaultX = dp(context, 20)
+      val defaultY = dp(context, 140)
+      val x = prefs.getInt(BUBBLE_X_KEY, defaultX)
+      val y = prefs.getInt(BUBBLE_Y_KEY, defaultY)
+      return nearestCorner(context, x, y)
+    }
+
+    fun setBubbleCorner(context: Context, corner: String): String {
+      val normalized = normalizeCorner(corner)
+      val (x, y) = coordinatesForCorner(context, normalized)
+      context
+        .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        .edit()
+        .putString(BUBBLE_CORNER_KEY, normalized)
+        .putInt(BUBBLE_X_KEY, x)
+        .putInt(BUBBLE_Y_KEY, y)
+        .apply()
+
+      instance?.mainHandler?.post {
+        instance?.moveBubbleToCorner(normalized)
+      }
+      return normalized
+    }
+
     fun startDebugInsertionProbe(context: Context) {
       if (!BuildConfig.DEBUG) {
         return
@@ -883,5 +946,44 @@ class FloatingBubbleService : Service() {
         // Debug-only adb hook; production builds do not register its receiver.
       }
     }
+
+    private fun normalizeCorner(corner: String): String =
+      when (corner) {
+        CORNER_TOP_LEFT,
+        CORNER_TOP_RIGHT,
+        CORNER_BOTTOM_LEFT,
+        CORNER_BOTTOM_RIGHT -> corner
+        else -> CORNER_TOP_RIGHT
+      }
+
+    private fun coordinatesForCorner(context: Context, corner: String): Pair<Int, Int> {
+      val metrics = context.resources.displayMetrics
+      val margin = dp(context, 20)
+      val topOffset = dp(context, 140)
+      val bottomOffset = dp(context, 220)
+      val estimatedBubbleWidth = dp(context, 180)
+      val estimatedBubbleHeight = dp(context, 64)
+      val x = when (corner) {
+        CORNER_TOP_RIGHT,
+        CORNER_BOTTOM_RIGHT -> max(margin, metrics.widthPixels - estimatedBubbleWidth - margin)
+        else -> margin
+      }
+      val y = when (corner) {
+        CORNER_BOTTOM_LEFT,
+        CORNER_BOTTOM_RIGHT -> max(topOffset, metrics.heightPixels - estimatedBubbleHeight - bottomOffset)
+        else -> topOffset
+      }
+      return Pair(x, y)
+    }
+
+    private fun nearestCorner(context: Context, x: Int, y: Int): String {
+      val metrics = context.resources.displayMetrics
+      val horizontal = if (x < metrics.widthPixels / 2) "left" else "right"
+      val vertical = if (y < metrics.heightPixels / 2) "top" else "bottom"
+      return "$vertical-$horizontal"
+    }
+
+    private fun dp(context: Context, value: Int): Int =
+      (value * context.resources.displayMetrics.density).toInt()
   }
 }
