@@ -286,10 +286,10 @@ class FloatingBubbleService : Service() {
     view.background = roundedBackground("#2563EB", 15)
     view.minimumWidth = dp(52)
     view.minimumHeight = dp(52)
-    view.setPadding(dp(11), dp(14), dp(11), dp(14))
+    view.setPadding(dp(11), dp(11), dp(11), dp(11))
     view.addView(
       VerbatimBubbleIconView(this),
-      LinearLayout.LayoutParams(dp(30), dp(14)),
+      LinearLayout.LayoutParams(dp(30), dp(30)),
     )
   }
 
@@ -865,17 +865,11 @@ class FloatingBubbleService : Service() {
       )
       canvas.scale(scale, scale)
 
-      drawBar(canvas, 18f, 38f, 8f, 20f, 4f)
-      drawBar(canvas, 34f, 25f, 8f, 46f, 4f)
-      drawBar(canvas, 50f, 14f, 8f, 68f, 4f)
-      drawBar(canvas, 66f, 25f, 8f, 46f, 4f)
-      drawBar(canvas, 82f, 34f, 8f, 28f, 4f)
-      drawBar(canvas, 98f, 39f, 8f, 18f, 4f)
-      drawBar(canvas, 114f, 43f, 8f, 10f, 4f)
-      listOf(136f, 154f, 172f, 190f, 208f).forEach { x ->
-        canvas.drawCircle(x, 48f, 4f, paint)
-      }
-      drawBar(canvas, 232f, 16f, 7f, 64f, 3.5f)
+      drawBar(canvas, 8.1f, 41.25f, 10.2f, 25.5f, 5.1f)
+      drawBar(canvas, 28.5f, 24.675f, 10.2f, 58.65f, 5.1f)
+      drawBar(canvas, 48.9f, 10.65f, 10.2f, 86.7f, 5.1f)
+      drawBar(canvas, 69.3f, 24.675f, 10.2f, 58.65f, 5.1f)
+      drawBar(canvas, 89.7f, 36.15f, 10.2f, 35.7f, 5.1f)
 
       canvas.restore()
     }
@@ -897,8 +891,8 @@ class FloatingBubbleService : Service() {
     }
 
     companion object {
-      private const val MARK_WIDTH = 256f
-      private const val MARK_HEIGHT = 96f
+      private const val MARK_WIDTH = 108f
+      private const val MARK_HEIGHT = 108f
     }
   }
 

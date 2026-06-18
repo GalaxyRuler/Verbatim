@@ -338,8 +338,8 @@ const Switch = ({
 );
 
 const VerbatimBubbleGlyph = ({
-  width = 32,
-  height = 12,
+  width = 30,
+  height = 30,
   className,
 }: {
   width?: number;
@@ -351,24 +351,16 @@ const VerbatimBubbleGlyph = ({
     className={className}
     fill="none"
     height={height}
-    viewBox="0 0 256 96"
+    viewBox="0 0 108 108"
     width={width}
     xmlns="http://www.w3.org/2000/svg"
   >
     <g fill="currentColor">
-      <rect x="18" y="38" width="8" height="20" rx="4" />
-      <rect x="34" y="25" width="8" height="46" rx="4" />
-      <rect x="50" y="14" width="8" height="68" rx="4" />
-      <rect x="66" y="25" width="8" height="46" rx="4" />
-      <rect x="82" y="34" width="8" height="28" rx="4" />
-      <rect x="98" y="39" width="8" height="18" rx="4" />
-      <rect x="114" y="43" width="8" height="10" rx="4" />
-      <circle cx="136" cy="48" r="4" />
-      <circle cx="154" cy="48" r="4" />
-      <circle cx="172" cy="48" r="4" />
-      <circle cx="190" cy="48" r="4" />
-      <circle cx="208" cy="48" r="4" />
-      <rect x="232" y="16" width="7" height="64" rx="3.5" />
+      <rect x="8.1" y="41.25" width="10.2" height="25.5" rx="5.1" />
+      <rect x="28.5" y="24.675" width="10.2" height="58.65" rx="5.1" />
+      <rect x="48.9" y="10.65" width="10.2" height="86.7" rx="5.1" />
+      <rect x="69.3" y="24.675" width="10.2" height="58.65" rx="5.1" />
+      <rect x="89.7" y="36.15" width="10.2" height="35.7" rx="5.1" />
     </g>
   </svg>
 );
@@ -784,7 +776,7 @@ function HomeTab({
           </div>
           {bubbleReady ? (
             <span className="android-hero-brand-icon" aria-hidden="true">
-              <VerbatimBubbleGlyph width={30} height={12} />
+              <VerbatimBubbleGlyph width={28} height={28} />
             </span>
           ) : (
             <MicOff size={28} />
