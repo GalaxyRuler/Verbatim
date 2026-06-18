@@ -1,6 +1,7 @@
 package com.galaxyruler.verbatim
 
 import android.Manifest
+import android.accessibilityservice.AccessibilityServiceInfo
 import android.content.ComponentName
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -8,6 +9,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
 import android.speech.SpeechRecognizer
+import android.view.accessibility.AccessibilityManager
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import androidx.activity.enableEdgeToEdge
@@ -43,7 +45,24 @@ class MainActivity : TauriActivity() {
   private fun hasOverlayPermission(): Boolean = Settings.canDrawOverlays(this)
 
   private fun isAccessibilityEnabled(): Boolean {
+    if (VerbatimAccessibilityService.isEnabled()) {
+      return true
+    }
+
     val component = ComponentName(this, VerbatimAccessibilityService::class.java)
+    val accessibilityManager = getSystemService(AccessibilityManager::class.java)
+    val enabledByManager = accessibilityManager
+      ?.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
+      ?.any {
+        val serviceInfo = it.resolveInfo.serviceInfo
+        serviceInfo.packageName == component.packageName &&
+          serviceInfo.name == component.className
+      } == true
+
+    if (enabledByManager) {
+      return true
+    }
+
     val expected = component.flattenToString()
     val shortExpected = component.flattenToShortString()
     val enabled = Settings.Secure.getString(

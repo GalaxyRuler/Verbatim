@@ -851,7 +851,7 @@ test.describe("Verbatim App", () => {
       .toContain("requestSpeechModelDownload");
   });
 
-  test("android setup requires a downloaded local model before bubble readiness", async ({
+  test("android home does not require a downloaded desktop model", async ({
     page,
   }) => {
     await installTauriMocks(page, {}, [], "android", {
@@ -876,19 +876,11 @@ test.describe("Verbatim App", () => {
 
     await expect(
       page.getByRole("heading", { name: "Set up mobile dictation" }),
-    ).toBeVisible();
-    await expect(page.getByText("Download a speech model")).toBeVisible();
-    await expect(
-      page.getByText(
-        "Choose a local model so Android dictation uses Verbatim's offline transcription path.",
-      ),
-    ).toBeVisible();
-    await expect(
-      page.getByRole("button", { name: "Choose model" }),
-    ).toBeVisible();
+    ).toHaveCount(0);
     await expect(
       page.getByRole("heading", { name: "Tap mic to dictate anywhere" }),
-    ).toHaveCount(0);
+    ).toBeVisible();
+    await expect(page.getByText("Bubble visibility")).toBeVisible();
   });
 
   test("android home reads native transcript history from bridge", async ({

@@ -203,10 +203,6 @@ export default function AndroidApp() {
   });
   const [permissions, setPermissions] =
     useState<AndroidPermissionSnapshot>(defaultPermissions);
-  const { models, currentModel } = useModelStore();
-  const activeDownloadedModel = models.find(
-    (model) => model.id === currentModel && model.is_downloaded,
-  );
 
   const refreshPermissions = useCallback(() => {
     const snapshot = safeBridge()?.permissionSnapshot();
@@ -234,8 +230,7 @@ export default function AndroidApp() {
     permissions.overlay &&
     permissions.accessibility &&
     permissions.onDeviceSpeechRecognizerAvailable &&
-    permissions.onDeviceSpeechLanguageAvailable &&
-    !!activeDownloadedModel;
+    permissions.onDeviceSpeechLanguageAvailable;
 
   const title = t(`android.tabs.${activeTab}`);
 
@@ -268,8 +263,6 @@ export default function AndroidApp() {
           <AndroidOnboarding
             permissions={permissions}
             refreshPermissions={refreshPermissions}
-            hasDownloadedModel={!!activeDownloadedModel}
-            goToModels={() => setActiveTab("models")}
           />
         ) : activeTab === "home" ? (
           <HomeTab
@@ -310,13 +303,9 @@ export default function AndroidApp() {
 function AndroidOnboarding({
   permissions,
   refreshPermissions,
-  hasDownloadedModel,
-  goToModels,
 }: {
   permissions: AndroidPermissionSnapshot;
   refreshPermissions: () => void;
-  hasDownloadedModel: boolean;
-  goToModels: () => void;
 }) {
   const { t } = useTranslation();
   const bridge = safeBridge();
@@ -378,16 +367,6 @@ function AndroidOnboarding({
       action: t("android.onboarding.speechPack.action"),
       onClick: () => bridge?.requestSpeechModelDownload(),
       callout: t(speechPackCalloutKey),
-    },
-    {
-      ready: hasDownloadedModel,
-      title: t("android.onboarding.model.title"),
-      description: t("android.onboarding.model.description"),
-      action: t("android.onboarding.model.action"),
-      onClick: goToModels,
-      callout: hasDownloadedModel
-        ? t("android.onboarding.model.readyCallout")
-        : t("android.onboarding.model.callout"),
     },
   ];
   const currentStepIndex = steps.findIndex((step) => !step.ready);

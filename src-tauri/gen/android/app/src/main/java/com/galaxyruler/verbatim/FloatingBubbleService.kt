@@ -100,7 +100,7 @@ class FloatingBubbleService : Service() {
     val params = WindowManager.LayoutParams(
       WindowManager.LayoutParams.WRAP_CONTENT,
       WindowManager.LayoutParams.WRAP_CONTENT,
-      WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+      bubbleWindowType(),
       WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
       PixelFormat.TRANSLUCENT,
     ).apply {
@@ -109,10 +109,42 @@ class FloatingBubbleService : Service() {
       y = loadCoordinate("bubble_y", dp(140))
     }
 
-    layoutParams = params
-    bubbleView = view
-    windowManager?.addView(view, params)
-    isVisible = true
+    if (addBubbleView(view, params)) {
+      layoutParams = params
+      bubbleView = view
+      isVisible = true
+    } else {
+      layoutParams = null
+      bubbleView = null
+      isVisible = false
+    }
+  }
+
+  private fun bubbleWindowType(): Int =
+    if (VerbatimAccessibilityService.isEnabled()) {
+      WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY
+    } else {
+      WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+    }
+
+  private fun addBubbleView(view: View, params: WindowManager.LayoutParams): Boolean {
+    val manager = windowManager ?: return false
+    return try {
+      manager.addView(view, params)
+      true
+    } catch (_: RuntimeException) {
+      if (params.type != WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY) {
+        return false
+      }
+
+      params.type = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+      try {
+        manager.addView(view, params)
+        true
+      } catch (_: RuntimeException) {
+        false
+      }
+    }
   }
 
   private fun hideBubble() {
