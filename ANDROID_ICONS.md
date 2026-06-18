@@ -12,6 +12,15 @@ The square icon uses a filled dictation-bubble symbol with the first five pulse
 bars from the Verbatim mark. The full Verbatim lockup is too wide for a square
 launcher icon and should stay in surfaces that can support its aspect ratio.
 
+The bubble mark is wrapped in a `translate(15.84 11.52) scale(0.72)` transform so
+it sits centered on the 108 canvas and inside the adaptive-icon safe zone. Without
+this the bubble spans x15-91 / y32-86, overflows the central 72dp viewport, and the
+launcher circle mask clips its sides and tail. Keep the same transform on every
+surface that re-draws the mark for masking (master SVGs, `ic_launcher_monochrome`,
+`ic_launcher_splash`, and the `drawable-v24` vector foreground) so they stay in
+sync. The full-bleed `#2563EB` background is drawn outside the transform so the
+foreground stays edge-to-edge while only the mark is scaled.
+
 Regenerate Android PNGs with:
 
 ```bash
