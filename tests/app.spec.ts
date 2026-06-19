@@ -125,6 +125,7 @@ const baseSettings = {
   bindings: {},
   push_to_talk: false,
   audio_feedback: false,
+  audio_feedback_volume: 0.5,
   start_hidden: false,
   autostart_enabled: false,
   update_checks_enabled: false,
@@ -213,13 +214,24 @@ const installTauriMocks = async (
   page: Page,
   settingsOverrides: Partial<typeof baseSettings> = {},
   historyEntries: Array<Record<string, unknown>> = [],
-  osType: "windows" | "linux" | "macos" = "windows",
+  osType: "windows" | "linux" | "macos" | "android" = "windows",
+  mockOptions: {
+    availableModels?: typeof models;
+    currentModel?: string;
+    hasAnyModels?: boolean;
+  } = {},
 ) => {
+  const availableModels = mockOptions.availableModels ?? models;
+  const currentModel = mockOptions.currentModel ?? "small";
+  const hasAnyModels = mockOptions.hasAnyModels ?? true;
+
   await page.addInitScript(
     ({
       settings,
       profiles,
-      models,
+      availableModels,
+      currentModel,
+      hasAnyModels,
       localPostProcessingModels,
       initialHistoryEntries,
       osType,
@@ -265,8 +277,17 @@ const installTauriMocks = async (
       let historyRows = [
         ...((initialHistoryEntries as Array<Record<string, unknown>>) ?? []),
       ];
+      const availableMicrophones = [
+        { index: "default", name: "Default", is_default: true },
+        { index: "studio", name: "Studio Mic", is_default: false },
+      ];
+      const availableOutputDevices = [
+        { index: "default", name: "Default", is_default: true },
+        { index: "headphones", name: "Headphones", is_default: false },
+      ];
       let nextDictionaryId = 1;
       let nextSnippetId = 1;
+      let nextPromptId = 1;
       const syncDictionarySettings = () => {
         appSettings = {
           ...appSettings,
@@ -570,12 +591,12 @@ const installTauriMocks = async (
               };
               return null;
             case "has_any_models_available":
-              return true;
+              return hasAnyModels;
             case "get_available_models":
-              return models;
+              return availableModels;
             case "get_current_model":
             case "get_transcription_model_status":
-              return "small";
+              return currentModel;
             case "get_windows_microphone_permission_status":
               return {
                 supported: true,
@@ -590,8 +611,63 @@ const installTauriMocks = async (
             case "initialize_shortcuts":
               return null;
             case "get_available_microphones":
+              return availableMicrophones;
             case "get_available_output_devices":
-              return [];
+              return availableOutputDevices;
+            case "change_audio_feedback_setting":
+              appSettings = {
+                ...appSettings,
+                audio_feedback: Boolean(args?.enabled),
+              };
+              return null;
+            case "change_audio_feedback_volume_setting":
+              appSettings = {
+                ...appSettings,
+                audio_feedback_volume: Number(args?.volume),
+              };
+              return null;
+            case "set_selected_microphone":
+              appSettings = {
+                ...appSettings,
+                selected_microphone:
+                  args?.deviceName === "default"
+                    ? "Default"
+                    : String(args?.deviceName ?? "Default"),
+              };
+              return null;
+            case "set_selected_output_device":
+              appSettings = {
+                ...appSettings,
+                selected_output_device:
+                  args?.deviceName === "default"
+                    ? "Default"
+                    : String(args?.deviceName ?? "Default"),
+              };
+              return null;
+            case "change_sound_theme_setting":
+              appSettings = {
+                ...appSettings,
+                sound_theme: String(args?.theme ?? "marimba"),
+              };
+              return null;
+            case "change_app_language_setting":
+              appSettings = {
+                ...appSettings,
+                app_language: String(args?.language ?? "en"),
+              };
+              return null;
+            case "update_history_limit":
+              appSettings = {
+                ...appSettings,
+                history_limit: Number(args?.limit),
+              };
+              return null;
+            case "update_recording_retention_period":
+              appSettings = {
+                ...appSettings,
+                recording_retention_period: String(args?.period ?? "never"),
+              };
+              return null;
             case "get_adaptive_profiles":
               return profiles;
             case "change_experimental_enabled_setting":
@@ -612,6 +688,125 @@ const installTauriMocks = async (
                 post_process_enabled: Boolean(args?.enabled),
               };
               return null;
+            case "set_post_process_provider":
+              appSettings = {
+                ...appSettings,
+                post_process_provider_id: String(args?.providerId ?? ""),
+              };
+              return null;
+            case "change_post_process_base_url_setting": {
+              const providerId = String(args?.providerId ?? "");
+              const baseUrl = String(args?.baseUrl ?? "");
+              appSettings = {
+                ...appSettings,
+                post_process_providers: (
+                  (appSettings.post_process_providers as Array<
+                    Record<string, unknown>
+                  >) ?? []
+                ).map((provider) =>
+                  provider.id === providerId
+                    ? { ...provider, base_url: baseUrl }
+                    : provider,
+                ),
+                post_process_models: {
+                  ...((appSettings.post_process_models as Record<
+                    string,
+                    string
+                  >) ?? {}),
+                  [providerId]: "",
+                },
+              };
+              return null;
+            }
+            case "change_post_process_api_key_setting": {
+              const providerId = String(args?.providerId ?? "");
+              appSettings = {
+                ...appSettings,
+                post_process_api_keys: {
+                  ...((appSettings.post_process_api_keys as Record<
+                    string,
+                    string
+                  >) ?? {}),
+                  [providerId]: String(args?.apiKey ?? ""),
+                },
+              };
+              return null;
+            }
+            case "change_post_process_model_setting": {
+              const providerId = String(args?.providerId ?? "");
+              appSettings = {
+                ...appSettings,
+                post_process_models: {
+                  ...((appSettings.post_process_models as Record<
+                    string,
+                    string
+                  >) ?? {}),
+                  [providerId]: String(args?.model ?? ""),
+                },
+              };
+              return null;
+            }
+            case "fetch_post_process_models": {
+              const providerId = String(args?.providerId ?? "");
+              return providerId === "anthropic"
+                ? ["claude-3-5-haiku-latest", "claude-3-5-sonnet-latest"]
+                : ["gpt-4o-mini", "gpt-4.1-mini"];
+            }
+            case "set_post_process_selected_prompt":
+              appSettings = {
+                ...appSettings,
+                post_process_selected_prompt_id: String(args?.id ?? ""),
+              };
+              return null;
+            case "add_post_process_prompt": {
+              const prompt = {
+                id: `prompt_test_${nextPromptId++}`,
+                name: String(args?.name ?? ""),
+                prompt: String(args?.prompt ?? ""),
+              };
+              appSettings = {
+                ...appSettings,
+                post_process_prompts: [
+                  ...((appSettings.post_process_prompts as Array<
+                    Record<string, unknown>
+                  >) ?? []),
+                  prompt,
+                ],
+              };
+              return prompt;
+            }
+            case "update_post_process_prompt": {
+              const id = String(args?.id ?? "");
+              appSettings = {
+                ...appSettings,
+                post_process_prompts: (
+                  (appSettings.post_process_prompts as Array<
+                    Record<string, unknown>
+                  >) ?? []
+                ).map((prompt) =>
+                  prompt.id === id
+                    ? {
+                        ...prompt,
+                        name: String(args?.name ?? ""),
+                        prompt: String(args?.prompt ?? ""),
+                      }
+                    : prompt,
+                ),
+              };
+              return null;
+            }
+            case "delete_post_process_prompt": {
+              const id = String(args?.id ?? "");
+              appSettings = {
+                ...appSettings,
+                post_process_prompts: (
+                  (appSettings.post_process_prompts as Array<
+                    Record<string, unknown>
+                  >) ?? []
+                ).filter((prompt) => prompt.id !== id),
+              };
+              return null;
+            }
             case "change_adaptive_profiles_enabled_setting":
               appSettings = {
                 ...appSettings,
@@ -690,11 +885,90 @@ const installTauriMocks = async (
     {
       settings: { ...baseSettings, ...settingsOverrides },
       profiles: adaptiveProfiles,
-      models,
+      availableModels,
+      currentModel,
+      hasAnyModels,
       localPostProcessingModels: localLlmModels,
       initialHistoryEntries: historyEntries,
       osType,
     },
+  );
+};
+
+const installAndroidBridgeMock = async (
+  page: Page,
+  snapshot: {
+    microphone: boolean;
+    overlay: boolean;
+    accessibility: boolean;
+    bubbleRunning: boolean;
+    bubbleVisible?: boolean;
+    speechRecognizerAvailable: boolean;
+    onDeviceSpeechRecognizerAvailable: boolean;
+    onDeviceSpeechLanguageAvailable?: boolean;
+    onDeviceSpeechModelStatus?: string;
+  },
+  nativeHistoryEntries: Array<Record<string, unknown>> = [],
+  bubbleCorner = "top-right",
+) => {
+  await page.addInitScript(
+    ({ snapshot, nativeHistoryEntries, bubbleCorner }) => {
+      let selectedBubbleCorner = bubbleCorner;
+      const testWindow = window as typeof window & {
+        VerbatimAndroid: {
+          permissionSnapshot: () => string;
+          nativeTranscriptHistory: () => string;
+          bubbleCornerSnapshot: () => string;
+          setBubbleCorner: (corner: string) => string;
+          openExternalUrl: (url: string) => boolean;
+          requestMicrophone: () => void;
+          openOverlaySettings: () => void;
+          openAccessibilitySettings: () => void;
+          requestSpeechModelDownload: () => void;
+          syncTextFormatter: (snapshot: string) => void;
+          startBubble: () => void;
+          stopBubble: () => void;
+        };
+        __VERBATIM_ANDROID_BRIDGE_CALLS__: string[];
+        __VERBATIM_ANDROID_FORMATTER_SNAPSHOTS__: string[];
+      };
+      testWindow.__VERBATIM_ANDROID_BRIDGE_CALLS__ = [];
+      testWindow.__VERBATIM_ANDROID_FORMATTER_SNAPSHOTS__ = [];
+      testWindow.VerbatimAndroid = {
+        permissionSnapshot: () => JSON.stringify(snapshot),
+        nativeTranscriptHistory: () => JSON.stringify(nativeHistoryEntries),
+        bubbleCornerSnapshot: () => selectedBubbleCorner,
+        setBubbleCorner: (corner: string) => {
+          selectedBubbleCorner = corner;
+          testWindow.__VERBATIM_ANDROID_BRIDGE_CALLS__.push(
+            `setBubbleCorner:${corner}`,
+          );
+          return selectedBubbleCorner;
+        },
+        openExternalUrl: (url: string) => {
+          testWindow.__VERBATIM_ANDROID_BRIDGE_CALLS__.push(
+            `openExternalUrl:${url}`,
+          );
+          return true;
+        },
+        requestMicrophone: () => undefined,
+        openOverlaySettings: () => undefined,
+        openAccessibilitySettings: () => undefined,
+        requestSpeechModelDownload: () => {
+          testWindow.__VERBATIM_ANDROID_BRIDGE_CALLS__.push(
+            "requestSpeechModelDownload",
+          );
+        },
+        syncTextFormatter: (formatterSnapshot: string) => {
+          testWindow.__VERBATIM_ANDROID_FORMATTER_SNAPSHOTS__.push(
+            formatterSnapshot,
+          );
+        },
+        startBubble: () => undefined,
+        stopBubble: () => undefined,
+      };
+    },
+    { snapshot, nativeHistoryEntries, bubbleCorner },
   );
 };
 
@@ -712,6 +986,677 @@ test.describe("Verbatim App", () => {
     const html = await page.content();
     expect(html).toContain("<html");
     expect(html).toContain("<body");
+  });
+
+  test("android setup requires on-device speech before bubble readiness", async ({
+    page,
+  }) => {
+    await installTauriMocks(page, {}, [], "android");
+    await installAndroidBridgeMock(page, {
+      microphone: true,
+      overlay: true,
+      accessibility: true,
+      bubbleRunning: true,
+      speechRecognizerAvailable: true,
+      onDeviceSpeechRecognizerAvailable: false,
+    });
+
+    await page.goto("/");
+
+    await expect(
+      page.getByRole("heading", { name: "Set up mobile dictation" }),
+    ).toBeVisible();
+    await expect(page.getByText("Use on-device speech")).toBeVisible();
+    await expect(
+      page.getByText(
+        "Install an offline speech pack or use a device with on-device speech. Verbatim will not silently use remote speech.",
+      ),
+    ).toBeVisible();
+    await expect(page.getByText("Unavailable")).toBeVisible();
+    await expect(
+      page.getByRole("heading", {
+        name: "Tap the Verbatim bubble to dictate anywhere",
+      }),
+    ).toHaveCount(0);
+  });
+
+  test("android setup requires a downloaded offline speech pack before bubble readiness", async ({
+    page,
+  }) => {
+    await installTauriMocks(page, {}, [], "android");
+    await installAndroidBridgeMock(page, {
+      microphone: true,
+      overlay: true,
+      accessibility: true,
+      bubbleRunning: true,
+      speechRecognizerAvailable: true,
+      onDeviceSpeechRecognizerAvailable: true,
+      onDeviceSpeechLanguageAvailable: false,
+      onDeviceSpeechModelStatus: "missing",
+    });
+
+    await page.goto("/");
+
+    await expect(
+      page.getByRole("heading", { name: "Set up mobile dictation" }),
+    ).toBeVisible();
+    await expect(page.getByText("Download offline speech pack")).toBeVisible();
+    await expect(
+      page.getByText(
+        "Install the local Android speech pack for your current language before dictation starts.",
+      ),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "Download pack" }).click();
+    await expect(
+      page.getByRole("heading", {
+        name: "Tap the Verbatim bubble to dictate anywhere",
+      }),
+    ).toHaveCount(0);
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            (
+              window as typeof window & {
+                __VERBATIM_ANDROID_BRIDGE_CALLS__?: string[];
+              }
+            ).__VERBATIM_ANDROID_BRIDGE_CALLS__ ?? [],
+        ),
+      )
+      .toContain("requestSpeechModelDownload");
+  });
+
+  test("android home does not require a downloaded desktop model", async ({
+    page,
+  }) => {
+    await installTauriMocks(page, {}, [], "android", {
+      availableModels: models.map((model) => ({
+        ...model,
+        is_downloaded: false,
+      })),
+      currentModel: "",
+      hasAnyModels: false,
+    });
+    await installAndroidBridgeMock(page, {
+      microphone: true,
+      overlay: true,
+      accessibility: true,
+      bubbleRunning: true,
+      speechRecognizerAvailable: true,
+      onDeviceSpeechRecognizerAvailable: true,
+      onDeviceSpeechLanguageAvailable: true,
+    });
+
+    await page.goto("/");
+
+    await expect(
+      page.getByRole("heading", { name: "Set up mobile dictation" }),
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole("heading", {
+        name: "Tap the Verbatim bubble to dictate anywhere",
+      }),
+    ).toBeVisible();
+    await expect(page.getByText("Bubble visibility")).toBeVisible();
+  });
+
+  test("android home reads native transcript history from bridge", async ({
+    page,
+  }) => {
+    await installTauriMocks(page, {}, [], "android");
+    await installAndroidBridgeMock(
+      page,
+      {
+        microphone: true,
+        overlay: true,
+        accessibility: true,
+        bubbleRunning: true,
+        speechRecognizerAvailable: true,
+        onDeviceSpeechRecognizerAvailable: true,
+        onDeviceSpeechLanguageAvailable: true,
+      },
+      [
+        {
+          id: 101,
+          timestamp: 1781740000000,
+          title: "Android dictation",
+          transcription_text: "Native Android raw transcript",
+          post_processed_text: "Native Android formatted transcript",
+          insertion_status: "inserted",
+        },
+      ],
+    );
+
+    await page.goto("/");
+
+    await expect(
+      page.getByRole("heading", {
+        name: "Tap the Verbatim bubble to dictate anywhere",
+      }),
+    ).toBeVisible();
+    await expect(page.getByText("Bubble visibility")).toBeVisible();
+    await expect(page.getByText("Waiting for keyboard")).toBeVisible();
+    await expect(
+      page.getByText("Native Android formatted transcript"),
+    ).toBeVisible();
+
+    await page.getByRole("button", { name: "History" }).click();
+    await expect(
+      page.getByText("Native Android formatted transcript"),
+    ).toBeVisible();
+  });
+
+  test("android shell syncs formatter rules to native bridge", async ({
+    page,
+  }) => {
+    await installTauriMocks(
+      page,
+      {
+        dictionary_entries: [
+          {
+            id: "dict_android_1",
+            phrase: "Kulaib",
+            replacement_of: "club",
+            source: "manual",
+            priority: "starred",
+            created_at_ms: 1,
+            updated_at_ms: 2,
+          },
+        ],
+        snippets: [
+          {
+            id: "snippet_android_1",
+            trigger: "/sig",
+            content: "Sent from Verbatim Android",
+            created_at_ms: 1,
+            updated_at_ms: 2,
+          },
+        ],
+      },
+      [],
+      "android",
+    );
+    await installAndroidBridgeMock(page, {
+      microphone: true,
+      overlay: true,
+      accessibility: true,
+      bubbleRunning: true,
+      speechRecognizerAvailable: true,
+      onDeviceSpeechRecognizerAvailable: true,
+      onDeviceSpeechLanguageAvailable: true,
+    });
+
+    await page.goto("/");
+
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const win = window as typeof window & {
+            __VERBATIM_ANDROID_FORMATTER_SNAPSHOTS__?: string[];
+          };
+          const lastSnapshot =
+            win.__VERBATIM_ANDROID_FORMATTER_SNAPSHOTS__?.at(-1);
+          return lastSnapshot ? JSON.parse(lastSnapshot) : null;
+        }),
+      )
+      .toEqual(
+        expect.objectContaining({
+          dictionary_entries: expect.arrayContaining([
+            expect.objectContaining({
+              phrase: "Kulaib",
+              replacement_of: "club",
+              priority: "starred",
+            }),
+          ]),
+          snippets: expect.arrayContaining([
+            expect.objectContaining({
+              trigger: "/sig",
+              content: "Sent from Verbatim Android",
+            }),
+          ]),
+        }),
+      );
+  });
+
+  test("android settings opens dictionary and snippets library screens", async ({
+    page,
+  }) => {
+    await installTauriMocks(
+      page,
+      {
+        dictionary_entries: [
+          {
+            id: "dict_android_1",
+            phrase: "Kulaib",
+            replacement_of: "club",
+            source: "manual",
+            priority: "starred",
+            created_at_ms: 1,
+            updated_at_ms: 2,
+          },
+        ],
+        snippets: [
+          {
+            id: "snippet_android_1",
+            trigger: "/sig",
+            content: "Sent from Verbatim Android",
+            created_at_ms: 1,
+            updated_at_ms: 2,
+          },
+        ],
+      },
+      [],
+      "android",
+    );
+    await installAndroidBridgeMock(page, {
+      microphone: true,
+      overlay: true,
+      accessibility: true,
+      bubbleRunning: true,
+      speechRecognizerAvailable: true,
+      onDeviceSpeechRecognizerAvailable: true,
+      onDeviceSpeechLanguageAvailable: true,
+    });
+
+    await page.goto("/");
+
+    await expect(page.getByRole("button", { name: "Dictionary" })).toHaveCount(
+      0,
+    );
+    await page.getByRole("button", { name: "Settings" }).click();
+    await page.getByRole("button", { name: "Advanced features" }).click();
+    await page.getByRole("button", { name: "Dictionary" }).click();
+    await expect(page.getByText("Kulaib")).toBeVisible();
+    await expect(page.getByText("Corrects: club")).toBeVisible();
+
+    await page.getByLabel("Word or phrase").fill("Verbatim Android");
+    await page.getByLabel("Correct when Verbatim writes").fill("Handy Android");
+    await page.getByRole("button", { name: "Add entry" }).click();
+    await expect(page.getByText("Verbatim Android")).toBeVisible();
+
+    await page.getByRole("button", { name: "Edit Kulaib" }).click();
+    await page.getByLabel("Word or phrase").fill("Kulaib updated");
+    await page.getByRole("button", { name: "Save entry" }).click();
+    await expect(page.getByText("Kulaib updated")).toBeVisible();
+
+    await page.getByRole("button", { name: "Delete Kulaib updated" }).click();
+    await expect(page.getByText("Kulaib updated")).toHaveCount(0);
+
+    await page.getByRole("tab", { name: "Snippets" }).click();
+    await expect(page.getByText("/sig")).toBeVisible();
+    await expect(page.getByText("Sent from Verbatim Android")).toBeVisible();
+
+    await page.getByLabel("Trigger phrase").fill("/addr");
+    await page.getByLabel("Snippet content").fill("Android address block");
+    await page.getByRole("button", { name: "Add snippet" }).click();
+    await expect(page.getByText("/addr")).toBeVisible();
+
+    await page.getByRole("button", { name: "Edit /addr" }).click();
+    await page.getByLabel("Snippet content").fill("Updated Android address");
+    await page.getByRole("button", { name: "Save snippet" }).click();
+    await expect(page.getByText("Updated Android address")).toBeVisible();
+
+    await page.getByRole("button", { name: "Delete /addr" }).click();
+    await expect(page.getByText("/addr")).toHaveCount(0);
+
+    await page.getByLabel("Cancel").click();
+    await expect(page.getByRole("button", { name: "Settings" })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Advanced features" }),
+    ).toBeVisible();
+    await expect(page.getByRole("button", { name: "Dictionary" })).toHaveCount(
+      0,
+    );
+  });
+
+  test("android settings opens post-processing screen", async ({ page }) => {
+    await installTauriMocks(
+      page,
+      {
+        post_process_enabled: true,
+        post_process_provider_id: "openai",
+        post_process_providers: [
+          {
+            id: "openai",
+            label: "OpenAI",
+            base_url: "https://api.openai.com/v1",
+            allow_base_url_edit: false,
+            models_endpoint: null,
+            supports_structured_output: true,
+          },
+          {
+            id: "anthropic",
+            label: "Claude",
+            base_url: "https://api.anthropic.com/v1",
+            allow_base_url_edit: false,
+            models_endpoint: null,
+            supports_structured_output: true,
+          },
+          {
+            id: "custom",
+            label: "Custom",
+            base_url: "http://127.0.0.1:11434/v1",
+            allow_base_url_edit: true,
+            models_endpoint: null,
+            supports_structured_output: false,
+          },
+          {
+            id: "apple_intelligence",
+            label: "Apple Intelligence",
+            base_url: "apple-intelligence://local",
+            allow_base_url_edit: false,
+            models_endpoint: null,
+            supports_structured_output: true,
+          },
+        ],
+        post_process_api_keys: {
+          openai: "test-openai-key",
+          anthropic: "test-claude-key",
+        },
+        post_process_models: {
+          openai: "gpt-4o-mini",
+          anthropic: "claude-3-5-haiku-latest",
+        },
+        post_process_prompts: [
+          {
+            id: "prompt_clean",
+            name: "Clean up",
+            prompt: "Clean up {transcription}",
+          },
+        ],
+        post_process_selected_prompt_id: "prompt_clean",
+      },
+      [],
+      "android",
+    );
+    await installAndroidBridgeMock(page, {
+      microphone: true,
+      overlay: true,
+      accessibility: true,
+      bubbleRunning: true,
+      speechRecognizerAvailable: true,
+      onDeviceSpeechRecognizerAvailable: true,
+      onDeviceSpeechLanguageAvailable: true,
+    });
+
+    await page.goto("/");
+
+    await page.getByRole("button", { name: "Settings" }).click();
+    await page.getByRole("button", { name: "Advanced features" }).click();
+    await page.getByRole("button", { name: "Post Process" }).click();
+
+    await expect(
+      page.getByRole("heading", { name: "Post Process", exact: true }),
+    ).toBeVisible();
+    await expect(page.getByRole("button", { name: "Home" })).toHaveCount(0);
+    await expect(page.getByText("Apple Intelligence")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /OpenAI/ })).toBeVisible();
+    await expect(page.getByLabel("API Key")).toHaveValue("test-openai-key");
+    const modelField = page.getByRole("combobox", {
+      name: "Model",
+      exact: true,
+    });
+    await expect(modelField).toHaveValue("gpt-4o-mini");
+    await expect(page.getByLabel("Selected Prompt")).toHaveValue(
+      "prompt_clean",
+    );
+
+    await page.getByRole("button", { name: /Claude/ }).click();
+    await expect(modelField).toHaveValue("claude-3-5-haiku-latest");
+    await page.getByRole("button", { name: "Refresh models" }).click();
+    await modelField.fill("claude-3-5-sonnet-latest");
+    await page.getByLabel("API Key").click();
+    await expect(modelField).toHaveValue("claude-3-5-sonnet-latest");
+
+    await page.getByRole("button", { name: "Create New Prompt" }).click();
+    await expect(
+      page.getByRole("heading", { name: "Create New Prompt" }),
+    ).toBeVisible();
+    await page.getByLabel("Prompt Label").fill("Android polish");
+    await page
+      .getByLabel("Prompt Instructions")
+      .fill("Polish {transcription} for mobile.");
+    await page.getByRole("button", { name: "Save" }).click();
+    await expect(page.getByLabel("Selected Prompt")).toHaveValue(
+      "prompt_test_1",
+    );
+
+    await expect
+      .poll(async () =>
+        page.evaluate(() => {
+          const win = window as typeof window & {
+            __VERBATIM_TEST_COMMANDS__: string[];
+            __VERBATIM_TEST_INVOKES__: Array<{
+              cmd: string;
+              args?: Record<string, unknown>;
+            }>;
+          };
+          return {
+            commands: win.__VERBATIM_TEST_COMMANDS__,
+            invokes: win.__VERBATIM_TEST_INVOKES__,
+          };
+        }),
+      )
+      .toEqual(
+        expect.objectContaining({
+          commands: expect.arrayContaining([
+            "set_post_process_provider",
+            "fetch_post_process_models",
+            "change_post_process_model_setting",
+            "add_post_process_prompt",
+            "set_post_process_selected_prompt",
+          ]),
+          invokes: expect.arrayContaining([
+            expect.objectContaining({
+              cmd: "change_post_process_model_setting",
+              args: {
+                providerId: "anthropic",
+                model: "claude-3-5-sonnet-latest",
+              },
+            }),
+          ]),
+        }),
+      );
+
+    await page.getByLabel("Cancel").click();
+    await expect(
+      page.getByRole("button", { name: "Advanced features" }),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "Advanced features" }).click();
+    await expect(
+      page.getByRole("button", { name: "Post Process" }),
+    ).toBeVisible();
+  });
+
+  test("android settings expose mobile configuration sheets", async ({
+    page,
+  }) => {
+    await installTauriMocks(
+      page,
+      {
+        audio_feedback: true,
+        audio_feedback_volume: 0.25,
+        selected_microphone: "Default",
+        selected_output_device: "Default",
+        history_limit: 100,
+        recording_retention_period: "never",
+        sound_theme: "marimba",
+        app_language: "en",
+      },
+      [],
+      "android",
+    );
+    await installAndroidBridgeMock(
+      page,
+      {
+        microphone: true,
+        overlay: true,
+        accessibility: true,
+        bubbleRunning: true,
+        speechRecognizerAvailable: true,
+        onDeviceSpeechRecognizerAvailable: true,
+        onDeviceSpeechLanguageAvailable: true,
+      },
+      [],
+      "top-right",
+    );
+
+    await page.goto("/");
+    await page.getByRole("button", { name: "Settings" }).click();
+
+    await page.getByRole("button", { name: /Microphone/ }).click();
+    await expect(
+      page.getByRole("dialog", { name: "Microphone" }),
+    ).toBeVisible();
+    await page.getByRole("button", { name: /Studio Mic/ }).click();
+    await expect(page.getByText("Studio Mic")).toBeVisible();
+
+    const volumeSlider = page.getByLabel("Volume");
+    await volumeSlider.focus();
+    await volumeSlider.press("End");
+    await expect(page.getByText("100%")).toBeVisible();
+
+    await page.getByRole("button", { name: /Bubble position/ }).click();
+    await expect(
+      page.getByRole("dialog", { name: "Bubble position" }),
+    ).toBeVisible();
+    await page.getByRole("button", { name: /Bottom right/ }).click();
+    await expect(page.getByText("Bottom right")).toBeVisible();
+
+    await page.getByRole("button", { name: /Application Language/ }).click();
+    const languageDialog = page.getByRole("dialog", {
+      name: "Application Language",
+    });
+    await expect(languageDialog).toBeVisible();
+    await expect(
+      languageDialog.getByRole("button", { name: /English/ }),
+    ).toBeVisible();
+    await page.getByLabel("Cancel").click();
+
+    await page.getByRole("button", { name: "Advanced features" }).click();
+    await page.getByRole("button", { name: /History Limit/ }).click();
+    await page.getByRole("spinbutton", { name: "History Limit" }).fill("250");
+    await page.getByRole("button", { name: "Save" }).click();
+    await expect(page.getByText("250 entries")).toBeVisible();
+
+    await page.getByRole("button", { name: /Auto-Delete Recordings/ }).click();
+    await page.getByRole("button", { name: "After 3 days" }).click();
+    await expect(page.getByText("After 3 days")).toBeVisible();
+
+    await page.getByRole("button", { name: /Sound Theme/ }).click();
+    await page.getByRole("button", { name: "Pop" }).click();
+    await expect(page.getByText("Pop")).toBeVisible();
+
+    await page.getByRole("button", { name: /Output Device/ }).click();
+    await page.getByRole("button", { name: /Headphones/ }).click();
+    await expect(page.getByText("Headphones")).toBeVisible();
+
+    await expect
+      .poll(async () =>
+        page.evaluate(() => {
+          const win = window as typeof window & {
+            __VERBATIM_ANDROID_BRIDGE_CALLS__: string[];
+            __VERBATIM_TEST_COMMANDS__: string[];
+            __VERBATIM_TEST_INVOKES__: Array<{
+              cmd: string;
+              args?: Record<string, unknown>;
+            }>;
+          };
+          return {
+            bridge: win.__VERBATIM_ANDROID_BRIDGE_CALLS__,
+            commands: win.__VERBATIM_TEST_COMMANDS__,
+            invokes: win.__VERBATIM_TEST_INVOKES__,
+          };
+        }),
+      )
+      .toEqual(
+        expect.objectContaining({
+          bridge: expect.arrayContaining(["setBubbleCorner:bottom-right"]),
+          commands: expect.arrayContaining([
+            "set_selected_microphone",
+            "change_audio_feedback_volume_setting",
+            "update_history_limit",
+            "update_recording_retention_period",
+            "change_sound_theme_setting",
+            "set_selected_output_device",
+          ]),
+          invokes: expect.arrayContaining([
+            expect.objectContaining({
+              cmd: "set_selected_microphone",
+              args: { deviceName: "Studio Mic" },
+            }),
+            expect.objectContaining({
+              cmd: "change_audio_feedback_volume_setting",
+              args: { volume: 1 },
+            }),
+            expect.objectContaining({
+              cmd: "update_history_limit",
+              args: { limit: 250 },
+            }),
+            expect.objectContaining({
+              cmd: "update_recording_retention_period",
+              args: { period: "days3" },
+            }),
+            expect.objectContaining({
+              cmd: "change_sound_theme_setting",
+              args: { theme: "pop" },
+            }),
+            expect.objectContaining({
+              cmd: "set_selected_output_device",
+              args: { deviceName: "Headphones" },
+            }),
+          ]),
+        }),
+      );
+  });
+
+  test("android settings exposes about source and license details", async ({
+    page,
+  }) => {
+    await installTauriMocks(page, {}, [], "android");
+    await installAndroidBridgeMock(page, {
+      microphone: true,
+      overlay: true,
+      accessibility: true,
+      bubbleRunning: true,
+      speechRecognizerAvailable: true,
+      onDeviceSpeechRecognizerAvailable: true,
+      onDeviceSpeechLanguageAvailable: true,
+    });
+
+    await page.goto("/");
+    await page.getByRole("button", { name: "Settings" }).click();
+
+    await page.getByRole("button", { name: /^About/ }).click();
+    await expect(
+      page.getByRole("heading", { name: "About" }).first(),
+    ).toBeVisible();
+    await expect(page.getByText("MIT License Notice")).toBeVisible();
+    await expect(
+      page.getByText(/Portions of this app are derived from Handy/),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Whisper.cpp" }),
+    ).toBeVisible();
+
+    await page.getByRole("button", { name: /View on GitHub/ }).click();
+    await page.getByRole("button", { name: /View Handy on GitHub/ }).click();
+
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const win = window as typeof window & {
+            __VERBATIM_ANDROID_BRIDGE_CALLS__: string[];
+          };
+          return win.__VERBATIM_ANDROID_BRIDGE_CALLS__;
+        }),
+      )
+      .toEqual(
+        expect.arrayContaining([
+          "openExternalUrl:https://github.com/GalaxyRuler/Verbatim",
+          "openExternalUrl:https://github.com/cjpais/Handy",
+        ]),
+      );
   });
 
   test("adaptive profiles can be enabled from experimental settings", async ({

@@ -19,6 +19,7 @@ import { useDictionaryStore } from "./stores/dictionaryStore";
 import { useSettingsStore } from "./stores/settingsStore";
 import { commands } from "@/bindings";
 import { getLanguageDirection, initializeRTL } from "@/lib/utils/rtl";
+import AndroidApp from "./android/AndroidApp";
 
 type OnboardingStep = "accessibility" | "model" | "done";
 
@@ -33,7 +34,7 @@ const renderSettingsContent = (section: SidebarSection) => {
   return <ActiveComponent />;
 };
 
-function App() {
+function DesktopApp() {
   const { t, i18n } = useTranslation();
   const [onboardingStep, setOnboardingStep] = useState<OnboardingStep | null>(
     null,
@@ -394,6 +395,14 @@ function App() {
       <Footer />
     </div>
   );
+}
+
+function App() {
+  if (platform() === "android") {
+    return <AndroidApp />;
+  }
+
+  return <DesktopApp />;
 }
 
 export default App;
