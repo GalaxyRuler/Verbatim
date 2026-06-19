@@ -1,6 +1,6 @@
 # Verbatim — User Guide
 
-Verbatim is a free, open-source, on-device speech-to-text app for Windows, macOS, and Linux. Press a global hotkey, speak, and your words are typed into whatever app you're using — transcribed locally, with no cloud, no account, and no telemetry.
+Verbatim is a free, open-source, on-device speech-to-text app with desktop builds for Windows, macOS, and Linux plus Android builds on the release page. On desktop, press a global hotkey, speak, and your words are typed into whatever app you're using — transcribed locally, with no cloud, no account, and no telemetry.
 
 ## Contents
 

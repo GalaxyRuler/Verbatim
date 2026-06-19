@@ -30,6 +30,15 @@ sudo dpkg -i Verbatim_<version>_amd64.deb
 sudo apt-get install -f   # pull in any missing dependencies
 ```
 
+## Android
+
+- `Verbatim_<version>_android_universal.apk` for direct installation
+- `Verbatim_<version>_android_universal.aab` for app-bundle distribution
+
+Install the APK from the release page on your Android device. Android may ask you to allow installs from that source before the package can be installed.
+
+The AAB is not directly installable on a phone. Use it only for app-bundle distribution tooling.
+
 ## Verifying your download
 
-Each release publishes its binaries together with signature files (`.sig`) and an updater manifest. See the [Releases page](https://github.com/GalaxyRuler/Verbatim/releases/latest) for the full asset list.
+Desktop releases publish updater/signature assets where available. Android releases publish signed APK/AAB assets and `SHA256SUMS.txt` checksums. See the [Releases page](https://github.com/GalaxyRuler/Verbatim/releases/latest) for the full asset list.
