@@ -1,0 +1,143 @@
+# Phase 0 / Task 0.3 — Android CI: Kotlin unit tests + emulator E2E (Maestro).
+# Incorporates v2 audit fixes: caching, deterministic APK path, failure artifacts,
+# regeneration guard, and a note that ARM64 performance (Gate G2) cannot run on hosted x86_64 runners.
+name: android
+
+on:
+  pull_request:
+    paths:
+      - "src/android/**"
+      - "src-tauri/gen/android/**"
+      - "src-tauri/**"
+      - "maestro/**"
+      - ".github/workflows/android.yml"
+  workflow_dispatch:
+
+env:
+  NDK_VERSION: "28.2.13676358" # r28 — 16 KB-aligned by default (Gate G1)
+
+jobs:
+  # Guard: a regeneration (`tauri android init`) must not silently delete committed custom native code.
+  regen-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assert custom native files present
+        shell: bash
+        run: |
+          set -e
+          base="src-tauri/gen/android/app/src/main/java/com/galaxyruler/verbatim"
+          for f in MainActivity.kt FloatingBubbleService.kt VerbatimAccessibilityService.kt AndroidSpeechSupport.kt; do
+            test -f "$base/$f" || { echo "::error::missing committed native file $base/$f"; exit 1; }
+          done
+          test -f "src-tauri/gen/android/app/src/test/java/com/galaxyruler/verbatim/SmokeTest.kt" || { echo "::error::missing SmokeTest.kt"; exit 1; }
+
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: "21" }
+      - uses: android-actions/setup-android@v3
+      - name: Install NDK ${{ env.NDK_VERSION }}
+        run: sdkmanager "ndk;${{ env.NDK_VERSION }}"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Kotlin unit tests
+        working-directory: src-tauri/gen/android
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/${{ env.NDK_VERSION }}
+        # ABI flavors (Arm/Universal) exist via the rust plugin, so the variant task name is explicit.
+        run: ./gradlew :app:testUniversalDebugUnitTest
+      - name: Upload test report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with: { name: unit-test-report, path: src-tauri/gen/android/app/build/reports/tests/** }
+
+  e2e:
+    runs-on: ubuntu-latest # HW-accelerated emulation is Linux-only
+    steps:
+      - uses: actions/checkout@v4
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: "21" }
+      - uses: oven-sh/setup-bun@v2
+      - uses: dtolnay/rust-toolchain@stable
+        with: { targets: x86_64-linux-android }
+      - uses: android-actions/setup-android@v3
+      - name: Install NDK
+        run: sdkmanager "ndk;${{ env.NDK_VERSION }}"
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: "src-tauri -> target" }
+      - uses: actions/cache@v4 # bun deps
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ hashFiles('bun.lock') }}
+      - run: bun install --frozen-lockfile
+      - name: Install Maestro
+        run: |
+          curl -Ls "https://get.maestro.mobile.dev" | bash
+          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
+      - name: Build debug APK (x86_64 for emulator)
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/${{ env.NDK_VERSION }}
+        run: bun run tauri android build --debug --target x86_64 --apk
+      - name: Resolve APK path (deterministic; tauri merges a single --target to "universal")
+        id: apk
+        run: |
+          set -e
+          base="src-tauri/gen/android/app/build/outputs/apk"
+          apk="$base/universal/debug/app-universal-debug.apk"
+          test -f "$apk" || apk="$(find "$base" -name 'app-*-debug.apk' | head -1)"
+          test -f "$apk" || { echo "::error::debug APK not found under $base"; exit 1; }
+          echo "path=$apk" >> "$GITHUB_OUTPUT"
+      - name: AVD cache
+        uses: actions/cache@v4
+        id: avd-cache
+        with:
+          path: |
+            ~/.android/avd/*
+            ~/.android/adb*
+          key: avd-34
+      - name: Create AVD snapshot (cache miss)
+        if: steps.avd-cache.outputs.cache-hit != 'true'
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          force-avd-creation: false
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
+          script: echo "avd warmed"
+      - name: E2E (Maestro)
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          force-avd-creation: false
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
+          script: |
+            adb install -r "${{ steps.apk.outputs.path }}"
+            maestro test maestro/
+      - name: Failure artifacts (logcat + screenshots)
+        if: failure()
+        run: |
+          adb logcat -d > logcat.txt || true
+          adb exec-out screencap -p > screen.png || true
+      - name: Upload failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-failure
+          path: |
+            logcat.txt
+            screen.png
+            ~/.maestro/tests/**
+
+# NOTE (Gate G2): x86_64 emulators cannot establish ARM64 ASR latency/RAM/thermal behavior.
+# Physical-device benchmarks (Snapdragon 6xx/7xx + a flagship) must run on a self-hosted/device-farm
+# lane, scheduled separately — they are NOT part of this PR gate.
+# NOTE (Maestro): standard runtime permission dialogs are automatable, but Accessibility/overlay
+# Settings and OEM permission managers are not — those flows need Appium/UiAutomator (added with Phase 2).

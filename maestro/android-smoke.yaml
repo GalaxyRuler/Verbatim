@@ -1,0 +1,9 @@
+# Phase 0 / Task 0.2 — Maestro smoke flow: the app launches to onboarding.
+# Run: maestro test maestro/   (needs a booted emulator/device + installed debug APK)
+appId: com.galaxyruler.verbatim
+---
+- launchApp
+- assertVisible: "Verbatim"
+# Onboarding step 1 (microphone permission) — copy comes from i18n "android.onboarding.microphone.*"
+- assertVisible:
+    text: ".*[Mm]icrophone.*"
