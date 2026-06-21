@@ -593,6 +593,11 @@ fn run_inner(cli_args: CliArgs) {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_store::Builder::default().build());
 
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        builder = builder.plugin(tauri_plugin_verbatim_android::init());
+    }
+
     #[cfg(target_os = "macos")]
     {
         builder = builder.plugin(tauri_plugin_macos_permissions::init());

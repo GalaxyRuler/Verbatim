@@ -11,6 +11,8 @@
     "process:default",
     "dialog:default",
     "os:default",
+    "core:event:default",
+    "verbatim-android:default",
     "clipboard-manager:allow-read-text",
     "clipboard-manager:allow-write-text",
     "fs:read-files",

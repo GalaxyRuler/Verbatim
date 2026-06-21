@@ -1,0 +1,20 @@
+[package]
+name = "tauri-plugin-verbatim-android"
+version = "0.1.0"
+authors = [ "GalaxyRuler" ]
+description = ""
+edition = "2021"
+rust-version = "1.77.2"
+exclude = ["/examples", "/dist-js", "/guest-js", "/node_modules"]
+links = "tauri-plugin-verbatim-android"
+
+[dependencies]
+# Use crates.io tauri; the app's [patch.crates-io] redirects the runtime crates to the
+# GalaxyRuler fork, and cargo unifies this to the app's pinned 2.10.2.
+tauri = "2"
+serde = "1.0"
+serde_json = "1.0"
+thiserror = "2"
+
+[build-dependencies]
+tauri-plugin = { version = "2", features = ["build"] }

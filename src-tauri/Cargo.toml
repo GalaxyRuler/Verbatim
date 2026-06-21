@@ -90,6 +90,9 @@ tauri-plugin-dialog = "2.6"
 [target.'cfg(unix)'.dependencies]
 signal-hook = "0.3"
 
+[target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
+tauri-plugin-verbatim-android = { path = "tauri-plugin-verbatim-android" }
+
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 rdev = { git = "https://github.com/rustdesk-org/rdev" }
 tauri-plugin-autostart = "2.5.1"
