@@ -107,6 +107,12 @@ jobs:
           New-Item -ItemType Directory -Force -Path $stage | Out-Null
           Copy-Item (Join-Path $rel "verbatim.exe") $stage
           Copy-Item (Join-Path $rel "*.dll") $stage -ErrorAction SilentlyContinue
+          # Bundle the VC++ runtime DLLs the app imports (MSVCP140*, VCRUNTIME140*),
+          # staged by stage-windows-vc-runtime.ps1. Without these the packaged app
+          # fails to launch on machines lacking the VC++ redistributable.
+          if (Test-Path "src-tauri/nsis/runtime/windows-x64") {
+            Copy-Item "src-tauri/nsis/runtime/windows-x64/*.dll" $stage -ErrorAction SilentlyContinue
+          }
           if (Test-Path "src-tauri/resources") {
             Copy-Item "src-tauri/resources" (Join-Path $stage "resources") -Recurse
           }
