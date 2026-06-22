@@ -14,8 +14,10 @@ pub fn init<R: Runtime, C: DeserializeOwned>(
   _app: &AppHandle<R>,
   api: PluginApi<R, C>,
 ) -> crate::Result<VerbatimAndroid<R>> {
+  // The real plugin class lives in the APP module so it can reach the app's services.
+  // Resolved by Tauri as "com/galaxyruler/verbatim/VerbatimAndroidPlugin".
   #[cfg(target_os = "android")]
-  let handle = api.register_android_plugin("com.plugin.verbatimandroid", "ExamplePlugin")?;
+  let handle = api.register_android_plugin("com.galaxyruler.verbatim", "VerbatimAndroidPlugin")?;
   #[cfg(target_os = "ios")]
   let handle = api.register_ios_plugin(init_plugin_verbatim_android)?;
   Ok(VerbatimAndroid(handle))
@@ -29,6 +31,13 @@ impl<R: Runtime> VerbatimAndroid<R> {
     self
       .0
       .run_mobile_plugin("ping", payload)
+      .map_err(Into::into)
+  }
+
+  pub fn permission_snapshot(&self) -> crate::Result<serde_json::Value> {
+    self
+      .0
+      .run_mobile_plugin("permissionSnapshot", ())
       .map_err(Into::into)
   }
 }

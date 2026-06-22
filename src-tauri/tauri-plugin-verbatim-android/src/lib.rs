@@ -35,7 +35,10 @@ impl<R: Runtime, T: Manager<R>> crate::VerbatimAndroidExt<R> for T {
 /// Initializes the plugin.
 pub fn init<R: Runtime>() -> TauriPlugin<R> {
   Builder::new("verbatim-android")
-    .invoke_handler(tauri::generate_handler![commands::ping])
+    .invoke_handler(tauri::generate_handler![
+      commands::ping,
+      commands::permission_snapshot
+    ])
     .setup(|app, api| {
       #[cfg(mobile)]
       let verbatim_android = mobile::init(app, api)?;

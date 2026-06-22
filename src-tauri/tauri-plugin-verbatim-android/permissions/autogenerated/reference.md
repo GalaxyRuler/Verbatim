@@ -7,6 +7,7 @@ Default permissions for the plugin
 - `allow-ping`
 - `allow-registerListener`
 - `allow-removeListener`
+- `allow-permission-snapshot`
 
 ## Permission Table
 
@@ -16,6 +17,32 @@ Default permissions for the plugin
 <th>Description</th>
 </tr>
 
+
+<tr>
+<td>
+
+`verbatim-android:allow-permission-snapshot`
+
+</td>
+<td>
+
+Enables the permission_snapshot command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`verbatim-android:deny-permission-snapshot`
+
+</td>
+<td>
+
+Denies the permission_snapshot command without any pre-configured scope.
+
+</td>
+</tr>
 
 <tr>
 <td>

@@ -2,4 +2,4 @@
 description = "Default permissions for the plugin"
 # allow-registerListener/allow-removeListener authorize JS addPluginListener() to receive
 # Kotlin trigger() events (the native->JS push that replaces 1.2s polling, ADR-1).
-permissions = ["allow-ping", "allow-registerListener", "allow-removeListener"]
+permissions = ["allow-ping", "allow-registerListener", "allow-removeListener", "allow-permission-snapshot"]

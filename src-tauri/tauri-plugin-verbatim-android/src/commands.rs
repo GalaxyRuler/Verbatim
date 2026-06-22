@@ -11,3 +11,10 @@ pub(crate) async fn ping<R: Runtime>(
 ) -> Result<PingResponse> {
     app.verbatim_android().ping(payload)
 }
+
+#[command]
+pub(crate) async fn permission_snapshot<R: Runtime>(
+    app: AppHandle<R>,
+) -> Result<serde_json::Value> {
+    app.verbatim_android().permission_snapshot()
+}

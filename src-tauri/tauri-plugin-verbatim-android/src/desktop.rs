@@ -19,4 +19,9 @@ impl<R: Runtime> VerbatimAndroid<R> {
       value: payload.value,
     })
   }
+
+  pub fn permission_snapshot(&self) -> crate::Result<serde_json::Value> {
+    // No native Android surface on desktop; return an empty snapshot.
+    Ok(serde_json::json!({}))
+  }
 }
