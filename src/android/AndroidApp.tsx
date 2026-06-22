@@ -61,6 +61,7 @@ import { useModelStore } from "@/stores/modelStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useSnippetsStore } from "@/stores/snippetsStore";
 import { formatDateTime } from "@/utils/dateFormat";
+import { onPermissions, permissionSnapshot } from "./bridge";
 import "./AndroidApp.css";
 
 type AndroidTab = "home" | "history" | "models" | "settings";
@@ -170,14 +171,6 @@ const openAndroidExternalUrl = (url: string) => {
 
 const isAndroidPostProcessProvider = (provider: PostProcessProvider) =>
   !ANDROID_EXCLUDED_POST_PROCESS_PROVIDERS.has(provider.id);
-
-const parsePermissions = (value: string): AndroidPermissionSnapshot => {
-  try {
-    return { ...defaultPermissions, ...JSON.parse(value) };
-  } catch {
-    return defaultPermissions;
-  }
-};
 
 const normalizeBubbleCorner = (
   value: string | null | undefined,
@@ -440,18 +433,31 @@ export default function AndroidApp() {
   useAndroidTextFormatterSync();
 
   const refreshPermissions = useCallback(() => {
-    const snapshot = safeBridge()?.permissionSnapshot();
-    if (snapshot) {
-      setPermissions(parsePermissions(snapshot));
-    }
+    void permissionSnapshot().then((snapshot) => {
+      if (snapshot && Object.keys(snapshot).length > 0) {
+        setPermissions({
+          ...defaultPermissions,
+          ...(snapshot as Partial<AndroidPermissionSnapshot>),
+        });
+      }
+    });
   }, []);
 
   useEffect(() => {
     refreshPermissions();
-    const interval = window.setInterval(refreshPermissions, 1200);
+    // Push-based updates from the native plugin replace the old 1.2s polling (ADR-1).
+    let listener: { unregister: () => void } | undefined;
+    void onPermissions((snapshot) =>
+      setPermissions({
+        ...defaultPermissions,
+        ...(snapshot as Partial<AndroidPermissionSnapshot>),
+      }),
+    ).then((registered) => {
+      listener = registered;
+    });
     window.addEventListener("focus", refreshPermissions);
     return () => {
-      window.clearInterval(interval);
+      listener?.unregister();
       window.removeEventListener("focus", refreshPermissions);
     };
   }, [refreshPermissions]);

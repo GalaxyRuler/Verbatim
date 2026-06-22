@@ -9,6 +9,7 @@ import android.os.Build
 import android.provider.Settings
 import android.speech.SpeechRecognizer
 import android.view.accessibility.AccessibilityManager
+import android.webkit.WebView
 import androidx.core.content.ContextCompat
 import app.tauri.annotation.Command
 import app.tauri.annotation.InvokeArg
@@ -28,11 +29,30 @@ class PingArgs {
  * services (FloatingBubbleService, VerbatimAccessibilityService, AndroidSpeechSupport).
  * Registered from Rust via register_android_plugin("com.galaxyruler.verbatim", "VerbatimAndroidPlugin").
  *
- * Phase 1 / T-CUTOVER: this replaces the raw `window.VerbatimAndroid` @JavascriptInterface bridge,
- * one command at a time. The bridge stays as a rollback path until parity is complete.
+ * Phase 1 / T-CUTOVER: replaces the raw `window.VerbatimAndroid` @JavascriptInterface bridge.
+ * State changes are PUSHED to JS via trigger("permissions", ...) on resume (ADR-1: no polling).
  */
 @TauriPlugin
 class VerbatimAndroidPlugin(private val activity: Activity) : Plugin(activity) {
+
+  override fun load(webView: WebView) {
+    super.load(webView)
+    instance = this
+  }
+
+  override fun onResume() {
+    super.onResume()
+    // Returning from a permission dialog / settings screen is when state most often changes.
+    // Push a fresh snapshot instead of having the webview poll every 1.2s.
+    emitPermissions()
+  }
+
+  override fun onDestroy() {
+    if (instance === this) {
+      instance = null
+    }
+    super.onDestroy()
+  }
 
   @Command
   fun ping(invoke: Invoke) {
@@ -45,7 +65,15 @@ class VerbatimAndroidPlugin(private val activity: Activity) : Plugin(activity) {
   /** Mirror of the legacy AndroidBridge.permissionSnapshot() JSON shape. */
   @Command
   fun permissionSnapshot(invoke: Invoke) {
-    val ret = JSObject()
+    invoke.resolve(buildSnapshot())
+  }
+
+  fun emitPermissions() {
+    trigger("permissions", buildSnapshot())
+  }
+
+  private fun buildSnapshot(): JSObject =
+    JSObject()
       .put("microphone", hasMicrophonePermission())
       .put("overlay", Settings.canDrawOverlays(activity))
       .put("accessibility", isAccessibilityEnabled())
@@ -59,8 +87,6 @@ class VerbatimAndroidPlugin(private val activity: Activity) : Plugin(activity) {
       )
       .put("onDeviceSpeechLanguageAvailable", AndroidSpeechSupport.isLanguageAvailable(activity))
       .put("onDeviceSpeechModelStatus", AndroidSpeechSupport.currentStatus(activity))
-    invoke.resolve(ret)
-  }
 
   private fun hasMicrophonePermission(): Boolean =
     ContextCompat.checkSelfPermission(activity, Manifest.permission.RECORD_AUDIO) ==
@@ -90,5 +116,12 @@ class VerbatimAndroidPlugin(private val activity: Activity) : Plugin(activity) {
     return enabled.split(':').any {
       it.equals(expected, ignoreCase = true) || it.equals(shortExpected, ignoreCase = true)
     }
+  }
+
+  companion object {
+    /** Set in load(); lets MainActivity (e.g. onRequestPermissionsResult) push a fresh snapshot. */
+    @Volatile
+    var instance: VerbatimAndroidPlugin? = null
+      private set
   }
 }
