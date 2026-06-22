@@ -61,7 +61,19 @@ import { useModelStore } from "@/stores/modelStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useSnippetsStore } from "@/stores/snippetsStore";
 import { formatDateTime } from "@/utils/dateFormat";
-import { onPermissions, permissionSnapshot } from "./bridge";
+import {
+  bubbleCornerSnapshot,
+  nativeTranscriptHistory,
+  onPermissions,
+  openAccessibilitySettings,
+  openExternalUrl,
+  openOverlaySettings,
+  permissionSnapshot,
+  requestMicrophone,
+  requestSpeechModelDownload,
+  setBubbleCorner as setNativeBubbleCorner,
+  syncTextFormatter,
+} from "./bridge";
 import "./AndroidApp.css";
 
 type AndroidTab = "home" | "history" | "models" | "settings";
@@ -127,7 +139,7 @@ declare global {
       startBubble: () => void;
       stopBubble: () => void;
       bubbleCornerSnapshot?: () => string;
-      setBubbleCorner?: (corner: AndroidBubbleCorner) => string;
+      setBubbleCorner?: (corner: string) => string;
       openExternalUrl?: (url: string) => boolean;
     };
   }
@@ -163,10 +175,8 @@ const androidBubbleCorners: AndroidBubbleCorner[] = [
   "bottom-right",
 ];
 
-const safeBridge = () => window.VerbatimAndroid;
-
 const openAndroidExternalUrl = (url: string) => {
-  safeBridge()?.openExternalUrl?.(url);
+  void openExternalUrl(url);
 };
 
 const isAndroidPostProcessProvider = (provider: PostProcessProvider) =>
@@ -287,8 +297,8 @@ const historyEntryFromAndroidSnapshot = (
 const historyDisplayText = (entry: HistoryEntry): string =>
   entry.post_processed_text || entry.transcription_text;
 
-const readAndroidNativeHistory = (): HistoryEntry[] => {
-  const snapshot = safeBridge()?.nativeTranscriptHistory?.();
+const readAndroidNativeHistory = async (): Promise<HistoryEntry[]> => {
+  const snapshot = await nativeTranscriptHistory();
   if (!snapshot) {
     return [];
   }
@@ -385,22 +395,13 @@ const useAndroidTextFormatterSync = () => {
   const loadSnippetEntries = useSnippetsStore((store) => store.loadEntries);
 
   useEffect(() => {
-    if (!safeBridge()?.syncTextFormatter) {
-      return;
-    }
-
     void Promise.all([loadDictionaryEntries(), loadSnippetEntries()]).catch(
       () => undefined,
     );
   }, [loadDictionaryEntries, loadSnippetEntries]);
 
   useEffect(() => {
-    const bridge = safeBridge();
-    if (!bridge?.syncTextFormatter) {
-      return;
-    }
-
-    bridge.syncTextFormatter(
+    void syncTextFormatter(
       JSON.stringify({
         dictionary_entries: dictionaryEntries.map((entry) => ({
           phrase: entry.phrase,
@@ -603,7 +604,6 @@ function AndroidOnboarding({
   refreshPermissions: () => void;
 }) {
   const { t } = useTranslation();
-  const bridge = safeBridge();
   const speechPackCalloutKey = (() => {
     switch (permissions.onDeviceSpeechModelStatus) {
       case "ready":
@@ -626,7 +626,7 @@ function AndroidOnboarding({
       title: t("android.onboarding.microphone.title"),
       description: t("android.onboarding.microphone.description"),
       action: t("android.onboarding.microphone.action"),
-      onClick: () => bridge?.requestMicrophone(),
+      onClick: () => void requestMicrophone(),
       callout: null,
     },
     {
@@ -634,7 +634,7 @@ function AndroidOnboarding({
       title: t("android.onboarding.overlay.title"),
       description: t("android.onboarding.overlay.description"),
       action: t("android.onboarding.overlay.action"),
-      onClick: () => bridge?.openOverlaySettings(),
+      onClick: () => void openOverlaySettings(),
       callout: t("android.onboarding.overlay.callout"),
     },
     {
@@ -642,7 +642,7 @@ function AndroidOnboarding({
       title: t("android.onboarding.accessibility.title"),
       description: t("android.onboarding.accessibility.description"),
       action: t("android.onboarding.accessibility.action"),
-      onClick: () => bridge?.openAccessibilitySettings(),
+      onClick: () => void openAccessibilitySettings(),
       callout: t("android.onboarding.accessibility.callout"),
     },
     {
@@ -660,7 +660,7 @@ function AndroidOnboarding({
       title: t("android.onboarding.speechPack.title"),
       description: t("android.onboarding.speechPack.description"),
       action: t("android.onboarding.speechPack.action"),
-      onClick: () => bridge?.requestSpeechModelDownload(),
+      onClick: () => void requestSpeechModelDownload(),
       callout: t(speechPackCalloutKey),
     },
   ];
@@ -741,23 +741,22 @@ function HomeTab({
   const activeModel = models.find((model) => model.id === currentModel);
   const selectedLanguage = settings?.selected_language || t("common.default");
 
-  const loadLastEntry = useCallback(() => {
-    const nativeEntries = readAndroidNativeHistory();
+  const loadLastEntry = useCallback(async () => {
+    const nativeEntries = await readAndroidNativeHistory();
     if (nativeEntries.length > 0) {
       setLastEntry(nativeEntries[0]);
       return;
     }
 
-    commands.getHistoryEntries(null, 1).then((result) => {
-      if (result.status === "ok") {
-        setLastEntry(result.data.entries[0] ?? null);
-      }
-    });
+    const result = await commands.getHistoryEntries(null, 1);
+    if (result.status === "ok") {
+      setLastEntry(result.data.entries[0] ?? null);
+    }
   }, []);
 
   useEffect(() => {
-    loadLastEntry();
-    const interval = window.setInterval(loadLastEntry, 1500);
+    void loadLastEntry();
+    const interval = window.setInterval(() => void loadLastEntry(), 1500);
     return () => window.clearInterval(interval);
   }, [loadLastEntry]);
 
@@ -872,22 +871,21 @@ function HistoryTab() {
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [search, setSearch] = useState("");
 
-  const loadEntries = useCallback(() => {
-    const nativeEntries = readAndroidNativeHistory();
+  const loadEntries = useCallback(async () => {
+    const nativeEntries = await readAndroidNativeHistory();
     if (nativeEntries.length > 0) {
       setEntries(nativeEntries);
       return;
     }
 
-    commands.getHistoryEntries(null, 30).then((result) => {
-      if (result.status === "ok") {
-        setEntries(result.data.entries);
-      }
-    });
+    const result = await commands.getHistoryEntries(null, 30);
+    if (result.status === "ok") {
+      setEntries(result.data.entries);
+    }
   }, []);
 
   useEffect(() => {
-    loadEntries();
+    void loadEntries();
   }, [loadEntries]);
 
   const filteredEntries = entries.filter((entry) =>
@@ -2329,9 +2327,9 @@ function SettingsTab({
   }, []);
 
   useEffect(() => {
-    setBubbleCorner(
-      normalizeBubbleCorner(
-        safeBridge()?.bubbleCornerSnapshot?.() ?? settings?.overlay_position,
+    void bubbleCornerSnapshot().then((corner) =>
+      setBubbleCorner(
+        normalizeBubbleCorner(corner ?? settings?.overlay_position),
       ),
     );
   }, [settings?.overlay_position]);
@@ -2364,7 +2362,7 @@ function SettingsTab({
 
   const handleBubbleCornerSelect = (corner: AndroidBubbleCorner) => {
     setBubbleCorner(corner);
-    safeBridge()?.setBubbleCorner?.(corner);
+    void setNativeBubbleCorner(corner);
     closeSheet();
   };
 

@@ -37,7 +37,18 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
   Builder::new("verbatim-android")
     .invoke_handler(tauri::generate_handler![
       commands::ping,
-      commands::permission_snapshot
+      commands::permission_snapshot,
+      commands::native_transcript_history,
+      commands::sync_text_formatter,
+      commands::bubble_corner_snapshot,
+      commands::set_bubble_corner,
+      commands::start_bubble,
+      commands::stop_bubble,
+      commands::request_microphone,
+      commands::open_overlay_settings,
+      commands::open_accessibility_settings,
+      commands::request_speech_model_download,
+      commands::open_external_url
     ])
     .setup(|app, api| {
       #[cfg(mobile)]

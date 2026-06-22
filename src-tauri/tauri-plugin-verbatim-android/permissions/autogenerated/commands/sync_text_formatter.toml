@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-sync-text-formatter"
+description = "Enables the sync_text_formatter command without any pre-configured scope."
+commands.allow = ["sync_text_formatter"]
+
+[[permission]]
+identifier = "deny-sync-text-formatter"
+description = "Denies the sync_text_formatter command without any pre-configured scope."
+commands.deny = ["sync_text_formatter"]

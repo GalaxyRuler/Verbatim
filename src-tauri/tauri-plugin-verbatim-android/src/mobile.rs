@@ -40,4 +40,91 @@ impl<R: Runtime> VerbatimAndroid<R> {
       .run_mobile_plugin("permissionSnapshot", ())
       .map_err(Into::into)
   }
+
+  pub fn native_transcript_history(&self) -> crate::Result<serde_json::Value> {
+    self
+      .0
+      .run_mobile_plugin("nativeTranscriptHistory", ())
+      .map_err(Into::into)
+  }
+
+  pub fn sync_text_formatter(&self, snapshot: String) -> crate::Result<()> {
+    self
+      .0
+      .run_mobile_plugin::<serde_json::Value>(
+        "syncTextFormatter",
+        serde_json::json!({ "snapshot": snapshot }),
+      )
+      .map(|_| ())
+      .map_err(Into::into)
+  }
+
+  pub fn bubble_corner_snapshot(&self) -> crate::Result<serde_json::Value> {
+    self
+      .0
+      .run_mobile_plugin("bubbleCornerSnapshot", ())
+      .map_err(Into::into)
+  }
+
+  pub fn set_bubble_corner(&self, corner: String) -> crate::Result<serde_json::Value> {
+    self
+      .0
+      .run_mobile_plugin("setBubbleCorner", serde_json::json!({ "corner": corner }))
+      .map_err(Into::into)
+  }
+
+  pub fn start_bubble(&self) -> crate::Result<()> {
+    self
+      .0
+      .run_mobile_plugin::<serde_json::Value>("startBubble", ())
+      .map(|_| ())
+      .map_err(Into::into)
+  }
+
+  pub fn stop_bubble(&self) -> crate::Result<()> {
+    self
+      .0
+      .run_mobile_plugin::<serde_json::Value>("stopBubble", ())
+      .map(|_| ())
+      .map_err(Into::into)
+  }
+
+  pub fn request_microphone(&self) -> crate::Result<()> {
+    self
+      .0
+      .run_mobile_plugin::<serde_json::Value>("requestMicrophone", ())
+      .map(|_| ())
+      .map_err(Into::into)
+  }
+
+  pub fn open_overlay_settings(&self) -> crate::Result<()> {
+    self
+      .0
+      .run_mobile_plugin::<serde_json::Value>("openOverlaySettings", ())
+      .map(|_| ())
+      .map_err(Into::into)
+  }
+
+  pub fn open_accessibility_settings(&self) -> crate::Result<()> {
+    self
+      .0
+      .run_mobile_plugin::<serde_json::Value>("openAccessibilitySettings", ())
+      .map(|_| ())
+      .map_err(Into::into)
+  }
+
+  pub fn request_speech_model_download(&self) -> crate::Result<()> {
+    self
+      .0
+      .run_mobile_plugin::<serde_json::Value>("requestSpeechModelDownload", ())
+      .map(|_| ())
+      .map_err(Into::into)
+  }
+
+  pub fn open_external_url(&self, url: String) -> crate::Result<serde_json::Value> {
+    self
+      .0
+      .run_mobile_plugin("openExternalUrl", serde_json::json!({ "url": url }))
+      .map_err(Into::into)
+  }
 }

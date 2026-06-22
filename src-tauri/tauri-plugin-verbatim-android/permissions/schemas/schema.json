@@ -295,6 +295,66 @@
       "type": "string",
       "oneOf": [
         {
+          "description": "Enables the bubble_corner_snapshot command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-bubble-corner-snapshot",
+          "markdownDescription": "Enables the bubble_corner_snapshot command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the bubble_corner_snapshot command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-bubble-corner-snapshot",
+          "markdownDescription": "Denies the bubble_corner_snapshot command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the native_transcript_history command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-native-transcript-history",
+          "markdownDescription": "Enables the native_transcript_history command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the native_transcript_history command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-native-transcript-history",
+          "markdownDescription": "Denies the native_transcript_history command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the open_accessibility_settings command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-open-accessibility-settings",
+          "markdownDescription": "Enables the open_accessibility_settings command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the open_accessibility_settings command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-open-accessibility-settings",
+          "markdownDescription": "Denies the open_accessibility_settings command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the open_external_url command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-open-external-url",
+          "markdownDescription": "Enables the open_external_url command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the open_external_url command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-open-external-url",
+          "markdownDescription": "Denies the open_external_url command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the open_overlay_settings command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-open-overlay-settings",
+          "markdownDescription": "Enables the open_overlay_settings command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the open_overlay_settings command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-open-overlay-settings",
+          "markdownDescription": "Denies the open_overlay_settings command without any pre-configured scope."
+        },
+        {
           "description": "Enables the permission_snapshot command without any pre-configured scope.",
           "type": "string",
           "const": "allow-permission-snapshot",
@@ -343,10 +403,82 @@
           "markdownDescription": "Denies the removeListener command without any pre-configured scope."
         },
         {
-          "description": "Default permissions for the plugin\n#### This default permission set includes:\n\n- `allow-ping`\n- `allow-registerListener`\n- `allow-removeListener`\n- `allow-permission-snapshot`",
+          "description": "Enables the request_microphone command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-request-microphone",
+          "markdownDescription": "Enables the request_microphone command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the request_microphone command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-request-microphone",
+          "markdownDescription": "Denies the request_microphone command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the request_speech_model_download command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-request-speech-model-download",
+          "markdownDescription": "Enables the request_speech_model_download command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the request_speech_model_download command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-request-speech-model-download",
+          "markdownDescription": "Denies the request_speech_model_download command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_bubble_corner command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-bubble-corner",
+          "markdownDescription": "Enables the set_bubble_corner command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_bubble_corner command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-bubble-corner",
+          "markdownDescription": "Denies the set_bubble_corner command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the start_bubble command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-start-bubble",
+          "markdownDescription": "Enables the start_bubble command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the start_bubble command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-start-bubble",
+          "markdownDescription": "Denies the start_bubble command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the stop_bubble command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-stop-bubble",
+          "markdownDescription": "Enables the stop_bubble command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the stop_bubble command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-stop-bubble",
+          "markdownDescription": "Denies the stop_bubble command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the sync_text_formatter command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-sync-text-formatter",
+          "markdownDescription": "Enables the sync_text_formatter command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the sync_text_formatter command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-sync-text-formatter",
+          "markdownDescription": "Denies the sync_text_formatter command without any pre-configured scope."
+        },
+        {
+          "description": "Default permissions for the plugin\n#### This default permission set includes:\n\n- `allow-ping`\n- `allow-registerListener`\n- `allow-removeListener`\n- `allow-permission-snapshot`\n- `allow-native-transcript-history`\n- `allow-sync-text-formatter`\n- `allow-bubble-corner-snapshot`\n- `allow-set-bubble-corner`\n- `allow-start-bubble`\n- `allow-stop-bubble`\n- `allow-request-microphone`\n- `allow-open-overlay-settings`\n- `allow-open-accessibility-settings`\n- `allow-request-speech-model-download`\n- `allow-open-external-url`",
           "type": "string",
           "const": "default",
-          "markdownDescription": "Default permissions for the plugin\n#### This default permission set includes:\n\n- `allow-ping`\n- `allow-registerListener`\n- `allow-removeListener`\n- `allow-permission-snapshot`"
+          "markdownDescription": "Default permissions for the plugin\n#### This default permission set includes:\n\n- `allow-ping`\n- `allow-registerListener`\n- `allow-removeListener`\n- `allow-permission-snapshot`\n- `allow-native-transcript-history`\n- `allow-sync-text-formatter`\n- `allow-bubble-corner-snapshot`\n- `allow-set-bubble-corner`\n- `allow-start-bubble`\n- `allow-stop-bubble`\n- `allow-request-microphone`\n- `allow-open-overlay-settings`\n- `allow-open-accessibility-settings`\n- `allow-request-speech-model-download`\n- `allow-open-external-url`"
         }
       ]
     }

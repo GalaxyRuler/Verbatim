@@ -4,12 +4,16 @@ import android.Manifest
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.app.Activity
 import android.content.ComponentName
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
+import android.os.Bundle
 import android.provider.Settings
 import android.speech.SpeechRecognizer
 import android.view.accessibility.AccessibilityManager
 import android.webkit.WebView
+import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import app.tauri.annotation.Command
 import app.tauri.annotation.InvokeArg
@@ -23,13 +27,28 @@ class PingArgs {
   var value: String? = null
 }
 
+@InvokeArg
+class SyncFormatterArgs {
+  var snapshot: String = ""
+}
+
+@InvokeArg
+class SetBubbleCornerArgs {
+  var corner: String = ""
+}
+
+@InvokeArg
+class OpenUrlArgs {
+  var url: String = ""
+}
+
 /**
  * The real Tauri plugin for Verbatim's Android native surface. It lives in the APP module
  * (com.galaxyruler.verbatim) — not the plugin's android library — so it can reach the app's
  * services (FloatingBubbleService, VerbatimAccessibilityService, AndroidSpeechSupport).
  * Registered from Rust via register_android_plugin("com.galaxyruler.verbatim", "VerbatimAndroidPlugin").
  *
- * Phase 1 / T-CUTOVER: replaces the raw `window.VerbatimAndroid` @JavascriptInterface bridge.
+ * Phase 1 / T-CUTOVER: this replaces the raw `window.VerbatimAndroid` @JavascriptInterface bridge.
  * State changes are PUSHED to JS via trigger("permissions", ...) on resume (ADR-1: no polling).
  */
 @TauriPlugin
@@ -54,13 +73,7 @@ class VerbatimAndroidPlugin(private val activity: Activity) : Plugin(activity) {
     super.onDestroy()
   }
 
-  @Command
-  fun ping(invoke: Invoke) {
-    val args = invoke.parseArgs(PingArgs::class.java)
-    val ret = JSObject()
-    ret.put("value", args.value ?: "")
-    invoke.resolve(ret)
-  }
+  // ---- State (pull + push) ----
 
   /** Mirror of the legacy AndroidBridge.permissionSnapshot() JSON shape. */
   @Command
@@ -71,6 +84,122 @@ class VerbatimAndroidPlugin(private val activity: Activity) : Plugin(activity) {
   fun emitPermissions() {
     trigger("permissions", buildSnapshot())
   }
+
+  @Command
+  fun nativeTranscriptHistory(invoke: Invoke) {
+    val ret = JSObject()
+    ret.put("json", FloatingBubbleService.nativeTranscriptHistory(activity))
+    invoke.resolve(ret)
+  }
+
+  @Command
+  fun syncTextFormatter(invoke: Invoke) {
+    val args = invoke.parseArgs(SyncFormatterArgs::class.java)
+    FloatingBubbleService.syncTextFormatter(activity, args.snapshot)
+    invoke.resolve()
+  }
+
+  // ---- Bubble position ----
+
+  @Command
+  fun bubbleCornerSnapshot(invoke: Invoke) {
+    val ret = JSObject()
+    ret.put("value", FloatingBubbleService.bubbleCornerSnapshot(activity))
+    invoke.resolve(ret)
+  }
+
+  @Command
+  fun setBubbleCorner(invoke: Invoke) {
+    val args = invoke.parseArgs(SetBubbleCornerArgs::class.java)
+    val ret = JSObject()
+    ret.put("value", FloatingBubbleService.setBubbleCorner(activity, args.corner))
+    invoke.resolve(ret)
+  }
+
+  @Command
+  fun startBubble(invoke: Invoke) {
+    activity.runOnUiThread {
+      if (Settings.canDrawOverlays(activity)) {
+        activity.startService(Intent(activity, FloatingBubbleService::class.java))
+      }
+    }
+    invoke.resolve()
+  }
+
+  @Command
+  fun stopBubble(invoke: Invoke) {
+    activity.runOnUiThread {
+      activity.stopService(Intent(activity, FloatingBubbleService::class.java))
+    }
+    invoke.resolve()
+  }
+
+  // ---- Permission / settings entry points ----
+
+  @Command
+  fun requestMicrophone(invoke: Invoke) {
+    activity.runOnUiThread {
+      ActivityCompat.requestPermissions(
+        activity,
+        arrayOf(Manifest.permission.RECORD_AUDIO),
+        MICROPHONE_REQUEST_CODE,
+      )
+    }
+    invoke.resolve()
+  }
+
+  @Command
+  fun openOverlaySettings(invoke: Invoke) {
+    activity.runOnUiThread {
+      activity.startActivity(
+        Intent(
+          Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+          Uri.parse("package:${activity.packageName}"),
+        ),
+      )
+    }
+    invoke.resolve()
+  }
+
+  @Command
+  fun openAccessibilitySettings(invoke: Invoke) {
+    val component = ComponentName(activity, VerbatimAccessibilityService::class.java).flattenToString()
+    val args = Bundle().apply { putString(":settings:fragment_args_key", component) }
+    val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
+      putExtra(":settings:fragment_args_key", component)
+      putExtra(":settings:show_fragment_args", args)
+    }
+    activity.runOnUiThread { activity.startActivity(intent) }
+    invoke.resolve()
+  }
+
+  @Command
+  fun requestSpeechModelDownload(invoke: Invoke) {
+    AndroidSpeechSupport.requestModelDownload(activity)
+    invoke.resolve()
+  }
+
+  @Command
+  fun openExternalUrl(invoke: Invoke) {
+    val args = invoke.parseArgs(OpenUrlArgs::class.java)
+    val ret = JSObject()
+    if (!ALLOWED_EXTERNAL_URLS.contains(args.url)) {
+      ret.put("value", false)
+      invoke.resolve(ret)
+      return
+    }
+    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(args.url))
+    if (intent.resolveActivity(activity.packageManager) == null) {
+      ret.put("value", false)
+      invoke.resolve(ret)
+      return
+    }
+    activity.runOnUiThread { activity.startActivity(intent) }
+    ret.put("value", true)
+    invoke.resolve(ret)
+  }
+
+  // ---- Internal ----
 
   private fun buildSnapshot(): JSObject =
     JSObject()
@@ -119,6 +248,13 @@ class VerbatimAndroidPlugin(private val activity: Activity) : Plugin(activity) {
   }
 
   companion object {
+    private const val MICROPHONE_REQUEST_CODE = 4808
+
+    private val ALLOWED_EXTERNAL_URLS = setOf(
+      "https://github.com/GalaxyRuler/Verbatim",
+      "https://github.com/cjpais/Handy",
+    )
+
     /** Set in load(); lets MainActivity (e.g. onRequestPermissionsResult) push a fresh snapshot. */
     @Volatile
     var instance: VerbatimAndroidPlugin? = null

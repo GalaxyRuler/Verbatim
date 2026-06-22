@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-bubble-corner-snapshot"
+description = "Enables the bubble_corner_snapshot command without any pre-configured scope."
+commands.allow = ["bubble_corner_snapshot"]
+
+[[permission]]
+identifier = "deny-bubble-corner-snapshot"
+description = "Denies the bubble_corner_snapshot command without any pre-configured scope."
+commands.deny = ["bubble_corner_snapshot"]
