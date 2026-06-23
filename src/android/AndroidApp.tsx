@@ -56,6 +56,7 @@ import {
   type SupportedLanguageCode,
 } from "@/i18n";
 import { getDisplayVersion } from "@/lib/appVersion";
+import { getLanguageDirection, initializeRTL } from "@/lib/utils/rtl";
 import { useDictionaryStore } from "@/stores/dictionaryStore";
 import { useModelStore } from "@/stores/modelStore";
 import { useSettingsStore } from "@/stores/settingsStore";
@@ -477,6 +478,12 @@ export default function AndroidApp() {
     window.localStorage.setItem("verbatim.android.theme", theme);
   }, [theme]);
 
+  // Apply text direction for RTL locales (Arabic/Hebrew/...). The i18n languageChanged
+  // listener handles later switches; this covers the initial load on the Android entry.
+  useEffect(() => {
+    initializeRTL(i18n.language);
+  }, [i18n.language]);
+
   const allPermissionsReady =
     permissions.microphone &&
     permissions.overlay &&
@@ -503,7 +510,10 @@ export default function AndroidApp() {
   const showSettingsBack = activeTab === "settings" && !!settingsSubscreen;
 
   return (
-    <div className={`android-app android-theme-${theme}`}>
+    <div
+      className={`android-app android-theme-${theme}`}
+      dir={getLanguageDirection(i18n.language)}
+    >
       <main className="android-shell">
         <header className="android-top-bar">
           <div className="android-top-title">
