@@ -32,31 +32,6 @@ jobs:
           done
           test -f "src-tauri/gen/android/app/src/test/java/com/galaxyruler/verbatim/SmokeTest.kt" || { echo "::error::missing SmokeTest.kt"; exit 1; }
 
-  unit:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with: { distribution: temurin, java-version: "21" }
-      - uses: android-actions/setup-android@v3
-      - name: Install NDK ${{ env.NDK_VERSION }}
-        run: sdkmanager "ndk;${{ env.NDK_VERSION }}"
-      - uses: gradle/actions/setup-gradle@v4
-      - name: Kotlin unit tests
-        working-directory: src-tauri/gen/android
-        env:
-          ANDROID_NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/${{ env.NDK_VERSION }}
-        # ABI flavors (Arm/Universal) exist via the rust plugin, so the variant task name is explicit.
-        run: ./gradlew :app:testUniversalDebugUnitTest
-      - name: Upload test report on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          {
-            name: unit-test-report,
-            path: src-tauri/gen/android/app/build/reports/tests/**,
-          }
-
   e2e:
     runs-on: ubuntu-latest # HW-accelerated emulation is Linux-only
     steps:
@@ -89,6 +64,13 @@ jobs:
         env:
           ANDROID_NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/${{ env.NDK_VERSION }}
         run: bun run tauri android build --debug --target x86_64 --apk
+      # Run here, not as a standalone job: the build above generates gen/android's
+      # tauri.settings.gradle (machine-specific, not committed), which gradle needs.
+      - name: Kotlin unit tests
+        working-directory: src-tauri/gen/android
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/${{ env.NDK_VERSION }}
+        run: ./gradlew :app:testUniversalDebugUnitTest
       - name: Resolve APK path (deterministic; tauri merges a single --target to "universal")
         id: apk
         run: |
