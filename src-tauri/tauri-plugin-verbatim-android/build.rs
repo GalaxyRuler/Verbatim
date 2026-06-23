@@ -6,6 +6,7 @@ const COMMANDS: &[&str] = &[
   "removeListener",
   "permission_snapshot",
   "native_transcript_history",
+  "delete_history_entry",
   "sync_text_formatter",
   "bubble_corner_snapshot",
   "set_bubble_corner",

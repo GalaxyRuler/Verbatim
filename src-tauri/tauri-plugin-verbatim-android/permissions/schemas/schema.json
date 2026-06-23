@@ -307,6 +307,18 @@
           "markdownDescription": "Denies the bubble_corner_snapshot command without any pre-configured scope."
         },
         {
+          "description": "Enables the delete_history_entry command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-delete-history-entry",
+          "markdownDescription": "Enables the delete_history_entry command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the delete_history_entry command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-delete-history-entry",
+          "markdownDescription": "Denies the delete_history_entry command without any pre-configured scope."
+        },
+        {
           "description": "Enables the native_transcript_history command without any pre-configured scope.",
           "type": "string",
           "const": "allow-native-transcript-history",
@@ -475,10 +487,10 @@
           "markdownDescription": "Denies the sync_text_formatter command without any pre-configured scope."
         },
         {
-          "description": "Default permissions for the plugin\n#### This default permission set includes:\n\n- `allow-ping`\n- `allow-registerListener`\n- `allow-removeListener`\n- `allow-permission-snapshot`\n- `allow-native-transcript-history`\n- `allow-sync-text-formatter`\n- `allow-bubble-corner-snapshot`\n- `allow-set-bubble-corner`\n- `allow-start-bubble`\n- `allow-stop-bubble`\n- `allow-request-microphone`\n- `allow-open-overlay-settings`\n- `allow-open-accessibility-settings`\n- `allow-request-speech-model-download`\n- `allow-open-external-url`",
+          "description": "Default permissions for the plugin\n#### This default permission set includes:\n\n- `allow-ping`\n- `allow-registerListener`\n- `allow-removeListener`\n- `allow-permission-snapshot`\n- `allow-native-transcript-history`\n- `allow-delete-history-entry`\n- `allow-sync-text-formatter`\n- `allow-bubble-corner-snapshot`\n- `allow-set-bubble-corner`\n- `allow-start-bubble`\n- `allow-stop-bubble`\n- `allow-request-microphone`\n- `allow-open-overlay-settings`\n- `allow-open-accessibility-settings`\n- `allow-request-speech-model-download`\n- `allow-open-external-url`",
           "type": "string",
           "const": "default",
-          "markdownDescription": "Default permissions for the plugin\n#### This default permission set includes:\n\n- `allow-ping`\n- `allow-registerListener`\n- `allow-removeListener`\n- `allow-permission-snapshot`\n- `allow-native-transcript-history`\n- `allow-sync-text-formatter`\n- `allow-bubble-corner-snapshot`\n- `allow-set-bubble-corner`\n- `allow-start-bubble`\n- `allow-stop-bubble`\n- `allow-request-microphone`\n- `allow-open-overlay-settings`\n- `allow-open-accessibility-settings`\n- `allow-request-speech-model-download`\n- `allow-open-external-url`"
+          "markdownDescription": "Default permissions for the plugin\n#### This default permission set includes:\n\n- `allow-ping`\n- `allow-registerListener`\n- `allow-removeListener`\n- `allow-permission-snapshot`\n- `allow-native-transcript-history`\n- `allow-delete-history-entry`\n- `allow-sync-text-formatter`\n- `allow-bubble-corner-snapshot`\n- `allow-set-bubble-corner`\n- `allow-start-bubble`\n- `allow-stop-bubble`\n- `allow-request-microphone`\n- `allow-open-overlay-settings`\n- `allow-open-accessibility-settings`\n- `allow-request-speech-model-download`\n- `allow-open-external-url`"
         }
       ]
     }

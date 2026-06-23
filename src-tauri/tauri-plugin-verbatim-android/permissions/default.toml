@@ -8,6 +8,7 @@ permissions = [
   "allow-removeListener",
   "allow-permission-snapshot",
   "allow-native-transcript-history",
+  "allow-delete-history-entry",
   "allow-sync-text-formatter",
   "allow-bubble-corner-snapshot",
   "allow-set-bubble-corner",

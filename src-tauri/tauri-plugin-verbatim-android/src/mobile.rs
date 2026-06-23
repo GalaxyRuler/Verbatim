@@ -48,6 +48,13 @@ impl<R: Runtime> VerbatimAndroid<R> {
       .map_err(Into::into)
   }
 
+  pub fn delete_history_entry(&self, id: i64) -> crate::Result<serde_json::Value> {
+    self
+      .0
+      .run_mobile_plugin("deleteHistoryEntry", serde_json::json!({ "id": id }))
+      .map_err(Into::into)
+  }
+
   pub fn sync_text_formatter(&self, snapshot: String) -> crate::Result<()> {
     self
       .0

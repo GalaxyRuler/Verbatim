@@ -42,6 +42,11 @@ class OpenUrlArgs {
   var url: String = ""
 }
 
+@InvokeArg
+class DeleteHistoryArgs {
+  var id: Long = 0
+}
+
 /**
  * The real Tauri plugin for Verbatim's Android native surface. It lives in the APP module
  * (com.galaxyruler.verbatim) — not the plugin's android library — so it can reach the app's
@@ -89,6 +94,14 @@ class VerbatimAndroidPlugin(private val activity: Activity) : Plugin(activity) {
   fun nativeTranscriptHistory(invoke: Invoke) {
     val ret = JSObject()
     ret.put("json", FloatingBubbleService.nativeTranscriptHistory(activity))
+    invoke.resolve(ret)
+  }
+
+  @Command
+  fun deleteHistoryEntry(invoke: Invoke) {
+    val args = invoke.parseArgs(DeleteHistoryArgs::class.java)
+    val ret = JSObject()
+    ret.put("json", FloatingBubbleService.deleteNativeHistoryEntry(activity, args.id))
     invoke.resolve(ret)
   }
 

@@ -39,6 +39,7 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
       commands::ping,
       commands::permission_snapshot,
       commands::native_transcript_history,
+      commands::delete_history_entry,
       commands::sync_text_formatter,
       commands::bubble_corner_snapshot,
       commands::set_bubble_corner,

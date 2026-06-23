@@ -29,6 +29,10 @@ impl<R: Runtime> VerbatimAndroid<R> {
     Ok(serde_json::json!({ "json": "[]" }))
   }
 
+  pub fn delete_history_entry(&self, _id: i64) -> crate::Result<serde_json::Value> {
+    Ok(serde_json::json!({ "json": "[]" }))
+  }
+
   pub fn sync_text_formatter(&self, _snapshot: String) -> crate::Result<()> {
     Ok(())
   }

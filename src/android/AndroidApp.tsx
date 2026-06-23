@@ -63,6 +63,7 @@ import { useSnippetsStore } from "@/stores/snippetsStore";
 import { formatDateTime } from "@/utils/dateFormat";
 import {
   bubbleCornerSnapshot,
+  deleteHistoryEntry,
   nativeTranscriptHistory,
   onPermissions,
   openAccessibilitySettings,
@@ -177,6 +178,14 @@ const androidBubbleCorners: AndroidBubbleCorner[] = [
 
 const openAndroidExternalUrl = (url: string) => {
   void openExternalUrl(url);
+};
+
+const shareTranscript = (text: string) => {
+  if (typeof navigator.share === "function") {
+    void navigator.share({ text }).catch(() => undefined);
+    return;
+  }
+  void navigator.clipboard.writeText(text).catch(() => undefined);
 };
 
 const isAndroidPostProcessProvider = (provider: PostProcessProvider) =>
@@ -855,7 +864,11 @@ function HomeTab({
               <Copy size={17} />
               <span>{t("android.actions.copy")}</span>
             </button>
-            <button type="button" className="android-action">
+            <button
+              type="button"
+              className="android-action"
+              onClick={() => shareTranscript(historyDisplayText(lastEntry))}
+            >
               <Share2 size={17} />
               <span>{t("android.actions.share")}</span>
             </button>
@@ -888,6 +901,14 @@ function HistoryTab() {
   useEffect(() => {
     void loadEntries();
   }, [loadEntries]);
+
+  const handleDeleteEntry = useCallback(
+    async (id: number) => {
+      await deleteHistoryEntry(id);
+      await loadEntries();
+    },
+    [loadEntries],
+  );
 
   const filteredEntries = entries.filter((entry) =>
     historyDisplayText(entry).toLowerCase().includes(search.toLowerCase()),
@@ -947,11 +968,25 @@ function HistoryTab() {
                       <Copy size={17} />
                       <span>{t("android.actions.copy")}</span>
                     </button>
-                    <button type="button" className="android-action">
-                      <BookOpen size={17} />
-                      <span>{t("settings.history.learnCorrection")}</span>
+                    <button
+                      type="button"
+                      className="android-action"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        shareTranscript(historyDisplayText(entry));
+                      }}
+                    >
+                      <Share2 size={17} />
+                      <span>{t("android.actions.share")}</span>
                     </button>
-                    <button type="button" className="android-action">
+                    <button
+                      type="button"
+                      className="android-action"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void handleDeleteEntry(entry.id);
+                      }}
+                    >
                       <Trash2 size={17} />
                       <span>{t("common.delete")}</span>
                     </button>

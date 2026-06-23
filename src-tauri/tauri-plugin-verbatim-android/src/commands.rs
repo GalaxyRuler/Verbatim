@@ -27,6 +27,14 @@ pub(crate) async fn native_transcript_history<R: Runtime>(
 }
 
 #[command]
+pub(crate) async fn delete_history_entry<R: Runtime>(
+    app: AppHandle<R>,
+    id: i64,
+) -> Result<serde_json::Value> {
+    app.verbatim_android().delete_history_entry(id)
+}
+
+#[command]
 pub(crate) async fn sync_text_formatter<R: Runtime>(
     app: AppHandle<R>,
     snapshot: String,

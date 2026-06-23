@@ -54,6 +54,18 @@ export async function nativeTranscriptHistory(): Promise<string> {
   }
 }
 
+/** Delete a native transcript-history entry by id; returns the updated history JSON. */
+export async function deleteHistoryEntry(id: number): Promise<string> {
+  try {
+    return (
+      (await cmd<{ json?: string }>("delete_history_entry", { id })).json ??
+      "[]"
+    );
+  } catch {
+    return "[]";
+  }
+}
+
 export async function syncTextFormatter(snapshot: string): Promise<void> {
   try {
     await cmd<void>("sync_text_formatter", { snapshot });

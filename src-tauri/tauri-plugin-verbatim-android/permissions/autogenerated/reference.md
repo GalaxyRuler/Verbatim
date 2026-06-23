@@ -9,6 +9,7 @@ Default permissions for the plugin
 - `allow-removeListener`
 - `allow-permission-snapshot`
 - `allow-native-transcript-history`
+- `allow-delete-history-entry`
 - `allow-sync-text-formatter`
 - `allow-bubble-corner-snapshot`
 - `allow-set-bubble-corner`
@@ -51,6 +52,32 @@ Enables the bubble_corner_snapshot command without any pre-configured scope.
 <td>
 
 Denies the bubble_corner_snapshot command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`verbatim-android:allow-delete-history-entry`
+
+</td>
+<td>
+
+Enables the delete_history_entry command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`verbatim-android:deny-delete-history-entry`
+
+</td>
+<td>
+
+Denies the delete_history_entry command without any pre-configured scope.
 
 </td>
 </tr>

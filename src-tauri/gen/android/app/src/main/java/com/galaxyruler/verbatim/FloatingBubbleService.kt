@@ -984,6 +984,27 @@ class FloatingBubbleService : Service() {
         .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         .getString(ANDROID_HISTORY_KEY, "[]") ?: "[]"
 
+    /** Remove the native history entry with the given id; returns the updated history JSON. */
+    fun deleteNativeHistoryEntry(context: Context, id: Long): String {
+      val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+      val stored = prefs.getString(ANDROID_HISTORY_KEY, "[]") ?: "[]"
+      return try {
+        val existing = JSONArray(stored)
+        val next = JSONArray()
+        for (index in 0 until existing.length()) {
+          val item = existing.optJSONObject(index) ?: continue
+          if (item.optLong("id", Long.MIN_VALUE) != id) {
+            next.put(item)
+          }
+        }
+        val result = next.toString()
+        prefs.edit().putString(ANDROID_HISTORY_KEY, result).apply()
+        result
+      } catch (_: Exception) {
+        stored
+      }
+    }
+
     fun syncTextFormatter(context: Context, snapshot: String) {
       if (snapshot.length > MAX_TEXT_FORMATTER_SNAPSHOT_CHARS) {
         return
