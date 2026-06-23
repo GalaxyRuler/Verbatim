@@ -531,7 +531,9 @@ impl NativeClipboardSnapshot {
 
     #[cfg(test)]
     fn for_test() -> Self {
-        Self
+        Self {
+            payload: DesktopClipboardPayload::Text("test".to_string()),
+        }
     }
 }
 
