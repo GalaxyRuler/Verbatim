@@ -34,7 +34,7 @@ jobs:
             runner: macos-26
             target: aarch64-apple-darwin
           - name: "Ubuntu x64 production backend"
-            runner: ubuntu-22.04
+            runner: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
 
     env:
