@@ -378,6 +378,67 @@ const installTauriMocks = async (
             );
             return null;
           }
+          // verbatim-android plugin: serve from the same window.VerbatimAndroid mock so the
+          // tests exercise the real adapter (src/android/bridge.ts) plugin path.
+          if (cmd.startsWith("plugin:verbatim-android|")) {
+            const va = (
+              window as unknown as {
+                VerbatimAndroid?: {
+                  permissionSnapshot: () => string;
+                  nativeTranscriptHistory: () => string;
+                  bubbleCornerSnapshot: () => string;
+                  setBubbleCorner: (corner: string) => string;
+                  openExternalUrl: (url: string) => boolean;
+                  requestMicrophone: () => void;
+                  openOverlaySettings: () => void;
+                  openAccessibilitySettings: () => void;
+                  requestSpeechModelDownload: () => void;
+                  syncTextFormatter: (snapshot: string) => void;
+                  startBubble: () => void;
+                  stopBubble: () => void;
+                };
+              }
+            ).VerbatimAndroid;
+            const method = cmd.slice("plugin:verbatim-android|".length);
+            switch (method) {
+              case "permission_snapshot":
+                return va ? JSON.parse(va.permissionSnapshot()) : {};
+              case "native_transcript_history":
+                return { json: va?.nativeTranscriptHistory() ?? "[]" };
+              case "sync_text_formatter":
+                va?.syncTextFormatter(args?.snapshot as string);
+                return null;
+              case "bubble_corner_snapshot":
+                return { value: va?.bubbleCornerSnapshot() };
+              case "set_bubble_corner":
+                return { value: va?.setBubbleCorner(args?.corner as string) };
+              case "open_external_url":
+                return {
+                  value: va?.openExternalUrl(args?.url as string) ?? false,
+                };
+              case "request_microphone":
+                va?.requestMicrophone();
+                return null;
+              case "open_overlay_settings":
+                va?.openOverlaySettings();
+                return null;
+              case "open_accessibility_settings":
+                va?.openAccessibilitySettings();
+                return null;
+              case "request_speech_model_download":
+                va?.requestSpeechModelDownload();
+                return null;
+              case "start_bubble":
+                va?.startBubble();
+                return null;
+              case "stop_bubble":
+                va?.stopBubble();
+                return null;
+              default:
+                // registerListener / removeListener etc. — no-op resolve.
+                return null;
+            }
+          }
           switch (cmd) {
             case "get_default_settings":
             case "get_app_settings":
