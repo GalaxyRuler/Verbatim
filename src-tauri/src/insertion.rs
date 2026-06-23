@@ -1,10 +1,12 @@
 use crate::adaptive::types::{InsertionMethod, InsertionReceipt};
+use serde::Serialize;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum InsertionKind {
     Adaptive,
     Classic,
     PasteLastTranscript,
+    TransformReplacement,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -36,11 +38,65 @@ pub struct InsertionOutcome {
     pub emit_inserted: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PasteRecoveryReason {
+    PasteFailure,
+    TargetChanged,
+    LanguageGuard,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct PasteRecoveryEvent {
+    pub reason: PasteRecoveryReason,
+    pub copied: bool,
+    pub paste_here_available: bool,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InsertionPasteRequest {
     pub text: String,
     pub target_verified: bool,
     pub auto_learn_eligible: bool,
+}
+
+pub struct InsertionTransaction<P> {
+    paste: P,
+}
+
+impl<P> InsertionTransaction<P>
+where
+    P: FnMut(InsertionPasteRequest) -> InsertionReceipt,
+{
+    pub fn new(paste: P) -> Self {
+        Self { paste }
+    }
+
+    pub fn run(&mut self, attempt: InsertionAttempt) -> InsertionOutcome {
+        resolve_insertion_attempt(attempt, |request| (self.paste)(request))
+    }
+}
+
+impl InsertionOutcome {
+    pub fn paste_recovery_event(&self) -> Option<PasteRecoveryEvent> {
+        if !self.emit_paste_error {
+            return None;
+        }
+
+        let error = self.receipt.error.as_deref();
+        let reason = match error {
+            Some("target changed before insertion") => PasteRecoveryReason::TargetChanged,
+            Some("language guard blocked paste") => PasteRecoveryReason::LanguageGuard,
+            _ => PasteRecoveryReason::PasteFailure,
+        };
+
+        Some(PasteRecoveryEvent {
+            paste_here_available: matches!(reason, PasteRecoveryReason::TargetChanged),
+            copied: self.recovery_copy.is_some()
+                || matches!(reason, PasteRecoveryReason::LanguageGuard),
+            reason,
+        })
+    }
 }
 
 impl InsertionAttempt {
@@ -80,6 +136,15 @@ impl InsertionAttempt {
         }
     }
 
+    pub fn classic_target_changed() -> Self {
+        Self {
+            kind: InsertionKind::Classic,
+            block: Some(InsertionBlock::TargetChanged),
+            text: None,
+            auto_learn_eligible: false,
+        }
+    }
+
     pub fn classic_ready(text: impl Into<String>) -> Self {
         Self {
             kind: InsertionKind::Classic,
@@ -92,6 +157,15 @@ impl InsertionAttempt {
     pub fn paste_last_transcript(text: impl Into<String>) -> Self {
         Self {
             kind: InsertionKind::PasteLastTranscript,
+            block: None,
+            text: Some(text.into()),
+            auto_learn_eligible: false,
+        }
+    }
+
+    pub fn transform_replacement(text: impl Into<String>) -> Self {
+        Self {
+            kind: InsertionKind::TransformReplacement,
             block: None,
             text: Some(text.into()),
             auto_learn_eligible: false,
@@ -148,6 +222,19 @@ where
             emit_paste_error: false,
             emit_inserted: false,
         },
+        (InsertionKind::Classic, Some(InsertionBlock::TargetChanged), _, _) => InsertionOutcome {
+            receipt: InsertionReceipt {
+                attempted: false,
+                succeeded: false,
+                method: InsertionMethod::None,
+                target_verified: false,
+                error: Some("target changed before insertion".to_string()),
+            },
+            recovery_copy: None,
+            auto_learn_eligible: false,
+            emit_paste_error: true,
+            emit_inserted: false,
+        },
         (InsertionKind::Adaptive, None, Some(text), auto_learn_eligible) => {
             resolve_ready_insertion(
                 text,
@@ -166,6 +253,15 @@ where
                 true,
                 auto_learn_eligible,
                 "paste last transcript failure",
+                paste,
+            )
+        }
+        (InsertionKind::TransformReplacement, None, Some(text), auto_learn_eligible) => {
+            resolve_ready_insertion(
+                text,
+                true,
+                auto_learn_eligible,
+                "transform replacement failure",
                 paste,
             )
         }
@@ -249,6 +345,42 @@ mod tests {
         assert!(!outcome.emit_inserted);
         assert!(!outcome.auto_learn_eligible);
         assert!(outcome.recovery_copy.is_none());
+        assert_eq!(
+            outcome.paste_recovery_event(),
+            Some(PasteRecoveryEvent {
+                reason: PasteRecoveryReason::TargetChanged,
+                copied: false,
+                paste_here_available: true,
+            })
+        );
+    }
+
+    #[test]
+    fn classic_target_changed_is_not_attempted() {
+        let outcome = resolve_insertion_attempt(InsertionAttempt::classic_target_changed(), |_| {
+            panic!("changed target must not paste")
+        });
+
+        assert!(!outcome.receipt.attempted);
+        assert!(!outcome.receipt.succeeded);
+        assert_eq!(outcome.receipt.method, InsertionMethod::None);
+        assert!(!outcome.receipt.target_verified);
+        assert_eq!(
+            outcome.receipt.error.as_deref(),
+            Some("target changed before insertion")
+        );
+        assert!(outcome.emit_paste_error);
+        assert!(!outcome.emit_inserted);
+        assert!(!outcome.auto_learn_eligible);
+        assert!(outcome.recovery_copy.is_none());
+        assert_eq!(
+            outcome.paste_recovery_event(),
+            Some(PasteRecoveryEvent {
+                reason: PasteRecoveryReason::TargetChanged,
+                copied: false,
+                paste_here_available: true,
+            })
+        );
     }
 
     #[test]
@@ -287,6 +419,14 @@ mod tests {
                 reason: "adaptive paste failure",
             })
         );
+        assert_eq!(
+            outcome.paste_recovery_event(),
+            Some(PasteRecoveryEvent {
+                reason: PasteRecoveryReason::PasteFailure,
+                copied: true,
+                paste_here_available: false,
+            })
+        );
     }
 
     #[test]
@@ -303,6 +443,7 @@ mod tests {
         assert!(!outcome.emit_inserted);
         assert!(!outcome.auto_learn_eligible);
         assert!(outcome.recovery_copy.is_none());
+        assert_eq!(outcome.paste_recovery_event(), None);
     }
 
     #[test]
@@ -341,5 +482,77 @@ mod tests {
         );
         assert!(!outcome.auto_learn_eligible);
         assert!(outcome.emit_paste_error);
+    }
+
+    #[test]
+    fn transform_replacement_success_uses_shared_transaction_without_auto_learn() {
+        let outcome = resolve_insertion_attempt(
+            InsertionAttempt::transform_replacement("polished"),
+            |request| {
+                assert_eq!(request.text, "polished");
+                assert!(request.target_verified);
+                assert!(!request.auto_learn_eligible);
+                success_receipt(request.target_verified)
+            },
+        );
+
+        assert!(outcome.receipt.succeeded);
+        assert!(outcome.emit_inserted);
+        assert!(!outcome.auto_learn_eligible);
+        assert!(outcome.recovery_copy.is_none());
+    }
+
+    #[test]
+    fn transform_replacement_failure_keeps_recovery_copy() {
+        let outcome = resolve_insertion_attempt(
+            InsertionAttempt::transform_replacement("copy me"),
+            |request| {
+                assert!(!request.auto_learn_eligible);
+                failed_receipt(request.target_verified)
+            },
+        );
+
+        assert!(!outcome.receipt.succeeded);
+        assert_eq!(
+            outcome.recovery_copy,
+            Some(RecoveryCopy {
+                text: "copy me".to_string(),
+                reason: "transform replacement failure",
+            })
+        );
+        assert!(!outcome.auto_learn_eligible);
+    }
+
+    #[test]
+    fn insertion_transaction_runs_ready_attempt_through_shared_paste_callback() {
+        let mut pasted_text = Vec::new();
+        let mut transaction = InsertionTransaction::new(|request: InsertionPasteRequest| {
+            pasted_text.push(request.text);
+            assert!(request.target_verified);
+            assert!(request.auto_learn_eligible);
+            success_receipt(request.target_verified)
+        });
+
+        let outcome = transaction.run(InsertionAttempt::classic_ready("transaction text"));
+        drop(transaction);
+
+        assert!(outcome.receipt.succeeded);
+        assert_eq!(pasted_text, vec!["transaction text".to_string()]);
+    }
+
+    #[test]
+    fn insertion_transaction_blocks_target_change_before_paste_callback() {
+        let mut transaction = InsertionTransaction::new(|_request: InsertionPasteRequest| {
+            panic!("target-changed transaction must not paste")
+        });
+
+        let outcome = transaction.run(InsertionAttempt::adaptive_target_changed());
+
+        assert!(!outcome.receipt.attempted);
+        assert!(!outcome.receipt.target_verified);
+        assert_eq!(
+            outcome.receipt.error.as_deref(),
+            Some("target changed before insertion")
+        );
     }
 }

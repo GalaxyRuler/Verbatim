@@ -2,7 +2,11 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import { Check, Download, Loader2, RefreshCcw, Trash2 } from "lucide-react";
 import { listen } from "@tauri-apps/api/event";
-import { commands, type LocalLlmModelInfo } from "@/bindings";
+import {
+  commands,
+  type CredentialStoreStatus,
+  type LocalLlmModelInfo,
+} from "@/bindings";
 
 import { Alert } from "../../ui/Alert";
 import {
@@ -33,6 +37,32 @@ type LocalLlmDownloadProgress = {
 const PostProcessingSettingsApiComponent: React.FC = () => {
   const { t } = useTranslation();
   const state = usePostProcessProviderState();
+  const [credentialStoreStatus, setCredentialStoreStatus] =
+    useState<CredentialStoreStatus | null>(null);
+  const [credentialStoreStatusLoadFailed, setCredentialStoreStatusLoadFailed] =
+    useState(false);
+  const [sessionOnlyApiKey, setSessionOnlyApiKey] = useState(false);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    commands
+      .getCredentialStoreStatus()
+      .then((status) => {
+        if (!isMounted) return;
+        setCredentialStoreStatus(status);
+        setCredentialStoreStatusLoadFailed(false);
+      })
+      .catch(() => {
+        if (!isMounted) return;
+        setCredentialStoreStatus(null);
+        setCredentialStoreStatusLoadFailed(true);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   return (
     <>
@@ -92,7 +122,9 @@ const PostProcessingSettingsApiComponent: React.FC = () => {
             <div className="flex items-center gap-2">
               <ApiKeyField
                 value={state.apiKey}
-                onBlur={state.handleApiKeyChange}
+                onBlur={(value) =>
+                  state.handleApiKeyChange(value, sessionOnlyApiKey)
+                }
                 placeholder={t(
                   "settings.postProcessing.api.apiKey.placeholder",
                 )}
@@ -100,6 +132,47 @@ const PostProcessingSettingsApiComponent: React.FC = () => {
                 className="min-w-[320px]"
               />
             </div>
+            <label className="mt-3 flex items-start gap-2 text-sm text-mid-gray">
+              <input
+                type="checkbox"
+                checked={sessionOnlyApiKey}
+                onChange={(event) =>
+                  setSessionOnlyApiKey(event.currentTarget.checked)
+                }
+                disabled={state.isApiKeyUpdating}
+                className="mt-0.5 h-4 w-4 rounded border-mid-gray/50 bg-background-ui text-logo-primary focus:ring-logo-primary"
+              />
+              <span>{t("settings.postProcessing.api.apiKey.sessionOnly")}</span>
+            </label>
+            {credentialStoreStatusLoadFailed && (
+              <Alert variant="warning" contained className="mt-3">
+                {t("settings.postProcessing.api.apiKey.storeStatusUnknown")}
+              </Alert>
+            )}
+            {credentialStoreStatus && (
+              <Alert
+                variant={
+                  credentialStoreStatus.available ? "success" : "warning"
+                }
+                contained
+                className="mt-3"
+              >
+                {credentialStoreStatus.available
+                  ? t("settings.postProcessing.api.apiKey.storeAvailable", {
+                      platform: credentialStoreStatus.platform,
+                    })
+                  : t(
+                      credentialStoreStatus.retained_legacy_api_key_count > 0
+                        ? "settings.postProcessing.api.apiKey.storeUnavailableLegacyRetained"
+                        : "settings.postProcessing.api.apiKey.storeUnavailable",
+                      {
+                        platform: credentialStoreStatus.platform,
+                        count:
+                          credentialStoreStatus.retained_legacy_api_key_count,
+                      },
+                    )}
+              </Alert>
+            )}
           </SettingContainer>
         </>
       )}
@@ -122,6 +195,7 @@ const PostProcessingSettingsApiComponent: React.FC = () => {
               options={state.modelOptions}
               disabled={state.isModelUpdating}
               isLoading={state.isFetchingModels}
+              ariaLabel={t("settings.postProcessing.api.model.title")}
               placeholder={
                 state.modelOptions.length > 0
                   ? t(

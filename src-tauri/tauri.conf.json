@@ -13,11 +13,19 @@
     "macOSPrivateApi": true,
     "windows": [],
     "security": {
-      "csp": null,
+      "csp": {
+        "default-src": "'self'",
+        "script-src": "'self'",
+        "style-src": "'self' 'unsafe-inline'",
+        "img-src": "'self' data: asset: http://asset.localhost",
+        "media-src": "'self' blob: asset: http://asset.localhost",
+        "font-src": "'self' data:",
+        "connect-src": "'self' ipc: http://ipc.localhost"
+      },
       "assetProtocol": {
         "enable": true,
         "scope": {
-          "allow": ["**"],
+          "allow": ["$APPDATA/recordings/*", "$EXE/Data/recordings/*"],
           "requireLiteralLeadingDot": false
         }
       }

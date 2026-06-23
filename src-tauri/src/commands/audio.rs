@@ -1,12 +1,16 @@
 use crate::audio_feedback;
 use crate::audio_toolkit::audio::{list_input_devices, list_output_devices};
-use crate::managers::audio::{AudioRecordingManager, MicrophoneMode};
+use crate::managers::{
+    audio::{AudioRecordingManager, MicrophoneMode},
+    transcription::TranscriptionManager,
+};
 use crate::settings::{get_settings, write_settings};
 use log::warn;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use std::sync::Arc;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, State};
+use tauri_plugin_clipboard_manager::ClipboardExt;
 
 #[cfg(target_os = "windows")]
 use winreg::{
@@ -40,6 +44,21 @@ pub struct AudioDevice {
     pub name: String,
     pub is_default: bool,
 }
+
+#[derive(Serialize, Deserialize, Debug, Clone, Type)]
+pub struct MicrophoneTestStatus {
+    pub selected_microphone: String,
+    pub stream_open: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Type)]
+pub struct OnboardingDictationTestResult {
+    pub text: String,
+    pub captured_sample_count: usize,
+    pub observed_active_signal: bool,
+}
+
+const ONBOARDING_DICTATION_TEST_BINDING_ID: &str = "onboarding-dictation-test";
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Type)]
 #[serde(rename_all = "snake_case")]
@@ -223,6 +242,103 @@ pub fn get_selected_microphone(app: AppHandle) -> Result<String, String> {
     Ok(settings
         .selected_microphone
         .unwrap_or_else(|| "default".to_string()))
+}
+
+fn selected_microphone_label(app: &AppHandle) -> String {
+    get_settings(app)
+        .selected_microphone
+        .unwrap_or_else(|| "default".to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn start_microphone_test(app: AppHandle) -> Result<MicrophoneTestStatus, String> {
+    let audio_manager = app.state::<Arc<AudioRecordingManager>>();
+    audio_manager
+        .start_microphone_stream()
+        .map_err(|err| format!("Failed to start microphone test: {err}"))?;
+
+    Ok(MicrophoneTestStatus {
+        selected_microphone: selected_microphone_label(&app),
+        stream_open: true,
+    })
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn stop_microphone_test(app: AppHandle) -> Result<bool, String> {
+    let settings = get_settings(&app);
+    if !settings.always_on_microphone {
+        let audio_manager = app.state::<Arc<AudioRecordingManager>>();
+        audio_manager.stop_microphone_stream();
+    }
+
+    Ok(true)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn start_onboarding_dictation_test(
+    audio_manager: State<'_, Arc<AudioRecordingManager>>,
+) -> Result<bool, String> {
+    audio_manager.try_start_recording(ONBOARDING_DICTATION_TEST_BINDING_ID)?;
+    Ok(true)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn stop_onboarding_dictation_test(
+    audio_manager: State<'_, Arc<AudioRecordingManager>>,
+    transcription_manager: State<'_, Arc<TranscriptionManager>>,
+) -> Result<OnboardingDictationTestResult, String> {
+    let recording = audio_manager
+        .stop_recording(ONBOARDING_DICTATION_TEST_BINDING_ID)
+        .ok_or_else(|| "No onboarding dictation test is recording".to_string())?;
+
+    if recording.samples.is_empty() {
+        return Err("Recording has no audio samples".to_string());
+    }
+
+    transcription_manager.initiate_model_load();
+    let tm = Arc::clone(&transcription_manager);
+    let samples = recording.samples;
+    let transcription = tauri::async_runtime::spawn_blocking(move || tm.transcribe(samples))
+        .await
+        .map_err(|err| format!("Test dictation task panicked: {err}"))?
+        .map_err(|err| err.to_string())?;
+
+    let text = transcription.trim().to_string();
+    if text.is_empty() {
+        return Err("Test dictation produced no transcript".to_string());
+    }
+
+    Ok(OnboardingDictationTestResult {
+        text,
+        captured_sample_count: recording.captured_sample_count,
+        observed_active_signal: recording.observed_active_signal,
+    })
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn cancel_onboarding_dictation_test(
+    audio_manager: State<'_, Arc<AudioRecordingManager>>,
+) -> Result<bool, String> {
+    audio_manager.cancel_recording();
+    Ok(true)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn copy_onboarding_dictation_text(app: AppHandle, text: String) -> Result<bool, String> {
+    if text.trim().is_empty() {
+        return Ok(false);
+    }
+
+    app.clipboard()
+        .write_text(text)
+        .map_err(|err| err.to_string())?;
+    Ok(true)
 }
 
 #[tauri::command]

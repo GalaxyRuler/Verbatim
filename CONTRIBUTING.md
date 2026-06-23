@@ -14,7 +14,7 @@ Verbatim aims to be the most forkable speech-to-text app. The goal is to create 
 
 - **Simplicity**: Clear, maintainable code over clever solutions
 - **Extensibility**: Make it easy for others to fork and customize
-- **Privacy**: Keep everything local and offline
+- **Privacy**: Keep audio transcription local by default and make any networked behavior explicit
 - **Accessibility**: Free tooling that belongs in everyone's hands
 
 ## 🚀 Getting Started
@@ -90,7 +90,7 @@ Verbatim follows a clean architecture pattern:
 - `hooks/` - Reusable React hooks
 - `lib/types.ts` - Shared TypeScript types
 
-For more details, see the Architecture section in [README.md](README.md) or [AGENTS.md](AGENTS.md).
+For more details, see [ARCHITECTURE.md](docs/ARCHITECTURE.md), [DATA_FLOW.md](docs/DATA_FLOW.md), [THREAT_MODEL.md](docs/THREAT_MODEL.md), and the provider architecture ADR in [docs/adr/0001-engine-provider-architecture.md](docs/adr/0001-engine-provider-architecture.md).
 
 ## 🐛 Reporting Bugs
 
@@ -99,7 +99,7 @@ For more details, see the Architecture section in [README.md](README.md) or [AGE
 1. **Search existing issues** at [github.com/GalaxyRuler/Verbatim/issues](https://github.com/GalaxyRuler/Verbatim/issues)
 2. **Check discussions** at [github.com/GalaxyRuler/Verbatim/discussions](https://github.com/GalaxyRuler/Verbatim/discussions)
 3. **Try the latest release** to see if the issue has been fixed
-4. **Enable debug mode** (`Cmd/Ctrl+Shift+D`) to gather diagnostic information
+4. **Open Settings > Diagnostics** to gather log-location and troubleshooting information
 
 ### Submitting a Bug Report
 
@@ -111,6 +111,10 @@ When creating a bug report, please include:
 - Operating System (e.g., macOS 14.1, Windows 11, Ubuntu 22.04)
 - CPU (e.g., Apple M2, Intel i7-12700K, AMD Ryzen 7 5800X)
 - GPU (e.g., Apple M2 GPU, NVIDIA RTX 4080, Intel UHD Graphics)
+- Display/session details on Linux (X11 or Wayland, desktop environment)
+- Audio input device and backend if known
+- Model and accelerator settings
+- Paste method and helper tool, if the bug involves insertion
 
 **Bug Details:**
 
@@ -119,7 +123,7 @@ When creating a bug report, please include:
 - Expected behavior
 - Actual behavior
 - Screenshots or logs if applicable
-- Information from debug mode if relevant
+- Information from Settings > Diagnostics if relevant
 
 Use the [Bug Report template](.github/ISSUE_TEMPLATE/bug_report.md) when creating an issue.
 
@@ -184,7 +188,8 @@ Community feedback is essential to keeping Verbatim the best it can be for every
    - Test on your target platform(s)
    - Verify existing functionality still works
    - Test edge cases and error conditions
-   - Use debug mode to verify audio/transcription behavior
+   - Use Settings > Diagnostics to verify log level and audio/transcription behavior
+   - If you add or change backend commands or exported Rust types, regenerate `src/bindings.ts` from a debug build before relying on the frontend types
 
 4. **Commit your changes**:
 
@@ -270,7 +275,7 @@ In your PR description, please include:
 **Manual Testing:**
 
 - Run the app in development mode: `bun run tauri dev`
-- Test your changes with debug mode enabled
+- Test your changes with Settings > Diagnostics available
 - Verify on multiple platforms if possible
 - Test with different audio devices
 - Try various transcription scenarios

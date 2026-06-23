@@ -4,18 +4,18 @@
     <img src="src/assets/verbatim-lockup-horizontal.svg" alt="Verbatim" width="400">
   </picture>
 
-**A free, open source, and extensible speech-to-text application that works completely offline.**
+**A free, open source, and extensible local-first speech-to-text application.**
 
 [![Latest release](https://img.shields.io/github/v/release/GalaxyRuler/Verbatim?sort=semver&style=flat-square&logo=github)](https://github.com/GalaxyRuler/Verbatim/releases/latest)
 [![Downloads](https://img.shields.io/github/downloads/GalaxyRuler/Verbatim/total?style=flat-square&logo=github)](https://github.com/GalaxyRuler/Verbatim/releases)
 [![License](https://img.shields.io/github/license/GalaxyRuler/Verbatim?style=flat-square)](https://github.com/GalaxyRuler/Verbatim/blob/main/LICENSE)
 [![Platforms](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-2563eb?style=flat-square)](#download-verbatim)
-[![Offline](https://img.shields.io/badge/privacy-local%20first-15803d?style=flat-square)](#why-verbatim)
+[![Local-first privacy](https://img.shields.io/badge/privacy-local%20first-15803d?style=flat-square)](#why-verbatim)
 [![Updater](https://img.shields.io/badge/updates-in--app-0f766e?style=flat-square)](#download-verbatim)
 
 </div>
 
-Verbatim is a cross-platform desktop application that provides simple, privacy-focused speech transcription. Press a shortcut, speak, and have your words appear in any text field. This happens on your own computer without sending any information to the cloud.
+Verbatim is a cross-platform desktop application that provides simple, privacy-focused speech transcription. Press a shortcut, speak, and have your words appear in any text field. Audio transcription runs on your own computer; network access is used for update checks, model downloads, and optional post-processing providers you configure.
 
 Verbatim is a fork of [Handy](https://github.com/cjpais/Handy) by [CJ Pais](https://github.com/cjpais), carrying its open-source foundation forward under a new identity and direction. See [Acknowledgments](#acknowledgments).
 
@@ -25,7 +25,7 @@ Verbatim exists to be a truly open source, extensible speech-to-text tool:
 
 - **Free**: Accessibility tooling belongs in everyone's hands, not behind a paywall
 - **Open Source**: Together we can build further. Extend Verbatim for yourself and contribute to something bigger
-- **Private**: Your voice stays on your computer. Get transcriptions without sending audio to the cloud
+- **Private**: Your audio transcription runs on your computer. Optional remote post-processing is separate and user-configured
 - **Simple**: One tool, one job. Transcribe what you say and put it into a text box
 
 Verbatim isn't trying to be the best speech-to-text app—it's trying to be the most forkable one.
@@ -37,7 +37,7 @@ Verbatim isn't trying to be the best speech-to-text app—it's trying to be the 
 3. **Release** and Verbatim processes your speech using Whisper
 4. **Get** your transcribed text pasted directly into whatever app you're using
 
-The process is entirely local:
+The core audio transcription process is local:
 
 - Silence is filtered using VAD (Voice Activity Detection) with Silero
 - Transcription uses your choice of models:
@@ -45,19 +45,21 @@ The process is entirely local:
   - **Parakeet V3** - CPU-optimized model with excellent performance and automatic language detection
 - Works on Windows, macOS, and Linux
 
+For exact storage, retention, clipboard, network, and API-key behavior, see [Privacy and Data Flow](docs/PRIVACY.md).
+
 ## Download Verbatim
 
 Download the latest Windows, macOS, and Linux installers from the [Verbatim Releases page](https://github.com/GalaxyRuler/Verbatim/releases/latest).
 
 <!-- latest-release:start -->
 
-**Latest published release:** [v0.8.7](https://github.com/GalaxyRuler/Verbatim/releases/tag/v0.8.7) (2026-06-13)
+**Latest published release:** [v0.9.0](https://github.com/GalaxyRuler/Verbatim/releases/tag/v0.9.0) (2026-06-19)
 
 | Platform            | Direct downloads                                                                                                                                                                                                  |
 | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Windows x64         | [setup.exe](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.8.7/Verbatim_0.8.7_x64-setup.exe) · [MSI](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.8.7/Verbatim_0.8.7_x64_en-US.msi) |
-| macOS Apple Silicon | [DMG](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.8.7/Verbatim_0.8.7_aarch64.dmg)                                                                                                                |
-| Ubuntu x64          | [DEB](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.8.7/Verbatim_0.8.7_amd64.deb)                                                                                                                  |
+| Windows x64         | [setup.exe](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.9.0/Verbatim_0.9.0_x64-setup.exe) · [MSI](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.9.0/Verbatim_0.9.0_x64_en-US.msi) |
+| macOS Apple Silicon | [DMG](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.9.0/Verbatim_0.9.0_aarch64.dmg)                                                                                                                |
+| Ubuntu x64          | [DEB](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.9.0/Verbatim_0.9.0_amd64.deb)                                                                                                                  |
 
 <!-- latest-release:end -->
 
@@ -102,9 +104,9 @@ Verbatim is built as a Tauri application combining:
   - `rdev`: Global keyboard shortcuts and system events
   - `rubato`: Audio resampling
 
-### Debug Mode
+### Diagnostics
 
-Verbatim includes an advanced debug mode for development and troubleshooting. Access it by pressing:
+Verbatim includes a visible Diagnostics section in Settings for log location, log level, update checks, and troubleshooting controls. The keyboard shortcut still toggles verbose debug behavior:
 
 - **macOS**: `Cmd+Shift+D`
 - **Windows/Linux**: `Ctrl+Shift+D`
@@ -285,7 +287,8 @@ The following are recommendations for running Verbatim on your own machine. If y
 
 - **CPU-only operation** - runs on a wide variety of hardware
 - **Minimum**: Intel Skylake (6th gen) or equivalent AMD processors
-- **Performance**: ~5x real-time speed on mid-range hardware (tested on i5)
+- **Performance**: Benchmark-backed hardware guidance is pending; test on your
+  target machine before relying on it for long recordings
 - **Automatic language detection** - no manual language selection required
 
 ## Roadmap & Active Development
@@ -294,9 +297,9 @@ We're actively working on several features and improvements. Contributions and f
 
 ### In Progress
 
-**Debug Logging:**
+**Diagnostics and Logging:**
 
-- Adding debug logging to a file to help diagnose issues
+- Keep the Diagnostics settings visible and improve safe log collection for troubleshooting
 
 **macOS Keyboard Improvements:**
 
@@ -321,6 +324,10 @@ We're actively working on several features and improvements. Contributions and f
 ## Verify Release Signatures
 
 Current public installers are unsigned unless the release notes explicitly say otherwise. This means Windows SmartScreen and macOS Gatekeeper may warn before first launch.
+
+Releases publish `SHA256SUMS.txt` when the release workflow completes. Download
+that file from the release page and compare the SHA-256 value for the installer
+you downloaded before running it.
 
 When a release includes matching `.sig` files, Verbatim release artifacts can be verified with Tauri's updater signature format. The public key is stored in [`src-tauri/tauri.conf.json`](src-tauri/tauri.conf.json) under `plugins.updater.pubkey`.
 
@@ -365,9 +372,7 @@ If you're behind a proxy, firewall, or in a restricted network environment where
 
 1. Open Verbatim settings
 2. Navigate to the **About** section
-3. Copy the "App Data Directory" path shown there, or use the shortcuts:
-   - **macOS**: `Cmd+Shift+D` to open debug menu
-   - **Windows/Linux**: `Ctrl+Shift+D` to open debug menu
+3. Copy the "App Data Directory" path shown there, or open **Settings > Diagnostics** for log and troubleshooting paths
 
 The typical paths are:
 

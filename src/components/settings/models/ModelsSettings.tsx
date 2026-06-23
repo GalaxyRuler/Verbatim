@@ -356,7 +356,7 @@ export const ModelsSettings: React.FC = () => {
           )}
         </div>
       ) : (
-        <div className="text-center py-8 text-text/50">
+        <div className="text-center py-8 text-mid-gray">
           {t("settings.models.noModelsMatch")}
         </div>
       )}

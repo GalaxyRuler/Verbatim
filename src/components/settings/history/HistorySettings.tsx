@@ -75,6 +75,8 @@ export const HistorySettings: React.FC = () => {
   const [entries, setEntries] = useState<HistoryEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [hasMore, setHasMore] = useState(true);
+  const [clearingHistory, setClearingHistory] = useState(false);
+  const [clearingRecordings, setClearingRecordings] = useState(false);
   const sentinelRef = useRef<HTMLDivElement>(null);
   const entriesRef = useRef<HistoryEntry[]>([]);
   const loadingRef = useRef(false);
@@ -244,6 +246,49 @@ export const HistorySettings: React.FC = () => {
     }
   };
 
+  const clearRecordings = async () => {
+    if (!window.confirm(t("settings.history.clearRecordingsConfirm"))) {
+      return;
+    }
+
+    try {
+      setClearingRecordings(true);
+      const result = await commands.clearRecordings();
+      if (result.status !== "ok") {
+        throw new Error(String(result.error));
+      }
+      await loadPage();
+      toast.success(t("settings.history.clearRecordingsSuccess"));
+    } catch (error) {
+      console.error("Failed to clear recordings:", error);
+      toast.error(t("settings.history.clearRecordingsError"));
+    } finally {
+      setClearingRecordings(false);
+    }
+  };
+
+  const clearHistory = async () => {
+    if (!window.confirm(t("settings.history.clearHistoryConfirm"))) {
+      return;
+    }
+
+    try {
+      setClearingHistory(true);
+      const result = await commands.clearHistory();
+      if (result.status !== "ok") {
+        throw new Error(String(result.error));
+      }
+      setEntries([]);
+      setHasMore(false);
+      toast.success(t("settings.history.clearHistorySuccess"));
+    } catch (error) {
+      console.error("Failed to clear history:", error);
+      toast.error(t("settings.history.clearHistoryError"));
+    } finally {
+      setClearingHistory(false);
+    }
+  };
+
   let content: React.ReactNode;
 
   if (loading) {
@@ -291,16 +336,37 @@ export const HistorySettings: React.FC = () => {
   return (
     <div className="max-w-3xl w-full mx-auto space-y-6">
       <div className="space-y-2">
-        <div className="px-4 flex items-center justify-between">
+        <div className="px-4 flex flex-wrap items-start justify-between gap-3">
           <div>
             <h2 className="text-xs font-medium text-mid-gray uppercase tracking-wide">
               {t("settings.history.title")}
             </h2>
+            <p className="mt-1 max-w-xl text-xs text-mid-gray">
+              {t("settings.history.retentionNote")}
+            </p>
           </div>
-          <OpenRecordingsButton
-            onClick={openRecordingsFolder}
-            label={t("settings.history.openFolder")}
-          />
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button
+              onClick={clearRecordings}
+              variant="secondary"
+              size="sm"
+              disabled={clearingRecordings || clearingHistory}
+            >
+              {t("settings.history.clearRecordings")}
+            </Button>
+            <Button
+              onClick={clearHistory}
+              variant="danger-ghost"
+              size="sm"
+              disabled={clearingRecordings || clearingHistory}
+            >
+              {t("settings.history.clearHistory")}
+            </Button>
+            <OpenRecordingsButton
+              onClick={openRecordingsFolder}
+              label={t("settings.history.openFolder")}
+            />
+          </div>
         </div>
         <div className="bg-background border border-mid-gray/20 rounded-lg overflow-visible">
           {content}
@@ -336,6 +402,7 @@ const HistoryEntryComponent: React.FC<HistoryEntryProps> = ({
   const [learningCorrection, setLearningCorrection] = useState(false);
 
   const isTransformEntry = entry.transform_action !== null;
+  const hasRecording = !isTransformEntry && entry.file_name.trim().length > 0;
   const displayText = isTransformEntry
     ? (entry.transform_result_text ??
       entry.post_processed_text ??
@@ -349,10 +416,13 @@ const HistoryEntryComponent: React.FC<HistoryEntryProps> = ({
     }
   }, [displayText, isLearningCorrection]);
 
-  const handleLoadAudio = useCallback(
-    () => getAudioUrl(entry.file_name),
-    [getAudioUrl, entry.file_name],
-  );
+  const handleLoadAudio = useCallback(() => {
+    if (!hasRecording) {
+      return Promise.resolve(null);
+    }
+
+    return getAudioUrl(entry.file_name);
+  }, [getAudioUrl, entry.file_name, hasRecording]);
 
   const handleCopyText = () => {
     if (!hasTranscription) {
@@ -483,7 +553,7 @@ const HistoryEntryComponent: React.FC<HistoryEntryProps> = ({
               fill={entry.saved ? "currentColor" : "none"}
             />
           </IconButton>
-          {!isTransformEntry && (
+          {hasRecording && (
             <IconButton
               onClick={handleRetranscribe}
               disabled={retrying}
@@ -567,7 +637,7 @@ const HistoryEntryComponent: React.FC<HistoryEntryProps> = ({
         </p>
       )}
 
-      {!isTransformEntry && (
+      {hasRecording && (
         <AudioPlayer onLoadRequest={handleLoadAudio} className="w-full" />
       )}
     </div>

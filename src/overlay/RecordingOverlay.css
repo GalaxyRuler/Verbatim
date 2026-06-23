@@ -325,6 +325,8 @@
 
 @media (prefers-color-scheme: light) {
   .recording-overlay {
+    --overlay-accent: #1d4ed8;
+    --overlay-accent-soft: #1d4ed826;
     --overlay-background: #fffffff2;
     --overlay-foreground: #111827;
     --overlay-border: color-mix(in srgb, var(--overlay-accent) 24%, #11182722);

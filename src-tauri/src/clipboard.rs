@@ -5,13 +5,46 @@ use crate::settings::TypingTool;
 use crate::settings::{get_settings, AutoSubmitKey, ClipboardHandling, PasteMethod};
 use enigo::{Direction, Enigo, Key, Keyboard};
 use log::{info, warn};
-use std::process::Command;
-use std::time::Duration;
+use serde::Serialize;
+use std::process::{Child, Command, ExitStatus, Stdio};
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Manager};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
 #[cfg(target_os = "linux")]
 use crate::utils::{is_kde_wayland, is_wayland};
+
+pub(crate) type CancellationCheck<'a> = Option<&'a dyn Fn() -> bool>;
+const CLIPBOARD_PAYLOAD_POLL_INTERVAL_MS: u64 = 10;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ClipboardPayloadMarker {
+    sequence_number: Option<u32>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub(crate) struct NativeSmokeClipboardSafetyDrillCase {
+    case: String,
+    owned_by_verbatim: bool,
+    expected_owned_by_verbatim: bool,
+    passed: bool,
+}
+
+impl ClipboardPayloadMarker {
+    fn capture_current() -> Self {
+        Self {
+            sequence_number: clipboard_sequence_number(),
+        }
+    }
+}
+
+fn ensure_not_cancelled(is_cancelled: CancellationCheck<'_>, stage: &str) -> Result<(), String> {
+    if is_cancelled.is_some_and(|check| check()) {
+        return Err(format!("Operation cancelled before {stage}"));
+    }
+
+    Ok(())
+}
 
 enum ClipboardSnapshot {
     Native {
@@ -525,6 +558,148 @@ fn restore_text_clipboard(app_handle: &AppHandle, text: &str) -> Result<(), Stri
     })
 }
 
+#[cfg(target_os = "windows")]
+fn clipboard_sequence_number() -> Option<u32> {
+    use windows::Win32::System::DataExchange::GetClipboardSequenceNumber;
+
+    let sequence = unsafe { GetClipboardSequenceNumber() };
+    (sequence != 0).then_some(sequence)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn clipboard_sequence_number() -> Option<u32> {
+    None
+}
+
+fn clipboard_payload_owned_by_verbatim(
+    current_text: Option<&str>,
+    payload: &str,
+    expected_marker: Option<ClipboardPayloadMarker>,
+    current_marker: ClipboardPayloadMarker,
+) -> bool {
+    if current_text != Some(payload) {
+        return false;
+    }
+
+    match expected_marker.and_then(|marker| marker.sequence_number) {
+        Some(expected_sequence) => current_marker.sequence_number == Some(expected_sequence),
+        None => true,
+    }
+}
+
+pub(crate) fn native_smoke_clipboard_safety_drill() -> Vec<NativeSmokeClipboardSafetyDrillCase> {
+    fn run_case(
+        case: &str,
+        current_text: Option<&str>,
+        payload: &str,
+        expected_marker: Option<ClipboardPayloadMarker>,
+        current_marker: ClipboardPayloadMarker,
+        expected_owned_by_verbatim: bool,
+    ) -> NativeSmokeClipboardSafetyDrillCase {
+        let owned_by_verbatim = clipboard_payload_owned_by_verbatim(
+            current_text,
+            payload,
+            expected_marker,
+            current_marker,
+        );
+
+        NativeSmokeClipboardSafetyDrillCase {
+            case: case.to_string(),
+            owned_by_verbatim,
+            expected_owned_by_verbatim,
+            passed: owned_by_verbatim == expected_owned_by_verbatim,
+        }
+    }
+
+    vec![
+        run_case(
+            "same_text_sequence_changed",
+            Some("verbatim payload"),
+            "verbatim payload",
+            Some(ClipboardPayloadMarker {
+                sequence_number: Some(42),
+            }),
+            ClipboardPayloadMarker {
+                sequence_number: Some(43),
+            },
+            false,
+        ),
+        run_case(
+            "changed_text_matching_sequence",
+            Some("user changed clipboard"),
+            "verbatim payload",
+            Some(ClipboardPayloadMarker {
+                sequence_number: Some(42),
+            }),
+            ClipboardPayloadMarker {
+                sequence_number: Some(42),
+            },
+            false,
+        ),
+        run_case(
+            "exact_text_without_sequence",
+            Some("verbatim payload"),
+            "verbatim payload",
+            Some(ClipboardPayloadMarker {
+                sequence_number: None,
+            }),
+            ClipboardPayloadMarker {
+                sequence_number: None,
+            },
+            true,
+        ),
+    ]
+}
+
+fn clipboard_still_contains_verbatim_payload(
+    app_handle: &AppHandle,
+    payload: &str,
+    expected_marker: Option<ClipboardPayloadMarker>,
+) -> bool {
+    let current_text = app_handle.clipboard().read_text().ok();
+    clipboard_payload_owned_by_verbatim(
+        current_text.as_deref(),
+        payload,
+        expected_marker,
+        ClipboardPayloadMarker::capture_current(),
+    )
+}
+
+fn clipboard_payload_wait_timeout(paste_delay_ms: u64) -> Duration {
+    Duration::from_millis(paste_delay_ms.max(CLIPBOARD_PAYLOAD_POLL_INTERVAL_MS))
+}
+
+fn wait_until_clipboard_owns_payload(
+    app_handle: &AppHandle,
+    payload: &str,
+    expected_marker: Option<ClipboardPayloadMarker>,
+    paste_delay_ms: u64,
+    is_cancelled: CancellationCheck<'_>,
+) -> Result<(), String> {
+    let timeout = clipboard_payload_wait_timeout(paste_delay_ms);
+    let started = Instant::now();
+
+    loop {
+        ensure_not_cancelled(is_cancelled, "clipboard payload ownership")?;
+
+        if clipboard_still_contains_verbatim_payload(app_handle, payload, expected_marker) {
+            return Ok(());
+        }
+
+        if started.elapsed() >= timeout {
+            return Err(format!(
+                "Clipboard did not report Verbatim paste payload within {}ms",
+                timeout.as_millis()
+            ));
+        }
+
+        let remaining = timeout.saturating_sub(started.elapsed());
+        std::thread::sleep(
+            remaining.min(Duration::from_millis(CLIPBOARD_PAYLOAD_POLL_INTERVAL_MS)),
+        );
+    }
+}
+
 pub(crate) fn copy_text_for_recovery(
     app_handle: &AppHandle,
     text: &str,
@@ -534,9 +709,10 @@ pub(crate) fn copy_text_for_recovery(
         .map_err(|err| format!("failed to copy recovery text after {reason}: {err}"))
 }
 
-pub(crate) fn paste_exact_preserving_clipboard(
+pub(crate) fn paste_exact_preserving_clipboard_with_cancellation(
     text: &str,
     app_handle: &AppHandle,
+    is_cancelled: CancellationCheck<'_>,
 ) -> Result<(), String> {
     let settings = get_settings(app_handle);
     let paste_method = settings.paste_method;
@@ -557,14 +733,24 @@ pub(crate) fn paste_exact_preserving_clipboard(
 
     match paste_method {
         PasteMethod::None => Err("PasteMethod::None cannot replace selected text".to_string()),
-        PasteMethod::Direct => paste_direct(
-            &mut enigo,
-            text,
-            #[cfg(target_os = "linux")]
-            settings.typing_tool,
-        ),
+        PasteMethod::Direct => {
+            ensure_not_cancelled(is_cancelled, "direct typing")?;
+            paste_direct(
+                &mut enigo,
+                text,
+                #[cfg(target_os = "linux")]
+                settings.typing_tool,
+            )
+        }
         PasteMethod::CtrlV | PasteMethod::CtrlShiftV | PasteMethod::ShiftInsert => {
-            paste_via_clipboard(&mut enigo, text, app_handle, &paste_method, paste_delay_ms)
+            paste_via_clipboard(
+                &mut enigo,
+                text,
+                app_handle,
+                &paste_method,
+                paste_delay_ms,
+                is_cancelled,
+            )
         }
         PasteMethod::ExternalScript => {
             let script_path = settings
@@ -572,7 +758,7 @@ pub(crate) fn paste_exact_preserving_clipboard(
                 .as_ref()
                 .filter(|p| !p.is_empty())
                 .ok_or("External script path is not configured")?;
-            paste_via_external_script(text, script_path)
+            paste_via_external_script(text, script_path, is_cancelled)
         }
     }
 }
@@ -584,13 +770,29 @@ fn paste_via_clipboard(
     app_handle: &AppHandle,
     paste_method: &PasteMethod,
     paste_delay_ms: u64,
+    is_cancelled: CancellationCheck<'_>,
 ) -> Result<(), String> {
     let clipboard_snapshot = ClipboardSnapshot::capture(app_handle);
 
     // Write text to clipboard first
+    ensure_not_cancelled(is_cancelled, "clipboard write")?;
     write_text_clipboard(app_handle, text)?;
+    let payload_marker = ClipboardPayloadMarker::capture_current();
 
-    std::thread::sleep(Duration::from_millis(paste_delay_ms));
+    if let Err(err) = wait_until_clipboard_owns_payload(
+        app_handle,
+        text,
+        Some(payload_marker),
+        paste_delay_ms,
+        is_cancelled,
+    ) {
+        if clipboard_still_contains_verbatim_payload(app_handle, text, Some(payload_marker)) {
+            clipboard_snapshot.restore(app_handle)?;
+        }
+        return Err(err);
+    }
+
+    ensure_not_cancelled(is_cancelled, "clipboard paste")?;
 
     // Send paste key combo
     #[cfg(target_os = "linux")]
@@ -611,8 +813,12 @@ fn paste_via_clipboard(
 
     std::thread::sleep(std::time::Duration::from_millis(50));
 
-    // Restore original clipboard content, including non-text formats where supported.
-    clipboard_snapshot.restore(app_handle)?;
+    // Restore original clipboard content only if our temporary payload is still present.
+    if clipboard_still_contains_verbatim_payload(app_handle, text, Some(payload_marker)) {
+        clipboard_snapshot.restore(app_handle)?;
+    } else {
+        warn!("Skipping clipboard restore because clipboard changed after paste payload write");
+    }
 
     Ok(())
 }
@@ -1038,26 +1244,102 @@ fn send_key_combo_via_xdotool(paste_method: &PasteMethod) -> Result<(), String> 
     Ok(())
 }
 
-/// Pastes text by invoking an external script.
-/// The script receives the text to paste as a single argument.
-fn paste_via_external_script(text: &str, script_path: &str) -> Result<(), String> {
-    info!("Pasting via external script: {}", script_path);
+struct ExternalScriptInvocation<'a> {
+    program: &'a str,
+    args: Vec<&'a str>,
+    stdin: &'a [u8],
+}
 
-    let output = Command::new(script_path)
-        .arg(text)
-        .output()
+fn build_external_script_invocation<'a>(
+    script_path: &'a str,
+    text: &'a str,
+) -> ExternalScriptInvocation<'a> {
+    ExternalScriptInvocation {
+        program: script_path,
+        args: Vec::new(),
+        stdin: text.as_bytes(),
+    }
+}
+
+fn external_script_failure_message(script_path: &str, code: Option<i32>) -> String {
+    format!(
+        "External script '{}' failed with exit code {:?}",
+        script_path, code
+    )
+}
+
+fn wait_for_external_script(
+    child: &mut Child,
+    script_path: &str,
+    is_cancelled: CancellationCheck<'_>,
+) -> Result<ExitStatus, String> {
+    loop {
+        if let Some(status) = child
+            .try_wait()
+            .map_err(|e| format!("Failed to poll external script '{}': {}", script_path, e))?
+        {
+            return Ok(status);
+        }
+
+        if let Err(err) = ensure_not_cancelled(is_cancelled, "external script completion") {
+            kill_external_script_child(child, script_path);
+            return Err(err);
+        }
+
+        std::thread::sleep(Duration::from_millis(25));
+    }
+}
+
+fn kill_external_script_child(child: &mut Child, script_path: &str) {
+    if let Err(kill_err) = child.kill() {
+        warn!(
+            "Failed to kill cancelled external script '{}': {}",
+            script_path, kill_err
+        );
+    }
+    let _ = child.wait();
+}
+
+/// Pastes text by invoking an external script.
+/// The script receives the text to paste on stdin.
+fn paste_via_external_script(
+    text: &str,
+    script_path: &str,
+    is_cancelled: CancellationCheck<'_>,
+) -> Result<(), String> {
+    use std::io::Write;
+
+    info!("Pasting via external script: {}", script_path);
+    ensure_not_cancelled(is_cancelled, "external script invocation")?;
+
+    let invocation = build_external_script_invocation(script_path, text);
+    let mut child = Command::new(invocation.program)
+        .args(&invocation.args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
         .map_err(|e| format!("Failed to execute external script '{}': {}", script_path, e))?;
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        return Err(format!(
-            "External script '{}' failed with exit code {:?}. stderr: {}, stdout: {}",
-            script_path,
-            output.status.code(),
-            stderr.trim(),
-            stdout.trim()
-        ));
+    if let Err(err) = ensure_not_cancelled(is_cancelled, "external script stdin write") {
+        kill_external_script_child(&mut child, script_path);
+        return Err(err);
+    }
+    let mut stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| format!("Failed to open stdin for external script '{}'", script_path))?;
+    stdin.write_all(invocation.stdin).map_err(|e| {
+        format!(
+            "Failed to write to external script '{}': {}",
+            script_path, e
+        )
+    })?;
+    drop(stdin);
+
+    let status = wait_for_external_script(&mut child, script_path, is_cancelled)?;
+    if !status.success() {
+        return Err(external_script_failure_message(script_path, status.code()));
     }
 
     Ok(())
@@ -1162,19 +1444,30 @@ fn receipt_from_result(
     }
 }
 
+pub(crate) fn receipt_from_current_paste_method(
+    app_handle: &AppHandle,
+    target_verified: bool,
+    result: Result<(), String>,
+) -> InsertionReceipt {
+    let settings = get_settings(app_handle);
+    receipt_from_result(settings.paste_method, target_verified, result)
+}
+
 #[allow(dead_code)]
 pub fn paste(text: String, app_handle: AppHandle) -> Result<(), String> {
-    paste_with_auto_learn(text, app_handle, true)
+    paste_with_auto_learn(text, app_handle, true, None)
 }
 
 fn paste_with_auto_learn(
     text: String,
     app_handle: AppHandle,
     auto_learn_eligible: bool,
+    is_cancelled: CancellationCheck<'_>,
 ) -> Result<(), String> {
     let settings = get_settings(&app_handle);
     let paste_method = settings.paste_method;
     let paste_delay_ms = settings.paste_delay_ms;
+    let private_session_enabled = crate::private_session::is_enabled(&app_handle);
 
     // Append trailing space if setting is enabled
     let text = if settings.append_trailing_space {
@@ -1184,6 +1477,7 @@ fn paste_with_auto_learn(
     };
 
     let before_paste_snapshot = if auto_learn_eligible
+        && !private_session_enabled
         && settings.auto_add_dictionary_words
         && paste_method != PasteMethod::None
     {
@@ -1212,6 +1506,7 @@ fn paste_with_auto_learn(
             info!("PasteMethod::None selected - skipping paste action");
         }
         PasteMethod::Direct => {
+            ensure_not_cancelled(is_cancelled, "direct typing")?;
             paste_direct(
                 &mut enigo,
                 &text,
@@ -1226,6 +1521,7 @@ fn paste_with_auto_learn(
                 &app_handle,
                 &paste_method,
                 paste_delay_ms,
+                is_cancelled,
             )?
         }
         PasteMethod::ExternalScript => {
@@ -1234,17 +1530,19 @@ fn paste_with_auto_learn(
                 .as_ref()
                 .filter(|p| !p.is_empty())
                 .ok_or("External script path is not configured")?;
-            paste_via_external_script(&text, script_path)?;
+            paste_via_external_script(&text, script_path, is_cancelled)?;
         }
     }
 
     if should_send_auto_submit(settings.auto_submit, paste_method) {
         std::thread::sleep(Duration::from_millis(50));
+        ensure_not_cancelled(is_cancelled, "auto-submit")?;
         send_return_key(&mut enigo, settings.auto_submit_key)?;
     }
 
     // After pasting, optionally copy to clipboard based on settings
     if settings.clipboard_handling == ClipboardHandling::CopyToClipboard {
+        ensure_not_cancelled(is_cancelled, "copy-to-clipboard")?;
         let clipboard = app_handle.clipboard();
         clipboard
             .write_text(&text)
@@ -1252,6 +1550,7 @@ fn paste_with_auto_learn(
     }
 
     if auto_learn_eligible
+        && !private_session_enabled
         && settings.auto_add_dictionary_words
         && paste_method != PasteMethod::None
     {
@@ -1280,9 +1579,25 @@ pub fn paste_with_receipt_with_auto_learn(
     target_verified: bool,
     auto_learn_eligible: bool,
 ) -> InsertionReceipt {
+    paste_with_receipt_with_auto_learn_and_cancellation(
+        text,
+        app_handle,
+        target_verified,
+        auto_learn_eligible,
+        None,
+    )
+}
+
+pub fn paste_with_receipt_with_auto_learn_and_cancellation(
+    text: String,
+    app_handle: AppHandle,
+    target_verified: bool,
+    auto_learn_eligible: bool,
+    is_cancelled: CancellationCheck<'_>,
+) -> InsertionReceipt {
     let settings = get_settings(&app_handle);
     let paste_method = settings.paste_method;
-    let result = paste_with_auto_learn(text, app_handle, auto_learn_eligible);
+    let result = paste_with_auto_learn(text, app_handle, auto_learn_eligible, is_cancelled);
     receipt_from_result(paste_method, target_verified, result)
 }
 
@@ -1307,6 +1622,162 @@ mod tests {
         assert!(should_send_auto_submit(true, PasteMethod::Direct));
         assert!(should_send_auto_submit(true, PasteMethod::CtrlShiftV));
         assert!(should_send_auto_submit(true, PasteMethod::ShiftInsert));
+    }
+
+    #[test]
+    fn cancellation_guard_blocks_side_effect_stage() {
+        let cancelled = || true;
+
+        let err = ensure_not_cancelled(Some(&cancelled), "clipboard write")
+            .expect_err("cancelled operation must block side effect");
+
+        assert!(err.contains("clipboard write"));
+    }
+
+    #[test]
+    fn cancellation_guard_allows_uncancelled_or_unguarded_stage() {
+        let active = || false;
+
+        ensure_not_cancelled(Some(&active), "direct typing").expect("active operation");
+        ensure_not_cancelled(None, "direct typing").expect("unguarded operation");
+    }
+
+    #[test]
+    fn external_script_invocation_sends_text_on_stdin_not_argv() {
+        let invocation = build_external_script_invocation("paste-helper", "sensitive text");
+
+        assert_eq!(invocation.program, "paste-helper");
+        assert!(invocation.args.is_empty());
+        assert_eq!(invocation.stdin, b"sensitive text");
+    }
+
+    #[test]
+    fn external_script_failure_message_redacts_script_output() {
+        let message = external_script_failure_message("paste-helper", Some(7));
+
+        assert_eq!(
+            message,
+            "External script 'paste-helper' failed with exit code Some(7)"
+        );
+        assert!(!message.contains("stdout"));
+        assert!(!message.contains("stderr"));
+        assert!(!message.contains("sensitive text"));
+    }
+
+    #[test]
+    fn clipboard_restore_requires_own_payload() {
+        assert!(clipboard_payload_owned_by_verbatim(
+            Some("temporary payload"),
+            "temporary payload",
+            None,
+            ClipboardPayloadMarker {
+                sequence_number: None
+            }
+        ));
+        assert!(!clipboard_payload_owned_by_verbatim(
+            Some("user copied something else"),
+            "temporary payload",
+            None,
+            ClipboardPayloadMarker {
+                sequence_number: None
+            }
+        ));
+        assert!(!clipboard_payload_owned_by_verbatim(
+            None,
+            "temporary payload",
+            None,
+            ClipboardPayloadMarker {
+                sequence_number: None
+            }
+        ));
+    }
+
+    #[test]
+    fn native_smoke_clipboard_safety_drill_covers_mutation_cases() {
+        let cases = native_smoke_clipboard_safety_drill();
+
+        assert_eq!(cases.len(), 3);
+        assert!(cases.iter().all(|case| case.passed));
+        assert!(cases
+            .iter()
+            .any(|case| { case.case == "same_text_sequence_changed" && !case.owned_by_verbatim }));
+        assert!(cases.iter().any(|case| {
+            case.case == "changed_text_matching_sequence" && !case.owned_by_verbatim
+        }));
+        assert!(cases
+            .iter()
+            .any(|case| { case.case == "exact_text_without_sequence" && case.owned_by_verbatim }));
+    }
+
+    #[test]
+    fn clipboard_restore_accepts_matching_platform_sequence_marker() {
+        let marker = ClipboardPayloadMarker {
+            sequence_number: Some(42),
+        };
+
+        assert!(clipboard_payload_owned_by_verbatim(
+            Some("temporary payload"),
+            "temporary payload",
+            Some(marker),
+            marker
+        ));
+    }
+
+    #[test]
+    fn clipboard_restore_rejects_same_text_after_platform_sequence_change() {
+        let expected_marker = ClipboardPayloadMarker {
+            sequence_number: Some(42),
+        };
+        let current_marker = ClipboardPayloadMarker {
+            sequence_number: Some(43),
+        };
+
+        assert!(!clipboard_payload_owned_by_verbatim(
+            Some("temporary payload"),
+            "temporary payload",
+            Some(expected_marker),
+            current_marker
+        ));
+    }
+
+    #[test]
+    fn clipboard_restore_rejects_changed_text_even_with_matching_sequence() {
+        let marker = ClipboardPayloadMarker {
+            sequence_number: Some(42),
+        };
+
+        assert!(!clipboard_payload_owned_by_verbatim(
+            Some("user replacement"),
+            "temporary payload",
+            Some(marker),
+            marker
+        ));
+    }
+
+    #[test]
+    fn clipboard_restore_falls_back_to_exact_text_when_sequence_is_unavailable() {
+        let marker_without_sequence = ClipboardPayloadMarker {
+            sequence_number: None,
+        };
+
+        assert!(clipboard_payload_owned_by_verbatim(
+            Some("temporary payload"),
+            "temporary payload",
+            Some(marker_without_sequence),
+            marker_without_sequence
+        ));
+    }
+
+    #[test]
+    fn clipboard_payload_wait_timeout_uses_user_delay_with_minimum_poll_window() {
+        assert_eq!(
+            clipboard_payload_wait_timeout(0),
+            Duration::from_millis(CLIPBOARD_PAYLOAD_POLL_INTERVAL_MS)
+        );
+        assert_eq!(
+            clipboard_payload_wait_timeout(75),
+            Duration::from_millis(75)
+        );
     }
 
     #[test]
@@ -1494,6 +1965,55 @@ mod tests {
 
     #[cfg(target_os = "windows")]
     #[test]
+    fn native_restore_uses_image_payload_when_native_restore_fails() {
+        let mut native_ops = FakeNativeRestoreOps {
+            fail_set_format: Some(13),
+            ..FakeNativeRestoreOps::default()
+        };
+        let mut desktop_ops = FakeDesktopClipboardOps::default();
+        let image = DesktopClipboardPayload::Image {
+            rgba: vec![255, 0, 0, 255],
+            width: 1,
+            height: 1,
+        };
+
+        restore_native_clipboard_snapshot_with_image_fallback(
+            &test_formats(),
+            Some(&image),
+            &mut native_ops,
+            &mut desktop_ops,
+        )
+        .unwrap();
+
+        assert!(native_ops.opened_and_emptied);
+        assert_eq!(native_ops.set_attempts, vec![13, 15]);
+        assert_eq!(desktop_ops.writes, vec!["image"]);
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn native_restore_preserves_file_and_registered_rich_text_formats() {
+        let mut ops = FakeNativeRestoreOps::default();
+        let formats = vec![
+            ClipboardFormatData {
+                format: 15,
+                bytes: b"file-drop-list".to_vec(),
+            },
+            ClipboardFormatData {
+                format: 0xC001,
+                bytes: b"{\\rtf1 rich text}".to_vec(),
+            },
+        ];
+
+        restore_native_clipboard_snapshot_with_ops(&formats, &mut ops).unwrap();
+
+        assert!(ops.opened_and_emptied);
+        assert_eq!(ops.set_attempts, vec![15, 0xC001]);
+        assert!(ops.freed_handles.is_empty());
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
     fn native_restore_reports_failure_when_no_snapshot_fallback_exists() {
         let mut native_ops = FakeNativeRestoreOps::default();
         let mut desktop_ops = FakeDesktopClipboardOps::default();
@@ -1570,6 +2090,36 @@ mod tests {
                 height: 1,
             }
         );
+    }
+
+    #[test]
+    fn desktop_clipboard_capture_reads_text_when_no_image_exists() {
+        let ops = FakeDesktopClipboardOps {
+            image: None,
+            text: Some("plain text".to_string()),
+            writes: Vec::new(),
+        };
+
+        let snapshot = capture_desktop_clipboard_payload(&ops).unwrap();
+
+        assert_eq!(
+            snapshot,
+            DesktopClipboardPayload::Text("plain text".to_string())
+        );
+    }
+
+    #[test]
+    fn desktop_clipboard_capture_rejects_empty_text_placeholder() {
+        let ops = FakeDesktopClipboardOps {
+            image: None,
+            text: Some(String::new()),
+            writes: Vec::new(),
+        };
+
+        let error =
+            capture_desktop_clipboard_payload(&ops).expect_err("empty text is not a snapshot");
+
+        assert_eq!(error, "desktop clipboard text is empty");
     }
 
     #[test]

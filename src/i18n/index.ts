@@ -9,6 +9,7 @@ import {
   updateDocumentDirection,
   updateDocumentLanguage,
 } from "@/lib/utils/rtl";
+import { settingsFromDocument } from "@/lib/settingsDocument";
 
 const localeLoaders = import.meta.glob<{ default: Record<string, unknown> }>([
   "./locales/*/translation.json",
@@ -117,9 +118,12 @@ i18n.use(initReactI18next).init({
 // Sync language from app settings
 export const syncLanguageFromSettings = async () => {
   try {
-    const result = await commands.getAppSettings();
-    if (result.status === "ok" && result.data.app_language) {
-      const supported = getSupportedLanguage(result.data.app_language);
+    const result = await commands.getAppSettingsDocument();
+    const settings =
+      result.status === "ok" ? settingsFromDocument(result.data) : null;
+
+    if (settings?.app_language) {
+      const supported = getSupportedLanguage(settings.app_language);
       if (supported && supported !== i18n.language) {
         await changeAppLanguage(supported);
       }

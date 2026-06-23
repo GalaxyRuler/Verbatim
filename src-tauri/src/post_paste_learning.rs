@@ -75,6 +75,10 @@ pub fn maybe_spawn_auto_add_watcher(
     inserted_text: String,
     before_paste: Option<FocusedTextSnapshot>,
 ) {
+    if crate::private_session::is_enabled(&app) {
+        return;
+    }
+
     let Some(before_paste) = before_paste else {
         return;
     };
@@ -192,6 +196,10 @@ fn learn_from_text_snapshots(
     after_paste_text: &str,
     after_edit_text: &str,
 ) -> Result<(), String> {
+    if crate::private_session::is_enabled(app) {
+        return Ok(());
+    }
+
     let Some(corrected_text) =
         extract_corrected_inserted_text(before_paste_text, after_paste_text, after_edit_text)
     else {

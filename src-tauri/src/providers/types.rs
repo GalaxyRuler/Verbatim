@@ -183,6 +183,8 @@ mod tests {
             partial_size: 0,
             is_directory,
             engine_type: EngineType::Whisper,
+            license_label: "MIT".to_string(),
+            accelerator_support: vec!["whisper-cpp".to_string()],
             accuracy_score: 0.0,
             speed_score: 0.0,
             supports_translation: false,

@@ -25,7 +25,7 @@ export function getTranslatedModelDescription(
 ): string {
   // Custom models use a generic translation key
   if (model.is_custom) {
-    return t("onboarding.customModelDescription");
+    return t("modelSelector.customUnverifiedDescription");
   }
   const translationKey = `onboarding.models.${model.id}.description`;
   const translated = t(translationKey, { defaultValue: "" });

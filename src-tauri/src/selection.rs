@@ -250,11 +250,26 @@ pub fn replace_captured_selection(
     captured: &SelectionSnapshot,
     replacement_text: &str,
 ) -> Result<SelectionReplacementOutcome, SelectionReplaceError> {
+    replace_captured_selection_with_cancellation(app, captured, replacement_text, None)
+}
+
+pub fn replace_captured_selection_with_cancellation(
+    app: &AppHandle,
+    captured: &SelectionSnapshot,
+    replacement_text: &str,
+    is_cancelled: crate::clipboard::CancellationCheck<'_>,
+) -> Result<SelectionReplacementOutcome, SelectionReplaceError> {
     replace_selected_text_after_recapture(
         captured,
         replacement_text,
         capture_current_selection_snapshot,
-        |plan| crate::clipboard::paste_exact_preserving_clipboard(&plan.replacement_text, app),
+        |plan| {
+            crate::clipboard::paste_exact_preserving_clipboard_with_cancellation(
+                &plan.replacement_text,
+                app,
+                is_cancelled,
+            )
+        },
     )
 }
 

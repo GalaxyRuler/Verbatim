@@ -1,7 +1,7 @@
 use crate::audio_toolkit::{apply_dictionary_entries, filter_transcription_output};
 use crate::managers::audio::AudioRecordingManager;
 use crate::managers::model::{EngineType, ModelManager};
-use crate::providers::{EngineProvider, TranscribeRsProvider};
+use crate::providers::{CancellationToken, EngineProvider, TranscribeRsProvider};
 use crate::settings::{
     get_settings, AppSettings, ModelUnloadTimeout, OrtAcceleratorSetting, WhisperAcceleratorSetting,
 };
@@ -22,6 +22,155 @@ pub struct ModelStateEvent {
     pub model_id: Option<String>,
     pub model_name: Option<String>,
     pub error: Option<String>,
+    pub diagnostic_code: Option<String>,
+    pub fallback: Option<String>,
+}
+
+fn model_load_diagnostic_code(error: &anyhow::Error) -> &'static str {
+    let message = error.to_string().to_ascii_lowercase();
+    if [
+        "accelerator",
+        "cuda",
+        "directml",
+        "gpu",
+        "metal",
+        "ort",
+        "vulkan",
+    ]
+    .iter()
+    .any(|needle| message.contains(needle))
+    {
+        "accelerator_load_failed"
+    } else {
+        "provider_load_failed"
+    }
+}
+
+fn engine_label(engine_type: EngineType) -> &'static str {
+    match engine_type {
+        EngineType::Whisper => "whisper",
+        EngineType::Parakeet => "parakeet",
+        EngineType::Moonshine => "moonshine",
+        EngineType::MoonshineStreaming => "moonshine streaming",
+        EngineType::SenseVoice => "SenseVoice",
+        EngineType::GigaAM => "gigaam",
+        EngineType::Canary => "canary",
+        EngineType::Cohere => "cohere",
+    }
+}
+
+fn should_retry_model_load_on_cpu(
+    settings: &AppSettings,
+    engine_type: EngineType,
+    error: &anyhow::Error,
+) -> bool {
+    if model_load_diagnostic_code(error) != "accelerator_load_failed" {
+        return false;
+    }
+
+    match engine_type {
+        EngineType::Whisper => settings.whisper_accelerator != WhisperAcceleratorSetting::Cpu,
+        EngineType::Parakeet
+        | EngineType::Moonshine
+        | EngineType::MoonshineStreaming
+        | EngineType::SenseVoice
+        | EngineType::GigaAM
+        | EngineType::Canary
+        | EngineType::Cohere => settings.ort_accelerator != OrtAcceleratorSetting::Cpu,
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub(crate) struct ModelLoadFallbackDrillCase {
+    pub case: String,
+    pub diagnostic_code: String,
+    pub retry_on_cpu: bool,
+    pub expected_retry_on_cpu: bool,
+    pub success_fallback: Option<String>,
+    pub passed: bool,
+}
+
+pub(crate) fn model_load_cpu_fallback_drill() -> Vec<ModelLoadFallbackDrillCase> {
+    let mut whisper_gpu = crate::settings::get_default_settings();
+    whisper_gpu.whisper_accelerator = WhisperAcceleratorSetting::Gpu;
+
+    let mut whisper_cpu = crate::settings::get_default_settings();
+    whisper_cpu.whisper_accelerator = WhisperAcceleratorSetting::Cpu;
+
+    let mut ort_directml = crate::settings::get_default_settings();
+    ort_directml.ort_accelerator = OrtAcceleratorSetting::DirectMl;
+
+    let generic = crate::settings::get_default_settings();
+
+    let cases = [
+        (
+            "whisper_gpu_accelerator_failure",
+            whisper_gpu,
+            EngineType::Whisper,
+            anyhow::anyhow!("Vulkan initialization failed"),
+            true,
+        ),
+        (
+            "whisper_cpu_accelerator_failure",
+            whisper_cpu,
+            EngineType::Whisper,
+            anyhow::anyhow!("Vulkan initialization failed"),
+            false,
+        ),
+        (
+            "ort_directml_accelerator_failure",
+            ort_directml,
+            EngineType::Parakeet,
+            anyhow::anyhow!("DirectML provider failed to initialize"),
+            true,
+        ),
+        (
+            "generic_provider_failure",
+            generic,
+            EngineType::Whisper,
+            anyhow::anyhow!("model file is unreadable"),
+            false,
+        ),
+    ];
+
+    cases
+        .into_iter()
+        .map(
+            |(case, settings, engine_type, error, expected_retry_on_cpu)| {
+                let diagnostic_code = model_load_diagnostic_code(&error).to_string();
+                let retry_on_cpu = should_retry_model_load_on_cpu(&settings, engine_type, &error);
+                ModelLoadFallbackDrillCase {
+                    case: case.to_string(),
+                    diagnostic_code,
+                    retry_on_cpu,
+                    expected_retry_on_cpu,
+                    success_fallback: retry_on_cpu
+                        .then(|| "cpu_after_accelerator_load_failed".to_string()),
+                    passed: retry_on_cpu == expected_retry_on_cpu,
+                }
+            },
+        )
+        .collect()
+}
+
+fn apply_cpu_accelerator_fallback(engine_type: EngineType) {
+    use transcribe_rs::accel;
+
+    match engine_type {
+        EngineType::Whisper => {
+            accel::set_whisper_accelerator(accel::WhisperAccelerator::CpuOnly);
+            accel::set_whisper_gpu_device(accel::GPU_DEVICE_AUTO);
+        }
+        EngineType::Parakeet
+        | EngineType::Moonshine
+        | EngineType::MoonshineStreaming
+        | EngineType::SenseVoice
+        | EngineType::GigaAM
+        | EngineType::Canary
+        | EngineType::Cohere => {
+            accel::set_ort_accelerator(accel::OrtAccelerator::CpuOnly);
+        }
+    }
 }
 
 fn effective_english_translation(user_requested: bool, model_supports_translation: bool) -> bool {
@@ -52,6 +201,7 @@ fn build_transcription_request(
     translate_to_english: bool,
     language_shortlist: &[String],
     custom_words: &[String],
+    cancellation: CancellationToken,
 ) -> crate::providers::SpeechRequest {
     let source_language = if selected_language == "auto" {
         crate::providers::LanguageSelection::Auto
@@ -69,7 +219,7 @@ fn build_transcription_request(
         }),
         language_shortlist: language_shortlist.to_vec(),
         custom_words: custom_words.to_vec(),
-        cancellation: crate::providers::CancellationToken::default(),
+        cancellation,
     }
 }
 
@@ -86,6 +236,30 @@ impl Drop for LoadingGuard {
         *is_loading = false;
         self.loading_condvar.notify_all();
     }
+}
+
+fn wait_for_model_loading_to_finish(
+    is_loading: &Mutex<bool>,
+    loading_condvar: &Condvar,
+    cancellation: &CancellationToken,
+) -> Result<()> {
+    if cancellation.is_cancelled() {
+        return Err(anyhow::anyhow!("transcription cancelled before model load"));
+    }
+
+    let mut is_loading = is_loading.lock().unwrap();
+    while *is_loading {
+        let wait_result = loading_condvar
+            .wait_timeout(is_loading, Duration::from_millis(50))
+            .unwrap();
+        is_loading = wait_result.0;
+
+        if cancellation.is_cancelled() {
+            return Err(anyhow::anyhow!("transcription cancelled during model load"));
+        }
+    }
+
+    Ok(())
 }
 
 #[derive(Clone)]
@@ -243,6 +417,8 @@ impl TranscriptionManager {
                 model_id: None,
                 model_name: None,
                 error: None,
+                diagnostic_code: None,
+                fallback: None,
             },
         );
 
@@ -291,6 +467,8 @@ impl TranscriptionManager {
                 model_id: Some(model_id.to_string()),
                 model_name: None,
                 error: None,
+                diagnostic_code: None,
+                fallback: None,
             },
         );
 
@@ -308,40 +486,82 @@ impl TranscriptionManager {
                     model_id: Some(model_id.to_string()),
                     model_name: Some(model_info.name.clone()),
                     error: Some(error_msg.to_string()),
+                    diagnostic_code: Some("model_not_downloaded".to_string()),
+                    fallback: None,
                 },
             );
             return Err(anyhow::anyhow!(error_msg));
         }
 
-        let emit_loading_failed = |error_msg: &str| {
-            let _ = self.app_handle.emit(
-                "model-state-changed",
-                ModelStateEvent {
-                    event_type: "loading_failed".to_string(),
-                    model_id: Some(model_id.to_string()),
-                    model_name: Some(model_info.name.clone()),
-                    error: Some(error_msg.to_string()),
-                },
-            );
-        };
+        let emit_loading_failed =
+            |error_msg: &str, diagnostic_code: &str, fallback: Option<String>| {
+                let _ = self.app_handle.emit(
+                    "model-state-changed",
+                    ModelStateEvent {
+                        event_type: "loading_failed".to_string(),
+                        model_id: Some(model_id.to_string()),
+                        model_name: Some(model_info.name.clone()),
+                        error: Some(error_msg.to_string()),
+                        diagnostic_code: Some(diagnostic_code.to_string()),
+                        fallback,
+                    },
+                );
+            };
 
         let model_asset = self.model_manager.get_model_asset(model_id)?;
+        let settings = get_settings(&self.app_handle);
+        apply_accelerator_settings(&self.app_handle);
         let mut provider = TranscribeRsProvider::new();
-        provider.load(&model_asset).map_err(|e| {
-            let engine_label = match model_info.engine_type {
-                EngineType::Whisper => "whisper",
-                EngineType::Parakeet => "parakeet",
-                EngineType::Moonshine => "moonshine",
-                EngineType::MoonshineStreaming => "moonshine streaming",
-                EngineType::SenseVoice => "SenseVoice",
-                EngineType::GigaAM => "gigaam",
-                EngineType::Canary => "canary",
-                EngineType::Cohere => "cohere",
-            };
-            let error_msg = format!("Failed to load {} model {}: {}", engine_label, model_id, e);
-            emit_loading_failed(&error_msg);
-            anyhow::anyhow!(error_msg)
-        })?;
+        let fallback = match provider.load(&model_asset) {
+            Ok(()) => None,
+            Err(initial_error)
+                if should_retry_model_load_on_cpu(
+                    &settings,
+                    model_info.engine_type.clone(),
+                    &initial_error,
+                ) =>
+            {
+                warn!(
+                    "Accelerated model load failed for {}; retrying with CPU fallback: {}",
+                    model_id, initial_error
+                );
+                apply_cpu_accelerator_fallback(model_info.engine_type.clone());
+
+                let mut cpu_provider = TranscribeRsProvider::new();
+                match cpu_provider.load(&model_asset) {
+                    Ok(()) => {
+                        provider = cpu_provider;
+                        Some("cpu_after_accelerator_load_failed".to_string())
+                    }
+                    Err(cpu_error) => {
+                        let error_msg = format!(
+                            "Failed to load {} model {} after CPU fallback. Accelerated error: {}; CPU error: {}",
+                            engine_label(model_info.engine_type.clone()),
+                            model_id,
+                            initial_error,
+                            cpu_error
+                        );
+                        emit_loading_failed(
+                            &error_msg,
+                            "accelerator_load_failed",
+                            Some("cpu_fallback_failed".to_string()),
+                        );
+                        return Err(anyhow::anyhow!(error_msg));
+                    }
+                }
+            }
+            Err(error) => {
+                let error_msg = format!(
+                    "Failed to load {} model {}: {}",
+                    engine_label(model_info.engine_type.clone()),
+                    model_id,
+                    error
+                );
+                let diagnostic_code = model_load_diagnostic_code(&error);
+                emit_loading_failed(&error_msg, diagnostic_code, None);
+                return Err(anyhow::anyhow!(error_msg));
+            }
+        };
 
         // Update the current provider and model ID
         {
@@ -364,6 +584,8 @@ impl TranscriptionManager {
                 model_id: Some(model_id.to_string()),
                 model_name: Some(model_info.name.clone()),
                 error: None,
+                diagnostic_code: None,
+                fallback,
             },
         );
 
@@ -402,6 +624,14 @@ impl TranscriptionManager {
     }
 
     pub fn transcribe(&self, audio: Vec<f32>) -> Result<String> {
+        self.transcribe_with_cancellation(audio, CancellationToken::default())
+    }
+
+    pub fn transcribe_with_cancellation(
+        &self,
+        audio: Vec<f32>,
+        cancellation: CancellationToken,
+    ) -> Result<String> {
         #[cfg(debug_assertions)]
         if std::env::var("VERBATIM_FORCE_TRANSCRIPTION_FAILURE").is_ok() {
             return Err(anyhow::anyhow!(
@@ -425,10 +655,11 @@ impl TranscriptionManager {
         // Check if model is loaded, if not try to load it
         {
             // If the model is loading, wait for it to complete.
-            let mut is_loading = self.is_loading.lock().unwrap();
-            while *is_loading {
-                is_loading = self.loading_condvar.wait(is_loading).unwrap();
-            }
+            wait_for_model_loading_to_finish(
+                self.is_loading.as_ref(),
+                self.loading_condvar.as_ref(),
+                &cancellation,
+            )?;
 
             let engine_guard = self.lock_engine();
             if engine_guard.is_none() {
@@ -470,6 +701,7 @@ impl TranscriptionManager {
             effective_translate_to_english,
             &settings.adaptive_language_shortlist,
             &settings.dictionary_phrases(),
+            cancellation,
         );
 
         // Perform transcription with the appropriate provider.
@@ -536,6 +768,8 @@ impl TranscriptionManager {
                             model_id: None,
                             model_name: None,
                             error: Some(format!("Engine panicked: {}", panic_msg)),
+                            diagnostic_code: Some("provider_panic".to_string()),
+                            fallback: Some("model_unloaded_for_reload".to_string()),
                         },
                     );
 
@@ -766,6 +1000,65 @@ mod tests {
     }
 
     #[test]
+    fn model_load_diagnostic_code_classifies_accelerator_failures() {
+        assert_eq!(
+            model_load_diagnostic_code(&anyhow::anyhow!("Vulkan initialization failed")),
+            "accelerator_load_failed"
+        );
+        assert_eq!(
+            model_load_diagnostic_code(&anyhow::anyhow!("model file is unreadable")),
+            "provider_load_failed"
+        );
+    }
+
+    #[test]
+    fn cpu_fallback_retries_accelerator_load_failures_for_non_cpu_whisper() {
+        let mut settings = crate::settings::get_default_settings();
+        settings.whisper_accelerator = WhisperAcceleratorSetting::Gpu;
+
+        assert!(should_retry_model_load_on_cpu(
+            &settings,
+            EngineType::Whisper,
+            &anyhow::anyhow!("Vulkan initialization failed")
+        ));
+    }
+
+    #[test]
+    fn cpu_fallback_does_not_retry_when_whisper_is_already_cpu() {
+        let mut settings = crate::settings::get_default_settings();
+        settings.whisper_accelerator = WhisperAcceleratorSetting::Cpu;
+
+        assert!(!should_retry_model_load_on_cpu(
+            &settings,
+            EngineType::Whisper,
+            &anyhow::anyhow!("Vulkan initialization failed")
+        ));
+    }
+
+    #[test]
+    fn cpu_fallback_retries_accelerator_load_failures_for_non_cpu_ort_models() {
+        let mut settings = crate::settings::get_default_settings();
+        settings.ort_accelerator = OrtAcceleratorSetting::DirectMl;
+
+        assert!(should_retry_model_load_on_cpu(
+            &settings,
+            EngineType::Parakeet,
+            &anyhow::anyhow!("DirectML provider failed to initialize")
+        ));
+    }
+
+    #[test]
+    fn cpu_fallback_does_not_retry_generic_provider_failures() {
+        let settings = crate::settings::get_default_settings();
+
+        assert!(!should_retry_model_load_on_cpu(
+            &settings,
+            EngineType::Whisper,
+            &anyhow::anyhow!("model file is unreadable")
+        ));
+    }
+
+    #[test]
     fn speech_request_translation_is_absent_when_legacy_toggle_is_off() {
         let request = build_transcription_request(
             vec![0.0, 1.0],
@@ -773,6 +1066,7 @@ mod tests {
             false,
             &["en".to_string(), "ar".to_string()],
             &[],
+            CancellationToken::default(),
         );
 
         assert!(request.translation.is_none());
@@ -786,6 +1080,7 @@ mod tests {
             false,
             &["en".to_string(), "ar".to_string()],
             &[],
+            CancellationToken::default(),
         );
 
         assert_eq!(
@@ -802,10 +1097,49 @@ mod tests {
             true,
             &["en".to_string(), "ar".to_string()],
             &[],
+            CancellationToken::default(),
         );
 
         let translation = request.translation.expect("translation should be present");
         assert_eq!(translation.target_language, "en");
+    }
+
+    #[test]
+    fn cancelled_transcription_does_not_wait_for_model_load() {
+        let is_loading = Mutex::new(true);
+        let loading_condvar = Condvar::new();
+        let cancellation = CancellationToken::default();
+        cancellation.cancel();
+
+        let error = wait_for_model_loading_to_finish(&is_loading, &loading_condvar, &cancellation)
+            .expect_err("cancelled operation should not wait for model load");
+
+        assert!(error.to_string().contains("cancelled before model load"));
+    }
+
+    #[test]
+    fn cancellation_during_model_load_wait_returns_promptly() {
+        let is_loading = Arc::new(Mutex::new(true));
+        let loading_condvar = Arc::new(Condvar::new());
+        let cancellation = CancellationToken::default();
+        let cancellation_for_thread = cancellation.clone();
+        let loading_condvar_for_thread = Arc::clone(&loading_condvar);
+
+        let handle = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(10));
+            cancellation_for_thread.cancel();
+            loading_condvar_for_thread.notify_all();
+        });
+
+        let error = wait_for_model_loading_to_finish(
+            is_loading.as_ref(),
+            loading_condvar.as_ref(),
+            &cancellation,
+        )
+        .expect_err("cancelled operation should abort the model load wait");
+
+        handle.join().expect("cancellation thread should finish");
+        assert!(error.to_string().contains("cancelled during model load"));
     }
 
     #[test]

@@ -98,7 +98,8 @@
     },
     "errors": {
       "loadModels": "فشل تحميل النماذج المتاحة",
-      "downloadModel": "فشل تنزيل النموذج: {{error}}"
+      "downloadModel": "فشل تنزيل النموذج: {{error}}",
+      "selectModel": "اختر نموذجًا للمتابعة."
     },
     "permissions": {
       "title": "الأذونات المطلوبة",
@@ -118,6 +119,45 @@
       "errors": {
         "checkFailed": "فشل التحقق من الأذونات. يرجير المحاولة مرة أخرى.",
         "requestFailed": "فشل طلب الإذن. يرجى المحاولة مرة أخرى."
+      }
+    },
+    "shortcut": {
+      "title": "Set Recording Shortcut",
+      "description": "Confirm the shortcut you will use to start dictation before finishing setup.",
+      "missing": "Assign a recording shortcut before continuing.",
+      "duplicate": "This recording shortcut is already assigned to another action. Choose a unique shortcut before continuing.",
+      "ready": "Recording shortcut is ready.",
+      "continue": "Continue"
+    },
+    "microphoneTest": {
+      "title": "اختبار الميكروفون",
+      "description": "تأكد من أن Verbatim يستطيع فتح الميكروفون المحدد ورؤية الإدخال المباشر قبل إنهاء الإعداد.",
+      "start": "ابدأ الاختبار",
+      "stop": "أوقف الاختبار",
+      "listening": "يستمع إلى الإدخال",
+      "idle": "جاهز للاختبار",
+      "opened": "تم فتح الميكروفون. تحدث للحظة للتحقق من مقياس المستوى المباشر.",
+      "ready": "تم اكتشاف إدخال الميكروفون.",
+      "continue": "متابعة",
+      "meterLabel": "مستوى إدخال الميكروفون"
+    },
+    "dictationTest": {
+      "title": "اختبار الإملاء",
+      "description": "سجّل عينة قصيرة للتأكد من أن Verbatim يستطيع التفريغ قبل إدراج النص في التطبيقات الأخرى.",
+      "samplePrompt": "قل عبارة قصيرة، ثم أوقف التسجيل لمراجعة التفريغ.",
+      "start": "بدء التسجيل",
+      "stop": "إيقاف التسجيل",
+      "transcribing": "يتم تفريغ عينة الاختبار. لن يتم حفظها في السجل.",
+      "copy": "نسخ نص الاختبار",
+      "copied": "تم نسخ نص الاختبار إلى الحافظة.",
+      "copyFailed": "لم يتم نسخ أي نص اختبار.",
+      "recordAgain": "التسجيل مرة أخرى",
+      "discardContinue": "تجاهل والمتابعة",
+      "states": {
+        "idle": "جاهز لتسجيل عينة اختبار",
+        "recording": "جار تسجيل عينة الاختبار",
+        "transcribing": "جار تفريغ عينة الاختبار",
+        "ready": "راجع تفريغ الاختبار"
       }
     }
   },
@@ -150,7 +190,9 @@
       "languageOnly": "{{language}} فقط",
       "translation": "يدعم الترجمة",
       "translate": "ترجمة"
-    }
+    },
+    "customUnverified": "غير موثّق",
+    "customUnverifiedDescription": "نموذج يقدمه المستخدم. لم يتحقق Verbatim من هذا الملف أو الترخيص أو المجموع الاختباري أو السلوك."
   },
   "settings": {
     "general": {
@@ -307,7 +349,13 @@
           "none": "بلا",
           "externalScript": "نص برمجي خارجي"
         },
-        "externalScriptPlaceholder": "/path/to/your/script.sh"
+        "externalScriptPlaceholder": "/path/to/your/script.sh",
+        "linuxReadiness": {
+          "ready": "جلسة Linux: {{session}} على {{desktop}}. مساعد الحافظة: {{clipboardHelper}}؛ مساعد اللصق: {{pasteHelper}}؛ مساعد الإدخال المباشر: {{directHelper}}.",
+          "limited": "جلسة Linux: {{session}} على {{desktop}}. مساعد الحافظة: {{clipboardHelper}}؛ مساعد اللصق: {{pasteHelper}}؛ مساعد الإدخال المباشر: {{directHelper}}. بعض مساعدات الإدراج مفقودة؛ غيّر طريقة اللصق أو ثبّت مساعدًا متوافقًا إذا فشل الإدراج.",
+          "unknown": "تعذر التحقق من جاهزية الإدراج على Linux.",
+          "none": "لا يوجد"
+        }
       },
       "typingTool": {
         "title": "أداة الكتابة",
@@ -441,7 +489,12 @@
         "apiKey": {
           "title": "مفتاح API",
           "description": "مفتاح API للمزود المختار.",
-          "placeholder": "sk-..."
+          "placeholder": "sk-...",
+          "storeAvailable": "مخزن بيانات الاعتماد في نظام التشغيل متاح على {{platform}}. يتم حفظ مفاتيح API الخاصة بالمزوّدين خارج إعدادات التطبيق.",
+          "storeUnavailable": "مخزن بيانات الاعتماد في نظام التشغيل غير متاح على {{platform}}. يحتفظ Verbatim بقيمة الإعداد الحالية لتجنب فقدان المفتاح؛ تجنب حفظ مفاتيح API بعيدة ودائمة حتى يتم حل ذلك.",
+          "storeUnavailableLegacyRetained": "OS credential store is unavailable on {{platform}}. Verbatim retained {{count}} existing settings value to avoid key loss; use session-only API keys or fix the credential store before saving persistent remote API keys.",
+          "storeStatusUnknown": "تعذر التحقق من حالة مخزن بيانات الاعتماد. قد لا تكون مفاتيح API المحفوظة محمية بواسطة مخزن بيانات اعتماد نظام التشغيل.",
+          "sessionOnly": "استخدم مفتاح API لهذه الجلسة فقط"
         },
         "model": {
           "title": "النموذج",
@@ -527,7 +580,16 @@
       "cancelCorrection": "إلغاء التصحيح",
       "dictionaryLearned": "أضيفت إلى الكلمات المخصصة: {{words}}",
       "dictionaryNoCandidates": "لم يتم العثور على كلمات مخصصة جديدة في هذا التصحيح.",
-      "dictionaryLearnError": "فشل تعلم الكلمات المخصصة. يرجى المحاولة مرة أخرى."
+      "dictionaryLearnError": "فشل تعلم الكلمات المخصصة. يرجى المحاولة مرة أخرى.",
+      "clearHistory": "مسح كل السجل",
+      "clearHistoryConfirm": "هل تريد مسح كل إدخالات السجل والتسجيلات المرتبطة بها؟ لا يمكن التراجع عن ذلك.",
+      "clearHistoryError": "فشل مسح السجل.",
+      "clearHistorySuccess": "تم مسح السجل.",
+      "clearRecordings": "مسح التسجيلات",
+      "clearRecordingsConfirm": "هل تريد حذف تسجيلات الإملاء غير المحفوظة مع إبقاء الإدخالات المحفوظة ونصوص التحويل فقط؟",
+      "clearRecordingsError": "فشل مسح التسجيلات.",
+      "clearRecordingsSuccess": "تم مسح التسجيلات.",
+      "retentionNote": "قد يتضمن السجل النصوص الخام والنصوص المحسنة ونصوص التحويل وملفات WAV المرتبطة. تبقى الإدخالات المحفوظة حتى تحذفها."
     },
     "debug": {
       "title": "تصحيح الأخطاء",
@@ -603,6 +665,71 @@
       "recordingBuffer": {
         "title": "مخزن التسجيل الإضافي",
         "description": "وقت إضافي (بالمللي ثانية) للاستمرار في التسجيل بعد تحرير المفتاح، لالتقاط الصوت المتبقي. 0 = لا مخزن إضافي."
+      },
+      "historyStorage": {
+        "description": "حفظ نصوص التفريغ المستقبلية في السجل.",
+        "label": "حفظ السجل"
+      },
+      "privateSession": {
+        "description": "تعطيل السجل والتسجيلات والمعالجة اللاحقة والتحويلات وإعادة المحاولة والتعلم مؤقتًا للإملاءات الجديدة.",
+        "label": "جلسة خاصة"
+      },
+      "recordingStorage": {
+        "description": "حفظ تسجيلات WAV مع إدخالات سجل الإملاء المستقبلية.",
+        "disabledDescription": "فعّل السجل قبل حفظ التسجيلات.",
+        "label": "حفظ التسجيلات"
+      },
+      "diagnostics": {
+        "title": "Diagnostics",
+        "description": "Review app health, platform readiness, paths, and active runtime settings.",
+        "refresh": "Refresh",
+        "pathError": "Path unavailable: {{error}}",
+        "rows": {
+          "startup": "Startup",
+          "permissions": "Permissions",
+          "shortcuts": "Shortcuts",
+          "model": "Selected model",
+          "accelerator": "Accelerator",
+          "insertion": "Insertion",
+          "updates": "Updates",
+          "storage": "Storage",
+          "credentials": "Credential store",
+          "linuxHelpers": "Linux helpers"
+        },
+        "values": {
+          "ready": "Ready",
+          "failed": "Failed",
+          "starting": "Starting",
+          "unavailable": "Unavailable",
+          "none": "None",
+          "accessibilityGranted": "Accessibility granted",
+          "accessibilityMissing": "Accessibility missing",
+          "atSpiAvailable": "AT-SPI available",
+          "atSpiMissing": "AT-SPI unavailable",
+          "shortcuts": "{{assigned}} of {{total}} assigned",
+          "checksummed": "Checksummed",
+          "unverified": "Unverified",
+          "accelerator": "Whisper {{whisper}} / ORT {{ort}} / {{gpuCount}} GPU",
+          "storage": "History {{history}}, recordings {{recordings}}",
+          "noWarnings": "No warnings"
+        },
+        "permission": {
+          "allowed": "Allowed",
+          "denied": "Denied",
+          "unknown": "Unknown"
+        },
+        "details": {
+          "startupFailed": "{{step}}: {{message}}",
+          "windowsMicrophone": "Device {{device}}, app {{app}}, desktop apps {{desktop}}",
+          "linuxSession": "{{session}} on {{desktop}}; tray {{tray}}",
+          "model": "{{engine}}; downloaded {{downloaded}}; license {{license}}; accelerators {{accelerators}}; integrity {{integrity}}",
+          "accelerator": "ORT options: {{ort}}. GPU devices: {{devices}}",
+          "insertion": "Clipboard {{clipboard}}; typing tool {{typingTool}}; external script {{externalScript}}",
+          "updates": "Shows whether automatic update checks are enabled. Live update availability remains in the footer checker.",
+          "storage": "Private session {{privateSession}}; retention {{retention}}",
+          "credentialStore": "{{platform}} credential backend",
+          "credentialStoreRetainedLegacy": "Credential store is unavailable; {{count}} legacy API-key value remains in settings so it is not lost."
+        }
       }
     },
     "about": {
@@ -826,7 +953,26 @@
     "languageGuardPreview": "معاينة: {{preview}}",
     "languageGuardPasteAnyway": "الصق على أي حال",
     "transformRecoveryCopiedTitle": "تم نسخ نتيجة التحويل",
-    "transformRecoveryCopiedDescription": "تم تحويل النص المحدد، لكن تعذر استبداله في التطبيق النشط. تم نسخ النتيجة إلى الحافظة."
+    "transformRecoveryCopiedDescription": "تم تحويل النص المحدد، لكن تعذر استبداله في التطبيق النشط. تم نسخ النتيجة إلى الحافظة.",
+    "coordinatorFailedMessage": "توقف منسق الإملاء بعد إخفاقات متكررة. أعد تشغيل Verbatim للاسترداد.",
+    "coordinatorFailedStep": "منسق الإملاء",
+    "coordinatorRestartedDescription": "استعاد Verbatim عامل الإملاء. إذا تكرر ذلك، افتح السجلات من إعدادات التصحيح.",
+    "coordinatorRestartedTitle": "تمت إعادة تشغيل خدمة الإملاء",
+    "startupFailedDescription": "تعذر على Verbatim إكمال بدء التشغيل. استخدم إجراءات الاسترداد أدناه، أو افتح السجلات للتفاصيل.",
+    "startupFailedStep": "الخطوة التي فشلت: {{step}}",
+    "startupFailedTitle": "فشل بدء التشغيل",
+    "startupOpenAppData": "فتح بيانات التطبيق",
+    "startupOpenLogs": "فتح السجلات",
+    "startupResetSettings": "إعادة ضبط الإعدادات",
+    "startupResetSettingsFailed": "فشلت إعادة ضبط الإعدادات",
+    "startupResettingSettings": "جارٍ إعادة الضبط...",
+    "startupRestart": "إعادة تشغيل Verbatim",
+    "startupUnknownStep": "خطوة بدء تشغيل غير معروفة",
+    "targetChangedTitle": "تم منع الإدراج",
+    "targetChangedDescription": "تغيرت الوجهة النشطة قبل أن يدرج Verbatim النص. استخدم اللصق هنا فقط إذا كان الحقل الحالي هو الوجهة الصحيحة.",
+    "targetChangedPasteHereAction": "الصق هنا",
+    "targetPrivacyExcludedTitle": "تم حظر التسجيل",
+    "targetPrivacyExcludedDescription": "يطابق التطبيق النشط استثناء تطبيق خاص. لم يبدأ Verbatim التسجيل."
   },
   "appLanguage": {
     "title": "لغة التطبيق",
@@ -868,6 +1014,7 @@
       "micFailed": "مشكلة في الميكروفون",
       "cancelled": "تم الإلغاء",
       "transformCopied": "تم نسخ التحويل"
-    }
+    },
+    "privateSession": "جلسة خاصة"
   }
 }

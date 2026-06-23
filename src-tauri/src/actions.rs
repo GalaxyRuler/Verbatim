@@ -2,11 +2,17 @@
 use crate::apple_intelligence;
 use crate::audio_feedback::{play_feedback_sound, play_feedback_sound_blocking, SoundType};
 use crate::audio_toolkit::{is_microphone_access_denied, is_no_input_device_error};
+use crate::dictation_transaction::{
+    classify_final_text, classify_recording_stop, DictationTransactionTerminal, FinalTextDecision,
+    RecordingStopDecision,
+};
 use crate::managers::audio::{
     is_selected_microphone_unavailable_error, AudioRecordingManager, RecordingStopResult,
 };
 use crate::managers::history::HistoryManager;
 use crate::managers::transcription::TranscriptionManager;
+use crate::operation_cancellation::{OperationCancellationState, OperationToken};
+use crate::overlay::OverlayState;
 use crate::settings::{get_settings, AppSettings, APPLE_INTELLIGENCE_PROVIDER_ID};
 use crate::shortcut;
 use crate::transform_mode::TransformAction;
@@ -72,11 +78,6 @@ struct TransformShortcutAction {
 /// Field name for structured output JSON schema
 const TRANSCRIPTION_FIELD: &str = "transcription";
 
-/// Strip invisible Unicode characters that some LLMs may insert
-fn strip_invisible_chars(s: &str) -> String {
-    s.replace(['\u{200B}', '\u{200C}', '\u{200D}', '\u{FEFF}'], "")
-}
-
 /// Build a system prompt from the user's prompt template.
 /// Removes `${output}` placeholder since the transcription is sent as the user message.
 fn build_system_prompt(prompt_template: &str) -> String {
@@ -84,7 +85,8 @@ fn build_system_prompt(prompt_template: &str) -> String {
 }
 
 fn validate_post_processed_text(transcription: &str, processed_text: &str) -> Result<(), String> {
-    crate::adaptive::processor::validate_unrequested_translation(transcription, processed_text)
+    crate::text_processing::validate_no_unrequested_translation(transcription, processed_text)
+        .map_err(|err| err.to_string())
 }
 
 fn copy_text_to_clipboard(app: &AppHandle, text: &str, reason: &str) {
@@ -133,7 +135,8 @@ fn native_translation_allows_language_guard_bypass(
     settings: &AppSettings,
     model_supports_translation: bool,
 ) -> bool {
-    model_supports_translation && settings.translate_to_english
+    crate::runtime_settings::dictation_runtime(settings, &[], model_supports_translation)
+        .native_translation_to_english()
 }
 
 fn selected_model_supports_translation(app: &AppHandle, settings: &AppSettings) -> bool {
@@ -176,23 +179,247 @@ fn language_guard_blocks(app: &AppHandle, settings: &AppSettings, final_text: &s
     true
 }
 
+fn finish_dictation_transaction(app: &AppHandle, terminal: DictationTransactionTerminal) {
+    let cleanup = terminal.cleanup_plan();
+    if cleanup.hide_overlay {
+        utils::hide_recording_overlay(app);
+    }
+    if cleanup.restore_idle_tray {
+        change_tray_icon(app, TrayIconState::Idle);
+    }
+}
+
+fn current_or_new_operation_token(app: &AppHandle) -> Option<OperationToken> {
+    app.try_state::<OperationCancellationState>().map(|state| {
+        state
+            .current_token()
+            .unwrap_or_else(|| state.begin_operation())
+    })
+}
+
+fn operation_is_cancelled(app: &AppHandle, token: Option<&OperationToken>) -> bool {
+    let Some(token) = token else {
+        return false;
+    };
+
+    app.try_state::<OperationCancellationState>().map_or_else(
+        || token.provider_cancellation().is_cancelled(),
+        |state| state.is_cancelled(token),
+    )
+}
+
+fn finish_cancelled_operation(app: &AppHandle) {
+    utils::emit_overlay_state_changed(app, OverlayState::Cancelled);
+    finish_dictation_transaction(app, DictationTransactionTerminal::Cancelled);
+}
+
+fn cleanup_cancelled_wav(wav_path: &std::path::Path) {
+    if wav_path.exists() {
+        if let Err(err) = std::fs::remove_file(wav_path) {
+            error!(
+                "Failed to delete WAV for cancelled operation at {}: {}",
+                wav_path.display(),
+                err
+            );
+        }
+    }
+}
+
+fn cleanup_cancelled_recording(
+    history_manager: Arc<HistoryManager>,
+    saved_entry_id: Option<i64>,
+    wav_path: Option<std::path::PathBuf>,
+) {
+    if let Some(entry_id) = saved_entry_id {
+        tauri::async_runtime::spawn(async move {
+            if let Err(err) = history_manager.delete_entry(entry_id).await {
+                error!(
+                    "Failed to delete history entry {} for cancelled operation: {}",
+                    entry_id, err
+                );
+            }
+        });
+    } else if let Some(wav_path) = wav_path {
+        cleanup_cancelled_wav(&wav_path);
+    }
+}
+
+struct AdaptiveInsertionRequest {
+    app: AppHandle,
+    history_manager: Arc<HistoryManager>,
+    settings: AppSettings,
+    final_text: String,
+    context: crate::adaptive::types::CapturedContext,
+    saved_entry_id: Option<i64>,
+    cancelled_wav_path: Option<std::path::PathBuf>,
+    operation_token: Option<OperationToken>,
+    paste_started_at: Instant,
+}
+
+fn complete_adaptive_insertion(request: AdaptiveInsertionRequest) {
+    let AdaptiveInsertionRequest {
+        app,
+        history_manager,
+        settings,
+        final_text,
+        context,
+        saved_entry_id,
+        cancelled_wav_path,
+        operation_token,
+        paste_started_at,
+    } = request;
+
+    if operation_is_cancelled(&app, operation_token.as_ref()) {
+        cleanup_cancelled_recording(
+            Arc::clone(&history_manager),
+            saved_entry_id,
+            cancelled_wav_path,
+        );
+        finish_cancelled_operation(&app);
+        return;
+    }
+
+    let verify_adaptive_target =
+        should_verify_adaptive_target(&context) && should_capture_adaptive_context(&settings);
+    let target_verified = if verify_adaptive_target {
+        let current_context =
+            crate::adaptive::context::capture_context(&settings.adaptive_private_app_patterns);
+        adaptive_target_verified(&context, &current_context)
+    } else {
+        true
+    };
+    let attempt = if target_verified {
+        if language_guard_blocks(&app, &settings, &final_text) {
+            crate::insertion::InsertionAttempt::adaptive_guard_blocked()
+        } else {
+            let paste_text = prepare_adaptive_paste_text(&final_text, &context);
+            force_ltr_input_direction_before_paste(&app, &final_text, &context);
+            crate::insertion::InsertionAttempt::adaptive_ready(paste_text)
+        }
+    } else {
+        error!("Adaptive paste skipped because the foreground target changed before insertion");
+        crate::insertion::InsertionAttempt::adaptive_target_changed()
+    };
+
+    let mut insertion_transaction = crate::insertion::InsertionTransaction::new(|request| {
+        let cancellation_check = || operation_is_cancelled(&app, operation_token.as_ref());
+        utils::paste_with_receipt_with_auto_learn_and_cancellation(
+            request.text,
+            app.clone(),
+            request.target_verified,
+            request.auto_learn_eligible,
+            Some(&cancellation_check),
+        )
+    });
+    let outcome = insertion_transaction.run(attempt);
+    if let Some(recovery) = &outcome.recovery_copy {
+        copy_text_to_clipboard(&app, &recovery.text, recovery.reason);
+    }
+    let recovery_event = outcome.paste_recovery_event();
+    let receipt = outcome.receipt;
+
+    if outcome.emit_inserted {
+        debug!(
+            "Text pasted successfully in {:?}",
+            paste_started_at.elapsed()
+        );
+        utils::emit_overlay_state_changed(&app, OverlayState::Inserted);
+    }
+    if outcome.emit_paste_error {
+        error!(
+            "Failed to paste transcription: {:?}",
+            receipt.error.as_deref()
+        );
+        if let Some(recovery_event) = recovery_event {
+            let _ = app.emit("paste-error", recovery_event);
+        }
+    }
+    if let Some(entry_id) = saved_entry_id {
+        if let Some(receipt_json) = serialize_json(&receipt) {
+            if let Err(err) = history_manager.update_insertion_receipt(entry_id, receipt_json) {
+                error!("Failed to update insertion receipt: {}", err);
+            }
+        }
+    }
+    finish_dictation_transaction(&app, DictationTransactionTerminal::InsertionCompleted);
+}
+
+fn complete_classic_insertion(
+    app: AppHandle,
+    history_manager: Arc<HistoryManager>,
+    settings: AppSettings,
+    final_text: String,
+    saved_entry_id: Option<i64>,
+    cancelled_wav_path: Option<std::path::PathBuf>,
+    operation_token: Option<OperationToken>,
+    context: Option<crate::adaptive::types::CapturedContext>,
+    paste_started_at: Instant,
+) {
+    if operation_is_cancelled(&app, operation_token.as_ref()) {
+        cleanup_cancelled_recording(history_manager, saved_entry_id, cancelled_wav_path);
+        finish_cancelled_operation(&app);
+        return;
+    }
+
+    let target_verified = classic_target_verified(&settings, context.as_ref());
+    let attempt = if !target_verified {
+        error!("Classic paste skipped because the foreground target changed before insertion");
+        crate::insertion::InsertionAttempt::classic_target_changed()
+    } else if language_guard_blocks(&app, &settings, &final_text) {
+        crate::insertion::InsertionAttempt::classic_guard_blocked()
+    } else {
+        crate::insertion::InsertionAttempt::classic_ready(final_text)
+    };
+    let mut insertion_transaction = crate::insertion::InsertionTransaction::new(|request| {
+        let cancellation_check = || operation_is_cancelled(&app, operation_token.as_ref());
+        utils::paste_with_receipt_with_auto_learn_and_cancellation(
+            request.text,
+            app.clone(),
+            request.target_verified,
+            request.auto_learn_eligible,
+            Some(&cancellation_check),
+        )
+    });
+    let outcome = insertion_transaction.run(attempt);
+    if let Some(recovery) = &outcome.recovery_copy {
+        copy_text_to_clipboard(&app, &recovery.text, recovery.reason);
+    }
+    if outcome.emit_inserted {
+        debug!(
+            "Text pasted successfully in {:?}",
+            paste_started_at.elapsed()
+        );
+        utils::emit_overlay_state_changed(&app, OverlayState::Inserted);
+    }
+    if outcome.emit_paste_error {
+        error!(
+            "Failed to paste transcription: {:?}",
+            outcome.receipt.error.as_deref()
+        );
+        if let Some(recovery_event) = outcome.paste_recovery_event() {
+            let _ = app.emit("paste-error", recovery_event);
+        }
+    }
+    finish_dictation_transaction(&app, DictationTransactionTerminal::InsertionCompleted);
+}
+
 fn accept_post_processed_text(
     transcription: &str,
     processed_text: String,
     provider_id: &str,
 ) -> Option<String> {
     if provider_id == crate::local_llm::runtime::VERBATIM_LOCAL_PROVIDER_ID {
-        let evaluation = crate::local_llm::evaluation::evaluate_post_processing_output(
-            transcription,
-            &processed_text,
-        );
-        if !evaluation.passed {
+        if let Err(err) =
+            crate::text_processing::validate_preserved_text(transcription, &processed_text)
+        {
             warn!(
-                "Managed local post-processing output rejected for provider '{}': {:?}. Falling back to raw transcript.",
-                provider_id, evaluation.issues
+                "Managed local post-processing output rejected for provider '{}': {}. Falling back to raw transcript.",
+                provider_id, err
             );
             return None;
         }
+
+        return Some(processed_text);
     }
 
     match validate_post_processed_text(transcription, &processed_text) {
@@ -207,37 +434,35 @@ fn accept_post_processed_text(
     }
 }
 
-fn is_local_post_process_provider(base_url: &str) -> bool {
-    crate::settings::is_local_post_process_base_url(base_url)
+fn should_run_requested_post_processing(
+    requested: bool,
+    settings: &AppSettings,
+    private_session_enabled: bool,
+) -> bool {
+    requested && settings.post_process_enabled && !private_session_enabled
 }
 
-fn can_egress_post_process_text(provider_base_url: &str, api_key: &str) -> bool {
-    is_local_post_process_provider(provider_base_url) || !api_key.trim().is_empty()
-}
-
-fn should_run_requested_post_processing(requested: bool, settings: &AppSettings) -> bool {
-    requested && settings.post_process_enabled
-}
-
-fn should_attempt_api_post_processing(settings: &AppSettings) -> bool {
-    !settings.local_llm.enabled
+pub(crate) fn dictation_storage_policy(
+    settings: &AppSettings,
+    private_session_enabled: bool,
+) -> (bool, bool) {
+    let history_enabled = settings.history_enabled && !private_session_enabled;
+    let recordings_enabled = history_enabled && settings.recordings_enabled;
+    (history_enabled, recordings_enabled)
 }
 
 async fn post_process_with_managed_local_llm(
     app: &AppHandle,
-    settings: &AppSettings,
+    settings: &crate::local_llm::LocalLlmSettings,
     transcription: &str,
+    operation_token: Option<&OperationToken>,
 ) -> Option<String> {
-    if !settings.local_llm.enabled {
-        return None;
-    }
-
     let Some(manager) = app.try_state::<Arc<crate::local_llm::download::LocalLlmManager>>() else {
         debug!("Managed local post-processing skipped because local LLM manager is unavailable");
         return None;
     };
 
-    let endpoint = match manager.ensure_runtime(&settings.local_llm).await {
+    let endpoint = match manager.ensure_runtime(settings).await {
         Ok(endpoint) => endpoint,
         Err(err) => {
             warn!(
@@ -253,6 +478,11 @@ async fn post_process_with_managed_local_llm(
         endpoint.model_id
     );
 
+    if operation_is_cancelled(app, operation_token) {
+        debug!("Managed local post-processing skipped because operation was cancelled");
+        return None;
+    }
+
     match crate::llm_client::send_chat_completion_with_schema(
         &endpoint.provider,
         String::new(),
@@ -266,7 +496,7 @@ async fn post_process_with_managed_local_llm(
     .await
     {
         Ok(Some(content)) => {
-            let content = strip_invisible_chars(&content);
+            let content = crate::text_processing::strip_invisible_chars(&content);
             debug!(
                 "Managed local post-processing succeeded. Output length: {} chars",
                 content.len()
@@ -295,102 +525,49 @@ async fn post_process_transcription(
     app: &AppHandle,
     settings: &AppSettings,
     transcription: &str,
+    operation_token: Option<&OperationToken>,
 ) -> Option<String> {
-    if let Some(processed_text) =
-        post_process_with_managed_local_llm(app, settings, transcription).await
-    {
-        return Some(processed_text);
-    }
+    let runtime = crate::runtime_settings::post_processing_runtime(settings, true);
 
-    if !should_attempt_api_post_processing(settings) {
-        debug!("Post-processing skipped API provider because local model mode is active");
+    if runtime.uses_managed_local() {
+        if let Some(processed_text) = post_process_with_managed_local_llm(
+            app,
+            &settings.local_llm,
+            transcription,
+            operation_token,
+        )
+        .await
+        {
+            return Some(processed_text);
+        }
         return None;
     }
 
-    let provider = match settings.active_post_process_provider().cloned() {
-        Some(provider) => provider,
-        None => {
-            debug!("Post-processing enabled but no provider is selected");
-            return None;
-        }
-    };
-
-    let model = settings
-        .post_process_models
-        .get(&provider.id)
-        .cloned()
-        .unwrap_or_default();
-
-    if model.trim().is_empty() {
-        debug!(
-            "Post-processing skipped because provider '{}' has no model configured",
-            provider.id
-        );
-        return None;
-    }
-
-    let selected_prompt_id = match &settings.post_process_selected_prompt_id {
-        Some(id) => id.clone(),
-        None => {
-            debug!("Post-processing skipped because no prompt is selected");
-            return None;
-        }
-    };
-
-    let prompt = match settings
-        .post_process_prompts
-        .iter()
-        .find(|prompt| prompt.id == selected_prompt_id)
-    {
-        Some(prompt) => prompt.prompt.clone(),
+    let api_runtime = match runtime.api_provider() {
+        Some(api_runtime) => api_runtime.clone(),
         None => {
             debug!(
-                "Post-processing skipped because prompt '{}' was not found",
-                selected_prompt_id
+                "Post-processing skipped by runtime settings: {:?}",
+                runtime.skip_reason()
             );
             return None;
         }
     };
 
-    if prompt.trim().is_empty() {
-        debug!("Post-processing skipped because the selected prompt is empty");
-        return None;
-    }
+    let provider = api_runtime.provider;
+    let model = api_runtime.model;
+    let prompt = api_runtime.prompt.prompt;
+    let api_key = api_runtime.api_key;
 
     debug!(
         "Starting LLM post-processing with provider '{}' (model: {})",
         provider.id, model
     );
 
-    let api_key = settings
-        .post_process_api_keys
-        .get(&provider.id)
-        .cloned()
-        .unwrap_or_default();
-
-    if !can_egress_post_process_text(&provider.base_url, &api_key) {
-        warn!(
-            "Post-processing skipped for provider '{}' because remote providers require a configured API key before transcript egress",
-            provider.id
-        );
+    if operation_is_cancelled(app, operation_token) {
+        debug!("Post-processing skipped because operation was cancelled before provider request");
         return None;
     }
-
-    // Disable reasoning for providers where post-processing rarely benefits from it.
-    // - custom: top-level reasoning_effort (works for local OpenAI-compat servers)
-    // - openrouter: nested reasoning object; exclude:true also keeps reasoning text
-    //   out of the response so it can't pollute structured-output JSON parsing
-    let (reasoning_effort, reasoning) = match provider.id.as_str() {
-        "custom" => (Some("none".to_string()), None),
-        "openrouter" => (
-            None,
-            Some(crate::llm_client::ReasoningConfig {
-                effort: Some("none".to_string()),
-                exclude: Some(true),
-            }),
-        ),
-        _ => (None, None),
-    };
 
     if provider.supports_structured_output {
         debug!("Using structured outputs for provider '{}'", provider.id);
@@ -420,7 +597,7 @@ async fn post_process_transcription(
                             debug!("Apple Intelligence returned an empty response");
                             None
                         } else {
-                            let result = strip_invisible_chars(&result);
+                            let result = crate::text_processing::strip_invisible_chars(&result);
                             debug!(
                                 "Apple Intelligence post-processing succeeded. Output length: {} chars",
                                 result.len()
@@ -442,62 +619,41 @@ async fn post_process_transcription(
             }
         }
 
-        // Define JSON schema for transcription output
-        let json_schema = serde_json::json!({
-            "type": "object",
-            "properties": {
-                (TRANSCRIPTION_FIELD): {
-                    "type": "string",
-                    "description": "The cleaned and processed transcription text"
-                }
-            },
-            "required": [TRANSCRIPTION_FIELD],
-            "additionalProperties": false
-        });
+        let request = crate::text_processing::TextProviderRequest::structured(
+            user_content,
+            Some(system_prompt),
+            TRANSCRIPTION_FIELD,
+            "The cleaned and processed transcription text",
+        );
 
-        match crate::llm_client::send_chat_completion_with_schema(
+        match crate::text_processing::send_text_provider_request(
             &provider,
             api_key.clone(),
             &model,
-            user_content,
-            Some(system_prompt),
-            Some(json_schema),
-            reasoning_effort.clone(),
-            reasoning.clone(),
+            request,
         )
         .await
         {
             Ok(Some(content)) => {
-                // Parse the JSON response to extract the transcription field
-                match serde_json::from_str::<serde_json::Value>(&content) {
-                    Ok(json) => {
-                        if let Some(transcription_value) =
-                            json.get(TRANSCRIPTION_FIELD).and_then(|t| t.as_str())
-                        {
-                            let result = strip_invisible_chars(transcription_value);
-                            debug!(
-                                "Structured output post-processing succeeded for provider '{}'. Output length: {} chars",
-                                provider.id,
-                                result.len()
-                            );
-                            return accept_post_processed_text(transcription, result, &provider.id);
-                        } else {
-                            error!("Structured output response missing 'transcription' field");
-                            return accept_post_processed_text(
-                                transcription,
-                                strip_invisible_chars(&content),
-                                &provider.id,
-                            );
-                        }
+                // Parse the JSON response to extract the transcription field.
+                match crate::text_processing::extract_structured_text(&content, TRANSCRIPTION_FIELD)
+                {
+                    Ok(result) => {
+                        debug!(
+                            "Structured output post-processing succeeded for provider '{}'. Output length: {} chars",
+                            provider.id,
+                            result.len()
+                        );
+                        return accept_post_processed_text(transcription, result, &provider.id);
                     }
-                    Err(e) => {
+                    Err(err) => {
                         error!(
-                            "Failed to parse structured output JSON: {}. Returning raw content.",
-                            e
+                            "Structured output parse failed: {}. Returning raw content.",
+                            err
                         );
                         return accept_post_processed_text(
                             transcription,
-                            strip_invisible_chars(&content),
+                            crate::text_processing::strip_invisible_chars(&content),
                             &provider.id,
                         );
                     }
@@ -520,19 +676,18 @@ async fn post_process_transcription(
     // Legacy mode: Replace ${output} variable in the prompt with the actual text
     let processed_prompt = prompt.replace("${output}", transcription);
     debug!("Processed prompt length: {} chars", processed_prompt.len());
+    let request = crate::text_processing::TextProviderRequest::new(processed_prompt, None);
 
-    match crate::llm_client::send_chat_completion(
-        &provider,
-        api_key,
-        &model,
-        processed_prompt,
-        reasoning_effort,
-        reasoning,
-    )
-    .await
+    if operation_is_cancelled(app, operation_token) {
+        debug!("Post-processing skipped because operation was cancelled before legacy request");
+        return None;
+    }
+
+    match crate::text_processing::send_text_provider_request(&provider, api_key, &model, request)
+        .await
     {
         Ok(Some(content)) => {
-            let content = strip_invisible_chars(&content);
+            let content = crate::text_processing::strip_invisible_chars(&content);
             debug!(
                 "LLM post-processing succeeded for provider '{}'. Output length: {} chars",
                 provider.id,
@@ -609,8 +764,11 @@ pub(crate) async fn process_transcription_output(
     app: &AppHandle,
     transcription: &str,
     post_process: bool,
+    operation_token: Option<OperationToken>,
 ) -> ProcessedTranscription {
-    let settings = get_settings(app);
+    let mut settings = get_settings(app);
+    crate::credentials::hydrate_runtime_post_process_api_keys(app, &mut settings);
+    let private_session_enabled = crate::private_session::is_enabled(app);
     let mut final_text = transcription.to_string();
     let mut post_processed_text: Option<String> = None;
     let mut post_process_prompt: Option<String> = None;
@@ -628,8 +786,9 @@ pub(crate) async fn process_transcription_output(
         post_processed_text = Some(final_text.clone());
     }
 
-    if post_process {
-        if let Some(processed_text) = post_process_transcription(app, &settings, &final_text).await
+    if should_run_requested_post_processing(post_process, &settings, private_session_enabled) {
+        if let Some(processed_text) =
+            post_process_transcription(app, &settings, &final_text, operation_token.as_ref()).await
         {
             if let Err(err) = validate_post_processed_text(transcription, &processed_text) {
                 warn!(
@@ -690,11 +849,54 @@ fn prepare_adaptive_paste_text(
 }
 
 fn should_capture_adaptive_context(settings: &AppSettings) -> bool {
-    settings.adaptive_profiles_enabled && settings.context_awareness_enabled
+    crate::runtime_settings::context_runtime(settings).should_capture_context()
+}
+
+fn should_capture_target_context(settings: &AppSettings) -> bool {
+    should_capture_adaptive_context(settings) || settings.context_awareness_enabled
+}
+
+fn should_check_target_privacy_exclusion(settings: &AppSettings) -> bool {
+    !crate::runtime_settings::context_runtime(settings)
+        .private_app_patterns()
+        .is_empty()
+}
+
+fn should_capture_start_context(settings: &AppSettings) -> bool {
+    should_capture_target_context(settings) || should_check_target_privacy_exclusion(settings)
+}
+
+fn target_privacy_exclusion_blocks_recording(
+    context: &crate::adaptive::types::CapturedContext,
+) -> bool {
+    context.is_sensitive
 }
 
 fn should_verify_adaptive_target(context: &crate::adaptive::types::CapturedContext) -> bool {
     context.target_fingerprint.is_some()
+}
+
+fn should_verify_classic_target(
+    settings: &AppSettings,
+    context: Option<&crate::adaptive::types::CapturedContext>,
+) -> bool {
+    settings.context_awareness_enabled && context.is_some_and(should_verify_adaptive_target)
+}
+
+fn classic_target_verified(
+    settings: &AppSettings,
+    context: Option<&crate::adaptive::types::CapturedContext>,
+) -> bool {
+    let Some(context) = context else {
+        return true;
+    };
+    if !should_verify_classic_target(settings, Some(context)) {
+        return true;
+    }
+
+    let current_context =
+        crate::adaptive::context::capture_context(&settings.adaptive_private_app_patterns);
+    adaptive_target_verified(context, &current_context)
 }
 
 #[cfg(target_os = "windows")]
@@ -817,6 +1019,57 @@ mod adaptive_action_tests {
         }
     }
 
+    fn post_processing_settings_for_provider(base_url: &str, api_key: &str) -> AppSettings {
+        let mut settings = crate::settings::get_default_settings();
+        let provider_id = "test-provider".to_string();
+
+        settings.post_process_enabled = true;
+        settings.local_llm.enabled = false;
+        settings.post_process_provider_id = provider_id.clone();
+        settings.post_process_selected_prompt_id = Some("test-prompt".to_string());
+        settings.post_process_prompts = vec![crate::settings::LLMPrompt {
+            id: "test-prompt".to_string(),
+            name: "Test Prompt".to_string(),
+            prompt: "Clean up the dictated transcript without changing its meaning.".to_string(),
+        }];
+        settings
+            .post_process_models
+            .insert(provider_id.clone(), "test-model".to_string());
+        settings
+            .post_process_providers
+            .push(crate::settings::PostProcessProvider {
+                id: provider_id.clone(),
+                label: "Test Provider".to_string(),
+                base_url: base_url.to_string(),
+                allow_base_url_edit: true,
+                models_endpoint: None,
+                supports_structured_output: true,
+            });
+
+        if !api_key.is_empty() {
+            settings
+                .post_process_api_keys
+                .insert(provider_id, api_key.to_string());
+        }
+
+        settings
+    }
+
+    fn api_post_processing_is_available(base_url: &str, api_key: &str) -> bool {
+        let settings = post_processing_settings_for_provider(base_url, api_key);
+        crate::runtime_settings::post_processing_runtime(&settings, true)
+            .api_provider()
+            .is_some()
+    }
+
+    fn post_processing_skip_reason(
+        base_url: &str,
+        api_key: &str,
+    ) -> Option<crate::runtime_settings::PostProcessingSkipReason> {
+        let settings = post_processing_settings_for_provider(base_url, api_key);
+        crate::runtime_settings::post_processing_runtime(&settings, true).skip_reason()
+    }
+
     #[test]
     fn serialize_json_returns_some_for_receipt() {
         let receipt = InsertionReceipt {
@@ -874,6 +1127,27 @@ mod adaptive_action_tests {
         assert!(should_verify_adaptive_target(&context_with_fingerprint(
             Some("notepad|edit")
         )));
+    }
+
+    #[test]
+    fn classic_target_recheck_requires_context_awareness_and_fingerprint() {
+        let mut settings = crate::settings::get_default_settings();
+        settings.context_awareness_enabled = false;
+
+        assert!(!should_verify_classic_target(
+            &settings,
+            Some(&context_with_fingerprint(Some("notepad|edit")))
+        ));
+
+        settings.context_awareness_enabled = true;
+        assert!(!should_verify_classic_target(
+            &settings,
+            Some(&context_with_fingerprint(None))
+        ));
+        assert!(should_verify_classic_target(
+            &settings,
+            Some(&context_with_fingerprint(Some("notepad|edit")))
+        ));
     }
 
     #[test]
@@ -979,16 +1253,19 @@ mod adaptive_action_tests {
 
     #[test]
     fn local_post_process_providers_do_not_require_api_key() {
-        assert!(can_egress_post_process_text(
+        assert!(api_post_processing_is_available(
             "http://localhost:11434/v1",
             ""
         ));
-        assert!(can_egress_post_process_text(
+        assert!(api_post_processing_is_available(
             "https://127.0.0.1:8080/v1",
             "   "
         ));
-        assert!(can_egress_post_process_text("http://[::1]:11434/v1", ""));
-        assert!(can_egress_post_process_text(
+        assert!(api_post_processing_is_available(
+            "http://[::1]:11434/v1",
+            ""
+        ));
+        assert!(api_post_processing_is_available(
             "apple-intelligence://local",
             ""
         ));
@@ -996,15 +1273,15 @@ mod adaptive_action_tests {
 
     #[test]
     fn remote_post_process_providers_require_api_key() {
-        assert!(!can_egress_post_process_text(
-            "https://api.openai.com/v1",
-            ""
-        ));
-        assert!(!can_egress_post_process_text(
-            "https://openrouter.ai/api/v1",
-            "   "
-        ));
-        assert!(can_egress_post_process_text(
+        assert_eq!(
+            post_processing_skip_reason("https://api.openai.com/v1", ""),
+            Some(crate::runtime_settings::PostProcessingSkipReason::RemoteMissingApiKey)
+        );
+        assert_eq!(
+            post_processing_skip_reason("https://openrouter.ai/api/v1", "   "),
+            Some(crate::runtime_settings::PostProcessingSkipReason::RemoteMissingApiKey)
+        );
+        assert!(api_post_processing_is_available(
             "https://api.openai.com/v1",
             "sk-test"
         ));
@@ -1017,9 +1294,10 @@ mod adaptive_action_tests {
             "http://localhost.evil.com/v1",
             "https://127.0.0.1.evil.com/v1",
         ] {
-            assert!(
-                !can_egress_post_process_text(base_url, ""),
-                "{base_url} must not be treated as a local provider"
+            assert_eq!(
+                post_processing_skip_reason(base_url, ""),
+                Some(crate::runtime_settings::PostProcessingSkipReason::RemoteMissingApiKey),
+                "{base_url} must not be treated as a local provider",
             );
         }
     }
@@ -1029,22 +1307,47 @@ mod adaptive_action_tests {
         let mut settings = crate::settings::get_default_settings();
         settings.post_process_enabled = false;
 
-        assert!(!should_run_requested_post_processing(true, &settings));
+        assert!(!should_run_requested_post_processing(
+            true, &settings, false
+        ));
 
         settings.post_process_enabled = true;
-        assert!(should_run_requested_post_processing(true, &settings));
-        assert!(!should_run_requested_post_processing(false, &settings));
+        assert!(should_run_requested_post_processing(true, &settings, false));
+        assert!(!should_run_requested_post_processing(
+            false, &settings, false
+        ));
+        assert!(!should_run_requested_post_processing(true, &settings, true));
+    }
+
+    #[test]
+    fn private_session_disables_history_and_wav_storage_policy() {
+        let mut settings = crate::settings::get_default_settings();
+
+        assert_eq!(dictation_storage_policy(&settings, false), (true, true));
+        assert_eq!(dictation_storage_policy(&settings, true), (false, false));
+
+        settings.recordings_enabled = false;
+        assert_eq!(dictation_storage_policy(&settings, false), (true, false));
+
+        settings.history_enabled = false;
+        settings.recordings_enabled = true;
+        assert_eq!(dictation_storage_policy(&settings, false), (false, false));
     }
 
     #[test]
     fn local_post_processing_mode_does_not_attempt_api_fallback() {
-        let mut settings = crate::settings::get_default_settings();
+        let mut settings =
+            post_processing_settings_for_provider("https://api.openai.com/v1", "sk-test");
 
         settings.local_llm.enabled = false;
-        assert!(should_attempt_api_post_processing(&settings));
+        let api_runtime = crate::runtime_settings::post_processing_runtime(&settings, true);
+        assert!(api_runtime.api_provider().is_some());
+        assert!(!api_runtime.uses_managed_local());
 
         settings.local_llm.enabled = true;
-        assert!(!should_attempt_api_post_processing(&settings));
+        let local_runtime = crate::runtime_settings::post_processing_runtime(&settings, true);
+        assert!(local_runtime.uses_managed_local());
+        assert!(local_runtime.api_provider().is_none());
     }
 
     #[test]
@@ -1053,6 +1356,11 @@ mod adaptive_action_tests {
         settings.selected_language = "ar".to_string();
         settings.translation_enabled = true;
         settings.translate_to_english = true;
+        settings.translation_request = Some(crate::settings::TranslationRequestSettings {
+            source_language: "auto".to_string(),
+            target_language: "en".to_string(),
+            route: crate::settings::TranslationRoute::Auto,
+        });
 
         assert!(!native_translation_allows_language_guard_bypass(
             &settings, false
@@ -1065,6 +1373,11 @@ mod adaptive_action_tests {
         settings.selected_language = "ar".to_string();
         settings.translation_enabled = true;
         settings.translate_to_english = true;
+        settings.translation_request = Some(crate::settings::TranslationRequestSettings {
+            source_language: "auto".to_string(),
+            target_language: "en".to_string(),
+            route: crate::settings::TranslationRoute::Auto,
+        });
 
         assert!(native_translation_allows_language_guard_bypass(
             &settings, true
@@ -1160,6 +1473,49 @@ mod adaptive_action_tests {
     }
 
     #[test]
+    fn target_context_capture_allows_context_awareness_without_adaptive_profiles() {
+        let mut settings = crate::settings::get_default_settings();
+        settings.adaptive_profiles_enabled = false;
+        settings.context_awareness_enabled = true;
+
+        assert!(!should_capture_adaptive_context(&settings));
+        assert!(should_capture_target_context(&settings));
+    }
+
+    #[test]
+    fn target_privacy_exclusion_checks_default_private_patterns_without_context_awareness() {
+        let mut settings = crate::settings::get_default_settings();
+        settings.context_awareness_enabled = false;
+        settings.adaptive_profiles_enabled = false;
+
+        assert!(should_check_target_privacy_exclusion(&settings));
+        assert!(should_capture_start_context(&settings));
+        assert!(!should_capture_target_context(&settings));
+    }
+
+    #[test]
+    fn target_privacy_exclusion_is_disabled_when_patterns_are_empty() {
+        let mut settings = crate::settings::get_default_settings();
+        settings.context_awareness_enabled = false;
+        settings.adaptive_profiles_enabled = false;
+        settings.adaptive_private_app_patterns.clear();
+
+        assert!(!should_check_target_privacy_exclusion(&settings));
+        assert!(!should_capture_start_context(&settings));
+    }
+
+    #[test]
+    fn target_privacy_exclusion_blocks_sensitive_context() {
+        let mut context = context_with_fingerprint(Some("bitwarden.exe|Chrome_WidgetWin_1"));
+        context.is_sensitive = true;
+
+        assert!(target_privacy_exclusion_blocks_recording(&context));
+
+        context.is_sensitive = false;
+        assert!(!target_privacy_exclusion_blocks_recording(&context));
+    }
+
+    #[test]
     fn adaptive_guard_block_outcome_is_not_attempted_and_keeps_feedback() {
         let attempt = crate::insertion::InsertionAttempt::adaptive_guard_blocked();
 
@@ -1205,13 +1561,23 @@ impl ShortcutAction for TranscribeAction {
 
         // Get the microphone mode to determine audio feedback timing
         let settings = get_settings(app);
-        if should_capture_adaptive_context(&settings) {
+        let context_runtime = crate::runtime_settings::context_runtime(&settings);
+        let mut target_privacy_excluded = false;
+        let should_store_target_context = should_capture_target_context(&settings);
+        if should_capture_start_context(&settings) {
             if let Some(store) = app.try_state::<crate::adaptive::session::ActiveDictationContext>()
             {
                 let context = crate::adaptive::context::capture_context(
-                    &settings.adaptive_private_app_patterns,
+                    context_runtime.private_app_patterns(),
                 );
-                store.insert(&binding_id, context);
+                if target_privacy_exclusion_blocks_recording(&context) {
+                    target_privacy_excluded = true;
+                    store.clear(&binding_id);
+                } else if should_store_target_context {
+                    store.insert(&binding_id, context);
+                } else {
+                    store.clear(&binding_id);
+                }
             }
         } else if let Some(store) =
             app.try_state::<crate::adaptive::session::ActiveDictationContext>()
@@ -1222,7 +1588,9 @@ impl ShortcutAction for TranscribeAction {
         debug!("Microphone mode - always_on: {}", is_always_on);
 
         let mut recording_error: Option<String> = None;
-        if is_always_on {
+        if target_privacy_excluded {
+            recording_error = Some("target_privacy_excluded".to_string());
+        } else if is_always_on {
             if let Err(e) = rm.try_start_recording(&binding_id) {
                 debug!("Recording failed: {}", e);
                 recording_error = Some(e);
@@ -1268,6 +1636,10 @@ impl ShortcutAction for TranscribeAction {
         }
 
         if recording_error.is_none() {
+            if let Some(cancellation_state) = app.try_state::<OperationCancellationState>() {
+                cancellation_state.begin_operation();
+            }
+
             // Dynamically register the cancel shortcut in a separate task to avoid deadlock
             shortcut::register_cancel_shortcut(app);
         } else {
@@ -1286,6 +1658,8 @@ impl ShortcutAction for TranscribeAction {
                     "no_input_device"
                 } else if is_selected_microphone_unavailable_error(&err) {
                     "selected_microphone_unavailable"
+                } else if err == "target_privacy_excluded" {
+                    "target_privacy_excluded"
                 } else {
                     "unknown"
                 };
@@ -1328,6 +1702,7 @@ impl ShortcutAction for TranscribeAction {
 
         let binding_id = binding_id.to_string(); // Clone binding_id for the async task
         let post_process = self.post_process;
+        let operation_token = current_or_new_operation_token(app);
 
         tauri::async_runtime::spawn(async move {
             let _guard = FinishGuard(ah.clone());
@@ -1337,61 +1712,90 @@ impl ShortcutAction for TranscribeAction {
             );
 
             let stop_recording_time = Instant::now();
-            if let Some(stop_result) = rm.stop_recording(&binding_id) {
-                debug!(
-                    "Recording stopped and samples retrieved in {:?}, sample count: {}, captured sample count: {}, active signal observed: {}, diagnostic state: {:?}",
-                    stop_recording_time.elapsed(),
-                    stop_result.samples.len(),
-                    stop_result.captured_sample_count,
-                    stop_result.observed_active_signal,
-                    stop_result.diagnostic_state
-                );
-
-                if !recording_has_usable_speech(&stop_result) {
+            match classify_recording_stop(
+                rm.stop_recording(&binding_id),
+                recording_has_usable_speech,
+            ) {
+                RecordingStopDecision::Continue(stop_result) => {
                     debug!(
-                        "Recording did not contain usable speech; skipping transcription and paste"
+                        "Recording stopped and samples retrieved in {:?}, sample count: {}, captured sample count: {}, active signal observed: {}, diagnostic state: {:?}",
+                        stop_recording_time.elapsed(),
+                        stop_result.samples.len(),
+                        stop_result.captured_sample_count,
+                        stop_result.observed_active_signal,
+                        stop_result.diagnostic_state
                     );
-                    utils::hide_recording_overlay(&ah);
-                    change_tray_icon(&ah, TrayIconState::Idle);
-                } else {
+
+                    if operation_is_cancelled(&ah, operation_token.as_ref()) {
+                        finish_cancelled_operation(&ah);
+                        return;
+                    }
+
                     let samples = stop_result.samples;
-                    // Save WAV concurrently with transcription
+                    let history_settings = get_settings(&ah);
+                    let private_session_enabled = crate::private_session::is_enabled(&ah);
+                    let (history_enabled, recordings_enabled) =
+                        dictation_storage_policy(&history_settings, private_session_enabled);
+
+                    // Save WAV concurrently with transcription when recording storage is enabled.
                     let sample_count = samples.len();
-                    let file_name = format!("verbatim-{}.wav", chrono::Utc::now().timestamp());
-                    let wav_path = hm.recordings_dir().join(&file_name);
-                    let wav_path_for_verify = wav_path.clone();
-                    let samples_for_wav = samples.clone();
-                    let wav_handle = tauri::async_runtime::spawn_blocking(move || {
-                        crate::audio_toolkit::save_wav_file(&wav_path, &samples_for_wav)
+                    let file_name = if recordings_enabled {
+                        format!("verbatim-{}.wav", chrono::Utc::now().timestamp())
+                    } else {
+                        String::new()
+                    };
+                    let wav_path_for_verify =
+                        recordings_enabled.then(|| hm.recordings_dir().join(&file_name));
+                    let wav_handle = wav_path_for_verify.clone().map(|wav_path| {
+                        let samples_for_wav = samples.clone();
+                        tauri::async_runtime::spawn_blocking(move || {
+                            crate::audio_toolkit::save_wav_file(&wav_path, &samples_for_wav)
+                        })
                     });
 
                     // Transcribe concurrently with WAV save
                     let transcription_time = Instant::now();
-                    let transcription_result = tm.transcribe(samples);
+                    let transcription_result = tm.transcribe_with_cancellation(
+                        samples,
+                        operation_token
+                            .as_ref()
+                            .map(OperationToken::provider_cancellation)
+                            .unwrap_or_default(),
+                    );
 
                     // Await WAV save and verify
-                    let wav_saved = match wav_handle.await {
-                        Ok(Ok(())) => {
-                            match crate::audio_toolkit::verify_wav_file(
-                                &wav_path_for_verify,
-                                sample_count,
-                            ) {
-                                Ok(()) => true,
-                                Err(e) => {
-                                    error!("WAV verification failed: {}", e);
-                                    false
+                    let wav_saved = match (wav_handle, wav_path_for_verify.as_ref()) {
+                        (Some(handle), Some(wav_path)) => match handle.await {
+                            Ok(Ok(())) => {
+                                match crate::audio_toolkit::verify_wav_file(wav_path, sample_count)
+                                {
+                                    Ok(()) => true,
+                                    Err(e) => {
+                                        error!("WAV verification failed: {}", e);
+                                        false
+                                    }
                                 }
                             }
-                        }
-                        Ok(Err(e)) => {
-                            error!("Failed to save WAV file: {}", e);
-                            false
-                        }
-                        Err(e) => {
-                            error!("WAV save task panicked: {}", e);
-                            false
-                        }
+                            Ok(Err(e)) => {
+                                error!("Failed to save WAV file: {}", e);
+                                false
+                            }
+                            Err(e) => {
+                                error!("WAV save task panicked: {}", e);
+                                false
+                            }
+                        },
+                        _ => false,
                     };
+                    let saved_wav_path = wav_saved.then(|| wav_path_for_verify.clone()).flatten();
+
+                    if operation_is_cancelled(&ah, operation_token.as_ref()) {
+                        if let Some(wav_path) = &saved_wav_path {
+                            cleanup_cancelled_wav(wav_path);
+                        }
+                        finish_cancelled_operation(&ah);
+                        return;
+                    }
 
                     match transcription_result {
                         Ok(transcription) => {
@@ -1404,18 +1808,27 @@ impl ShortcutAction for TranscribeAction {
                             );
 
                             let settings = get_settings(&ah);
-                            let effective_post_process =
-                                should_run_requested_post_processing(post_process, &settings);
+                            let effective_post_process = should_run_requested_post_processing(
+                                post_process,
+                                &settings,
+                                private_session_enabled,
+                            );
+                            let captured_context = ah
+                                .try_state::<crate::adaptive::session::ActiveDictationContext>()
+                                .and_then(|store| store.take(&binding_id));
                             let adaptive_context = if settings.adaptive_profiles_enabled {
-                                let captured = ah
-                                    .try_state::<crate::adaptive::session::ActiveDictationContext>()
-                                    .and_then(|store| store.take(&binding_id));
                                 Some(
-                                    captured
+                                    captured_context
+                                        .clone()
                                         .unwrap_or_else(crate::adaptive::context::unknown_context),
                                 )
                             } else {
                                 None
+                            };
+                            let classic_context = if settings.adaptive_profiles_enabled {
+                                None
+                            } else {
+                                captured_context
                             };
 
                             if effective_post_process || adaptive_context.is_some() {
@@ -1430,12 +1843,21 @@ impl ShortcutAction for TranscribeAction {
                                     crate::adaptive::types::ShortcutIntent::Default,
                                 )
                                 .await;
+
+                                if operation_is_cancelled(&ah, operation_token.as_ref()) {
+                                    if let Some(wav_path) = &saved_wav_path {
+                                        cleanup_cancelled_wav(wav_path);
+                                    }
+                                    finish_cancelled_operation(&ah);
+                                    return;
+                                }
+
                                 let profile = crate::adaptive::profile::find_profile_or_default(
                                     &settings.adaptive_profiles,
                                     &processed.routing.profile_id,
                                 );
 
-                                let saved_entry_id = if wav_saved {
+                                let saved_entry_id = if history_enabled {
                                     let metadata =
                                         crate::managers::history::AdaptiveHistoryMetadata {
                                             profile_id: Some(profile.id.clone()),
@@ -1450,7 +1872,7 @@ impl ShortcutAction for TranscribeAction {
                                             parent_entry_id: None,
                                         };
                                     match hm.save_entry_with_metadata(
-                                        file_name,
+                                        file_name.clone(),
                                         transcription,
                                         effective_post_process,
                                         processed.post_processed_text.clone(),
@@ -1469,210 +1891,137 @@ impl ShortcutAction for TranscribeAction {
                                 } else {
                                     None
                                 };
+                                let cancelled_wav_path = saved_wav_path.clone();
 
-                                if processed.final_text.is_empty() {
-                                    utils::hide_recording_overlay(&ah);
-                                    change_tray_icon(&ah, TrayIconState::Idle);
-                                } else {
-                                    let ah_clone = ah.clone();
-                                    let hm_for_receipt = Arc::clone(&hm);
-                                    let paste_time = Instant::now();
-                                    let final_text = processed.final_text;
-                                    let original_context = context.clone();
-                                    let private_patterns =
-                                        settings.adaptive_private_app_patterns.clone();
-                                    let verify_adaptive_target =
-                                        should_verify_adaptive_target(&original_context)
-                                            && should_capture_adaptive_context(&settings);
-                                    let settings_for_guard = settings.clone();
-                                    ah.run_on_main_thread(move || {
-                                        let target_verified = if verify_adaptive_target {
-                                            let current_context =
-                                                crate::adaptive::context::capture_context(
-                                                    &private_patterns,
-                                                );
-                                            adaptive_target_verified(
-                                                &original_context,
-                                                &current_context,
-                                            )
-                                        } else {
-                                            true
+                                if operation_is_cancelled(&ah, operation_token.as_ref()) {
+                                    cleanup_cancelled_recording(
+                                        Arc::clone(&hm),
+                                        saved_entry_id,
+                                        cancelled_wav_path,
+                                    );
+                                    finish_cancelled_operation(&ah);
+                                    return;
+                                }
+
+                                match classify_final_text(processed.final_text) {
+                                    FinalTextDecision::Terminal(terminal) => {
+                                        finish_dictation_transaction(&ah, terminal);
+                                    }
+                                    FinalTextDecision::Continue(final_text) => {
+                                        let insertion = AdaptiveInsertionRequest {
+                                            app: ah.clone(),
+                                            history_manager: Arc::clone(&hm),
+                                            settings: settings.clone(),
+                                            final_text,
+                                            context: context.clone(),
+                                            saved_entry_id,
+                                            cancelled_wav_path,
+                                            operation_token: operation_token.clone(),
+                                            paste_started_at: Instant::now(),
                                         };
-                                        let attempt = if target_verified {
-                                            if language_guard_blocks(
-                                                &ah_clone,
-                                                &settings_for_guard,
-                                                &final_text,
-                                            ) {
-                                                crate::insertion::InsertionAttempt::adaptive_guard_blocked()
-                                            } else {
-                                                let paste_text = prepare_adaptive_paste_text(
-                                                    &final_text,
-                                                    &original_context,
-                                                );
-                                                force_ltr_input_direction_before_paste(
-                                                    &ah_clone,
-                                                    &final_text,
-                                                    &original_context,
-                                                );
-                                                crate::insertion::InsertionAttempt::adaptive_ready(paste_text)
-                                            }
-                                        } else {
-                                            error!(
-                                                "Adaptive paste skipped because the foreground target changed before insertion"
+                                        ah.run_on_main_thread(move || {
+                                            complete_adaptive_insertion(insertion);
+                                        })
+                                        .unwrap_or_else(|e| {
+                                            error!("Failed to run paste on main thread: {:?}", e);
+                                            finish_dictation_transaction(
+                                                &ah,
+                                                DictationTransactionTerminal::InsertionSchedulingFailed,
                                             );
-                                            crate::insertion::InsertionAttempt::adaptive_target_changed()
-                                        };
-
-                                        let outcome = crate::insertion::resolve_insertion_attempt(
-                                            attempt,
-                                            |request| {
-                                                utils::paste_with_receipt_with_auto_learn(
-                                                    request.text,
-                                                    ah_clone.clone(),
-                                                    request.target_verified,
-                                                    request.auto_learn_eligible,
-                                                )
-                                            },
-                                        );
-                                        if let Some(recovery) = &outcome.recovery_copy {
-                                            copy_text_to_clipboard(
-                                                &ah_clone,
-                                                &recovery.text,
-                                                recovery.reason,
-                                            );
-                                        }
-                                        let receipt = outcome.receipt;
-
-                                        if outcome.emit_inserted {
-                                            debug!(
-                                                "Text pasted successfully in {:?}",
-                                                paste_time.elapsed()
-                                            );
-                                            utils::emit_overlay_state_changed(
-                                                &ah_clone,
-                                                "inserted",
-                                            );
-                                        }
-                                        if outcome.emit_paste_error {
-                                            error!(
-                                                "Failed to paste transcription: {:?}",
-                                                receipt.error.as_deref()
-                                            );
-                                            let _ = ah_clone.emit("paste-error", ());
-                                        }
-                                        if let Some(entry_id) = saved_entry_id {
-                                            if let Some(receipt_json) = serialize_json(&receipt) {
-                                                if let Err(err) = hm_for_receipt
-                                                    .update_insertion_receipt(
-                                                        entry_id,
-                                                        receipt_json,
-                                                    )
-                                                {
-                                                    error!(
-                                                        "Failed to update insertion receipt: {}",
-                                                        err
-                                                    );
-                                                }
-                                            }
-                                        }
-                                        utils::hide_recording_overlay(&ah_clone);
-                                        change_tray_icon(&ah_clone, TrayIconState::Idle);
-                                    })
-                                    .unwrap_or_else(|e| {
-                                        error!("Failed to run paste on main thread: {:?}", e);
-                                        utils::hide_recording_overlay(&ah);
-                                        change_tray_icon(&ah, TrayIconState::Idle);
-                                    });
+                                        });
+                                    }
                                 }
                             } else {
                                 let processed = process_transcription_output(
                                     &ah,
                                     &transcription,
                                     effective_post_process,
+                                    operation_token.clone(),
                                 )
                                 .await;
 
-                                // Save to history if WAV was saved
-                                if wav_saved {
-                                    if let Err(err) = hm.save_entry(
-                                        file_name,
+                                if operation_is_cancelled(&ah, operation_token.as_ref()) {
+                                    if let Some(wav_path) = &saved_wav_path {
+                                        cleanup_cancelled_wav(wav_path);
+                                    }
+                                    finish_cancelled_operation(&ah);
+                                    return;
+                                }
+
+                                let saved_entry_id = if history_enabled {
+                                    match hm.save_entry(
+                                        file_name.clone(),
                                         transcription,
                                         effective_post_process,
                                         processed.post_processed_text.clone(),
                                         processed.post_process_prompt.clone(),
                                     ) {
-                                        error!("Failed to save history entry: {}", err);
+                                        Ok(entry) => Some(entry.id),
+                                        Err(err) => {
+                                            error!("Failed to save history entry: {}", err);
+                                            None
+                                        }
                                     }
+                                } else {
+                                    None
+                                };
+                                let cancelled_wav_path = saved_wav_path.clone();
+
+                                if operation_is_cancelled(&ah, operation_token.as_ref()) {
+                                    cleanup_cancelled_recording(
+                                        Arc::clone(&hm),
+                                        saved_entry_id,
+                                        cancelled_wav_path,
+                                    );
+                                    finish_cancelled_operation(&ah);
+                                    return;
                                 }
 
-                                if processed.final_text.is_empty() {
-                                    utils::hide_recording_overlay(&ah);
-                                    change_tray_icon(&ah, TrayIconState::Idle);
-                                } else {
-                                    let ah_clone = ah.clone();
-                                    let paste_time = Instant::now();
-                                    let final_text = processed.final_text;
-                                    let settings_for_guard = settings.clone();
-                                    ah.run_on_main_thread(move || {
-                                        let attempt = if language_guard_blocks(
-                                            &ah_clone,
-                                            &settings_for_guard,
-                                            &final_text,
-                                        ) {
-                                            crate::insertion::InsertionAttempt::classic_guard_blocked()
-                                        } else {
-                                            crate::insertion::InsertionAttempt::classic_ready(final_text)
-                                        };
-                                        let outcome = crate::insertion::resolve_insertion_attempt(
-                                            attempt,
-                                            |request| {
-                                                utils::paste_with_receipt_with_auto_learn(
-                                                    request.text,
-                                                    ah_clone.clone(),
-                                                    request.target_verified,
-                                                    request.auto_learn_eligible,
-                                                )
-                                            },
-                                        );
-                                        if let Some(recovery) = &outcome.recovery_copy {
-                                            copy_text_to_clipboard(
-                                                &ah_clone,
-                                                &recovery.text,
-                                                recovery.reason,
+                                match classify_final_text(processed.final_text) {
+                                    FinalTextDecision::Terminal(terminal) => {
+                                        finish_dictation_transaction(&ah, terminal);
+                                    }
+                                    FinalTextDecision::Continue(final_text) => {
+                                        let app_for_insertion = ah.clone();
+                                        let settings_for_insertion = settings.clone();
+                                        let paste_started_at = Instant::now();
+                                        ah.run_on_main_thread(move || {
+                                            complete_classic_insertion(
+                                                app_for_insertion,
+                                                Arc::clone(&hm),
+                                                settings_for_insertion,
+                                                final_text,
+                                                saved_entry_id,
+                                                cancelled_wav_path,
+                                                operation_token.clone(),
+                                                classic_context,
+                                                paste_started_at,
                                             );
-                                        }
-                                        if outcome.emit_inserted {
-                                            debug!(
-                                                "Text pasted successfully in {:?}",
-                                                paste_time.elapsed()
+                                        })
+                                        .unwrap_or_else(|e| {
+                                            error!("Failed to run paste on main thread: {:?}", e);
+                                            finish_dictation_transaction(
+                                                &ah,
+                                                DictationTransactionTerminal::InsertionSchedulingFailed,
                                             );
-                                            utils::emit_overlay_state_changed(
-                                                &ah_clone, "inserted",
-                                            );
-                                        }
-                                        if outcome.emit_paste_error {
-                                            error!(
-                                                "Failed to paste transcription: {:?}",
-                                                outcome.receipt.error.as_deref()
-                                            );
-                                            let _ = ah_clone.emit("paste-error", ());
-                                        }
-                                        utils::hide_recording_overlay(&ah_clone);
-                                        change_tray_icon(&ah_clone, TrayIconState::Idle);
-                                    })
-                                    .unwrap_or_else(|e| {
-                                        error!("Failed to run paste on main thread: {:?}", e);
-                                        utils::hide_recording_overlay(&ah);
-                                        change_tray_icon(&ah, TrayIconState::Idle);
-                                    });
+                                        });
+                                    }
                                 }
                             }
                         }
                         Err(err) => {
                             debug!("Global Shortcut Transcription error: {}", err);
+                            if operation_is_cancelled(&ah, operation_token.as_ref()) {
+                                if let Some(wav_path) = &saved_wav_path {
+                                    cleanup_cancelled_wav(wav_path);
+                                }
+                                finish_cancelled_operation(&ah);
+                                return;
+                            }
+
                             // Save entry with empty text so user can retry
-                            if wav_saved {
+                            let terminal = DictationTransactionTerminal::TranscriptionFailed;
+                            if history_enabled && terminal.should_save_failed_history(wav_saved) {
                                 if let Err(save_err) = hm.save_entry(
                                     file_name,
                                     String::new(),
@@ -1683,15 +2032,29 @@ impl ShortcutAction for TranscribeAction {
                                     error!("Failed to save failed history entry: {}", save_err);
                                 }
                             }
-                            utils::hide_recording_overlay(&ah);
-                            change_tray_icon(&ah, TrayIconState::Idle);
+                            finish_dictation_transaction(&ah, terminal);
                         }
                     }
                 }
-            } else {
-                debug!("No samples retrieved from recording stop");
-                utils::hide_recording_overlay(&ah);
-                change_tray_icon(&ah, TrayIconState::Idle);
+                RecordingStopDecision::Terminal(terminal) => {
+                    let terminal = if operation_is_cancelled(&ah, operation_token.as_ref()) {
+                        DictationTransactionTerminal::Cancelled
+                    } else {
+                        terminal
+                    };
+                    match terminal {
+                        DictationTransactionTerminal::NoRecording => {
+                            debug!("No samples retrieved from recording stop");
+                        }
+                        DictationTransactionTerminal::NoUsableSpeech => {
+                            debug!(
+                                "Recording did not contain usable speech; skipping transcription and paste"
+                            );
+                        }
+                        _ => {}
+                    }
+                    finish_dictation_transaction(&ah, terminal);
+                }
             }
         });
 

@@ -98,7 +98,8 @@
     },
     "errors": {
       "loadModels": "טעינת המודלים הזמינים נכשלה",
-      "downloadModel": "הורדת המודל נכשלה: {{error}}"
+      "downloadModel": "הורדת המודל נכשלה: {{error}}",
+      "selectModel": "בחר מודל כדי להמשיך."
     },
     "permissions": {
       "title": "נדרשות הרשאות",
@@ -118,6 +119,45 @@
       "errors": {
         "checkFailed": "בדיקת ההרשאות נכשלה. נסה שוב.",
         "requestFailed": "בקשת ההרשאה נכשלה. נסה שוב."
+      }
+    },
+    "shortcut": {
+      "title": "Set Recording Shortcut",
+      "description": "Confirm the shortcut you will use to start dictation before finishing setup.",
+      "missing": "Assign a recording shortcut before continuing.",
+      "duplicate": "This recording shortcut is already assigned to another action. Choose a unique shortcut before continuing.",
+      "ready": "Recording shortcut is ready.",
+      "continue": "Continue"
+    },
+    "microphoneTest": {
+      "title": "בדיקת מיקרופון",
+      "description": "אשר ש-Verbatim יכול לפתוח את המיקרופון שנבחר ולראות קלט חי לפני סיום ההגדרה.",
+      "start": "התחל בדיקה",
+      "stop": "עצור בדיקה",
+      "listening": "מאזין לקלט",
+      "idle": "מוכן לבדיקה",
+      "opened": "המיקרופון נפתח. דבר לרגע כדי לבדוק את מד העוצמה החי.",
+      "ready": "זוהה קלט מהמיקרופון.",
+      "continue": "המשך",
+      "meterLabel": "עוצמת קלט המיקרופון"
+    },
+    "dictationTest": {
+      "title": "בדיקת הכתבה",
+      "description": "הקלט דוגמה קצרה כדי לוודא ש-Verbatim יכול לתמלל לפני שהוא מכניס טקסט לאפליקציות אחרות.",
+      "samplePrompt": "אמור ביטוי קצר, ואז עצור את ההקלטה כדי לבדוק את התמלול.",
+      "start": "התחל הקלטה",
+      "stop": "עצור הקלטה",
+      "transcribing": "מתמלל את דוגמת הבדיקה. היא לא תישמר בהיסטוריה.",
+      "copy": "העתק טקסט בדיקה",
+      "copied": "טקסט הבדיקה הועתק ללוח.",
+      "copyFailed": "לא הועתק טקסט בדיקה.",
+      "recordAgain": "הקלט שוב",
+      "discardContinue": "מחק והמשך",
+      "states": {
+        "idle": "מוכן להקלטת דוגמת בדיקה",
+        "recording": "מקליט דוגמת בדיקה",
+        "transcribing": "מתמלל דוגמת בדיקה",
+        "ready": "בדוק את תמלול הבדיקה"
       }
     }
   },
@@ -150,7 +190,9 @@
       "languageOnly": "{{language}} בלבד",
       "translation": "יכול לתרגם לאנגלית",
       "translate": "תרגם לאנגלית"
-    }
+    },
+    "customUnverified": "לא מאומת",
+    "customUnverifiedDescription": "מודל שסופק על ידי המשתמש. Verbatim לא אימת את הקובץ, הרישיון, סכום הביקורת או ההתנהגות שלו."
   },
   "settings": {
     "modelSettings": {
@@ -329,7 +371,13 @@
           "none": "ללא",
           "externalScript": "סקריפט חיצוני"
         },
-        "externalScriptPlaceholder": "/path/to/your/script.sh"
+        "externalScriptPlaceholder": "/path/to/your/script.sh",
+        "linuxReadiness": {
+          "ready": "הפעלת Linux: {{session}} ב-{{desktop}}. מסייע לוח: {{clipboardHelper}}; מסייע הדבקה: {{pasteHelper}}; מסייע קלט ישיר: {{directHelper}}.",
+          "limited": "הפעלת Linux: {{session}} ב-{{desktop}}. מסייע לוח: {{clipboardHelper}}; מסייע הדבקה: {{pasteHelper}}; מסייע קלט ישיר: {{directHelper}}. חלק ממסייעי ההכנסה חסרים; החלף שיטת הדבקה או התקן מסייע תואם אם ההכנסה נכשלת.",
+          "unknown": "לא ניתן לבדוק את מוכנות ההכנסה ב-Linux.",
+          "none": "אין"
+        }
       },
       "typingTool": {
         "title": "כלי הקלדה",
@@ -463,7 +511,12 @@
         "apiKey": {
           "title": "מפתח API",
           "description": "מפתח API עבור הספק הנבחר.",
-          "placeholder": "sk-..."
+          "placeholder": "sk-...",
+          "storeAvailable": "מאגר האישורים של מערכת ההפעלה זמין ב-{{platform}}. מפתחות API שמורים נשמרים מחוץ להגדרות האפליקציה.",
+          "storeUnavailable": "מאגר האישורים של מערכת ההפעלה אינו זמין ב-{{platform}}. Verbatim שומר את ערך ההגדרה הקיים כדי למנוע אובדן מפתח; הימנע משמירת מפתחות API מרוחקים וקבועים עד שהבעיה תיפתר.",
+          "storeUnavailableLegacyRetained": "OS credential store is unavailable on {{platform}}. Verbatim retained {{count}} existing settings value to avoid key loss; use session-only API keys or fix the credential store before saving persistent remote API keys.",
+          "storeStatusUnknown": "לא ניתן לבדוק את מצב מאגר האישורים. ייתכן שמפתחות API שמורים אינם מוגנים על ידי מאגר האישורים של מערכת ההפעלה.",
+          "sessionOnly": "השתמש במפתח API זה להפעלה הנוכחית בלבד"
         },
         "model": {
           "title": "מודל",
@@ -549,7 +602,16 @@
       "cancelCorrection": "בטל תיקון",
       "dictionaryLearned": "נוסף למילים המותאמות: {{words}}",
       "dictionaryNoCandidates": "לא נמצאו מילים מותאמות חדשות בתיקון הזה.",
-      "dictionaryLearnError": "למידת המילים המותאמות נכשלה. נסה שוב."
+      "dictionaryLearnError": "למידת המילים המותאמות נכשלה. נסה שוב.",
+      "clearHistory": "נקה את כל ההיסטוריה",
+      "clearHistoryConfirm": "לנקות את כל ערכי ההיסטוריה וההקלטות המקושרות? לא ניתן לבטל זאת.",
+      "clearHistoryError": "ניקוי ההיסטוריה נכשל.",
+      "clearHistorySuccess": "ההיסטוריה נוקתה.",
+      "clearRecordings": "נקה הקלטות",
+      "clearRecordingsConfirm": "למחוק הקלטות הכתבה לא שמורות תוך שמירת ערכים שמורים וטקסטים של המרות בלבד?",
+      "clearRecordingsError": "ניקוי ההקלטות נכשל.",
+      "clearRecordingsSuccess": "ההקלטות נוקו.",
+      "retentionNote": "ההיסטוריה יכולה לכלול תמלולים גולמיים, טקסט מעובד, טקסט המרות וקבצי WAV מקושרים. ערכים שמורים נשארים עד שתמחק אותם."
     },
     "debug": {
       "title": "ניפוי שגיאות",
@@ -625,6 +687,71 @@
       "recordingBuffer": {
         "title": "באפר הקלטה נוסף",
         "description": "זמן נוסף (במילישניות) להמשך הקלטה אחרי שחרור המקש, כדי ללכוד סוף דיבור. 0 = בלי באפר נוסף."
+      },
+      "historyStorage": {
+        "description": "שמור טקסט תמלול עתידי בהיסטוריה.",
+        "label": "שמור היסטוריה"
+      },
+      "privateSession": {
+        "description": "השבת זמנית היסטוריה, הקלטות, עיבוד לאחר, המרות, ניסיון חוזר ולמידה עבור הכתבות חדשות.",
+        "label": "הפעלה פרטית"
+      },
+      "recordingStorage": {
+        "description": "שמור הקלטות WAV עם ערכי היסטוריית הכתבה עתידיים.",
+        "disabledDescription": "הפעל היסטוריה לפני שמירת הקלטות.",
+        "label": "שמור הקלטות"
+      },
+      "diagnostics": {
+        "title": "Diagnostics",
+        "description": "Review app health, platform readiness, paths, and active runtime settings.",
+        "refresh": "Refresh",
+        "pathError": "Path unavailable: {{error}}",
+        "rows": {
+          "startup": "Startup",
+          "permissions": "Permissions",
+          "shortcuts": "Shortcuts",
+          "model": "Selected model",
+          "accelerator": "Accelerator",
+          "insertion": "Insertion",
+          "updates": "Updates",
+          "storage": "Storage",
+          "credentials": "Credential store",
+          "linuxHelpers": "Linux helpers"
+        },
+        "values": {
+          "ready": "Ready",
+          "failed": "Failed",
+          "starting": "Starting",
+          "unavailable": "Unavailable",
+          "none": "None",
+          "accessibilityGranted": "Accessibility granted",
+          "accessibilityMissing": "Accessibility missing",
+          "atSpiAvailable": "AT-SPI available",
+          "atSpiMissing": "AT-SPI unavailable",
+          "shortcuts": "{{assigned}} of {{total}} assigned",
+          "checksummed": "Checksummed",
+          "unverified": "Unverified",
+          "accelerator": "Whisper {{whisper}} / ORT {{ort}} / {{gpuCount}} GPU",
+          "storage": "History {{history}}, recordings {{recordings}}",
+          "noWarnings": "No warnings"
+        },
+        "permission": {
+          "allowed": "Allowed",
+          "denied": "Denied",
+          "unknown": "Unknown"
+        },
+        "details": {
+          "startupFailed": "{{step}}: {{message}}",
+          "windowsMicrophone": "Device {{device}}, app {{app}}, desktop apps {{desktop}}",
+          "linuxSession": "{{session}} on {{desktop}}; tray {{tray}}",
+          "model": "{{engine}}; downloaded {{downloaded}}; license {{license}}; accelerators {{accelerators}}; integrity {{integrity}}",
+          "accelerator": "ORT options: {{ort}}. GPU devices: {{devices}}",
+          "insertion": "Clipboard {{clipboard}}; typing tool {{typingTool}}; external script {{externalScript}}",
+          "updates": "Shows whether automatic update checks are enabled. Live update availability remains in the footer checker.",
+          "storage": "Private session {{privateSession}}; retention {{retention}}",
+          "credentialStore": "{{platform}} credential backend",
+          "credentialStoreRetainedLegacy": "Credential store is unavailable; {{count}} legacy API-key value remains in settings so it is not lost."
+        }
       }
     },
     "about": {
@@ -826,7 +953,26 @@
     "languageGuardPreview": "תצוגה מקדימה: {{preview}}",
     "languageGuardPasteAnyway": "הדבק בכל זאת",
     "transformRecoveryCopiedTitle": "תוצאת ההמרה הועתקה",
-    "transformRecoveryCopiedDescription": "הטקסט שנבחר הומר, אך לא ניתן היה להחליף אותו ביישום הפעיל. התוצאה הועתקה ללוח."
+    "transformRecoveryCopiedDescription": "הטקסט שנבחר הומר, אך לא ניתן היה להחליף אותו ביישום הפעיל. התוצאה הועתקה ללוח.",
+    "coordinatorFailedMessage": "מתאם ההכתבה נעצר לאחר כשלים חוזרים. הפעל מחדש את Verbatim כדי לשחזר.",
+    "coordinatorFailedStep": "מתאם הכתבה",
+    "coordinatorRestartedDescription": "Verbatim שחזר את עובד ההכתבה. אם זה ממשיך לקרות, פתח יומנים מהגדרות ניפוי השגיאות.",
+    "coordinatorRestartedTitle": "שירות ההכתבה הופעל מחדש",
+    "startupFailedDescription": "Verbatim לא הצליח להשלים את האתחול. השתמש בפעולות השחזור למטה, או פתח את היומנים לפרטים.",
+    "startupFailedStep": "שלב שנכשל: {{step}}",
+    "startupFailedTitle": "האתחול נכשל",
+    "startupOpenAppData": "פתח נתוני אפליקציה",
+    "startupOpenLogs": "פתח יומנים",
+    "startupResetSettings": "אפס הגדרות",
+    "startupResetSettingsFailed": "איפוס ההגדרות נכשל",
+    "startupResettingSettings": "מאפס...",
+    "startupRestart": "הפעל מחדש את Verbatim",
+    "startupUnknownStep": "שלב אתחול לא ידוע",
+    "targetChangedTitle": "ההכנסה נחסמה",
+    "targetChangedDescription": "היעד הפעיל השתנה לפני ש-Verbatim הכניס את הטקסט. השתמש בהדבקה כאן רק אם השדה הנוכחי הוא היעד הנכון.",
+    "targetChangedPasteHereAction": "הדבק כאן",
+    "targetPrivacyExcludedTitle": "ההקלטה נחסמה",
+    "targetPrivacyExcludedDescription": "האפליקציה הפעילה תואמת החרגת פרטיות. Verbatim לא התחיל להקליט."
   },
   "appLanguage": {
     "title": "שפת האפליקציה",
@@ -868,6 +1014,7 @@
       "micFailed": "בעיה במיקרופון",
       "cancelled": "בוטל",
       "transformCopied": "ההמרה הועתקה"
-    }
+    },
+    "privateSession": "הפעלה פרטית"
   }
 }

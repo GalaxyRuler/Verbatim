@@ -51,6 +51,7 @@ export const Slider: React.FC<SliderProps> = ({
             max={max}
             step={step}
             value={value}
+            aria-label={label}
             onChange={handleChange}
             disabled={disabled}
             className="flex-grow h-2 rounded-lg appearance-none cursor-pointer focus:outline-none focus:ring-2 focus:ring-logo-primary disabled:opacity-50 disabled:cursor-not-allowed"

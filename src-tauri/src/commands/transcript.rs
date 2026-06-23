@@ -79,16 +79,16 @@ pub async fn paste_last_transcript(
     let (sender, receiver) = std::sync::mpsc::channel();
 
     app.run_on_main_thread(move || {
-        let outcome = crate::insertion::resolve_insertion_attempt(
+        let mut insertion_transaction = crate::insertion::InsertionTransaction::new(|request| {
+            crate::clipboard::paste_with_receipt_with_auto_learn(
+                request.text,
+                app_for_paste.clone(),
+                request.target_verified,
+                request.auto_learn_eligible,
+            )
+        });
+        let outcome = insertion_transaction.run(
             crate::insertion::InsertionAttempt::paste_last_transcript(text),
-            |request| {
-                crate::clipboard::paste_with_receipt_with_auto_learn(
-                    request.text,
-                    app_for_paste.clone(),
-                    request.target_verified,
-                    request.auto_learn_eligible,
-                )
-            },
         );
         if !outcome.receipt.succeeded {
             log::error!(
@@ -105,7 +105,9 @@ pub async fn paste_last_transcript(
         crate::clipboard::copy_text_for_recovery(&app, &recovery.text, recovery.reason)?;
     }
     if outcome.emit_paste_error {
-        let _ = app.emit("paste-error", ());
+        if let Some(recovery_event) = outcome.paste_recovery_event() {
+            let _ = app.emit("paste-error", recovery_event);
+        }
     }
 
     if outcome.receipt.succeeded {

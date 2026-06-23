@@ -1,0 +1,285 @@
+name: "native smoke"
+
+on:
+  workflow_call:
+    inputs:
+      desktop-target-drill:
+        description: "Run controlled desktop text-target and synthetic clipboard drill"
+        required: false
+        type: boolean
+        default: false
+      virtual-audio-preflight:
+        description: "Provision or verify a virtual microphone before packaged smoke"
+        required: false
+        type: boolean
+        default: false
+      virtual-audio-device-name:
+        description: "Existing virtual microphone name for Windows/macOS smoke"
+        required: false
+        type: string
+        default: ""
+  workflow_dispatch:
+    inputs:
+      desktop-target-drill:
+        description: "Run controlled desktop text-target and synthetic clipboard drill"
+        required: false
+        type: boolean
+        default: false
+      virtual-audio-preflight:
+        description: "Provision or verify a virtual microphone before packaged smoke"
+        required: false
+        type: boolean
+        default: false
+      virtual-audio-device-name:
+        description: "Existing virtual microphone name for Windows/macOS smoke"
+        required: false
+        type: string
+        default: ""
+  pull_request:
+    paths:
+      - ".github/workflows/native-smoke.yml"
+      - "scripts/native-smoke/**"
+      - "src-tauri/**"
+      - "src/**"
+      - "package.json"
+      - "bun.lock"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  packaged-smoke:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: "Windows packaged smoke"
+            runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            build_args: "--bundles nsis"
+          - name: "macOS ARM64 packaged smoke"
+            runner: macos-26
+            target: aarch64-apple-darwin
+            build_args: "--target aarch64-apple-darwin"
+          - name: "Ubuntu x64 packaged smoke"
+            runner: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            build_args: "--bundles deb"
+
+    env:
+      CARGO_TERM_COLOR: always
+      GGML_NATIVE: ${{ matrix.target != 'aarch64-apple-darwin' && 'OFF' || '' }}
+      GGML_AVX: ${{ matrix.target != 'aarch64-apple-darwin' && 'OFF' || '' }}
+      GGML_AVX2: ${{ matrix.target != 'aarch64-apple-darwin' && 'OFF' || '' }}
+      GGML_FMA: ${{ matrix.target != 'aarch64-apple-darwin' && 'OFF' || '' }}
+      GGML_F16C: ${{ matrix.target != 'aarch64-apple-darwin' && 'OFF' || '' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+          key: native-smoke-${{ matrix.runner }}-${{ matrix.target }}
+
+      - name: Install frontend dependencies
+        run: bun install
+
+      - name: Install Ubuntu desktop dependencies
+        if: runner.os == 'Linux'
+        run: |
+          export DEBIAN_FRONTEND=noninteractive
+          sudo apt-get -o Acquire::Retries=3 update
+          timeout 15m sudo apt-get install -y --no-install-recommends \
+            xvfb \
+            imagemagick \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libasound2-dev \
+            libopenblas-dev \
+            libx11-dev \
+            libxtst-dev \
+            libxrandr-dev \
+            libgtk-layer-shell0 \
+            libgtk-layer-shell-dev \
+            libvulkan-dev \
+            mesa-vulkan-drivers \
+            glslang-tools \
+            xdotool \
+            xterm \
+            xclip \
+            pulseaudio \
+            pulseaudio-utils
+
+      - name: Install ONNX Runtime (Ubuntu x64)
+        if: runner.os == 'Linux'
+        run: |
+          ORT_VERSION="1.24.2"
+          curl -L -o ort.tgz "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-linux-x64-${ORT_VERSION}.tgz"
+          tar xzf ort.tgz
+          ORT_DIR="$(pwd)/onnxruntime-linux-x64-${ORT_VERSION}"
+          echo "ORT_LIB_LOCATION=$ORT_DIR/lib" >> "$GITHUB_ENV"
+          echo "ORT_PREFER_DYNAMIC_LINK=1" >> "$GITHUB_ENV"
+          for f in "$ORT_DIR"/lib/libonnxruntime.so*; do
+            if [ -L "$f" ]; then
+              cp -L "$f" "$f.real" && mv "$f.real" "$f"
+            fi
+          done
+          jq --arg so "$ORT_DIR/lib/libonnxruntime.so" \
+             --arg so1 "$ORT_DIR/lib/libonnxruntime.so.1" \
+             --arg sov "$ORT_DIR/lib/libonnxruntime.so.1.24.2" \
+            '.bundle.linux.deb.files["/usr/lib/libonnxruntime.so"] = $so | .bundle.linux.deb.files["/usr/lib/libonnxruntime.so.1"] = $so1 | .bundle.linux.deb.files["/usr/lib/libonnxruntime.so.1.24.2"] = $sov' \
+            src-tauri/tauri.conf.json > tmp.json && mv tmp.json src-tauri/tauri.conf.json
+
+      - name: Install Windows native dependencies
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (-not (Get-Command ninja -ErrorAction SilentlyContinue)) {
+            choco install ninja -y --no-progress
+          }
+
+      - name: Install Vulkan SDK (Windows x64)
+        if: runner.os == 'Windows'
+        uses: humbletim/install-vulkan-sdk@v1.2
+        with:
+          version: 1.4.309.0
+          cache: true
+
+      - name: Configure Windows native build
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $drive = Split-Path -Qualifier $env:GITHUB_WORKSPACE
+          $targetDir = "$drive\t\verbatim-native-smoke"
+          New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
+          echo "CARGO_TARGET_DIR=$targetDir" >> $env:GITHUB_ENV
+          echo "CMAKE_GENERATOR=Ninja" >> $env:GITHUB_ENV
+          echo "TrackFileAccess=false" >> $env:GITHUB_ENV
+
+      - name: Stage Visual C++ runtime DLLs (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/stage-windows-vc-runtime.ps1 -Arch x64
+
+      - name: Build packaged app (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-windows-installer.ps1 -Bundles nsis
+
+      - name: Build packaged app
+        if: runner.os != 'Windows'
+        run: bun run tauri build -- ${{ matrix.build_args }}
+
+      - name: Provision virtual audio input (Linux)
+        if: runner.os == 'Linux' && inputs.virtual-audio-preflight
+        run: |
+          pulseaudio --start
+          bun run smoke:virtual-audio -- --artifact-dir native-smoke-artifacts --create-linux-pulse-source --require
+          microphone="$(node -e "const fs = require('fs'); const data = JSON.parse(fs.readFileSync('native-smoke-artifacts/virtual-audio-input.json', 'utf8')); process.stdout.write(data.smoke_microphone_arg || '');")"
+          if [ -z "$microphone" ]; then
+            echo "virtual-audio-input.json did not report smoke_microphone_arg" >&2
+            exit 1
+          fi
+          echo "VERBATIM_SMOKE_MICROPHONE=$microphone" >> "$GITHUB_ENV"
+          echo "VERBATIM_SMOKE_SELECTED_MICROPHONE=$microphone" >> "$GITHUB_ENV"
+
+      - name: Verify configured virtual audio input
+        if: runner.os != 'Linux' && inputs.virtual-audio-preflight && inputs.virtual-audio-device-name != ''
+        shell: bash
+        run: |
+          bun run smoke:virtual-audio -- --artifact-dir native-smoke-artifacts --device-name "${{ inputs.virtual-audio-device-name }}" --require
+          microphone="$(node -e "const fs = require('fs'); const data = JSON.parse(fs.readFileSync('native-smoke-artifacts/virtual-audio-input.json', 'utf8')); process.stdout.write(data.smoke_microphone_arg || '');")"
+          if [ -z "$microphone" ]; then
+            echo "virtual-audio-input.json did not report smoke_microphone_arg" >&2
+            exit 1
+          fi
+          echo "VERBATIM_SMOKE_MICROPHONE=$microphone" >> "$GITHUB_ENV"
+          echo "VERBATIM_SMOKE_SELECTED_MICROPHONE=$microphone" >> "$GITHUB_ENV"
+
+      - name: Require configured virtual audio input
+        if: runner.os != 'Linux' && inputs.virtual-audio-preflight && inputs.virtual-audio-device-name == ''
+        shell: bash
+        run: |
+          echo "virtual-audio-device-name is required for Windows/macOS virtual audio preflight" >&2
+          exit 1
+
+      - name: Run packaged smoke (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          smoke_args=(--artifact-dir native-smoke-artifacts)
+          if [ -n "${VERBATIM_SMOKE_MICROPHONE:-}" ]; then
+            smoke_args+=(--smoke-microphone "$VERBATIM_SMOKE_MICROPHONE")
+          fi
+          if [ "${{ inputs.desktop-target-drill }}" = "true" ]; then
+            smoke_args+=(--desktop-target-drill --require-desktop-target --allow-text-entry --allow-clipboard-write)
+          fi
+          xvfb-run -a bun run smoke:native -- "${smoke_args[@]}"
+
+      - name: Run packaged smoke
+        if: runner.os != 'Linux'
+        shell: bash
+        run: |
+          smoke_args=(--artifact-dir native-smoke-artifacts)
+          if [ -n "${VERBATIM_SMOKE_MICROPHONE:-}" ]; then
+            smoke_args+=(--smoke-microphone "$VERBATIM_SMOKE_MICROPHONE")
+          fi
+          if [ "${{ inputs.desktop-target-drill }}" = "true" ]; then
+            smoke_args+=(--desktop-target-drill --require-desktop-target --allow-text-entry --allow-clipboard-write)
+          fi
+          bun run smoke:native -- "${smoke_args[@]}"
+
+      - name: Play audio fixture into virtual input (Linux)
+        if: runner.os == 'Linux' && inputs.virtual-audio-preflight
+        run: |
+          fixture="$(node -e "const fs = require('fs'); const data = JSON.parse(fs.readFileSync('native-smoke-artifacts/first-launch.status.json', 'utf8')); process.stdout.write(data.audio_fixture_path || '');")"
+          if [ -z "$fixture" ]; then
+            echo "first-launch.status.json did not report audio_fixture_path" >&2
+            exit 1
+          fi
+          bun run smoke:virtual-audio -- --artifact-dir native-smoke-artifacts --input-from native-smoke-artifacts/virtual-audio-input.json --play-fixture "$fixture"
+
+      - name: Run installer smoke (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a bun run smoke:installer -- --artifact-dir native-smoke-artifacts/installer
+
+      - name: Run installer smoke
+        if: runner.os != 'Linux'
+        run: bun run smoke:installer -- --artifact-dir native-smoke-artifacts/installer
+
+      - name: Cleanup virtual audio input (Linux)
+        if: always() && runner.os == 'Linux' && inputs.virtual-audio-preflight
+        run: |
+          bun run smoke:virtual-audio -- --artifact-dir native-smoke-artifacts --cleanup-from native-smoke-artifacts/virtual-audio-input.json
+
+      - name: Verify retained native smoke artifacts
+        shell: bash
+        run: |
+          check_args=(--dir native-smoke-artifacts --require-installer)
+          if [ "${{ inputs.desktop-target-drill }}" = "true" ]; then
+            check_args+=(--require-desktop-target)
+          fi
+          if [ "${{ inputs.virtual-audio-preflight }}" = "true" ]; then
+            check_args+=(--require-virtual-audio)
+          fi
+          bun run check:native-smoke-artifacts -- "${check_args[@]}"
+
+      - name: Upload native smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-smoke-${{ matrix.target }}
+          path: native-smoke-artifacts/**
+          retention-days: 30

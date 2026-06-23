@@ -9,6 +9,8 @@ import { AlwaysOnMicrophone } from "../AlwaysOnMicrophone";
 import { SoundPicker } from "../SoundPicker";
 import { ClamshellMicrophoneSelector } from "../ClamshellMicrophoneSelector";
 import { UpdateChecksToggle } from "../UpdateChecksToggle";
+import { LogDirectory } from "./LogDirectory";
+import { DiagnosticsPanel } from "./DiagnosticsPanel";
 
 export const DebugSettings: React.FC = () => {
   const { t } = useTranslation();
@@ -16,6 +18,8 @@ export const DebugSettings: React.FC = () => {
   return (
     <div className="max-w-3xl w-full mx-auto space-y-6">
       <SettingsGroup title={t("settings.debug.title")}>
+        <DiagnosticsPanel />
+        <LogDirectory grouped={true} />
         <LogLevelSelector grouped={true} />
         <UpdateChecksToggle descriptionMode="tooltip" grouped={true} />
         <SoundPicker

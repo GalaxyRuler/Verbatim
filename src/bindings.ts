@@ -240,9 +240,9 @@ async changePostProcessBaseUrlSetting(providerId: string, baseUrl: string) : Pro
     else return { status: "error", error: e  as any };
 }
 },
-async changePostProcessApiKeySetting(providerId: string, apiKey: string) : Promise<Result<null, string>> {
+async changePostProcessApiKeySetting(providerId: string, apiKey: string, sessionOnly: boolean) : Promise<Result<null, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("change_post_process_api_key_setting", { providerId, apiKey }) };
+    return { status: "ok", data: await TAURI_INVOKE("change_post_process_api_key_setting", { providerId, apiKey, sessionOnly }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -532,6 +532,9 @@ async showMainWindowCommand() : Promise<Result<null, string>> {
     else return { status: "error", error: e  as any };
 }
 },
+async getStartupStatus() : Promise<StartupStatus> {
+    return await TAURI_INVOKE("get_startup_status");
+},
 async cancelOperation() : Promise<void> {
     await TAURI_INVOKE("cancel_operation");
 },
@@ -546,17 +549,23 @@ async getAppDirPath() : Promise<Result<string, string>> {
     else return { status: "error", error: e  as any };
 }
 },
-async getAppSettings() : Promise<Result<AppSettings, string>> {
+async getAppSettingsDocument() : Promise<Result<SettingsStoreDocument, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("get_app_settings") };
+    return { status: "ok", data: await TAURI_INVOKE("get_app_settings_document") };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
 },
-async getDefaultSettings() : Promise<Result<AppSettings, string>> {
+async getCredentialStoreStatus() : Promise<CredentialStoreStatus> {
+    return await TAURI_INVOKE("get_credential_store_status");
+},
+async getLinuxEnvironmentStatus() : Promise<LinuxEnvironmentStatus> {
+    return await TAURI_INVOKE("get_linux_environment_status");
+},
+async getDefaultSettingsDocument() : Promise<Result<SettingsStoreDocument, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("get_default_settings") };
+    return { status: "ok", data: await TAURI_INVOKE("get_default_settings_document") };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -597,6 +606,30 @@ async openLogDir() : Promise<Result<null, string>> {
 async openAppDataDir() : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("open_app_data_dir") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async resetSettingsToDefaults() : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("reset_settings_to_defaults") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async getPrivateSessionStatus() : Promise<Result<PrivateSessionStatus, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_private_session_status") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async setPrivateSessionEnabled(enabled: boolean) : Promise<Result<PrivateSessionStatus, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_private_session_enabled", { enabled }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -933,6 +966,54 @@ async getSelectedMicrophone() : Promise<Result<string, string>> {
     else return { status: "error", error: e  as any };
 }
 },
+async startMicrophoneTest() : Promise<Result<MicrophoneTestStatus, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("start_microphone_test") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async stopMicrophoneTest() : Promise<Result<boolean, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("stop_microphone_test") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async startOnboardingDictationTest() : Promise<Result<boolean, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("start_onboarding_dictation_test") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async stopOnboardingDictationTest() : Promise<Result<OnboardingDictationTestResult, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("stop_onboarding_dictation_test") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async cancelOnboardingDictationTest() : Promise<Result<boolean, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("cancel_onboarding_dictation_test") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async copyOnboardingDictationText(text: string) : Promise<Result<boolean, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("copy_onboarding_dictation_text", { text }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async getAvailableOutputDevices() : Promise<Result<AudioDevice[], string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("get_available_output_devices") };
@@ -1041,6 +1122,22 @@ async deleteHistoryEntry(id: number) : Promise<Result<null, string>> {
     else return { status: "error", error: e  as any };
 }
 },
+async clearHistory() : Promise<Result<number, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("clear_history") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async clearRecordings() : Promise<Result<number, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("clear_recordings") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async retryHistoryEntryTranscription(id: number) : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("retry_history_entry_transcription", { id }) };
@@ -1049,9 +1146,25 @@ async retryHistoryEntryTranscription(id: number) : Promise<Result<null, string>>
     else return { status: "error", error: e  as any };
 }
 },
+async updateHistoryEnabled(enabled: boolean) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("update_history_enabled", { enabled }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async updateHistoryLimit(limit: number) : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("update_history_limit", { limit }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async updateRecordingsEnabled(enabled: boolean) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("update_recordings_enabled", { enabled }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -1127,14 +1240,17 @@ historyUpdatePayload: "history-update-payload"
 /** user-defined types **/
 
 export type AdaptiveProfile = { id: string; name: string; enabled: boolean; cleanup: CleanupPolicy; rewrite: RewritePolicy; validation: ValidationPolicy; routing: RoutingPolicy }
-export type AppSettings = { bindings: Partial<{ [key in string]: ShortcutBinding }>; push_to_talk: boolean; audio_feedback: boolean; audio_feedback_volume?: number; sound_theme?: SoundTheme; start_hidden?: boolean; autostart_enabled?: boolean; update_checks_enabled?: boolean; selected_model?: string; always_on_microphone?: boolean; selected_microphone?: string | null; clamshell_microphone?: string | null; selected_output_device?: string | null; translate_to_english?: boolean; translation_enabled?: boolean; translation_request?: TranslationRequestSettings | null; translation_provider_id?: string | null; translation_model_id?: string | null; selected_language?: string; dictation_language_mode?: DictationLanguageMode; overlay_position?: OverlayPosition; docked_pill_enabled?: boolean; debug_mode?: boolean; log_level?: LogLevel; custom_words?: string[]; dictionary_entries?: DictionaryEntry[]; dictionary_auto_learn_suppressed?: string[]; auto_add_dictionary_words?: boolean; snippets?: SnippetEntry[]; model_unload_timeout?: ModelUnloadTimeout; word_correction_threshold?: number; history_limit?: number; recording_retention_period?: RecordingRetentionPeriod; paste_method?: PasteMethod; clipboard_handling?: ClipboardHandling; auto_submit?: boolean; auto_submit_key?: AutoSubmitKey; post_process_enabled?: boolean; formatting_level?: FormattingLevel; post_process_provider_id?: string; post_process_providers?: PostProcessProvider[]; post_process_api_keys?: SecretMap; post_process_models?: Partial<{ [key in string]: string }>; post_process_prompts?: LLMPrompt[]; post_process_selected_prompt_id?: string | null; local_llm?: LocalLlmSettings; mute_while_recording?: boolean; append_trailing_space?: boolean; app_language?: string; experimental_enabled?: boolean; lazy_stream_close?: boolean; keyboard_implementation?: KeyboardImplementation; show_tray_icon?: boolean; paste_delay_ms?: number; typing_tool?: TypingTool; external_script_path: string | null; custom_filler_words?: string[] | null; adaptive_profiles_enabled?: boolean; context_awareness_enabled?: boolean; context_nearby_text_enabled?: boolean; adaptive_language_shortlist?: string[]; adaptive_default_profile_id?: string; adaptive_profiles?: AdaptiveProfile[]; adaptive_correction_memory_enabled?: boolean; adaptive_private_app_patterns?: string[]; whisper_accelerator?: WhisperAcceleratorSetting; ort_accelerator?: OrtAcceleratorSetting; whisper_gpu_device?: number; extra_recording_buffer_ms?: number }
+export type AdaptiveSettingsDomain = { version: number; selected_language: string; dictation_language_mode: DictationLanguageMode; word_correction_threshold: number; custom_filler_words: string[] | null; adaptive_profiles_enabled: boolean; context_awareness_enabled: boolean; context_nearby_text_enabled: boolean; adaptive_language_shortlist: string[]; adaptive_default_profile_id: string; adaptive_profiles: AdaptiveProfile[]; adaptive_correction_memory_enabled: boolean; adaptive_private_app_patterns: string[] }
 export type AudioDevice = { index: string; name: string; is_default: boolean }
+export type AudioSettingsDomain = { version: number; audio_feedback: boolean; audio_feedback_volume: number; sound_theme: SoundTheme; always_on_microphone: boolean; selected_microphone: string | null; clamshell_microphone: string | null; selected_output_device: string | null; mute_while_recording: boolean; extra_recording_buffer_ms: number }
 export type AutoSubmitKey = "enter" | "ctrl_enter" | "cmd_enter"
 export type AvailableAccelerators = { whisper: string[]; ort: string[]; gpu_devices: GpuDeviceOption[] }
 export type BindingResponse = { success: boolean; binding: ShortcutBinding | null; error: string | null }
 export type CleanupPolicy = { remove_fillers: boolean; remove_false_starts: boolean; normalize_punctuation: boolean; preserve_code_terms: boolean }
 export type ClipboardHandling = "dont_modify" | "copy_to_clipboard"
+export type CredentialStoreStatus = { available: boolean; platform: string; message: string | null; retained_legacy_api_key_count: number }
 export type CustomSounds = { start: boolean; stop: boolean }
+export type DiagnosticsSettingsDomain = { version: number; debug_mode: boolean; log_level: LogLevel; lazy_stream_close: boolean }
 export type DictationLanguageMode = "auto" | "single" | "multilingual"
 export type DictionaryEntry = { id: string; phrase: string; replacement_of?: string | null; source?: DictionaryEntrySource; priority?: DictionaryEntryPriority; created_at_ms?: number; updated_at_ms?: number }
 export type DictionaryEntryInput = { phrase: string; replacement_of?: string | null }
@@ -1143,6 +1259,7 @@ export type DictionaryEntrySource = "manual" | "auto_learned" | "imported"
 export type DictionaryEntryUpdate = { phrase?: string | null; replacement_of?: string | null; priority?: DictionaryEntryPriority | null }
 export type EngineType = "Whisper" | "Parakeet" | "Moonshine" | "MoonshineStreaming" | "SenseVoice" | "GigaAM" | "Canary" | "Cohere"
 export type FormattingLevel = "none" | "light" | "medium" | "high"
+export type GeneralSettingsDomain = { version: number; start_hidden: boolean; autostart_enabled: boolean; update_checks_enabled: boolean; overlay_position: OverlayPosition; docked_pill_enabled: boolean; app_language: string; experimental_enabled: boolean; show_tray_icon: boolean; custom_words: string[]; dictionary_entries: DictionaryEntry[]; dictionary_auto_learn_suppressed: string[]; auto_add_dictionary_words: boolean; snippets: SnippetEntry[] }
 export type GpuDeviceOption = { id: number; name: string; total_vram_mb: number }
 export type HistoryEntry = { id: number; file_name: string; timestamp: number; saved: boolean; title: string; transcription_text: string; post_processed_text: string | null; post_process_prompt: string | null; post_process_requested: boolean; adaptive_profile_id: string | null; adaptive_profile_name: string | null; adaptive_routing_json: string | null; adaptive_context_json: string | null; adaptive_language_json: string | null; adaptive_insertion_json: string | null; adaptive_parent_entry_id: number | null; transform_action: string | null; transform_original_text: string | null; transform_result_text: string | null; transform_target_language: string | null; transform_provider_id: string | null; transform_model: string | null; transform_recovery_status: string | null }
 export type HistoryUpdatePayload = { action: "added"; entry: HistoryEntry } | { action: "updated"; entry: HistoryEntry } | { action: "deleted"; id: number } | { action: "toggled"; id: number }
@@ -1154,30 +1271,42 @@ export type ImplementationChangeResult = { success: boolean;
  * List of binding IDs that were reset to defaults due to incompatibility
  */
 reset_bindings: string[] }
+export type InsertionSettingsDomain = { version: number; paste_method: PasteMethod; clipboard_handling: ClipboardHandling; auto_submit: boolean; auto_submit_key: AutoSubmitKey; append_trailing_space: boolean; paste_delay_ms: number; typing_tool: TypingTool; external_script_path: string | null }
 export type KeyboardImplementation = "tauri" | "verbatim_keys"
 export type LLMPrompt = { id: string; name: string; prompt: string }
+export type LinuxEnvironmentStatus = { is_linux: boolean; session_type: string; desktop: string; is_wayland: boolean; is_x11: boolean; helpers: LinuxHelperStatus[]; clipboard_helper: string | null; key_combo_helper: string | null; direct_input_helper: string | null; at_spi_available: boolean; tray_status: string; warnings: string[] }
+export type LinuxHelperStatus = { name: string; available: boolean; roles: string[] }
 export type LocalLlmModelInfo = { id: string; label: string; filename: string; url: string | null; sha256: string | null; size_mb: number; quantization: string; context_window: number; recommended_role: string; supported_language_notes: string; license_label: string; runtime: string; is_downloaded: boolean; is_downloading: boolean; partial_size: number }
 export type LocalLlmSettings = { enabled: boolean; selected_model_id: string; runtime_mode: string; runtime_host: string; runtime_port: number; unload_timeout_secs: number; max_output_tokens: number }
 export type LogLevel = "trace" | "debug" | "info" | "warn" | "error"
-export type ModelInfo = { id: string; name: string; description: string; filename: string; url: string | null; sha256: string | null; size_mb: number; is_downloaded: boolean; is_downloading: boolean; partial_size: number; is_directory: boolean; engine_type: EngineType; accuracy_score: number; speed_score: number; supports_translation: boolean; is_recommended: boolean; supported_languages: string[]; supports_language_selection: boolean; is_custom: boolean }
+export type MicrophoneTestStatus = { selected_microphone: string; stream_open: boolean }
+export type ModelInfo = { id: string; name: string; description: string; filename: string; url: string | null; sha256: string | null; size_mb: number; is_downloaded: boolean; is_downloading: boolean; partial_size: number; is_directory: boolean; engine_type: EngineType; license_label: string; accelerator_support: string[]; accuracy_score: number; speed_score: number; supports_translation: boolean; is_recommended: boolean; supported_languages: string[]; supports_language_selection: boolean; is_custom: boolean }
 export type ModelLoadStatus = { is_loaded: boolean; current_model: string | null }
 export type ModelUnloadTimeout = "never" | "immediately" | "min_2" | "min_5" | "min_10" | "min_15" | "hour_1" | "sec_15"
+export type ModelsSettingsDomain = { version: number; selected_model: string; model_unload_timeout: ModelUnloadTimeout; local_llm: LocalLlmSettings; whisper_accelerator: WhisperAcceleratorSetting; ort_accelerator: OrtAcceleratorSetting; whisper_gpu_device: number }
+export type OnboardingDictationTestResult = { text: string; captured_sample_count: number; observed_active_signal: boolean }
 export type OrtAcceleratorSetting = "auto" | "cpu" | "cuda" | "directml" | "rocm"
 export type OverlayPosition = "none" | "top" | "bottom"
 export type PaginatedHistory = { entries: HistoryEntry[]; has_more: boolean }
 export type PasteMethod = "ctrl_v" | "direct" | "none" | "shift_insert" | "ctrl_shift_v" | "external_script"
 export type PermissionAccess = "allowed" | "denied" | "unknown"
 export type PostProcessProvider = { id: string; label: string; base_url: string; allow_base_url_edit?: boolean; models_endpoint?: string | null; supports_structured_output?: boolean }
+export type PostProcessingSettingsDomain = { version: number; post_process_enabled: boolean; formatting_level: FormattingLevel; post_process_provider_id: string; post_process_providers: PostProcessProvider[]; post_process_api_keys: SecretMap; post_process_models: Partial<{ [key in string]: string }>; post_process_prompts: LLMPrompt[]; post_process_selected_prompt_id: string | null; translate_to_english: boolean; translation_enabled: boolean; translation_request: TranslationRequestSettings | null; translation_provider_id: string | null; translation_model_id: string | null }
+export type PrivacySettingsDomain = { version: number; history_enabled: boolean; recordings_enabled: boolean; history_limit: number; recording_retention_period: RecordingRetentionPeriod }
+export type PrivateSessionStatus = { enabled: boolean }
 export type RecordingRetentionPeriod = "never" | "preserve_limit" | "days_3" | "weeks_2" | "months_3"
 export type RewriteMode = "Disabled" | "DeterministicOnly" | "LlmOptional"
 export type RewritePolicy = { mode: RewriteMode; system_instruction: string; user_instruction: string }
 export type RoutingPolicy = { app_hints: string[]; language_hints: string[]; target_hints: string[]; priority: number }
 export type SecretMap = Partial<{ [key in string]: string }>
+export type SettingsStoreDocument = { settings_schema_version: number; domains: VersionedSettingsDomains }
 export type ShortcutBinding = { id: string; name: string; description: string; default_binding: string; current_binding: string }
+export type ShortcutsSettingsDomain = { version: number; bindings: Partial<{ [key in string]: ShortcutBinding }>; push_to_talk: boolean; keyboard_implementation: KeyboardImplementation }
 export type SnippetEntry = { id: string; trigger: string; content: string; created_at_ms?: number; updated_at_ms?: number }
 export type SnippetEntryInput = { trigger: string; content: string }
 export type SnippetEntryUpdate = { trigger?: string | null; content?: string | null }
 export type SoundTheme = "marimba" | "pop" | "custom"
+export type StartupStatus = { status: "starting" } | { status: "ready" } | { status: "failed"; step: string; message: string }
 export type TransformAction = "polish" | "make_concise" | "turn_into_list" | "translate_to_selected_language" | "prompt_engineer"
 export type TransformCommandResult = { status: TransformCommandStatus; history_entry_id: number; provider_id: string; model: string }
 export type TransformCommandStatus = "replaced" | "copied_for_recovery"
@@ -1185,6 +1314,7 @@ export type TranslationRequestSettings = { source_language: string; target_langu
 export type TranslationRoute = "auto" | "direct_speech" | "text_after_transcription"
 export type TypingTool = "auto" | "wtype" | "kwtype" | "dotool" | "ydotool" | "xdotool"
 export type ValidationPolicy = { preserve_raw_language: boolean; forbid_unrequested_translation: boolean; preserve_numbers: boolean; preserve_urls: boolean; preserve_identifiers: boolean; max_expansion_ratio: number }
+export type VersionedSettingsDomains = { general: GeneralSettingsDomain; audio: AudioSettingsDomain; insertion: InsertionSettingsDomain; privacy: PrivacySettingsDomain; models: ModelsSettingsDomain; post_processing: PostProcessingSettingsDomain; diagnostics: DiagnosticsSettingsDomain; adaptive: AdaptiveSettingsDomain; shortcuts: ShortcutsSettingsDomain }
 export type WhisperAcceleratorSetting = "auto" | "cpu" | "gpu"
 export type WindowsMicrophonePermissionStatus = { supported: boolean; overall_access: PermissionAccess; device_access: PermissionAccess; app_access: PermissionAccess; desktop_app_access: PermissionAccess }
 

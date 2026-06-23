@@ -57,6 +57,8 @@ jobs:
   build:
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     runs-on: ${{ inputs.platform }}
     steps:
       - name: Enable long paths (Windows)
@@ -99,6 +101,58 @@ jobs:
             echo "profile=release" >> "$GITHUB_OUTPUT"
             echo "Build profile: release"
           fi
+
+      - name: Validate platform signing prerequisites
+        if: inputs.sign-binaries
+        shell: pwsh
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        run: |
+          $missing = @()
+
+          function Require-Secret {
+            param([string]$Name)
+            if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($Name))) {
+              $script:missing += $Name
+            }
+          }
+
+          if ($env:RUNNER_OS -eq "Windows") {
+            Require-Secret "AZURE_CLIENT_ID"
+            Require-Secret "AZURE_CLIENT_SECRET"
+            Require-Secret "AZURE_TENANT_ID"
+          } elseif ($env:RUNNER_OS -eq "macOS") {
+            Require-Secret "APPLE_CERTIFICATE"
+            Require-Secret "APPLE_CERTIFICATE_PASSWORD"
+            Require-Secret "KEYCHAIN_PASSWORD"
+            Require-Secret "APPLE_ID"
+            Require-Secret "APPLE_TEAM_ID"
+
+            if (
+              [string]::IsNullOrWhiteSpace($env:APPLE_ID_PASSWORD) -and
+              [string]::IsNullOrWhiteSpace($env:APPLE_PASSWORD)
+            ) {
+              $missing += "APPLE_ID_PASSWORD or APPLE_PASSWORD"
+            }
+          } else {
+            Write-Host "No platform code-signing secrets are required for $env:RUNNER_OS."
+          }
+
+          if ($missing.Count -gt 0) {
+            Write-Error "Missing required signing secret(s) for $env:RUNNER_OS: $($missing -join ', ')"
+            exit 1
+          }
+
+          Write-Host "Signing prerequisites are present for $env:RUNNER_OS; secret values were not printed."
 
       - name: Enable updater artifacts for release builds
         if: inputs.create-updater-artifacts
@@ -222,7 +276,7 @@ jobs:
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
         run: |
-          echo $APPLE_CERTIFICATE | base64 --decode > certificate.p12
+          printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > certificate.p12
           security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
           security default-keychain -s build.keychain
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
@@ -331,6 +385,84 @@ jobs:
           assetNamePattern: ${{ steps.patch-release-name.outputs.platform }}
           args: ${{ inputs.build-args }} ${{ env.VERBATIM_WINDOWS_RUNTIME_CONFIG }}
 
+      - name: Verify Windows Authenticode signatures
+        if: contains(inputs.platform, 'windows') && inputs.sign-binaries
+        shell: pwsh
+        env:
+          BUILD_PROFILE: ${{ steps.build-profile.outputs.profile }}
+          RUST_TARGET: ${{ inputs.target }}
+        run: |
+          $base = if ([string]::IsNullOrWhiteSpace($env:CARGO_TARGET_DIR)) {
+            Join-Path $pwd "src-tauri\target"
+          } else {
+            $env:CARGO_TARGET_DIR
+          }
+
+          if (
+            -not [string]::IsNullOrWhiteSpace($env:RUST_TARGET) -and
+            $env:RUST_TARGET -ne "x86_64-pc-windows-msvc"
+          ) {
+            $bundleRoot = Join-Path $base (Join-Path $env:RUST_TARGET (Join-Path $env:BUILD_PROFILE "bundle"))
+          } else {
+            $bundleRoot = Join-Path $base (Join-Path $env:BUILD_PROFILE "bundle")
+          }
+
+          if (-not (Test-Path -LiteralPath $bundleRoot)) {
+            Write-Error "Bundle directory not found for signature verification: $bundleRoot"
+            exit 1
+          }
+
+          $artifacts = @(
+            Get-ChildItem -LiteralPath $bundleRoot -Recurse -File |
+              Where-Object { $_.Extension -in @(".exe", ".msi") }
+          )
+          if ($artifacts.Count -eq 0) {
+            Write-Error "No Windows EXE/MSI artifacts found under $bundleRoot"
+            exit 1
+          }
+
+          foreach ($artifact in $artifacts) {
+            $signature = Get-AuthenticodeSignature -LiteralPath $artifact.FullName
+            if ($signature.Status -ne "Valid") {
+              Write-Error "$($artifact.Name) signature status is $($signature.Status)"
+              exit 1
+            }
+            if ($null -eq $signature.TimeStamperCertificate) {
+              Write-Error "$($artifact.Name) is signed but has no timestamp certificate"
+              exit 1
+            }
+            Write-Host "$($artifact.Name) has a valid Authenticode signature and timestamp."
+          }
+
+      - name: Verify macOS signing, Gatekeeper, and notarization
+        if: contains(inputs.platform, 'macos') && inputs.sign-binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mapfile -d '' apps < <(find src-tauri/target -path '*/bundle/macos/*.app' -print0)
+          if [[ "${#apps[@]}" -eq 0 ]]; then
+            echo "No macOS .app bundle found for signing verification" >&2
+            exit 1
+          fi
+
+          for app in "${apps[@]}"; do
+            codesign --verify --deep --strict --verbose=2 "$app"
+            spctl --assess --type execute --verbose "$app"
+            xcrun stapler validate "$app"
+          done
+
+          mapfile -d '' dmgs < <(find src-tauri/target -path '*/bundle/dmg/*.dmg' -print0)
+          if [[ "${#dmgs[@]}" -eq 0 ]]; then
+            echo "No macOS DMG found for signing verification" >&2
+            exit 1
+          fi
+
+          for dmg in "${dmgs[@]}"; do
+            spctl --assess --type open --verbose "$dmg"
+            xcrun stapler validate "$dmg"
+          done
+
       - name: Build with Tauri (unsigned)
         if: ${{ !inputs.sign-binaries }}
         uses: tauri-apps/tauri-action@v0
@@ -351,6 +483,51 @@ jobs:
           releaseId: ${{ inputs.release-id }}
           assetNamePattern: ${{ steps.patch-release-name.outputs.platform }}
           args: ${{ inputs.build-args }} ${{ env.VERBATIM_WINDOWS_RUNTIME_CONFIG }}
+
+      - name: Generate release artifact checksums for attestation
+        if: ${{ inputs.release-id != '' }}
+        shell: pwsh
+        run: |
+          $roots = @()
+          if (-not [string]::IsNullOrWhiteSpace($env:CARGO_TARGET_DIR)) {
+            $roots += $env:CARGO_TARGET_DIR
+          }
+          $roots += (Join-Path $pwd "src-tauri/target")
+
+          $artifacts = @()
+          foreach ($root in $roots | Select-Object -Unique) {
+            if (-not (Test-Path -LiteralPath $root)) {
+              continue
+            }
+            $artifacts += Get-ChildItem -LiteralPath $root -Recurse -File |
+              Where-Object {
+                $_.FullName -match '[\\/](bundle)[\\/]' -and
+                $_.Extension -in @(".deb", ".dmg", ".exe", ".msi")
+              }
+          }
+
+          $artifacts = @($artifacts | Sort-Object FullName -Unique)
+          if ($artifacts.Count -eq 0) {
+            Write-Error "No packaged release artifacts found for attestation."
+            exit 1
+          }
+
+          $outDir = Join-Path $pwd "dist/release-attestations"
+          New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+          $checksumsPath = Join-Path $outDir "subject.checksums.txt"
+          $lines = foreach ($artifact in $artifacts) {
+            $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $artifact.FullName).Hash.ToLowerInvariant()
+            "$hash  $($artifact.FullName)"
+          }
+          Set-Content -LiteralPath $checksumsPath -Value $lines -Encoding utf8
+          Write-Host "Prepared attestation subjects:"
+          $artifacts | ForEach-Object { Write-Host " - $($_.FullName)" }
+
+      - name: Generate signed build provenance attestations
+        if: ${{ inputs.release-id != '' }}
+        uses: actions/attest@v4
+        with:
+          subject-checksums: dist/release-attestations/subject.checksums.txt
 
       - name: Upload artifacts (macOS)
         if: inputs.upload-artifacts && contains(inputs.platform, 'macos')

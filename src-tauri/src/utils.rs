@@ -39,6 +39,12 @@ const SILERO_VAD_ASSET: RequiredResourceAsset = RequiredResourceAsset {
 pub fn cancel_current_operation(app: &AppHandle) {
     info!("Initiating operation cancellation...");
 
+    if let Some(cancellation_state) =
+        app.try_state::<crate::operation_cancellation::OperationCancellationState>()
+    {
+        cancellation_state.cancel_current_operation();
+    }
+
     // Unregister the cancel shortcut asynchronously
     shortcut::unregister_cancel_shortcut(app);
 

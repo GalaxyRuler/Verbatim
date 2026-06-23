@@ -13,6 +13,11 @@ import { AutoSubmit } from "../AutoSubmit";
 import { PostProcessingToggle } from "../PostProcessingToggle";
 import { AppendTrailingSpace } from "../AppendTrailingSpace";
 import { HistoryLimit } from "../HistoryLimit";
+import {
+  HistoryStorageToggle,
+  RecordingStorageToggle,
+} from "../HistoryStorage";
+import { PrivateSessionToggle } from "../PrivateSession";
 import { RecordingRetentionPeriodSelector } from "../RecordingRetentionPeriod";
 import { ExperimentalToggle } from "../ExperimentalToggle";
 import { DockedPill } from "../DockedPill";
@@ -53,6 +58,9 @@ export const AdvancedSettings: React.FC = () => {
       </SettingsGroup>
 
       <SettingsGroup title={t("settings.advanced.groups.history")}>
+        <PrivateSessionToggle descriptionMode="tooltip" grouped={true} />
+        <HistoryStorageToggle descriptionMode="tooltip" grouped={true} />
+        <RecordingStorageToggle descriptionMode="tooltip" grouped={true} />
         <HistoryLimit descriptionMode="tooltip" grouped={true} />
         <RecordingRetentionPeriodSelector
           descriptionMode="tooltip"

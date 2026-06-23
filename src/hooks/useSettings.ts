@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useSettingsStore } from "../stores/settingsStore";
-import type { AppSettings as Settings, AudioDevice } from "@/bindings";
+import type { AudioDevice } from "@/bindings";
+import type { AppSettings as Settings } from "@/lib/settingsDocument";
 
 interface UseSettingsReturn {
   // State
@@ -38,6 +39,7 @@ interface UseSettingsReturn {
   updatePostProcessApiKey: (
     providerId: string,
     apiKey: string,
+    sessionOnly?: boolean,
   ) => Promise<void>;
   updatePostProcessModel: (providerId: string, model: string) => Promise<void>;
   fetchPostProcessModels: (providerId: string) => Promise<string[]>;
