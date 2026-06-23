@@ -1570,13 +1570,6 @@ test.describe("Verbatim App", () => {
     await page.goto("/");
     await page.getByRole("button", { name: "Settings" }).click();
 
-    await page.getByRole("button", { name: /Microphone/ }).click();
-    await expect(
-      page.getByRole("dialog", { name: "Microphone" }),
-    ).toBeVisible();
-    await page.getByRole("button", { name: /Studio Mic/ }).click();
-    await expect(page.getByText("Studio Mic")).toBeVisible();
-
     const volumeSlider = page.getByLabel("Volume");
     await volumeSlider.focus();
     await volumeSlider.press("End");
@@ -1613,10 +1606,6 @@ test.describe("Verbatim App", () => {
     await page.getByRole("button", { name: "Pop" }).click();
     await expect(page.getByText("Pop")).toBeVisible();
 
-    await page.getByRole("button", { name: /Output Device/ }).click();
-    await page.getByRole("button", { name: /Headphones/ }).click();
-    await expect(page.getByText("Headphones")).toBeVisible();
-
     await expect
       .poll(async () =>
         page.evaluate(() => {
@@ -1639,18 +1628,12 @@ test.describe("Verbatim App", () => {
         expect.objectContaining({
           bridge: expect.arrayContaining(["setBubbleCorner:bottom-right"]),
           commands: expect.arrayContaining([
-            "set_selected_microphone",
             "change_audio_feedback_volume_setting",
             "update_history_limit",
             "update_recording_retention_period",
             "change_sound_theme_setting",
-            "set_selected_output_device",
           ]),
           invokes: expect.arrayContaining([
-            expect.objectContaining({
-              cmd: "set_selected_microphone",
-              args: { deviceName: "Studio Mic" },
-            }),
             expect.objectContaining({
               cmd: "change_audio_feedback_volume_setting",
               args: { volume: 1 },
@@ -1666,10 +1649,6 @@ test.describe("Verbatim App", () => {
             expect.objectContaining({
               cmd: "change_sound_theme_setting",
               args: { theme: "pop" },
-            }),
-            expect.objectContaining({
-              cmd: "set_selected_output_device",
-              args: { deviceName: "Headphones" },
             }),
           ]),
         }),

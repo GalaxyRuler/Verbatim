@@ -34,12 +34,10 @@ import {
   Star,
   Sun,
   Trash2,
-  Volume1,
   X,
 } from "lucide-react";
 import {
   commands,
-  type AudioDevice,
   type DictionaryEntry,
   type HistoryEntry,
   type LLMPrompt,
@@ -86,8 +84,6 @@ type SettingsSubscreen =
   | { type: "postProcessing" }
   | { type: "about" };
 type SettingsSheet =
-  | "microphone"
-  | "output"
   | "bubblePosition"
   | "appLanguage"
   | "historyLimit"
@@ -167,7 +163,6 @@ const tabs: Array<{ id: AndroidTab; labelKey: string; icon: typeof Home }> = [
 ];
 
 const ANDROID_EXCLUDED_POST_PROCESS_PROVIDERS = new Set(["apple_intelligence"]);
-const DEFAULT_DEVICE_VALUE = "Default";
 const VERBATIM_SOURCE_URL = "https://github.com/GalaxyRuler/Verbatim";
 const HANDY_SOURCE_URL = "https://github.com/cjpais/Handy";
 const androidBubbleCorners: AndroidBubbleCorner[] = [
@@ -199,14 +194,6 @@ const normalizeBubbleCorner = (
     ? (value as AndroidBubbleCorner)
     : "top-right";
 
-const normalizeDeviceSetting = (value: string | null | undefined): string => {
-  if (!value || value.toLowerCase() === "default") {
-    return DEFAULT_DEVICE_VALUE;
-  }
-
-  return value;
-};
-
 const normalizeRetentionPeriod = (
   value: string | null | undefined,
 ): AndroidRetentionPeriod => {
@@ -226,27 +213,6 @@ const normalizeRetentionPeriod = (
     default:
       return "never";
   }
-};
-
-const deviceOptions = (devices: AudioDevice[], defaultLabel: string) => {
-  const seen = new Set(["default"]);
-  return [
-    { value: DEFAULT_DEVICE_VALUE, label: defaultLabel, description: "" },
-    ...devices.flatMap((device) => {
-      const normalized = device.name.toLowerCase();
-      if (seen.has(normalized)) {
-        return [];
-      }
-      seen.add(normalized);
-      return [
-        {
-          value: device.name,
-          label: device.name,
-          description: device.is_default ? defaultLabel : "",
-        },
-      ];
-    }),
-  ];
 };
 
 const soundThemeOptions: SoundTheme[] = ["marimba", "pop", "custom"];
@@ -2290,16 +2256,8 @@ function SettingsTab({
   openAbout: () => void;
 }) {
   const { t, i18n } = useTranslation();
-  const {
-    settings,
-    updateSetting,
-    audioDevices,
-    outputDevices,
-    audioFeedbackEnabled,
-    isUpdating,
-    refreshAudioDevices,
-    refreshOutputDevices,
-  } = useSettings();
+  const { settings, updateSetting, audioFeedbackEnabled, isUpdating } =
+    useSettings();
   const customSounds = useSettingsStore((state) => state.customSounds);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [settingsSheet, setSettingsSheet] = useState<SettingsSheet | null>(
@@ -2310,20 +2268,6 @@ function SettingsTab({
     useState<AndroidBubbleCorner>("top-right");
   const [version, setVersion] = useState("");
 
-  const selectedMicrophone = normalizeDeviceSetting(
-    settings?.selected_microphone,
-  );
-  const selectedOutput = normalizeDeviceSetting(
-    settings?.selected_output_device,
-  );
-  const microphoneOptions = useMemo(
-    () => deviceOptions(audioDevices, t("common.default")),
-    [audioDevices, t],
-  );
-  const outputOptions = useMemo(
-    () => deviceOptions(outputDevices, t("common.default")),
-    [outputDevices, t],
-  );
   const rawVolume = settings?.audio_feedback_volume ?? 0.5;
   const volumePercent = Math.round(
     rawVolume <= 1 ? rawVolume * 100 : rawVolume,
@@ -2348,16 +2292,6 @@ function SettingsTab({
     settings?.recording_retention_period,
   );
   const selectedSoundTheme = settings?.sound_theme || "marimba";
-  const selectedMicrophoneLabel =
-    selectedMicrophone === DEFAULT_DEVICE_VALUE
-      ? t("common.default")
-      : audioDevices.find((device) => device.name === selectedMicrophone)
-          ?.name || selectedMicrophone;
-  const selectedOutputLabel =
-    selectedOutput === DEFAULT_DEVICE_VALUE
-      ? t("common.default")
-      : outputDevices.find((device) => device.name === selectedOutput)?.name ||
-        selectedOutput;
   const visibleSoundThemeOptions = useMemo(
     () =>
       soundThemeOptions.filter(
@@ -2390,26 +2324,12 @@ function SettingsTab({
   }, [settings?.overlay_position]);
 
   useEffect(() => {
-    if (settingsSheet === "microphone") {
-      void refreshAudioDevices();
-    }
-    if (settingsSheet === "output") {
-      void refreshOutputDevices();
-    }
     if (settingsSheet === "historyLimit") {
       setHistoryLimitDraft(String(historyLimit));
     }
-  }, [historyLimit, refreshAudioDevices, refreshOutputDevices, settingsSheet]);
+  }, [historyLimit, settingsSheet]);
 
   const closeSheet = () => setSettingsSheet(null);
-
-  const handleDeviceSelect = async (
-    setting: "selected_microphone" | "selected_output_device",
-    value: string,
-  ) => {
-    await updateSetting(setting, value);
-    closeSheet();
-  };
 
   const handleVolumeChange = (value: number) => {
     void updateSetting("audio_feedback_volume", value / 100);
@@ -2502,69 +2422,6 @@ function SettingsTab({
   const renderSettingsSheet = () => {
     if (!settingsSheet) {
       return null;
-    }
-
-    if (settingsSheet === "microphone") {
-      return (
-        <AndroidSettingsSheet
-          title={t("settings.sound.microphone.title")}
-          onClose={closeSheet}
-        >
-          <button
-            type="button"
-            className="android-action android-sheet-action"
-            onClick={() => void refreshAudioDevices()}
-          >
-            <RefreshCw size={17} />
-            <span>{t("android.settings.refreshDevices")}</span>
-          </button>
-          <div className="android-picker-list">
-            {microphoneOptions.map((option) =>
-              renderPickerOption({
-                selected: selectedMicrophone === option.value,
-                label: option.label,
-                description: option.description,
-                optionKey: option.value,
-                onClick: () =>
-                  void handleDeviceSelect("selected_microphone", option.value),
-              }),
-            )}
-          </div>
-        </AndroidSettingsSheet>
-      );
-    }
-
-    if (settingsSheet === "output") {
-      return (
-        <AndroidSettingsSheet
-          title={t("settings.sound.outputDevice.title")}
-          onClose={closeSheet}
-        >
-          <button
-            type="button"
-            className="android-action android-sheet-action"
-            onClick={() => void refreshOutputDevices()}
-          >
-            <RefreshCw size={17} />
-            <span>{t("android.settings.refreshDevices")}</span>
-          </button>
-          <div className="android-picker-list">
-            {outputOptions.map((option) =>
-              renderPickerOption({
-                selected: selectedOutput === option.value,
-                label: option.label,
-                description: option.description,
-                optionKey: option.value,
-                onClick: () =>
-                  void handleDeviceSelect(
-                    "selected_output_device",
-                    option.value,
-                  ),
-              }),
-            )}
-          </div>
-        </AndroidSettingsSheet>
-      );
     }
 
     if (settingsSheet === "bubblePosition") {
@@ -2702,15 +2559,6 @@ function SettingsTab({
           <h2>{t("android.settings.general")}</h2>
         </div>
         <div className="android-settings-group">
-          <button
-            type="button"
-            className="android-settings-row"
-            onClick={() => setSettingsSheet("microphone")}
-          >
-            <span>{t("settings.sound.microphone.title")}</span>
-            <span className="android-muted">{selectedMicrophoneLabel}</span>
-            <ChevronRight size={18} />
-          </button>
           <div className="android-settings-row">
             <span>{t("settings.sound.audioFeedback.label")}</span>
             <Switch
@@ -2881,15 +2729,6 @@ function SettingsTab({
                 {soundThemeLabel(selectedSoundTheme)}
               </span>
               <Music size={18} />
-            </button>
-            <button
-              type="button"
-              className="android-settings-row"
-              onClick={() => setSettingsSheet("output")}
-            >
-              <span>{t("settings.sound.outputDevice.title")}</span>
-              <span className="android-muted">{selectedOutputLabel}</span>
-              <Volume1 size={18} />
             </button>
           </div>
         )}
