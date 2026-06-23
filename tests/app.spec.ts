@@ -1201,6 +1201,11 @@ test.describe("Verbatim App", () => {
       page.getByText("Native Android formatted transcript"),
     ).toBeVisible();
 
+    // Regression: native timestamps are ms but formatDateTime expects Unix seconds.
+    // The 1781740000000 ms entry must render in 2026, not mis-scale to year 58436.
+    await expect(page.locator("body")).toContainText("2026");
+    await expect(page.locator("body")).not.toContainText("58436");
+
     await page.getByRole("button", { name: "History" }).click();
     await expect(
       page.getByText("Native Android formatted transcript"),

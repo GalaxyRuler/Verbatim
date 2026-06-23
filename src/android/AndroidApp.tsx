@@ -258,11 +258,12 @@ const historyEntryFromAndroidSnapshot = (
   }
 
   const id = Number(entry.id);
-  const timestamp = Number(entry.timestamp);
-  const fallbackTimestamp = Date.now();
-  const normalizedTimestamp = Number.isFinite(timestamp)
-    ? timestamp
-    : fallbackTimestamp;
+  // Native writes System.currentTimeMillis() (ms); the rest of the app (and formatDateTime)
+  // use Unix SECONDS, so normalize here to avoid the "year 58436" mis-scale.
+  const timestampMs = Number(entry.timestamp);
+  const normalizedTimestamp = Math.floor(
+    (Number.isFinite(timestampMs) ? timestampMs : Date.now()) / 1000,
+  );
   return {
     id: Number.isFinite(id) ? id : normalizedTimestamp,
     file_name: "android-native",
