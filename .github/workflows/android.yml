@@ -70,7 +70,8 @@ jobs:
         working-directory: src-tauri/gen/android
         env:
           ANDROID_NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/${{ env.NDK_VERSION }}
-        run: ./gradlew :app:testUniversalDebugUnitTest
+        # via bash so it runs regardless of the committed wrapper exec bit
+        run: bash ./gradlew :app:testUniversalDebugUnitTest
       - name: Resolve APK path (deterministic; tauri merges a single --target to "universal")
         id: apk
         run: |

@@ -183,5 +183,9 @@ object AndroidSpeechSupport {
       .edit()
       .putString(SPEECH_MODEL_STATUS_KEY, status)
       .apply()
+    // The speech-pack status changes asynchronously from download callbacks (downloading ->
+    // ready/error/pending), not just on activity resume. Push the fresh snapshot so the
+    // event-driven onboarding doesn't show a stale state after the poll was removed (ADR-1).
+    runOnMain { VerbatimAndroidPlugin.instance?.emitPermissions() }
   }
 }
