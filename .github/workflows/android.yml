@@ -51,7 +51,11 @@ jobs:
       - name: Upload test report on failure
         if: failure()
         uses: actions/upload-artifact@v4
-        with: { name: unit-test-report, path: src-tauri/gen/android/app/build/reports/tests/** }
+        with:
+          {
+            name: unit-test-report,
+            path: src-tauri/gen/android/app/build/reports/tests/**,
+          }
 
   e2e:
     runs-on: ubuntu-latest # HW-accelerated emulation is Linux-only
