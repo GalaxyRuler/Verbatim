@@ -1,0 +1,136 @@
+name: "native backend"
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "src-tauri/**"
+      - "scripts/cargo-*.ps1"
+      - ".github/workflows/native-backend.yml"
+  pull_request:
+    paths:
+      - "src-tauri/**"
+      - "scripts/cargo-*.ps1"
+      - ".github/workflows/native-backend.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-backend:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: "Windows x64 production backend"
+            runner: windows-latest
+            target: x86_64-pc-windows-msvc
+          - name: "macOS ARM64 production backend"
+            runner: macos-26
+            target: aarch64-apple-darwin
+          - name: "Ubuntu x64 production backend"
+            runner: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+
+    env:
+      CARGO_TERM_COLOR: always
+      # Keep x86_64 native checks from producing binaries that require AVX/FMA.
+      GGML_NATIVE: ${{ matrix.target != 'aarch64-apple-darwin' && 'OFF' || '' }}
+      GGML_AVX: ${{ matrix.target != 'aarch64-apple-darwin' && 'OFF' || '' }}
+      GGML_AVX2: ${{ matrix.target != 'aarch64-apple-darwin' && 'OFF' || '' }}
+      GGML_FMA: ${{ matrix.target != 'aarch64-apple-darwin' && 'OFF' || '' }}
+      GGML_F16C: ${{ matrix.target != 'aarch64-apple-darwin' && 'OFF' || '' }}
+
+    steps:
+      - name: Enable long paths (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" `
+            -Name "LongPathsEnabled" -Value 1 -PropertyType DWORD -Force
+          git config --system core.longpaths true
+
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+          key: native-backend-${{ matrix.runner }}-${{ matrix.target }}
+
+      - name: Install Ubuntu desktop dependencies
+        if: runner.os == 'Linux'
+        run: |
+          export DEBIAN_FRONTEND=noninteractive
+          sudo apt-get -o Acquire::Retries=3 update
+          timeout 15m sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            libasound2-dev \
+            libopenblas-dev \
+            libx11-dev \
+            libxtst-dev \
+            libxrandr-dev \
+            libgtk-layer-shell0 \
+            libgtk-layer-shell-dev \
+            libvulkan-dev \
+            mesa-vulkan-drivers \
+            glslang-tools
+
+      - name: Install Windows native dependencies
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (-not (Get-Command ninja -ErrorAction SilentlyContinue)) {
+            choco install ninja -y --no-progress
+          }
+
+      - name: Install Vulkan SDK (Windows x64)
+        if: runner.os == 'Windows'
+        uses: humbletim/install-vulkan-sdk@v1.2
+        with:
+          version: 1.4.309.0
+          cache: true
+
+      - name: Configure Windows native build
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $drive = Split-Path -Qualifier $env:GITHUB_WORKSPACE
+          # Keep CARGO_TARGET_DIR short. whisper-rs-sys builds ggml-vulkan's
+          # vulkan-shaders-gen as a deeply nested ExternalProject; its TryCompile
+          # scratch paths blow past MAX_PATH (260) under a longer target dir, which
+          # surfaces as "C1083: Cannot open compiler generated file: '': Invalid
+          # argument". $drive\t matches the green release build (build.yml).
+          $targetDir = "$drive\t"
+          New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
+          echo "CARGO_TARGET_DIR=$targetDir" >> $env:GITHUB_ENV
+          echo "CMAKE_GENERATOR=Ninja" >> $env:GITHUB_ENV
+          echo "TrackFileAccess=false" >> $env:GITHUB_ENV
+
+      - name: Check production backend
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/cargo-check-windows.ps1 --target ${{ matrix.target }}
+
+      - name: Test production backend
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/cargo-test-windows.ps1 --target ${{ matrix.target }}
+
+      - name: Check production backend
+        if: runner.os != 'Windows'
+        run: cargo check --manifest-path src-tauri/Cargo.toml --target ${{ matrix.target }}
+
+      - name: Test production backend
+        if: runner.os != 'Windows'
+        run: cargo test --manifest-path src-tauri/Cargo.toml --target ${{ matrix.target }}
