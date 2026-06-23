@@ -86,12 +86,18 @@ jobs:
             choco install ninja -y --no-progress
           }
 
-      - name: Install Vulkan SDK (Windows x64)
-        if: runner.os == 'Windows'
+      - name: Install Vulkan SDK
+        if: runner.os == 'Windows' || runner.os == 'Linux'
         uses: humbletim/install-vulkan-sdk@v1.2
         with:
           version: 1.4.309.0
           cache: true
+
+      - name: Verify Linux Vulkan shader compiler
+        if: runner.os == 'Linux'
+        run: |
+          command -v glslc
+          glslc --version
 
       - name: Configure Windows native build
         if: runner.os == 'Windows'
