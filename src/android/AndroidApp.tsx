@@ -936,7 +936,16 @@ function HistoryTab() {
               <article
                 key={entry.id}
                 className="android-history-card"
+                role="button"
+                tabIndex={0}
+                aria-expanded={expanded}
                 onClick={() => setExpandedId(expanded ? null : entry.id)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    setExpandedId(expanded ? null : entry.id);
+                  }
+                }}
               >
                 <div className="android-card-header">
                   <div>
