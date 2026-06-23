@@ -27,7 +27,6 @@ pub mod providers;
 mod runtime_settings;
 mod selection;
 mod settings;
-mod settings_domains;
 mod shortcut;
 mod signal_handle;
 mod snippets;
@@ -56,7 +55,6 @@ use signal_hook::consts::{SIGUSR1, SIGUSR2};
 #[cfg(unix)]
 use signal_hook::iterator::Signals;
 use specta::Type;
-use std::collections::HashMap;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::image::Image;
@@ -113,8 +111,6 @@ impl StartupState {
 struct NativeSmokeStatus {
     startup_status: StartupStatus,
     settings_loaded: bool,
-    settings_schema_version: u32,
-    settings_domain_versions: HashMap<String, u32>,
     main_window_created: bool,
     tray_initialized: bool,
     tray_visible_requested: bool,
@@ -1148,10 +1144,10 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::cancel_operation,
             commands::is_portable,
             commands::get_app_dir_path,
-            commands::get_app_settings_document,
+            commands::get_app_settings,
             commands::get_credential_store_status,
             commands::get_linux_environment_status,
-            commands::get_default_settings_document,
+            commands::get_default_settings,
             commands::get_log_dir_path,
             commands::set_log_level,
             commands::open_recordings_folder,
@@ -1379,8 +1375,6 @@ pub fn run(cli_args: CliArgs) {
                         NativeSmokeStatus {
                             startup_status: startup_state.snapshot(),
                             settings_loaded: true,
-                            settings_schema_version: settings.settings_schema_version,
-                            settings_domain_versions: settings.settings_domain_versions.clone(),
                             main_window_created: true,
                             tray_initialized: false,
                             tray_visible_requested: false,
@@ -1474,8 +1468,6 @@ pub fn run(cli_args: CliArgs) {
                 NativeSmokeStatus {
                     startup_status: startup_state.snapshot(),
                     settings_loaded: true,
-                    settings_schema_version: settings.settings_schema_version,
-                    settings_domain_versions: settings.settings_domain_versions.clone(),
                     main_window_created: true,
                     tray_initialized: true,
                     tray_visible_requested: tray_available,
@@ -1587,8 +1579,6 @@ mod tests {
                 message: "forced startup failure for packaged smoke recovery drill".to_string(),
             },
             settings_loaded: true,
-            settings_schema_version: settings.settings_schema_version,
-            settings_domain_versions: settings.settings_domain_versions.clone(),
             main_window_created: true,
             tray_initialized: false,
             tray_visible_requested: false,
@@ -1695,8 +1685,6 @@ mod tests {
                 message: "forced startup failure for packaged smoke recovery drill".to_string(),
             },
             settings_loaded: true,
-            settings_schema_version: settings.settings_schema_version,
-            settings_domain_versions: settings.settings_domain_versions.clone(),
             main_window_created: true,
             tray_initialized: false,
             tray_visible_requested: false,

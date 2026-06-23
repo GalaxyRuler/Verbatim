@@ -99,20 +99,7 @@ helper when CMake creates paths near Windows' legacy path limit.
 
 `src/bindings.ts` is generated from Rust commands, events, and exported types.
 Regenerate it after adding, removing, or changing backend commands or exported
-Rust types.
-
-Use the dedicated no-default-features generator for routine binding updates:
-
-```bash
-bun run bindings:generate
-```
-
-This compiles the command/type registry without the native transcription engine
-feature, so binding regeneration is not blocked by Whisper/ONNX CMake or GPU
-toolchain failures.
-
-Use a debug Tauri build only when you also need to validate debug app startup or
-bundling behavior:
+Rust types. The current generation path is a debug Tauri build:
 
 ```bash
 bun run tauri build -- --debug

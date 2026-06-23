@@ -35,6 +35,40 @@ const OVERLAY_EXPANDED_WIDTH: f64 = 320.0;
 const OVERLAY_COLLAPSED_WIDTH: f64 = 44.0;
 const OVERLAY_HEIGHT: f64 = 42.0;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OverlayState {
+    Idle,
+    Recording,
+    Silence,
+    Transcribing,
+    Processing,
+    Inserted,
+    MicFailed,
+    Cancelled,
+}
+
+impl OverlayState {
+    pub fn as_payload(self) -> &'static str {
+        match self {
+            Self::Idle => "idle",
+            Self::Recording => "recording",
+            Self::Silence => "silence",
+            Self::Transcribing => "transcribing",
+            Self::Processing => "processing",
+            Self::Inserted => "inserted",
+            Self::MicFailed => "mic_failed",
+            Self::Cancelled => "cancelled",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct OverlayGeometryIntent {
+    width: f64,
+    height: f64,
+    expanded: bool,
+}
+
 #[cfg(target_os = "macos")]
 const OVERLAY_TOP_OFFSET: f64 = 46.0;
 #[cfg(any(target_os = "windows", target_os = "linux"))]
@@ -53,7 +87,8 @@ fn update_gtk_layer_shell_anchors(overlay_window: &tauri::webview::WebviewWindow
         // Try to get the GTK window from the Tauri webview
         if let Ok(gtk_window) = window_clone.gtk_window() {
             let settings = settings::get_settings(window_clone.app_handle());
-            match settings.overlay_position {
+            let runtime = crate::runtime_settings::overlay_runtime(&settings);
+            match runtime.position() {
                 OverlayPosition::Top => {
                     gtk_window.set_anchor(Edge::Top, true);
                     gtk_window.set_anchor(Edge::Bottom, false);
@@ -215,11 +250,22 @@ fn is_mouse_within_monitor(
 /// We must use LogicalPosition (not PhysicalPosition) because Tauri/tao
 /// converts PhysicalPosition using the scale factor of the monitor the window
 /// is *currently* on, which is wrong when moving cross-monitor.
-fn overlay_width_for_expanded_state(expanded: bool) -> f64 {
-    if expanded {
+fn overlay_geometry_for_state(state: OverlayState, docked: bool) -> OverlayGeometryIntent {
+    let expanded = !(docked && state == OverlayState::Idle);
+    overlay_geometry_for_expanded_state(expanded)
+}
+
+fn overlay_geometry_for_expanded_state(expanded: bool) -> OverlayGeometryIntent {
+    let width = if expanded {
         OVERLAY_EXPANDED_WIDTH
     } else {
         OVERLAY_COLLAPSED_WIDTH
+    };
+
+    OverlayGeometryIntent {
+        width,
+        height: OVERLAY_HEIGHT,
+        expanded,
     }
 }
 
@@ -235,9 +281,10 @@ fn calculate_overlay_position_for_width(
     let monitor_height = monitor.size().height as f64 / scale;
 
     let settings = settings::get_settings(app_handle);
+    let runtime = crate::runtime_settings::overlay_runtime(&settings);
 
     let x = monitor_x + (monitor_width - overlay_width) / 2.0;
-    let y = match settings.overlay_position {
+    let y = match runtime.position() {
         OverlayPosition::Top => monitor_y + OVERLAY_TOP_OFFSET,
         OverlayPosition::Bottom | OverlayPosition::None => {
             monitor_y + monitor_height - OVERLAY_HEIGHT - OVERLAY_BOTTOM_OFFSET
@@ -251,7 +298,7 @@ fn calculate_overlay_position(app_handle: &AppHandle) -> Option<(f64, f64)> {
     calculate_overlay_position_for_width(app_handle, OVERLAY_EXPANDED_WIDTH)
 }
 
-fn apply_overlay_geometry(app_handle: &AppHandle, overlay_width: f64) {
+fn apply_overlay_geometry(app_handle: &AppHandle, geometry: OverlayGeometryIntent) {
     if let Some(overlay_window) = app_handle.get_webview_window("recording_overlay") {
         #[cfg(target_os = "linux")]
         {
@@ -259,11 +306,11 @@ fn apply_overlay_geometry(app_handle: &AppHandle, overlay_width: f64) {
         }
 
         let _ = overlay_window.set_size(tauri::Size::Logical(tauri::LogicalSize {
-            width: overlay_width,
-            height: OVERLAY_HEIGHT,
+            width: geometry.width,
+            height: geometry.height,
         }));
 
-        if let Some((x, y)) = calculate_overlay_position_for_width(app_handle, overlay_width) {
+        if let Some((x, y)) = calculate_overlay_position_for_width(app_handle, geometry.width) {
             let _ = overlay_window
                 .set_position(tauri::Position::Logical(tauri::LogicalPosition { x, y }));
         }
@@ -271,7 +318,7 @@ fn apply_overlay_geometry(app_handle: &AppHandle, overlay_width: f64) {
 }
 
 pub fn set_recording_overlay_expanded(app_handle: &AppHandle, expanded: bool) {
-    apply_overlay_geometry(app_handle, overlay_width_for_expanded_state(expanded));
+    apply_overlay_geometry(app_handle, overlay_geometry_for_expanded_state(expanded));
 }
 
 /// Creates the recording overlay window and keeps it hidden by default
@@ -331,7 +378,9 @@ pub fn create_recording_overlay(app_handle: &AppHandle) {
             }
 
             debug!("Recording overlay window created successfully (hidden)");
-            if settings::get_settings(app_handle).docked_pill_enabled {
+            if crate::runtime_settings::overlay_runtime(&settings::get_settings(app_handle))
+                .should_show_docked_idle()
+            {
                 let app = app_handle.clone();
                 std::thread::spawn(move || {
                     std::thread::sleep(std::time::Duration::from_millis(500));
@@ -382,14 +431,18 @@ pub fn create_recording_overlay(app_handle: &AppHandle) {
     }
 }
 
-fn show_overlay_state(app_handle: &AppHandle, state: &str) {
+fn show_overlay_state(app_handle: &AppHandle, state: OverlayState) {
     // Check if overlay should be shown based on position setting
     let settings = settings::get_settings(app_handle);
-    if settings.overlay_position == OverlayPosition::None && !settings.docked_pill_enabled {
+    let runtime = crate::runtime_settings::overlay_runtime(&settings);
+    if !runtime.should_show_active_overlay() {
         return;
     }
 
-    set_recording_overlay_expanded(app_handle, true);
+    apply_overlay_geometry(
+        app_handle,
+        overlay_geometry_for_state(state, runtime.should_show_docked_idle()),
+    );
 
     if let Some(overlay_window) = app_handle.get_webview_window("recording_overlay") {
         let _ = overlay_window.show();
@@ -398,27 +451,30 @@ fn show_overlay_state(app_handle: &AppHandle, state: &str) {
         #[cfg(target_os = "windows")]
         force_overlay_topmost(&overlay_window);
 
-        let _ = overlay_window.emit("show-overlay", state);
+        let _ = overlay_window.emit("show-overlay", state.as_payload());
     }
 }
 
 /// Shows the recording overlay window with fade-in animation
 pub fn show_recording_overlay(app_handle: &AppHandle) {
-    show_overlay_state(app_handle, "recording");
+    show_overlay_state(app_handle, OverlayState::Recording);
 }
 
 /// Shows the transcribing overlay window
 pub fn show_transcribing_overlay(app_handle: &AppHandle) {
-    show_overlay_state(app_handle, "transcribing");
+    show_overlay_state(app_handle, OverlayState::Transcribing);
 }
 
 /// Shows the processing overlay window
 pub fn show_processing_overlay(app_handle: &AppHandle) {
-    show_overlay_state(app_handle, "processing");
+    show_overlay_state(app_handle, OverlayState::Processing);
 }
 
 pub fn show_docked_overlay(app_handle: &AppHandle) {
-    set_recording_overlay_expanded(app_handle, false);
+    apply_overlay_geometry(
+        app_handle,
+        overlay_geometry_for_state(OverlayState::Idle, true),
+    );
 
     if let Some(overlay_window) = app_handle.get_webview_window("recording_overlay") {
         let _ = overlay_window.show();
@@ -432,13 +488,16 @@ pub fn show_docked_overlay(app_handle: &AppHandle) {
 
 /// Updates the overlay window position based on current settings
 pub fn update_overlay_position(app_handle: &AppHandle) {
-    let expanded = !settings::get_settings(app_handle).docked_pill_enabled;
-    set_recording_overlay_expanded(app_handle, expanded);
+    let settings = settings::get_settings(app_handle);
+    let runtime = crate::runtime_settings::overlay_runtime(&settings);
+    set_recording_overlay_expanded(app_handle, runtime.starts_expanded());
 }
 
 /// Hides the recording overlay window with fade-out animation
 pub fn hide_recording_overlay(app_handle: &AppHandle) {
-    if settings::get_settings(app_handle).docked_pill_enabled {
+    let settings = settings::get_settings(app_handle);
+    let runtime = crate::runtime_settings::overlay_runtime(&settings);
+    if runtime.should_show_docked_idle() {
         show_docked_overlay(app_handle);
         return;
     }
@@ -467,17 +526,43 @@ pub fn emit_levels(app_handle: &AppHandle, levels: &Vec<f32>) {
     }
 }
 
-pub fn emit_overlay_state_changed(app_handle: &AppHandle, state: &str) {
-    let _ = app_handle.emit("overlay-state-changed", state);
+pub fn emit_overlay_state_changed(app_handle: &AppHandle, state: OverlayState) {
+    let payload = state.as_payload();
+    let _ = app_handle.emit("overlay-state-changed", payload);
 
     if let Some(overlay_window) = app_handle.get_webview_window("recording_overlay") {
-        let _ = overlay_window.emit("overlay-state-changed", state);
+        let _ = overlay_window.emit("overlay-state-changed", payload);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn overlay_state_payloads_match_frontend_contract() {
+        assert_eq!(OverlayState::Idle.as_payload(), "idle");
+        assert_eq!(OverlayState::Recording.as_payload(), "recording");
+        assert_eq!(OverlayState::Transcribing.as_payload(), "transcribing");
+        assert_eq!(OverlayState::Processing.as_payload(), "processing");
+        assert_eq!(OverlayState::Inserted.as_payload(), "inserted");
+        assert_eq!(OverlayState::Cancelled.as_payload(), "cancelled");
+    }
+
+    #[test]
+    fn overlay_geometry_collapses_only_for_docked_idle() {
+        let docked_idle = overlay_geometry_for_state(OverlayState::Idle, true);
+        assert_eq!(docked_idle.width, OVERLAY_COLLAPSED_WIDTH);
+        assert!(!docked_idle.expanded);
+
+        let docked_recording = overlay_geometry_for_state(OverlayState::Recording, true);
+        assert_eq!(docked_recording.width, OVERLAY_EXPANDED_WIDTH);
+        assert!(docked_recording.expanded);
+
+        let floating_idle = overlay_geometry_for_state(OverlayState::Idle, false);
+        assert_eq!(floating_idle.width, OVERLAY_EXPANDED_WIDTH);
+        assert!(floating_idle.expanded);
+    }
 
     #[test]
     fn monitor_hit_accepts_physical_cursor_coordinates_on_scaled_monitor() {

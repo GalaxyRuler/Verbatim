@@ -1,7 +1,6 @@
 import { useEffect } from "react";
 import { useSettingsStore } from "../stores/settingsStore";
-import type { AudioDevice } from "@/bindings";
-import type { AppSettings as Settings } from "@/lib/settingsDocument";
+import type { AppSettings as Settings, AudioDevice } from "@/bindings";
 
 interface UseSettingsReturn {
   // State

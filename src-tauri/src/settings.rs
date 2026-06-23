@@ -9,13 +9,8 @@ use std::path::{Path, PathBuf};
 use tauri::AppHandle;
 use tauri_plugin_store::StoreExt;
 
-use crate::settings_domains::{
-    default_settings_domain_versions, CURRENT_SETTINGS_DOMAIN_VERSION, SETTINGS_DOMAIN_IDS,
-};
-
 pub const APPLE_INTELLIGENCE_PROVIDER_ID: &str = "apple_intelligence";
 pub const APPLE_INTELLIGENCE_DEFAULT_MODEL_ID: &str = "Apple Intelligence";
-pub const CURRENT_SETTINGS_SCHEMA_VERSION: u32 = 1;
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -466,10 +461,6 @@ impl std::ops::DerefMut for SecretMap {
 /* useful for composing the initial JSON in the store ------------------ */
 #[derive(Serialize, Deserialize, Debug, Clone, Type)]
 pub struct AppSettings {
-    #[serde(default = "default_settings_schema_version")]
-    pub settings_schema_version: u32,
-    #[serde(default = "default_settings_domain_versions")]
-    pub settings_domain_versions: HashMap<String, u32>,
     pub bindings: HashMap<String, ShortcutBinding>,
     pub push_to_talk: bool,
     pub audio_feedback: bool,
@@ -711,10 +702,6 @@ fn default_recording_retention_period() -> RecordingRetentionPeriod {
 
 fn default_audio_feedback_volume() -> f32 {
     1.0
-}
-
-fn default_settings_schema_version() -> u32 {
-    CURRENT_SETTINGS_SCHEMA_VERSION
 }
 
 fn default_sound_theme() -> SoundTheme {
@@ -1091,49 +1078,6 @@ fn settings_value_has_key(settings_value: Option<&serde_json::Value>, key: &str)
         .is_some_and(|settings| settings.contains_key(key))
 }
 
-fn settings_value_has_domain_versions(settings_value: Option<&serde_json::Value>) -> bool {
-    settings_value_has_key(settings_value, "settings_domain_versions")
-        || settings_value_has_key(settings_value, "domains")
-}
-
-fn ensure_settings_version_defaults(
-    settings: &mut AppSettings,
-    settings_value: Option<&serde_json::Value>,
-) -> bool {
-    let mut changed = false;
-
-    if !settings_value_has_key(settings_value, "settings_schema_version") {
-        changed = true;
-    }
-
-    if settings.settings_schema_version < CURRENT_SETTINGS_SCHEMA_VERSION {
-        settings.settings_schema_version = CURRENT_SETTINGS_SCHEMA_VERSION;
-        changed = true;
-    }
-
-    if !settings_value_has_domain_versions(settings_value) {
-        changed = true;
-    }
-
-    for id in SETTINGS_DOMAIN_IDS {
-        match settings.settings_domain_versions.get_mut(*id) {
-            Some(version) if *version < CURRENT_SETTINGS_DOMAIN_VERSION => {
-                *version = CURRENT_SETTINGS_DOMAIN_VERSION;
-                changed = true;
-            }
-            Some(_) => {}
-            None => {
-                settings
-                    .settings_domain_versions
-                    .insert((*id).to_string(), CURRENT_SETTINGS_DOMAIN_VERSION);
-                changed = true;
-            }
-        }
-    }
-
-    changed
-}
-
 #[cfg_attr(not(test), allow(dead_code))]
 fn ensure_dictionary_defaults(settings: &mut AppSettings) -> bool {
     crate::dictionary::sync_legacy_custom_words(settings)
@@ -1266,8 +1210,6 @@ pub fn get_default_settings() -> AppSettings {
     }
 
     AppSettings {
-        settings_schema_version: default_settings_schema_version(),
-        settings_domain_versions: default_settings_domain_versions(),
         bindings,
         push_to_talk: true,
         audio_feedback: false,
@@ -1461,12 +1403,12 @@ fn recover_settings_from_unparseable_value(settings_value: &serde_json::Value) -
             candidate_object.insert(key.clone(), value.clone());
         }
 
-        if crate::settings_domains::parse_settings_store_value(candidate).is_ok() {
+        if serde_json::from_value::<AppSettings>(candidate).is_ok() {
             merged_object.insert(key.clone(), value.clone());
         }
     }
 
-    crate::settings_domains::parse_settings_store_value(merged_value).unwrap_or(default_settings)
+    serde_json::from_value(merged_value).unwrap_or(default_settings)
 }
 
 fn settings_store_file_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -1548,17 +1490,14 @@ pub fn load_or_create_app_settings(app: &AppHandle) -> AppSettings {
     let mut settings = if let Some(settings_value) = store.get("settings") {
         settings_value_for_defaults = Some(settings_value.clone());
         // Parse the entire settings object
-        match crate::settings_domains::parse_settings_store_value(settings_value.clone()) {
+        match serde_json::from_value::<AppSettings>(settings_value.clone()) {
             Ok(mut settings) => {
                 debug!("{}", existing_settings_log_message(&settings));
                 let updated = ensure_binding_defaults(&mut settings);
 
                 if updated {
                     debug!("Settings updated with new bindings");
-                    store.set(
-                        "settings",
-                        crate::settings_domains::settings_store_value(&settings).unwrap(),
-                    );
+                    store.set("settings", serde_json::to_value(&settings).unwrap());
                 }
 
                 settings
@@ -1567,22 +1506,17 @@ pub fn load_or_create_app_settings(app: &AppHandle) -> AppSettings {
                 let recovered_settings = recover_unparseable_settings(app, &settings_value, &e);
                 store.set(
                     "settings",
-                    crate::settings_domains::settings_store_value(&recovered_settings).unwrap(),
+                    serde_json::to_value(&recovered_settings).unwrap(),
                 );
                 recovered_settings
             }
         }
     } else {
         let default_settings = get_default_settings();
-        store.set(
-            "settings",
-            crate::settings_domains::settings_store_value(&default_settings).unwrap(),
-        );
+        store.set("settings", serde_json::to_value(&default_settings).unwrap());
         default_settings
     };
 
-    let version_changed =
-        ensure_settings_version_defaults(&mut settings, settings_value_for_defaults.as_ref());
     let binding_changed = ensure_binding_defaults(&mut settings);
     let post_process_changed = ensure_post_process_defaults(&mut settings);
     let adaptive_changed = ensure_adaptive_defaults(&mut settings);
@@ -1596,8 +1530,7 @@ pub fn load_or_create_app_settings(app: &AppHandle) -> AppSettings {
         &mut settings,
         crate::credentials::CredentialStoreFailurePolicy::PreserveLegacyValue,
     );
-    if version_changed
-        || binding_changed
+    if binding_changed
         || post_process_changed
         || adaptive_changed
         || translation_changed
@@ -1605,10 +1538,7 @@ pub fn load_or_create_app_settings(app: &AppHandle) -> AppSettings {
         || snippet_changed
         || credentials_changed
     {
-        store.set(
-            "settings",
-            crate::settings_domains::settings_store_value(&settings).unwrap(),
-        );
+        store.set("settings", serde_json::to_value(&settings).unwrap());
     }
 
     crate::credentials::hydrate_post_process_api_keys(&mut settings);
@@ -1624,27 +1554,20 @@ pub fn get_settings(app: &AppHandle) -> AppSettings {
     let mut settings_value_for_defaults = None;
     let mut settings = if let Some(settings_value) = store.get("settings") {
         settings_value_for_defaults = Some(settings_value.clone());
-        crate::settings_domains::parse_settings_store_value(settings_value.clone()).unwrap_or_else(
-            |err| {
-                let recovered_settings = recover_unparseable_settings(app, &settings_value, &err);
-                store.set(
-                    "settings",
-                    crate::settings_domains::settings_store_value(&recovered_settings).unwrap(),
-                );
-                recovered_settings
-            },
-        )
+        serde_json::from_value::<AppSettings>(settings_value.clone()).unwrap_or_else(|err| {
+            let recovered_settings = recover_unparseable_settings(app, &settings_value, &err);
+            store.set(
+                "settings",
+                serde_json::to_value(&recovered_settings).unwrap(),
+            );
+            recovered_settings
+        })
     } else {
         let default_settings = get_default_settings();
-        store.set(
-            "settings",
-            crate::settings_domains::settings_store_value(&default_settings).unwrap(),
-        );
+        store.set("settings", serde_json::to_value(&default_settings).unwrap());
         default_settings
     };
 
-    let version_changed =
-        ensure_settings_version_defaults(&mut settings, settings_value_for_defaults.as_ref());
     let binding_changed = ensure_binding_defaults(&mut settings);
     let post_process_changed = ensure_post_process_defaults(&mut settings);
     let adaptive_changed = ensure_adaptive_defaults(&mut settings);
@@ -1654,18 +1577,14 @@ pub fn get_settings(app: &AppHandle) -> AppSettings {
         settings_value_for_defaults.as_ref(),
     );
     let snippet_changed = ensure_snippet_defaults(&mut settings);
-    if version_changed
-        || binding_changed
+    if binding_changed
         || post_process_changed
         || adaptive_changed
         || translation_changed
         || dictionary_changed
         || snippet_changed
     {
-        store.set(
-            "settings",
-            crate::settings_domains::settings_store_value(&settings).unwrap(),
-        );
+        store.set("settings", serde_json::to_value(&settings).unwrap());
     }
 
     settings
@@ -1678,15 +1597,11 @@ pub fn write_settings(app: &AppHandle, mut settings: AppSettings) {
 
     crate::dictionary::sync_legacy_custom_words(&mut settings);
     crate::snippets::sync_snippets(&mut settings);
-    ensure_settings_version_defaults(&mut settings, None);
     crate::credentials::prepare_post_process_api_keys_for_store(
         &mut settings,
         crate::credentials::CredentialStoreFailurePolicy::RejectNewValue,
     );
-    store.set(
-        "settings",
-        crate::settings_domains::settings_store_value(&settings).unwrap(),
-    );
+    store.set("settings", serde_json::to_value(&settings).unwrap());
 }
 
 pub(crate) fn write_settings_domain<F>(
@@ -1734,63 +1649,15 @@ where
 
 pub(crate) fn try_mutate_settings_domain<F>(
     settings: &mut AppSettings,
-    domain: SettingsWriteDomain,
+    _domain: SettingsWriteDomain,
     mutate: F,
 ) -> Result<(), String>
 where
     F: FnOnce(&mut AppSettings) -> Result<(), String>,
 {
-    let domain_id = domain.as_str();
-    if !SETTINGS_DOMAIN_IDS.contains(&domain_id) {
-        return Err(format!("unknown settings domain: {domain_id}"));
-    }
-
-    let before = settings.clone();
     let mut next = settings.clone();
     mutate(&mut next)?;
-    validate_single_domain_mutation(&before, &next, domain_id)?;
     *settings = next;
-    Ok(())
-}
-
-fn validate_single_domain_mutation(
-    before: &AppSettings,
-    after: &AppSettings,
-    changed_domain_id: &str,
-) -> Result<(), String> {
-    if before.settings_schema_version != after.settings_schema_version {
-        return Err(format!(
-            "{changed_domain_id} settings write attempted to change settings schema version"
-        ));
-    }
-
-    let mut before_domain_versions = before.settings_domain_versions.clone();
-    let mut after_domain_versions = after.settings_domain_versions.clone();
-    before_domain_versions.remove(changed_domain_id);
-    after_domain_versions.remove(changed_domain_id);
-    if before_domain_versions != after_domain_versions {
-        return Err(format!(
-            "{changed_domain_id} settings write attempted to change another domain version"
-        ));
-    }
-
-    let before_domains = serde_json::to_value(before.domains())
-        .map_err(|err| format!("serialize current settings domains: {err}"))?;
-    let after_domains = serde_json::to_value(after.domains())
-        .map_err(|err| format!("serialize updated settings domains: {err}"))?;
-
-    for domain_id in SETTINGS_DOMAIN_IDS {
-        if *domain_id == changed_domain_id {
-            continue;
-        }
-
-        if before_domains.get(*domain_id) != after_domains.get(*domain_id) {
-            return Err(format!(
-                "{changed_domain_id} settings write attempted to change {domain_id} domain"
-            ));
-        }
-    }
-
     Ok(())
 }
 
@@ -1805,7 +1672,7 @@ pub fn reset_settings_to_defaults_with_backup(app: &AppHandle) -> Result<(), Str
     }
 
     let default_settings = get_default_settings();
-    let default_value = crate::settings_domains::settings_store_value(&default_settings)
+    let default_value = serde_json::to_value(&default_settings)
         .map_err(|err| format!("serialize default settings: {err}"))?;
     store.set("settings", default_value);
     Ok(())
@@ -1838,195 +1705,12 @@ pub fn get_recording_retention_period(app: &AppHandle) -> RecordingRetentionPeri
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::settings_domains::SETTINGS_DOMAIN_FIELD_GROUPS;
 
     #[test]
     fn default_settings_disable_auto_submit() {
         let settings = get_default_settings();
         assert!(!settings.auto_submit);
         assert_eq!(settings.auto_submit_key, AutoSubmitKey::Enter);
-    }
-
-    #[test]
-    fn default_settings_include_current_schema_versions() {
-        let settings = get_default_settings();
-
-        assert_eq!(
-            settings.settings_schema_version,
-            CURRENT_SETTINGS_SCHEMA_VERSION
-        );
-        for id in SETTINGS_DOMAIN_IDS {
-            assert_eq!(
-                settings.settings_domain_versions.get(*id),
-                Some(&CURRENT_SETTINGS_DOMAIN_VERSION)
-            );
-        }
-    }
-
-    #[test]
-    fn settings_version_defaults_migrate_legacy_settings_without_version_fields() {
-        let mut value = serde_json::to_value(get_default_settings()).unwrap();
-        let object = value.as_object_mut().expect("settings object");
-        object.remove("settings_schema_version");
-        object.remove("settings_domain_versions");
-
-        let mut settings: AppSettings = serde_json::from_value(value.clone()).unwrap();
-        let changed = ensure_settings_version_defaults(&mut settings, Some(&value));
-
-        assert!(changed);
-        assert_eq!(
-            settings.settings_schema_version,
-            CURRENT_SETTINGS_SCHEMA_VERSION
-        );
-        for id in SETTINGS_DOMAIN_IDS {
-            assert_eq!(
-                settings.settings_domain_versions.get(*id),
-                Some(&CURRENT_SETTINGS_DOMAIN_VERSION)
-            );
-        }
-    }
-
-    #[test]
-    fn settings_version_defaults_bump_stale_schema_and_domain_versions() {
-        let mut settings = get_default_settings();
-        settings.settings_schema_version = CURRENT_SETTINGS_SCHEMA_VERSION.saturating_sub(1);
-        settings.settings_domain_versions.insert(
-            "general".to_string(),
-            CURRENT_SETTINGS_DOMAIN_VERSION.saturating_sub(1),
-        );
-        let value = serde_json::to_value(&settings).unwrap();
-
-        let changed = ensure_settings_version_defaults(&mut settings, Some(&value));
-
-        assert!(changed);
-        assert_eq!(
-            settings.settings_schema_version,
-            CURRENT_SETTINGS_SCHEMA_VERSION
-        );
-        assert_eq!(
-            settings.settings_domain_versions.get("general"),
-            Some(&CURRENT_SETTINGS_DOMAIN_VERSION)
-        );
-    }
-
-    #[test]
-    fn settings_version_defaults_preserve_future_versions_and_unknown_domains() {
-        let mut settings = get_default_settings();
-        settings.settings_schema_version = CURRENT_SETTINGS_SCHEMA_VERSION + 1;
-        settings.settings_domain_versions = HashMap::from([
-            ("general".to_string(), CURRENT_SETTINGS_DOMAIN_VERSION + 1),
-            ("custom".to_string(), 99),
-        ]);
-        let value = serde_json::to_value(&settings).unwrap();
-
-        let changed = ensure_settings_version_defaults(&mut settings, Some(&value));
-
-        assert!(changed);
-        assert_eq!(
-            settings.settings_schema_version,
-            CURRENT_SETTINGS_SCHEMA_VERSION + 1
-        );
-        assert_eq!(
-            settings.settings_domain_versions.get("general"),
-            Some(&(CURRENT_SETTINGS_DOMAIN_VERSION + 1))
-        );
-        assert_eq!(settings.settings_domain_versions.get("custom"), Some(&99));
-        for id in SETTINGS_DOMAIN_IDS {
-            assert!(settings.settings_domain_versions.contains_key(*id));
-        }
-    }
-
-    #[test]
-    fn settings_version_defaults_accept_domain_backed_store_shape() {
-        let mut settings = get_default_settings();
-        let value =
-            crate::settings_domains::settings_store_value(&settings).expect("domain store value");
-
-        let changed = ensure_settings_version_defaults(&mut settings, Some(&value));
-
-        assert!(!changed);
-    }
-
-    #[test]
-    fn settings_domain_field_groups_cover_every_flat_user_setting_once() {
-        let settings_value = serde_json::to_value(get_default_settings()).unwrap();
-        let settings_object = settings_value.as_object().expect("settings object");
-        let mut owner_by_field = HashMap::new();
-
-        for (domain_id, fields) in SETTINGS_DOMAIN_FIELD_GROUPS {
-            assert!(
-                SETTINGS_DOMAIN_IDS.contains(domain_id),
-                "{domain_id} must be a planned settings domain"
-            );
-
-            for field in *fields {
-                assert!(
-                    owner_by_field.insert(*field, *domain_id).is_none(),
-                    "{field} must be owned by exactly one settings domain"
-                );
-            }
-        }
-
-        for field in settings_object.keys() {
-            if field == "settings_schema_version" || field == "settings_domain_versions" {
-                continue;
-            }
-
-            assert!(
-                owner_by_field.contains_key(field.as_str()),
-                "{field} must be assigned to a settings domain"
-            );
-        }
-
-        for field in owner_by_field.keys() {
-            assert!(
-                settings_object.contains_key(*field),
-                "{field} must correspond to a current flat settings field"
-            );
-        }
-    }
-
-    #[test]
-    fn settings_domains_snapshot_current_values_with_domain_versions() {
-        let mut settings = get_default_settings();
-        settings.history_enabled = false;
-        settings.recordings_enabled = false;
-        settings.selected_model = "verbatim-smoke-model".to_string();
-        settings.post_process_enabled = true;
-        settings.post_process_provider_id = "lm_studio".to_string();
-        settings.external_script_path = Some("C:\\tools\\verbatim-paste.ps1".to_string());
-        settings
-            .settings_domain_versions
-            .insert("privacy".to_string(), 7);
-
-        let domains = settings.domains();
-
-        assert_eq!(domains.privacy.version, 7);
-        assert!(!domains.privacy.history_enabled);
-        assert!(!domains.privacy.recordings_enabled);
-        assert_eq!(domains.models.selected_model, "verbatim-smoke-model");
-        assert!(domains.post_processing.post_process_enabled);
-        assert_eq!(
-            domains.post_processing.post_process_provider_id,
-            "lm_studio"
-        );
-        assert_eq!(
-            domains.insertion.external_script_path.as_deref(),
-            Some("C:\\tools\\verbatim-paste.ps1")
-        );
-        assert_eq!(
-            domains.general.version, CURRENT_SETTINGS_DOMAIN_VERSION,
-            "domains without explicit overrides use the current version"
-        );
-
-        let domain_value = serde_json::to_value(&domains).unwrap();
-        let domain_object = domain_value.as_object().expect("domain object");
-        for id in SETTINGS_DOMAIN_IDS {
-            assert!(
-                domain_object.contains_key(*id),
-                "{id} domain must serialize"
-            );
-        }
     }
 
     #[test]
@@ -2045,45 +1729,6 @@ mod tests {
         assert!(!settings.history_enabled);
         assert!(!settings.recordings_enabled);
         assert_eq!(settings.selected_model, "unchanged-model");
-    }
-
-    #[test]
-    fn settings_domain_mutation_rejects_cross_domain_changes() {
-        let mut settings = get_default_settings();
-        let original = settings.clone();
-
-        let result =
-            mutate_settings_domain(&mut settings, SettingsWriteDomain::Privacy, |settings| {
-                settings.history_enabled = false;
-                settings.selected_model = "cross-domain-model".to_string();
-            });
-
-        assert!(result
-            .expect_err("cross-domain mutation should be rejected")
-            .contains("privacy settings write attempted to change models domain"));
-        assert_eq!(
-            serde_json::to_value(&settings).expect("settings json"),
-            serde_json::to_value(&original).expect("original settings json")
-        );
-    }
-
-    #[test]
-    fn settings_domain_mutation_rejects_schema_metadata_changes() {
-        let mut settings = get_default_settings();
-        let original = settings.clone();
-
-        let result =
-            mutate_settings_domain(&mut settings, SettingsWriteDomain::Privacy, |settings| {
-                settings.settings_schema_version += 1;
-            });
-
-        assert!(result
-            .expect_err("schema metadata mutation should be rejected")
-            .contains("privacy settings write attempted to change settings schema version"));
-        assert_eq!(
-            serde_json::to_value(&settings).expect("settings json"),
-            serde_json::to_value(&original).expect("original settings json")
-        );
     }
 
     #[test]

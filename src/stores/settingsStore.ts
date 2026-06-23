@@ -7,12 +7,9 @@ import type {
   TranslationRequestSettings,
   WhisperAcceleratorSetting,
   OrtAcceleratorSetting,
+  AppSettings as Settings,
 } from "@/bindings";
 import { commands } from "@/bindings";
-import {
-  settingsFromDocument,
-  type AppSettings as Settings,
-} from "@/lib/settingsDocument";
 
 interface SettingsStore {
   settings: Settings | null;
@@ -227,9 +224,9 @@ export const useSettingsStore = create<SettingsStore>()(
     // Load settings from store
     refreshSettings: async () => {
       try {
-        const result = await commands.getAppSettingsDocument();
+        const result = await commands.getAppSettings();
         if (result.status === "ok") {
-          const settings = settingsFromDocument(result.data);
+          const settings = result.data;
           const normalizedSettings: Settings = {
             ...settings,
             always_on_microphone: settings.always_on_microphone ?? false,
@@ -636,9 +633,9 @@ export const useSettingsStore = create<SettingsStore>()(
     // Load default settings from Rust
     loadDefaultSettings: async () => {
       try {
-        const result = await commands.getDefaultSettingsDocument();
+        const result = await commands.getDefaultSettings();
         if (result.status === "ok") {
-          set({ defaultSettings: settingsFromDocument(result.data) });
+          set({ defaultSettings: result.data });
         } else {
           console.error("Failed to load default settings:", result.error);
         }

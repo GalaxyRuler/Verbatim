@@ -30,7 +30,6 @@ import {
   getNextDictationLanguageSelection,
   getSettingsForDictationLanguageSelection,
 } from "@/lib/dictationLanguageMode";
-import { settingsFromDocument } from "@/lib/settingsDocument";
 import { getLanguageDirection } from "@/lib/utils/rtl";
 
 type OverlayState =
@@ -147,11 +146,8 @@ const RecordingOverlay: React.FC = () => {
   };
 
   const getDockedPillSetting = async () => {
-    const result = await commands.getAppSettingsDocument();
-    return (
-      result.status === "ok" &&
-      settingsFromDocument(result.data).docked_pill_enabled === true
-    );
+    const result = await commands.getAppSettings();
+    return result.status === "ok" && result.data.docked_pill_enabled === true;
   };
 
   const shouldShowDockedFeedback = async () =>
@@ -164,9 +160,9 @@ const RecordingOverlay: React.FC = () => {
   }, [isVisible, isDocked, isDockedExpanded]);
 
   const refreshLanguageMode = async () => {
-    const result = await commands.getAppSettingsDocument();
+    const result = await commands.getAppSettings();
     if (result.status !== "ok") return;
-    const settings = settingsFromDocument(result.data);
+    const settings = result.data;
 
     const dictationLanguageMode = getDictationLanguageMode({
       dictationLanguageMode: settings.dictation_language_mode,

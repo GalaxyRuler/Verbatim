@@ -161,125 +161,6 @@ export const installA11yTauriMocks = async (
           });
         }
       };
-      const domainVersion = (id: string) =>
-        (
-          appSettings.settings_domain_versions as
-            | Record<string, number>
-            | undefined
-        )?.[id] ?? 1;
-      const settingsDocumentFromFlat = () => ({
-        settings_schema_version: appSettings.settings_schema_version ?? 1,
-        domains: {
-          general: {
-            version: domainVersion("general"),
-            start_hidden: appSettings.start_hidden,
-            autostart_enabled: appSettings.autostart_enabled,
-            update_checks_enabled: appSettings.update_checks_enabled,
-            overlay_position: appSettings.overlay_position,
-            docked_pill_enabled: appSettings.docked_pill_enabled,
-            app_language: appSettings.app_language,
-            experimental_enabled: appSettings.experimental_enabled,
-            show_tray_icon: appSettings.show_tray_icon,
-            custom_words: appSettings.custom_words,
-            dictionary_entries: appSettings.dictionary_entries,
-            dictionary_auto_learn_suppressed:
-              appSettings.dictionary_auto_learn_suppressed ?? [],
-            auto_add_dictionary_words:
-              appSettings.auto_add_dictionary_words ?? false,
-            snippets: appSettings.snippets,
-          },
-          audio: {
-            version: domainVersion("audio"),
-            audio_feedback: appSettings.audio_feedback,
-            audio_feedback_volume: appSettings.audio_feedback_volume ?? 1,
-            sound_theme: appSettings.sound_theme ?? "marimba",
-            always_on_microphone: appSettings.always_on_microphone,
-            selected_microphone: appSettings.selected_microphone,
-            clamshell_microphone: appSettings.clamshell_microphone,
-            selected_output_device: appSettings.selected_output_device,
-            mute_while_recording: appSettings.mute_while_recording,
-            extra_recording_buffer_ms: appSettings.extra_recording_buffer_ms,
-          },
-          insertion: {
-            version: domainVersion("insertion"),
-            paste_method: appSettings.paste_method,
-            clipboard_handling: appSettings.clipboard_handling,
-            auto_submit: appSettings.auto_submit,
-            auto_submit_key: appSettings.auto_submit_key,
-            append_trailing_space: appSettings.append_trailing_space,
-            paste_delay_ms: appSettings.paste_delay_ms,
-            typing_tool: appSettings.typing_tool,
-            external_script_path: appSettings.external_script_path,
-          },
-          privacy: {
-            version: domainVersion("privacy"),
-            history_enabled: appSettings.history_enabled,
-            recordings_enabled: appSettings.recordings_enabled,
-            history_limit: appSettings.history_limit,
-            recording_retention_period: appSettings.recording_retention_period,
-          },
-          models: {
-            version: domainVersion("models"),
-            selected_model: appSettings.selected_model,
-            model_unload_timeout: appSettings.model_unload_timeout,
-            local_llm: appSettings.local_llm,
-            whisper_accelerator: appSettings.whisper_accelerator,
-            ort_accelerator: appSettings.ort_accelerator,
-            whisper_gpu_device: appSettings.whisper_gpu_device,
-          },
-          post_processing: {
-            version: domainVersion("post_processing"),
-            post_process_enabled: appSettings.post_process_enabled,
-            formatting_level: appSettings.formatting_level,
-            post_process_provider_id: appSettings.post_process_provider_id,
-            post_process_providers: appSettings.post_process_providers,
-            post_process_api_keys: appSettings.post_process_api_keys,
-            post_process_models: appSettings.post_process_models,
-            post_process_prompts: appSettings.post_process_prompts,
-            post_process_selected_prompt_id:
-              appSettings.post_process_selected_prompt_id,
-            translate_to_english: appSettings.translate_to_english,
-            translation_enabled: appSettings.translation_enabled ?? false,
-            translation_request: appSettings.translation_request ?? null,
-            translation_provider_id:
-              appSettings.translation_provider_id ?? null,
-            translation_model_id: appSettings.translation_model_id ?? null,
-          },
-          diagnostics: {
-            version: domainVersion("diagnostics"),
-            debug_mode: appSettings.debug_mode,
-            log_level: appSettings.log_level,
-            lazy_stream_close: appSettings.lazy_stream_close,
-          },
-          adaptive: {
-            version: domainVersion("adaptive"),
-            selected_language: appSettings.selected_language,
-            dictation_language_mode: appSettings.dictation_language_mode,
-            word_correction_threshold: appSettings.word_correction_threshold,
-            custom_filler_words: appSettings.custom_filler_words,
-            adaptive_profiles_enabled: appSettings.adaptive_profiles_enabled,
-            context_awareness_enabled: appSettings.context_awareness_enabled,
-            context_nearby_text_enabled:
-              appSettings.context_nearby_text_enabled,
-            adaptive_language_shortlist:
-              appSettings.adaptive_language_shortlist,
-            adaptive_default_profile_id:
-              appSettings.adaptive_default_profile_id,
-            adaptive_profiles: appSettings.adaptive_profiles,
-            adaptive_correction_memory_enabled:
-              appSettings.adaptive_correction_memory_enabled,
-            adaptive_private_app_patterns:
-              appSettings.adaptive_private_app_patterns,
-          },
-          shortcuts: {
-            version: domainVersion("shortcuts"),
-            bindings: appSettings.bindings,
-            push_to_talk: appSettings.push_to_talk,
-            keyboard_implementation: appSettings.keyboard_implementation,
-          },
-        },
-      });
-
       testWindow.__VERBATIM_A11Y_EMIT_EVENT__ = emitEvent;
       testWindow.__TAURI_OS_PLUGIN_INTERNALS__ = {
         platform: "windows",
@@ -334,9 +215,6 @@ export const installA11yTauriMocks = async (
             case "get_default_settings":
             case "get_app_settings":
               return appSettings;
-            case "get_default_settings_document":
-            case "get_app_settings_document":
-              return settingsDocumentFromFlat();
             case "has_any_models_available":
               return true;
             case "get_available_models":

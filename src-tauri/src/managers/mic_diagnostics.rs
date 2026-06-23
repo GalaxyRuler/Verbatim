@@ -1,5 +1,7 @@
 use std::time::Duration;
 
+use crate::overlay::OverlayState;
+
 const DEFAULT_LEVEL_THRESHOLD: f32 = 0.03;
 const DEFAULT_SILENCE_AFTER: Duration = Duration::from_secs(2);
 const DEFAULT_MIC_FAILED_AFTER: Duration = Duration::from_secs(10);
@@ -12,11 +14,11 @@ pub enum MicDiagnosticState {
 }
 
 impl MicDiagnosticState {
-    pub fn overlay_state(self) -> &'static str {
+    pub fn overlay_state(self) -> OverlayState {
         match self {
-            Self::Recording => "recording",
-            Self::Silence => "silence",
-            Self::MicFailed => "mic_failed",
+            Self::Recording => OverlayState::Recording,
+            Self::Silence => OverlayState::Silence,
+            Self::MicFailed => OverlayState::MicFailed,
         }
     }
 }

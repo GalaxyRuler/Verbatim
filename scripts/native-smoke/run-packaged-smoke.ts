@@ -31,8 +31,6 @@ type NativeSmokeStatus = {
     | { status?: string; step?: string; message?: string }
     | string;
   settings_loaded?: boolean;
-  settings_schema_version?: number;
-  settings_domain_versions?: Record<string, number>;
   main_window_created?: boolean;
   tray_initialized?: boolean;
   tray_visible_requested?: boolean;
@@ -158,19 +156,6 @@ type AppInsertionDrillEvidence = {
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const tauriRoot = join(repoRoot, "src-tauri");
 const hostPlatform = platform();
-const expectedSettingsSchemaVersion = 1;
-const expectedSettingsDomainVersion = 1;
-const expectedSettingsDomains = [
-  "general",
-  "audio",
-  "insertion",
-  "privacy",
-  "models",
-  "post_processing",
-  "diagnostics",
-  "adaptive",
-  "shortcuts",
-];
 
 const args = process.argv.slice(2);
 
@@ -534,7 +519,6 @@ function assertSmokeStatus(
       ? null
       : `startup_status=${String(startup.status)}`,
     status.settings_loaded ? null : "settings_loaded=false",
-    ...settingsVersionFailures(status),
     status.main_window_created ? null : "main_window_created=false",
     status.tray_initialized ? null : "tray_initialized=false",
     status.updater_plugin_registered ? null : "updater_plugin_registered=false",
@@ -719,24 +703,6 @@ function insertionSafetyDrillFailures(
       failures.push(
         `insertion_safety_drill.${caseName}.error=${String(actual.error)}`,
       );
-    }
-  }
-
-  return failures;
-}
-
-function settingsVersionFailures(status: NativeSmokeStatus): string[] {
-  const failures = [
-    status.settings_schema_version === expectedSettingsSchemaVersion
-      ? null
-      : `settings_schema_version=${String(status.settings_schema_version)}`,
-    status.settings_domain_versions ? null : "settings_domain_versions=missing",
-  ].filter((failure): failure is string => Boolean(failure));
-
-  for (const domain of expectedSettingsDomains) {
-    const version = status.settings_domain_versions?.[domain];
-    if (version !== expectedSettingsDomainVersion) {
-      failures.push(`settings_domain_versions.${domain}=${String(version)}`);
     }
   }
 
@@ -967,7 +933,6 @@ function assertStartupFailureStatus(logPrefix: string): void {
       ? null
       : `startup_message=${String(startup.message)}`,
     status.settings_loaded ? null : "settings_loaded=false",
-    ...settingsVersionFailures(status),
     status.main_window_created ? null : "main_window_created=false",
     status.tray_initialized ? "tray_initialized=true" : null,
     status.close_to_tray_handler_registered

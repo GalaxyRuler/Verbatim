@@ -35,7 +35,6 @@
     "check:tauri-security": "bun scripts/validate-tauri-security.ts",
     "check:model-benchmark-evidence": "bun scripts/check-model-benchmark-evidence.ts",
     "check:model-benchmark-release-evidence": "bun scripts/check-model-benchmark-evidence.ts --require-representative-platforms",
-    "bindings:generate": "cargo run --manifest-path src-tauri/Cargo.toml --bin export_bindings --no-default-features -- src/bindings.ts",
     "benchmark:model:record": "bun scripts/model-performance-profile.ts record",
     "benchmark:model:recommend": "bun scripts/model-performance-profile.ts recommend",
     "release:metadata": "bun scripts/generate-release-metadata.ts",

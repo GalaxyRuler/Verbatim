@@ -37,13 +37,11 @@ pub fn get_app_dir_path(app: AppHandle) -> Result<String, String> {
 
 #[tauri::command]
 #[specta::specta]
-pub fn get_app_settings_document(
-    app: AppHandle,
-) -> Result<crate::settings_domains::SettingsStoreDocument, String> {
+pub fn get_app_settings(app: AppHandle) -> Result<crate::settings::AppSettings, String> {
     let mut settings = get_settings(&app);
     crate::credentials::redact_post_process_api_keys_for_frontend(&mut settings);
     crate::credentials::redact_session_post_process_api_keys_for_frontend(&app, &mut settings);
-    Ok(crate::settings_domains::settings_store_document(&settings))
+    Ok(settings)
 }
 
 #[tauri::command]
@@ -60,11 +58,8 @@ pub fn get_linux_environment_status() -> crate::linux_readiness::LinuxEnvironmen
 
 #[tauri::command]
 #[specta::specta]
-pub fn get_default_settings_document(
-) -> Result<crate::settings_domains::SettingsStoreDocument, String> {
-    Ok(crate::settings_domains::settings_store_document(
-        &crate::settings::get_default_settings(),
-    ))
+pub fn get_default_settings() -> Result<crate::settings::AppSettings, String> {
+    Ok(crate::settings::get_default_settings())
 }
 
 #[tauri::command]
