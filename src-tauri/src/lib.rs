@@ -19,6 +19,10 @@ mod llm_client;
 pub mod local_llm;
 mod managers;
 mod operation_cancellation;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+mod overlay;
+#[cfg(any(target_os = "android", target_os = "ios"))]
+#[path = "overlay_stub.rs"]
 mod overlay;
 pub mod portable;
 mod post_paste_learning;
@@ -33,12 +37,16 @@ mod snippets;
 mod text_processing;
 mod transcription_coordinator;
 mod transform_mode;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+mod tray;
+#[cfg(any(target_os = "android", target_os = "ios"))]
+#[path = "tray_stub.rs"]
 mod tray;
 mod tray_i18n;
 mod utils;
 
 pub use cli::CliArgs;
-#[cfg(debug_assertions)]
+#[cfg(all(debug_assertions, not(any(target_os = "android", target_os = "ios"))))]
 use specta_typescript::{BigIntExportBehavior, Typescript};
 use tauri_specta::{collect_commands, collect_events, Builder};
 use transcription_coordinator::CoordinatorHealthSnapshot;
@@ -57,11 +65,16 @@ use signal_hook::iterator::Signals;
 use specta::Type;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use tauri::image::Image;
 pub use transcription_coordinator::TranscriptionCoordinator;
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use tauri::tray::TrayIconBuilder;
-use tauri::{AppHandle, Emitter, Listener, Manager};
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+use tauri::Listener;
+use tauri::{AppHandle, Emitter, Manager};
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 use tauri_plugin_log::{Builder as LogBuilder, RotationStrategy, Target, TargetKind};
 
@@ -258,6 +271,7 @@ fn build_console_filter() -> env_filter::Filter {
     builder.build()
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn show_main_window(app: &AppHandle) {
     if let Some(main_window) = app.get_webview_window("main") {
         if let Err(e) = main_window.unminimize() {
@@ -285,7 +299,10 @@ fn show_main_window(app: &AppHandle) {
     );
 }
 
-#[allow(unused_variables)]
+#[cfg(any(target_os = "android", target_os = "ios"))]
+fn show_main_window(_app: &AppHandle) {}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn should_force_show_permissions_window(app: &AppHandle) -> bool {
     #[cfg(target_os = "windows")]
     {
@@ -402,6 +419,9 @@ fn initialize_core_logic(app_handle: &AppHandle) -> Result<(), StartupError> {
             let _ = app_handle.set_activation_policy(tauri::ActivationPolicy::Accessory);
         }
     }
+
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
     // Get the current theme to set the appropriate initial icon
     let initial_theme = tray::get_current_theme(app_handle);
 
@@ -510,6 +530,7 @@ fn initialize_core_logic(app_handle: &AppHandle) -> Result<(), StartupError> {
 
     // Create the recording overlay window (hidden by default)
     utils::create_recording_overlay(app_handle);
+    }
 
     Ok(())
 }
@@ -1072,7 +1093,6 @@ fn prepare_native_smoke_audio_fixture() -> (Option<String>, usize, bool) {
     (Some(path.display().to_string()), sample_count, verified)
 }
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn specta_builder() -> Builder<tauri::Wry> {
     Builder::<tauri::Wry>::new()
         .commands(collect_commands![
@@ -1235,8 +1255,21 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         .events(collect_events![managers::history::HistoryUpdatePayload,])
 }
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
+#[cfg_attr(
+    any(target_os = "android", target_os = "ios"),
+    tauri::mobile_entry_point
+)]
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub fn run() {
+    run_inner(CliArgs::default());
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn run(cli_args: CliArgs) {
+    run_inner(cli_args);
+}
+
+fn run_inner(cli_args: CliArgs) {
     // Detect portable mode before anything else
     portable::init();
 
@@ -1246,7 +1279,7 @@ pub fn run(cli_args: CliArgs) {
 
     let specta_builder = specta_builder();
 
-    #[cfg(debug_assertions)] // <- Only export on non-release builds
+    #[cfg(all(debug_assertions, not(any(target_os = "android", target_os = "ios"))))]
     specta_builder
         .export(
             Typescript::default().bigint(BigIntExportBehavior::Number),
@@ -1296,8 +1329,9 @@ pub fn run(cli_args: CliArgs) {
         builder = builder.plugin(tauri_nspanel::init());
     }
 
-    builder
-        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
             if args.iter().any(|a| a == "--toggle-transcription") {
                 signal_handle::send_transcription_input(app, "transcribe", "CLI");
             } else if args.iter().any(|a| a == "--toggle-post-process") {
@@ -1307,20 +1341,34 @@ pub fn run(cli_args: CliArgs) {
             } else {
                 show_main_window(app);
             }
-        }))
+        }));
+    }
+
+    builder = builder
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_clipboard_manager::init())
-        .plugin(tauri_plugin_macos_permissions::init())
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_store::Builder::default().build())
-        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
-        .plugin(tauri_plugin_autostart::init(
-            MacosLauncher::LaunchAgent,
-            Some(vec![]),
-        ))
+        .plugin(tauri_plugin_store::Builder::default().build());
+
+    #[cfg(target_os = "macos")]
+    {
+        builder = builder.plugin(tauri_plugin_macos_permissions::init());
+    }
+
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        builder = builder
+            .plugin(tauri_plugin_updater::Builder::new().build())
+            .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+            .plugin(tauri_plugin_autostart::init(
+                MacosLauncher::LaunchAgent,
+                Some(vec![]),
+            ));
+    }
+
+    builder
         .manage(cli_args.clone())
         .manage(StartupState::default())
         .manage(private_session::PrivateSessionState::default())
@@ -1328,22 +1376,28 @@ pub fn run(cli_args: CliArgs) {
         .setup(move |app| {
             specta_builder.mount_events(app);
 
-            // Create main window programmatically so we can set data_directory
-            // for portable mode (redirects WebView2 cache to portable Data dir)
-            let mut win_builder =
-                tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App("/".into()))
-                    .title("Verbatim")
-                    .inner_size(680.0, 570.0)
-                    .min_inner_size(680.0, 570.0)
-                    .resizable(true)
-                    .maximizable(false)
-                    .visible(false);
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            {
+                // Create main window programmatically so we can set data_directory
+                // for portable mode (redirects WebView2 cache to portable Data dir)
+                let mut win_builder = tauri::WebviewWindowBuilder::new(
+                    app,
+                    "main",
+                    tauri::WebviewUrl::App("/".into()),
+                )
+                .title("Verbatim")
+                .inner_size(680.0, 570.0)
+                .min_inner_size(680.0, 570.0)
+                .resizable(true)
+                .maximizable(false)
+                .visible(false);
 
-            if let Some(data_dir) = portable::data_dir() {
-                win_builder = win_builder.data_directory(data_dir.join("webview"));
+                if let Some(data_dir) = portable::data_dir() {
+                    win_builder = win_builder.data_directory(data_dir.join("webview"));
+                }
+
+                win_builder.build()?;
             }
-
-            win_builder.build()?;
 
             let mut settings = get_settings(&app.handle());
             apply_native_smoke_microphone_selection(&app.handle(), &mut settings);
@@ -1424,22 +1478,26 @@ pub fn run(cli_args: CliArgs) {
                 let _ = crate::managers::transcription::get_available_accelerators();
             });
 
-            // Hide tray icon if --no-tray was passed
-            if cli_args.no_tray {
-                tray::set_tray_visibility(&app_handle, false);
-            }
-
-            // Show main window only if not starting hidden.
-            // CLI --start-hidden flag overrides the setting.
-            // But if permission onboarding is required, always show the window.
-            let should_hide = settings.start_hidden || cli_args.start_hidden;
-            let should_force_show = should_force_show_permissions_window(&app_handle);
-
             // If start_hidden but tray is disabled, we must show the window
             // anyway. Without a tray icon, the dock is the only way back in.
             let tray_available = settings.show_tray_icon && !cli_args.no_tray;
-            if should_force_show || !should_hide || !tray_available {
-                show_main_window(&app_handle);
+
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            {
+                // Hide tray icon if --no-tray was passed
+                if cli_args.no_tray {
+                    tray::set_tray_visibility(&app_handle, false);
+                }
+
+                // Show main window only if not starting hidden.
+                // CLI --start-hidden flag overrides the setting.
+                // But if permission onboarding is required, always show the window.
+                let should_hide = settings.start_hidden || cli_args.start_hidden;
+                let should_force_show = should_force_show_permissions_window(&app_handle);
+
+                if should_force_show || !should_hide || !tray_available {
+                    show_main_window(&app_handle);
+                }
             }
 
             let selected_model_info = if settings.selected_model.trim().is_empty() {
@@ -1512,24 +1570,30 @@ pub fn run(cli_args: CliArgs) {
         })
         .on_window_event(|window, event| match event {
             tauri::WindowEvent::CloseRequested { api, .. } => {
-                api.prevent_close();
-                let _res = window.hide();
+                #[cfg(any(target_os = "android", target_os = "ios"))]
+                let _ = api;
 
-                #[cfg(target_os = "macos")]
+                #[cfg(not(any(target_os = "android", target_os = "ios")))]
                 {
-                    let settings = get_settings(&window.app_handle());
-                    let tray_visible =
-                        settings.show_tray_icon && !window.app_handle().state::<CliArgs>().no_tray;
-                    if tray_visible {
-                        // Tray is available: hide the dock icon, app lives in the tray
-                        let res = window
-                            .app_handle()
-                            .set_activation_policy(tauri::ActivationPolicy::Accessory);
-                        if let Err(e) = res {
-                            log::error!("Failed to set activation policy: {}", e);
+                    api.prevent_close();
+                    let _res = window.hide();
+
+                    #[cfg(target_os = "macos")]
+                    {
+                        let settings = get_settings(&window.app_handle());
+                        let tray_visible = settings.show_tray_icon
+                            && !window.app_handle().state::<CliArgs>().no_tray;
+                        if tray_visible {
+                            // Tray is available: hide the dock icon, app lives in the tray
+                            let res = window
+                                .app_handle()
+                                .set_activation_policy(tauri::ActivationPolicy::Accessory);
+                            if let Err(e) = res {
+                                log::error!("Failed to set activation policy: {}", e);
+                            }
                         }
+                        // No tray: keep the dock icon visible so the user can reopen
                     }
-                    // No tray: keep the dock icon visible so the user can reopen
                 }
             }
             tauri::WindowEvent::ThemeChanged(theme) => {

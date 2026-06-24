@@ -25,41 +25,76 @@ $runtimeConfigPath = Join-Path $resolvedOutputRoot 'tauri.windows-runtime.conf.j
 
 $candidateDirs = New-Object System.Collections.Generic.List[string]
 
-if ($env:VCToolsRedistDir) {
-  $candidateDirs.Add((Join-Path $env:VCToolsRedistDir "$Arch\Microsoft.VC143.CRT"))
-  $candidateDirs.Add((Join-Path $env:VCToolsRedistDir "$Arch\Microsoft.VC142.CRT"))
+function Add-RuntimeCandidateDir {
+  param([string]$Path)
+
+  if ($Path) {
+    $candidateDirs.Add($Path)
+  }
 }
 
-$vsRoots = @(
-  "${env:ProgramFiles}\Microsoft Visual Studio\2022",
-  "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022",
-  "${env:ProgramFiles}\Microsoft Visual Studio\2019",
-  "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2019"
+function Add-RedistVersionCandidates {
+  param([string]$RedistVersionRoot)
+
+  Add-RuntimeCandidateDir (Join-Path $RedistVersionRoot "$Arch\Microsoft.VC143.CRT")
+  Add-RuntimeCandidateDir (Join-Path $RedistVersionRoot "$Arch\Microsoft.VC142.CRT")
+  Add-RuntimeCandidateDir (Join-Path $RedistVersionRoot "$Arch\Microsoft.VC.CRT")
+}
+
+if ($env:VCToolsRedistDir) {
+  Add-RedistVersionCandidates $env:VCToolsRedistDir
+}
+
+$vsInstallRoots = New-Object System.Collections.Generic.List[string]
+$vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+if (Test-Path -LiteralPath $vswhere) {
+  & $vswhere -all -products * -property installationPath |
+    Where-Object { $_ -and (Test-Path -LiteralPath $_) } |
+    ForEach-Object { $vsInstallRoots.Add($_) }
+}
+
+$vsVersionRoots = @(
+  "${env:ProgramFiles}\Microsoft Visual Studio",
+  "${env:ProgramFiles(x86)}\Microsoft Visual Studio"
 ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) }
 
-foreach ($vsRoot in $vsRoots) {
-  Get-ChildItem -LiteralPath $vsRoot -Directory -ErrorAction SilentlyContinue |
+foreach ($versionRoot in $vsVersionRoots) {
+  Get-ChildItem -LiteralPath $versionRoot -Directory -ErrorAction SilentlyContinue |
+    Sort-Object Name -Descending |
     ForEach-Object {
-      $redistRoot = Join-Path $_.FullName 'VC\Redist\MSVC'
-      if (Test-Path -LiteralPath $redistRoot) {
-        Get-ChildItem -LiteralPath $redistRoot -Directory -ErrorAction SilentlyContinue |
-          Sort-Object Name -Descending |
-          ForEach-Object {
-            $candidateDirs.Add((Join-Path $_.FullName "$Arch\Microsoft.VC143.CRT"))
-            $candidateDirs.Add((Join-Path $_.FullName "$Arch\Microsoft.VC142.CRT"))
-          }
-      }
+      Get-ChildItem -LiteralPath $_.FullName -Directory -ErrorAction SilentlyContinue |
+        ForEach-Object { $vsInstallRoots.Add($_.FullName) }
     }
 }
 
-$systemRuntimeDir = if ($Arch -eq 'x64') {
-  Join-Path $env:SystemRoot 'System32'
-} else {
-  Join-Path $env:SystemRoot 'SysWOW64'
-}
+$vsInstallRoots |
+  Select-Object -Unique |
+  ForEach-Object {
+    $redistRoot = Join-Path $_ 'VC\Redist\MSVC'
+    if (Test-Path -LiteralPath $redistRoot) {
+      Get-ChildItem -LiteralPath $redistRoot -Directory -ErrorAction SilentlyContinue |
+        Sort-Object Name -Descending |
+        ForEach-Object { Add-RedistVersionCandidates $_.FullName }
+    }
+  }
 
-if (Test-Path -LiteralPath $systemRuntimeDir) {
-  $candidateDirs.Add($systemRuntimeDir)
+$runtimeRoots = @(
+  "${env:SystemRoot}\System32",
+  "${env:SystemRoot}\SysWOW64"
+) | Where-Object { $_ -and (Test-Path -LiteralPath $_) }
+
+foreach ($runtimeRoot in $runtimeRoots) {
+  $hasAllDlls = $true
+  foreach ($dllName in $requiredDlls) {
+    if (-not (Test-Path -LiteralPath (Join-Path $runtimeRoot $dllName))) {
+      $hasAllDlls = $false
+      break
+    }
+  }
+
+  if ($hasAllDlls) {
+    Add-RuntimeCandidateDir $runtimeRoot
+  }
 }
 
 $selectedDir = $candidateDirs |
@@ -76,6 +111,8 @@ $selectedDir = $candidateDirs |
   Select-Object -First 1
 
 if (-not $selectedDir) {
+  Write-Host "Checked Visual C++ runtime candidate directories:"
+  $candidateDirs | Select-Object -Unique | ForEach-Object { Write-Host "  $_" }
   throw "Could not locate the Visual C++ runtime redistributable directory for $Arch. Install Visual Studio Build Tools with MSVC redistributable files."
 }
 

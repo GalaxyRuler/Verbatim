@@ -1016,5 +1016,121 @@
       "transformCopied": "تم نسخ التحويل"
     },
     "privateSession": "جلسة خاصة"
+  },
+  "android": {
+    "tabs": {
+      "navigation": "Android navigation",
+      "home": "Home",
+      "history": "History",
+      "models": "Models",
+      "settings": "Settings"
+    },
+    "actions": {
+      "toggleTheme": "Toggle theme",
+      "copy": "Copy",
+      "share": "Share",
+      "switchModel": "Switch"
+    },
+    "permissions": {
+      "granted": "Granted",
+      "unavailable": "Unavailable"
+    },
+    "onboarding": {
+      "title": "Set up mobile dictation",
+      "subtitle": "Enable the Android permissions Verbatim needs before the floating mic bubble can type for you.",
+      "microphone": {
+        "title": "Let Verbatim hear you",
+        "description": "Verbatim needs your microphone to transcribe what you say.",
+        "action": "Allow microphone"
+      },
+      "overlay": {
+        "title": "Show the mic bubble",
+        "description": "The bubble floats over your other apps so you can dictate without switching away.",
+        "action": "Open Settings",
+        "callout": "Opens system Settings. Toggle 'Allow display over other apps' and return to Verbatim."
+      },
+      "accessibility": {
+        "title": "Type into any app",
+        "description": "Verbatim uses Android's accessibility API to insert text wherever your cursor is, like a keyboard.",
+        "action": "Enable in Accessibility",
+        "callout": "Can insert your transcribed text. Does not log screen text or app content."
+      },
+      "speech": {
+        "title": "Use on-device speech",
+        "description": "Verbatim starts dictation only when Android can recognize speech on this device.",
+        "readyCallout": "Speech recognition stays on-device for this prototype.",
+        "missingCallout": "Install an offline speech pack or use a device with on-device speech. Verbatim will not silently use remote speech."
+      },
+      "step": "Step {{current}} of {{total}}",
+      "model": {
+        "title": "Download a speech model",
+        "description": "Choose a local model so Android dictation uses Verbatim's offline transcription path.",
+        "action": "Choose model",
+        "callout": "Same local model requirement as desktop dictation. Downloads stay under your control.",
+        "readyCallout": "Local model is ready for offline dictation."
+      },
+      "speechPack": {
+        "title": "Download offline speech pack",
+        "description": "Install the local Android speech pack for your current language before dictation starts.",
+        "action": "Download pack",
+        "callout": "Verbatim will request Android's on-device model download and will not use remote speech recognition.",
+        "readyCallout": "Offline speech pack is ready for this device language.",
+        "pendingCallout": "Android scheduled the speech pack download. Keep the device online and try again after it finishes.",
+        "downloadingCallout": "Android is downloading the on-device speech pack.",
+        "errorCallout": "Android could not start the speech pack download. Check network or language settings and try again.",
+        "unsupportedCallout": "Android did not report a downloadable on-device speech pack for this language."
+      }
+    },
+    "home": {
+      "bubble": {
+        "activeTitle": "Tap mic to dictate anywhere",
+        "activeSubtitle": "The bubble appears only while a text field has the keyboard open.",
+        "inactiveTitle": "Keyboard bubble not ready",
+        "inactiveSubtitle": "Finish setup before the keyboard-triggered bubble can appear.",
+        "toggle": "Floating bubble",
+        "statusLabel": "Bubble visibility",
+        "visible": "Visible with keyboard",
+        "waiting": "Waiting for keyboard"
+      },
+      "modelMissing": "No model selected",
+      "lastTranscript": {
+        "title": "Last transcript",
+        "emptyTime": "Nothing yet",
+        "empty": "Dictate with the bubble to build your history.",
+        "seeAll": "See all"
+      }
+    },
+    "history": {
+      "search": "Search transcripts"
+    },
+    "models": {
+      "storage": "{{count}} MB used",
+      "downloaded": "Downloaded",
+      "available": "Available"
+    },
+    "settings": {
+      "general": "General",
+      "appearance": "Appearance",
+      "advanced": "Advanced features",
+      "percent": "{{value}}%",
+      "theme": {
+        "system": "System",
+        "light": "Light",
+        "dark": "Dark"
+      },
+      "refreshDevices": "Refresh devices",
+      "bubblePosition": {
+        "title": "Bubble position",
+        "topLeft": "Top left",
+        "topRight": "Top right",
+        "bottomLeft": "Bottom left",
+        "bottomRight": "Bottom right"
+      },
+      "soundTheme": {
+        "marimba": "Marimba",
+        "pop": "Pop",
+        "custom": "Custom"
+      }
+    }
   }
 }

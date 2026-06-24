@@ -25,8 +25,14 @@ pub trait VoiceActivityDetector: Send + Sync {
     fn reset(&mut self) {}
 }
 
+#[cfg(feature = "silero-vad-engine")]
 mod silero;
+#[cfg(not(feature = "silero-vad-engine"))]
+mod silero_stub;
 mod smoothed;
 
+#[cfg(feature = "silero-vad-engine")]
 pub use silero::SileroVad;
+#[cfg(not(feature = "silero-vad-engine"))]
+pub use silero_stub::SileroVad;
 pub use smoothed::SmoothedVad;

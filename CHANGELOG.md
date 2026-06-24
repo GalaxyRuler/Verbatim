@@ -12,6 +12,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/). Version
 
 ---
 
+## [0.9.0] — 2026-06-19
+
+### Added
+
+- **Android.** First public Android release, published as a signed universal APK (plus a universal AAB for app-bundle distribution) alongside `SHA256SUMS.txt` on the [GitHub Releases page](https://github.com/GalaxyRuler/Verbatim/releases/latest). See the [installation guide](docs/guide/installation.md) for sideload steps. Desktop builds (Windows, macOS, Linux) are unchanged by this release.
+
+---
+
 ## [0.8.8] — 2026
 
 ### Added
@@ -167,7 +175,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/). Version
 
 This project is a fork of [Handy](https://github.com/cjpais/Handy) by [CJ Pais](https://github.com/cjpais). For the complete upstream changelog see the [upstream releases page](https://github.com/cjpais/Handy/releases).
 
-[Unreleased]: https://github.com/GalaxyRuler/Verbatim/compare/v0.8.8...HEAD
+[Unreleased]: https://github.com/GalaxyRuler/Verbatim/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/GalaxyRuler/Verbatim/compare/v0.8.8...v0.9.0
 [0.8.8]: https://github.com/GalaxyRuler/Verbatim/compare/v0.8.7...v0.8.8
 [0.8.7]: https://github.com/GalaxyRuler/Verbatim/compare/v0.8.6...v0.8.7
 [0.8.6]: https://github.com/GalaxyRuler/Verbatim/compare/v0.8.5...v0.8.6

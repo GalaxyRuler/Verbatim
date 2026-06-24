@@ -9,14 +9,103 @@
 //! The active implementation is determined by the `keyboard_implementation`
 //! setting and can be changed at runtime.
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod handler;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod tauri_impl;
+#[cfg(any(target_os = "android", target_os = "ios"))]
+mod tauri_impl {
+    use crate::settings::ShortcutBinding;
+    use tauri::AppHandle;
+
+    const MOBILE_SHORTCUT_ERROR: &str = "Desktop shortcuts are not supported on mobile";
+
+    pub fn init_shortcuts(_app: &AppHandle) {}
+
+    pub fn register_cancel_shortcut(_app: &AppHandle) {}
+
+    pub fn unregister_cancel_shortcut(_app: &AppHandle) {}
+
+    pub fn register_shortcut(_app: &AppHandle, binding: ShortcutBinding) -> Result<(), String> {
+        if crate::settings::is_unbound_shortcut(&binding.current_binding) {
+            Ok(())
+        } else {
+            Err(MOBILE_SHORTCUT_ERROR.to_string())
+        }
+    }
+
+    pub fn unregister_shortcut(_app: &AppHandle, _binding: ShortcutBinding) -> Result<(), String> {
+        Ok(())
+    }
+
+    pub fn validate_shortcut(raw: &str) -> Result<(), String> {
+        if crate::settings::is_unbound_shortcut(raw) {
+            Ok(())
+        } else {
+            Err(MOBILE_SHORTCUT_ERROR.to_string())
+        }
+    }
+}
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub mod verbatim_keys;
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub mod verbatim_keys {
+    use crate::settings::ShortcutBinding;
+    use tauri::AppHandle;
+
+    const MOBILE_SHORTCUT_ERROR: &str = "Verbatim Keys is not supported on mobile";
+
+    pub struct VerbatimKeysState;
+
+    pub fn init_shortcuts(_app: &AppHandle) -> Result<(), String> {
+        Err(MOBILE_SHORTCUT_ERROR.to_string())
+    }
+
+    pub fn register_cancel_shortcut(_app: &AppHandle) {}
+
+    pub fn unregister_cancel_shortcut(_app: &AppHandle) {}
+
+    pub fn register_shortcut(_app: &AppHandle, binding: ShortcutBinding) -> Result<(), String> {
+        if crate::settings::is_unbound_shortcut(&binding.current_binding) {
+            Ok(())
+        } else {
+            Err(MOBILE_SHORTCUT_ERROR.to_string())
+        }
+    }
+
+    pub fn unregister_shortcut(_app: &AppHandle, _binding: ShortcutBinding) -> Result<(), String> {
+        Ok(())
+    }
+
+    pub fn validate_shortcut(raw: &str) -> Result<(), String> {
+        if crate::settings::is_unbound_shortcut(raw) {
+            Ok(())
+        } else {
+            Err(MOBILE_SHORTCUT_ERROR.to_string())
+        }
+    }
+
+    #[tauri::command]
+    #[specta::specta]
+    pub fn start_verbatim_keys_recording(
+        _app: AppHandle,
+        _binding_id: String,
+    ) -> Result<(), String> {
+        Err(MOBILE_SHORTCUT_ERROR.to_string())
+    }
+
+    #[tauri::command]
+    #[specta::specta]
+    pub fn stop_verbatim_keys_recording(_app: AppHandle) -> Result<(), String> {
+        Err(MOBILE_SHORTCUT_ERROR.to_string())
+    }
+}
 
 use log::{error, info, warn};
 use serde::Serialize;
 use specta::Type;
 use tauri::{AppHandle, Emitter, Manager};
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use tauri_plugin_autostart::ManagerExt;
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
@@ -694,12 +783,19 @@ pub fn change_start_hidden_setting(app: AppHandle, enabled: bool) -> Result<(), 
 #[tauri::command]
 #[specta::specta]
 pub fn change_autostart_setting(app: AppHandle, enabled: bool) -> Result<(), String> {
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    if enabled {
+        return Err("Autostart is not supported on mobile".to_string());
+    }
+
     settings::write_settings_domain(&app, settings::SettingsWriteDomain::General, |settings| {
         settings.autostart_enabled = enabled;
     })?;
 
     // Apply the autostart setting immediately
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     let autostart_manager = app.autolaunch();
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     if enabled {
         let _ = autostart_manager.enable();
     } else {

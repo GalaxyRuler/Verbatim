@@ -39,6 +39,13 @@ const assetGroups: Array<{
     platform: "Ubuntu x64",
     patterns: [{ label: "DEB", pattern: /^Verbatim_.*_amd64\.deb$/ }],
   },
+  {
+    platform: "Android",
+    patterns: [
+      { label: "APK", pattern: /^Verbatim_.*_android_universal\.apk$/ },
+      { label: "AAB", pattern: /^Verbatim_.*_android_universal\.aab$/ },
+    ],
+  },
 ];
 
 function assetLink(asset: ReleaseAsset, label: string): string {
@@ -138,7 +145,7 @@ function replaceOrInsertBlock(readme: string, block: string): string {
   }
 
   const anchor =
-    "Download the latest Windows, macOS, and Linux installers from the [Verbatim Releases page](https://github.com/GalaxyRuler/Verbatim/releases/latest).";
+    "Download the latest Windows, macOS, Linux, and Android builds from the [Verbatim Releases page](https://github.com/GalaxyRuler/Verbatim/releases/latest).";
   const anchorIndex = readme.indexOf(anchor);
 
   if (anchorIndex === -1) {

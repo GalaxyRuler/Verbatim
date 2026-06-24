@@ -1,0 +1,23 @@
+{
+  "$schema": "../gen/schemas/android-schema.json",
+  "identifier": "android-capability",
+  "description": "Capabilities for the Android shell",
+  "platforms": ["android"],
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "opener:default",
+    "store:default",
+    "process:default",
+    "dialog:default",
+    "os:default",
+    "clipboard-manager:allow-read-text",
+    "clipboard-manager:allow-write-text",
+    "fs:read-files",
+    "fs:allow-resource-read-recursive",
+    {
+      "identifier": "fs:scope",
+      "allow": [{ "path": "$APPDATA/recordings/*" }]
+    }
+  ]
+}

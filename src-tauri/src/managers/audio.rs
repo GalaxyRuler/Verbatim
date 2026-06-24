@@ -13,6 +13,9 @@ const STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 const SELECTED_MICROPHONE_UNAVAILABLE_PREFIX: &str = "Selected microphone unavailable";
 
 fn set_mute(mute: bool) {
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+    let _ = mute;
+
     // Expected behavior:
     // - Windows: works on most systems using standard audio drivers.
     // - Linux: works on many systems (PipeWire, PulseAudio, ALSA),

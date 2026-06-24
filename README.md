@@ -9,8 +9,8 @@
 [![Latest release](https://img.shields.io/github/v/release/GalaxyRuler/Verbatim?sort=semver&style=flat-square&logo=github)](https://github.com/GalaxyRuler/Verbatim/releases/latest)
 [![Downloads](https://img.shields.io/github/downloads/GalaxyRuler/Verbatim/total?style=flat-square&logo=github)](https://github.com/GalaxyRuler/Verbatim/releases)
 [![License](https://img.shields.io/github/license/GalaxyRuler/Verbatim?style=flat-square)](https://github.com/GalaxyRuler/Verbatim/blob/main/LICENSE)
-[![Platforms](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-2563eb?style=flat-square)](#download-verbatim)
-[![Local-first privacy](https://img.shields.io/badge/privacy-local%20first-15803d?style=flat-square)](#why-verbatim)
+[![Platforms](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux%20%7C%20Android-2563eb?style=flat-square)](#download-verbatim)
+[![Offline](https://img.shields.io/badge/privacy-local%20first-15803d?style=flat-square)](#why-verbatim)
 [![Updater](https://img.shields.io/badge/updates-in--app-0f766e?style=flat-square)](#download-verbatim)
 
 </div>
@@ -18,6 +18,8 @@
 Verbatim is a cross-platform desktop application that provides simple, privacy-focused speech transcription. Press a shortcut, speak, and have your words appear in any text field. Audio transcription runs on your own computer; network access is used for update checks, model downloads, and optional post-processing providers you configure.
 
 Verbatim is a fork of [Handy](https://github.com/cjpais/Handy) by [CJ Pais](https://github.com/cjpais), carrying its open-source foundation forward under a new identity and direction. See [Acknowledgments](#acknowledgments).
+
+📖 **Documentation:** start with the [**User Guide**](docs/guide/): [installation](docs/guide/installation.md), [getting started](docs/guide/getting-started.md), [models](docs/guide/models.md), [privacy](docs/guide/privacy.md), [troubleshooting](docs/guide/troubleshooting.md), and [FAQ](docs/guide/faq.md).
 
 ## Why Verbatim?
 
@@ -43,35 +45,37 @@ The core audio transcription process is local:
 - Transcription uses your choice of models:
   - **Whisper models** (Small/Medium/Turbo/Large) with GPU acceleration when available
   - **Parakeet V3** - CPU-optimized model with excellent performance and automatic language detection
-- Works on Windows, macOS, and Linux
+- Desktop builds work on Windows, macOS, and Linux; Android builds are published from the same release page
 
 For exact storage, retention, clipboard, network, and API-key behavior, see [Privacy and Data Flow](docs/PRIVACY.md).
 
 ## Download Verbatim
 
-Download the latest Windows, macOS, and Linux installers from the [Verbatim Releases page](https://github.com/GalaxyRuler/Verbatim/releases/latest).
+Download the latest Windows, macOS, Linux, and Android builds from the [Verbatim Releases page](https://github.com/GalaxyRuler/Verbatim/releases/latest).
 
 <!-- latest-release:start -->
 
 **Latest published release:** [v0.9.0](https://github.com/GalaxyRuler/Verbatim/releases/tag/v0.9.0) (2026-06-19)
 
-| Platform            | Direct downloads                                                                                                                                                                                                  |
-| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Windows x64         | [setup.exe](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.9.0/Verbatim_0.9.0_x64-setup.exe) · [MSI](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.9.0/Verbatim_0.9.0_x64_en-US.msi) |
-| macOS Apple Silicon | [DMG](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.9.0/Verbatim_0.9.0_aarch64.dmg)                                                                                                                |
-| Ubuntu x64          | [DEB](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.9.0/Verbatim_0.9.0_amd64.deb)                                                                                                                  |
+| Platform            | Direct downloads                                                                                                                                                                                                            |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Windows x64         | [setup.exe](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.9.0/Verbatim_0.9.0_x64-setup.exe) · [MSI](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.9.0/Verbatim_0.9.0_x64_en-US.msi)           |
+| macOS Apple Silicon | [DMG](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.9.0/Verbatim_0.9.0_aarch64.dmg)                                                                                                                          |
+| Ubuntu x64          | [DEB](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.9.0/Verbatim_0.9.0_amd64.deb)                                                                                                                            |
+| Android             | [APK](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.9.0/Verbatim_0.9.0_android_universal.apk) · [AAB](https://github.com/GalaxyRuler/Verbatim/releases/download/v0.9.0/Verbatim_0.9.0_android_universal.aab) |
 
 <!-- latest-release:end -->
 
 Choose the asset that matches your operating system and CPU:
 
-| Platform            | Recommended asset          | Notes                                                                |
-| ------------------- | -------------------------- | -------------------------------------------------------------------- |
-| Windows x64         | `Verbatim_*_x64-setup.exe` | Use the `.msi` for managed installs.                                 |
-| macOS Apple Silicon | `Verbatim_*_aarch64.dmg`   | For M-series Macs.                                                   |
-| Ubuntu x64          | `Verbatim_*_amd64.deb`     | Installs recommended Linux helper packages through `apt` by default. |
+| Platform            | Recommended asset                  | Notes                                                                |
+| ------------------- | ---------------------------------- | -------------------------------------------------------------------- |
+| Windows x64         | `Verbatim_*_x64-setup.exe`         | Use the `.msi` for managed installs.                                 |
+| macOS Apple Silicon | `Verbatim_*_aarch64.dmg`           | For M-series Macs.                                                   |
+| Ubuntu x64          | `Verbatim_*_amd64.deb`             | Installs recommended Linux helper packages through `apt` by default. |
+| Android             | `Verbatim_*_android_universal.apk` | Direct install package; use the `.aab` for app-bundle distribution.  |
 
-Installed builds can update in place from the footer update control when update checks are enabled. Portable installs may require a manual download from the Releases page.
+Desktop builds can update in place from the footer update control when update checks are enabled. Portable installs and Android installs may require a manual download from the Releases page.
 
 ## Quick Start
 

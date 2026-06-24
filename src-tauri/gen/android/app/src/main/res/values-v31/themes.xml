@@ -1,0 +1,7 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <style name="Theme.verbatim" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_launcher_splash</item>
+        <item name="android:windowSplashScreenBackground">#2563EB</item>
+        <item name="android:windowSplashScreenIconBackgroundColor">#2563EB</item>
+    </style>
+</resources>
