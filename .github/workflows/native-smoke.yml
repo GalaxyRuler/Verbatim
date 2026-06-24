@@ -181,7 +181,11 @@ jobs:
 
       - name: Build packaged app
         if: runner.os != 'Windows'
-        run: bun run tauri build -- ${{ matrix.build_args }}
+        # NOTE: no `--` before args. `bun run tauri build -- <args>` keeps the
+        # `--` (an arg `build` precedes it; see oven-sh/bun#4462), so Tauri routes
+        # `--bundles`/`--target` to cargo. Without `--`, bun forwards them to the
+        # tauri CLI correctly on all bun versions.
+        run: bun run tauri build ${{ matrix.build_args }}
 
       - name: Provision virtual audio input (Linux)
         if: runner.os == 'Linux' && inputs.virtual-audio-preflight

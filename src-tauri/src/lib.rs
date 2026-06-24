@@ -422,114 +422,114 @@ fn initialize_core_logic(app_handle: &AppHandle) -> Result<(), StartupError> {
 
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
-    // Get the current theme to set the appropriate initial icon
-    let initial_theme = tray::get_current_theme(app_handle);
+        // Get the current theme to set the appropriate initial icon
+        let initial_theme = tray::get_current_theme(app_handle);
 
-    // Choose the appropriate initial icon based on theme
-    let initial_icon_path = tray::get_icon_path(initial_theme, tray::TrayIconState::Idle);
-    let initial_icon_path = init_step(
-        "tray icon path",
-        app_handle
-            .path()
-            .resolve(initial_icon_path, tauri::path::BaseDirectory::Resource),
-    )?;
-    let initial_icon = init_step("tray icon image", Image::from_path(initial_icon_path))?;
+        // Choose the appropriate initial icon based on theme
+        let initial_icon_path = tray::get_icon_path(initial_theme, tray::TrayIconState::Idle);
+        let initial_icon_path = init_step(
+            "tray icon path",
+            app_handle
+                .path()
+                .resolve(initial_icon_path, tauri::path::BaseDirectory::Resource),
+        )?;
+        let initial_icon = init_step("tray icon image", Image::from_path(initial_icon_path))?;
 
-    let tray = init_step(
-        "tray icon",
-        TrayIconBuilder::new()
-            .icon(initial_icon)
-            .tooltip(tray::tray_tooltip())
-            .show_menu_on_left_click(true)
-            .icon_as_template(true)
-            .on_menu_event(|app, event| match event.id.as_ref() {
-                "settings" => {
-                    show_main_window(app);
-                }
-                "check_updates" => {
-                    let settings = settings::get_settings(app);
-                    if settings.update_checks_enabled {
+        let tray = init_step(
+            "tray icon",
+            TrayIconBuilder::new()
+                .icon(initial_icon)
+                .tooltip(tray::tray_tooltip())
+                .show_menu_on_left_click(true)
+                .icon_as_template(true)
+                .on_menu_event(|app, event| match event.id.as_ref() {
+                    "settings" => {
                         show_main_window(app);
-                        let _ = app.emit("check-for-updates", ());
                     }
-                }
-                "copy_last_transcript" => {
-                    tray::copy_last_transcript(app);
-                }
-                "unload_model" => {
-                    let transcription_manager = app.state::<Arc<TranscriptionManager>>();
-                    if !transcription_manager.is_model_loaded() {
-                        log::warn!("No model is currently loaded.");
-                        return;
-                    }
-                    match transcription_manager.unload_model() {
-                        Ok(()) => log::info!("Model unloaded via tray."),
-                        Err(e) => log::error!("Failed to unload model via tray: {}", e),
-                    }
-                }
-                "cancel" => {
-                    use crate::utils::cancel_current_operation;
-
-                    // Use centralized cancellation that handles all operations
-                    cancel_current_operation(app);
-                }
-                "quit" => {
-                    app.exit(0);
-                }
-                id if id.starts_with("model_select:") => {
-                    let model_id = id.strip_prefix("model_select:").unwrap().to_string();
-                    let current_model = settings::get_settings(app).selected_model;
-                    if model_id == current_model {
-                        return;
-                    }
-                    let app_clone = app.clone();
-                    std::thread::spawn(move || {
-                        match commands::models::switch_active_model(&app_clone, &model_id) {
-                            Ok(()) => {
-                                log::info!("Model switched to {} via tray.", model_id);
-                            }
-                            Err(e) => {
-                                log::error!("Failed to switch model via tray: {}", e);
-                            }
+                    "check_updates" => {
+                        let settings = settings::get_settings(app);
+                        if settings.update_checks_enabled {
+                            show_main_window(app);
+                            let _ = app.emit("check-for-updates", ());
                         }
-                        tray::update_tray_menu(&app_clone, &tray::TrayIconState::Idle, None);
-                    });
-                }
-                _ => {}
-            })
-            .build(app_handle),
-    )?;
-    app_handle.manage(tray);
+                    }
+                    "copy_last_transcript" => {
+                        tray::copy_last_transcript(app);
+                    }
+                    "unload_model" => {
+                        let transcription_manager = app.state::<Arc<TranscriptionManager>>();
+                        if !transcription_manager.is_model_loaded() {
+                            log::warn!("No model is currently loaded.");
+                            return;
+                        }
+                        match transcription_manager.unload_model() {
+                            Ok(()) => log::info!("Model unloaded via tray."),
+                            Err(e) => log::error!("Failed to unload model via tray: {}", e),
+                        }
+                    }
+                    "cancel" => {
+                        use crate::utils::cancel_current_operation;
 
-    // Initialize tray menu with idle state
-    utils::update_tray_menu(app_handle, &utils::TrayIconState::Idle, None);
+                        // Use centralized cancellation that handles all operations
+                        cancel_current_operation(app);
+                    }
+                    "quit" => {
+                        app.exit(0);
+                    }
+                    id if id.starts_with("model_select:") => {
+                        let model_id = id.strip_prefix("model_select:").unwrap().to_string();
+                        let current_model = settings::get_settings(app).selected_model;
+                        if model_id == current_model {
+                            return;
+                        }
+                        let app_clone = app.clone();
+                        std::thread::spawn(move || {
+                            match commands::models::switch_active_model(&app_clone, &model_id) {
+                                Ok(()) => {
+                                    log::info!("Model switched to {} via tray.", model_id);
+                                }
+                                Err(e) => {
+                                    log::error!("Failed to switch model via tray: {}", e);
+                                }
+                            }
+                            tray::update_tray_menu(&app_clone, &tray::TrayIconState::Idle, None);
+                        });
+                    }
+                    _ => {}
+                })
+                .build(app_handle),
+        )?;
+        app_handle.manage(tray);
 
-    // Apply show_tray_icon setting
-    let settings = settings::get_settings(app_handle);
-    if !settings.show_tray_icon {
-        tray::set_tray_visibility(app_handle, false);
-    }
+        // Initialize tray menu with idle state
+        utils::update_tray_menu(app_handle, &utils::TrayIconState::Idle, None);
 
-    // Refresh tray menu when model state changes
-    let app_handle_for_listener = app_handle.clone();
-    app_handle.listen("model-state-changed", move |_| {
-        tray::update_tray_menu(&app_handle_for_listener, &tray::TrayIconState::Idle, None);
-    });
+        // Apply show_tray_icon setting
+        let settings = settings::get_settings(app_handle);
+        if !settings.show_tray_icon {
+            tray::set_tray_visibility(app_handle, false);
+        }
 
-    // Get the autostart manager and configure based on user setting
-    let autostart_manager = app_handle.autolaunch();
-    let settings = settings::get_settings(&app_handle);
+        // Refresh tray menu when model state changes
+        let app_handle_for_listener = app_handle.clone();
+        app_handle.listen("model-state-changed", move |_| {
+            tray::update_tray_menu(&app_handle_for_listener, &tray::TrayIconState::Idle, None);
+        });
 
-    if settings.autostart_enabled {
-        // Enable autostart if user has opted in
-        let _ = autostart_manager.enable();
-    } else {
-        // Disable autostart if user has opted out
-        let _ = autostart_manager.disable();
-    }
+        // Get the autostart manager and configure based on user setting
+        let autostart_manager = app_handle.autolaunch();
+        let settings = settings::get_settings(&app_handle);
 
-    // Create the recording overlay window (hidden by default)
-    utils::create_recording_overlay(app_handle);
+        if settings.autostart_enabled {
+            // Enable autostart if user has opted in
+            let _ = autostart_manager.enable();
+        } else {
+            // Disable autostart if user has opted out
+            let _ = autostart_manager.disable();
+        }
+
+        // Create the recording overlay window (hidden by default)
+        utils::create_recording_overlay(app_handle);
     }
 
     Ok(())
