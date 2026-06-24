@@ -1,11 +1,15 @@
-# Phase 0 / Task 0.2 — Maestro smoke flow: the app launches to onboarding (microphone step).
+# Phase 0 / Task 0.2 — Maestro smoke flow: the app launches to the onboarding screen.
 # Run: maestro test maestro/   (needs a booted emulator/device + installed debug APK)
 #
-# The UI is a Tauri WebView (React). On a cold start — especially on a software-GPU CI
-# emulator — the WebView takes ~15-25s to paint, and its text only enters the accessibility
-# tree once rendered (verified on a local AVD: the tree is an empty WebView node at 9s, fully
-# populated with the microphone step by ~17s). A plain assertVisible races that cold load and
-# flakes, so wait explicitly with a generous timeout instead of the short default window.
+# Two things this flow must tolerate:
+#  1. Cold start. The UI is a Tauri WebView (React); on a software-GPU CI emulator it takes
+#     ~15-25s to paint, and its text only enters the accessibility tree once rendered. Use
+#     extendedWaitUntil with a generous timeout, not the short default assertVisible window.
+#  2. Emulator-granted permissions. Onboarding shows only the first not-yet-granted step.
+#     CI emulators commonly pre-grant RECORD_AUDIO and SYSTEM_ALERT_WINDOW, so the current
+#     step is often "accessibility" (STEP 3), not "microphone" (STEP 1). Assert the stable
+#     onboarding hero ("Set up mobile dictation" = i18n android.onboarding.title), which is
+#     shown for every step, instead of any step-specific copy.
 appId: com.galaxyruler.verbatim
 ---
 - launchApp
@@ -13,9 +17,7 @@ appId: com.galaxyruler.verbatim
 - extendedWaitUntil:
     visible: "Verbatim"
     timeout: 60000
-# Onboarding step 1 (microphone permission) — copy from i18n "android.onboarding.microphone.*"
-# ("Let Verbatim hear you" / "Verbatim needs your microphone to transcribe what you say.").
+# Onboarding hero — present regardless of which permission step is current.
 - extendedWaitUntil:
-    visible:
-      text: ".*[Mm]icrophone.*"
+    visible: "Set up mobile dictation"
     timeout: 60000
