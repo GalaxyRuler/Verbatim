@@ -609,13 +609,19 @@ impl AudioRecordingManager {
             Ok(()) => {
                 *self.is_recording.lock().unwrap() = true;
                 self.start_mic_diagnostic();
-                utils::emit_overlay_state_changed(&self.app_handle, "recording");
+                utils::emit_overlay_state_changed(
+                    &self.app_handle,
+                    crate::overlay::OverlayState::Recording,
+                );
                 Ok(())
             }
             Err(e) => {
                 *self.is_recording.lock().unwrap() = false;
                 self.reset_mic_diagnostic();
-                utils::emit_overlay_state_changed(&self.app_handle, "mic_failed");
+                utils::emit_overlay_state_changed(
+                    &self.app_handle,
+                    crate::overlay::OverlayState::MicFailed,
+                );
                 Err(format!("Failed to restart recording: {e}"))
             }
         }

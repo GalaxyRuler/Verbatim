@@ -8,6 +8,26 @@ on:
         required: false
         default: false
         type: boolean
+      signing_identity_label:
+        description: "Public signing identity label for signed release notes and manifests"
+        required: false
+        default: ""
+        type: string
+      native_smoke_desktop_target_drill:
+        description: "Require controlled desktop-target evidence during release smoke"
+        required: false
+        default: false
+        type: boolean
+      native_smoke_virtual_audio_preflight:
+        description: "Require virtual-audio preflight evidence during release smoke"
+        required: false
+        default: false
+        type: boolean
+      native_smoke_virtual_audio_device_name:
+        description: "Existing virtual microphone name for Windows/macOS release smoke"
+        required: false
+        default: ""
+        type: string
 
 jobs:
   create-release:
@@ -34,6 +54,30 @@ jobs:
           VERSION=$(grep -o '"version": "[^"]*"' src-tauri/tauri.conf.json | cut -d'"' -f4)
           echo "Application version from tauri.conf.json: $VERSION"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Validate signed release metadata
+        if: inputs.sign_binaries
+        shell: bash
+        env:
+          SIGNING_IDENTITY_LABEL: ${{ inputs.signing_identity_label }}
+        run: |
+          trimmed="$(printf '%s' "$SIGNING_IDENTITY_LABEL" | xargs)"
+          if [[ -z "$trimmed" ]]; then
+            echo "signing_identity_label is required when sign_binaries is true." >&2
+            exit 1
+          fi
+
+      - name: Validate release smoke inputs
+        if: inputs.native_smoke_virtual_audio_preflight
+        shell: bash
+        env:
+          VIRTUAL_AUDIO_DEVICE_NAME: ${{ inputs.native_smoke_virtual_audio_device_name }}
+        run: |
+          trimmed="$(printf '%s' "$VIRTUAL_AUDIO_DEVICE_NAME" | xargs)"
+          if [[ -z "$trimmed" ]]; then
+            echo "native_smoke_virtual_audio_device_name is required when native_smoke_virtual_audio_preflight is true because release smoke runs Windows and macOS." >&2
+            exit 1
+          fi
 
       - name: Create Draft Release
         id: create-release
@@ -95,6 +139,15 @@ jobs:
       release-id: ${{ needs.create-release.outputs.release-id }}
     secrets: inherit
 
+  release-smoke:
+    needs: publish-tauri
+    uses: ./.github/workflows/native-smoke.yml
+    with:
+      desktop-target-drill: ${{ inputs.native_smoke_desktop_target_drill }}
+      virtual-audio-preflight: ${{ inputs.native_smoke_virtual_audio_preflight }}
+      virtual-audio-device-name: ${{ inputs.native_smoke_virtual_audio_device_name }}
+    secrets: inherit
+
   finalize-release:
     permissions:
       contents: write
@@ -102,12 +155,16 @@ jobs:
     needs:
       - create-release
       - publish-tauri
+      - release-smoke
     steps:
-      - name: Verify updater release assets
+      - name: Verify desktop release assets
         uses: actions/github-script@v7
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         with:
           script: |
             const releaseId = Number('${{ needs.create-release.outputs.release-id }}');
+            const version = '${{ needs.create-release.outputs.version }}';
             const { data: assets } = await github.rest.repos.listReleaseAssets({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -116,7 +173,25 @@ jobs:
             });
 
             const names = assets.map((asset) => asset.name).sort();
-            const latestJson = names.includes('latest.json');
+            const duplicateNames = names.filter((name, index) => names.indexOf(name) !== index);
+            if (duplicateNames.length > 0) {
+              core.setFailed(`Duplicate release asset names found: ${[...new Set(duplicateNames)].join(', ')}`);
+              return;
+            }
+
+            const requiredDownloads = [
+              `Verbatim_${version}_x64-setup.exe`,
+              `Verbatim_${version}_x64_en-US.msi`,
+              `Verbatim_${version}_aarch64.dmg`,
+              `Verbatim_${version}_amd64.deb`,
+            ];
+            const missingDownloads = requiredDownloads.filter((name) => !names.includes(name));
+            if (missingDownloads.length > 0) {
+              core.setFailed(`Missing desktop downloads: ${missingDownloads.join(', ')}. Assets found: ${names.join(', ')}`);
+              return;
+            }
+
+            const latestJson = assets.find((asset) => asset.name === 'latest.json');
             const signatures = names.filter((name) => name.endsWith('.sig'));
 
             if (!latestJson) {
@@ -124,21 +199,292 @@ jobs:
               return;
             }
 
-            if (signatures.length === 0) {
-              core.setFailed(`Missing updater .sig assets. Assets found: ${names.join(', ')}`);
+            if (signatures.length < 3) {
+              core.setFailed(`Expected updater .sig coverage for all desktop platforms, found ${signatures.length}. Assets found: ${names.join(', ')}`);
               return;
             }
 
-            core.info(`Found latest.json and ${signatures.length} updater signature assets.`);
+            async function downloadAsset(asset) {
+              const response = await fetch(asset.url, {
+                headers: {
+                  Accept: 'application/octet-stream',
+                  Authorization: `Bearer ${process.env.GITHUB_TOKEN}`,
+                },
+              });
+
+              if (!response.ok) {
+                throw new Error(`Failed to download ${asset.name}: ${response.status} ${response.statusText}`);
+              }
+
+              return Buffer.from(await response.arrayBuffer());
+            }
+
+            const latestJsonData = JSON.parse((await downloadAsset(latestJson)).toString('utf8'));
+            const requiredUpdaterPlatforms = ['darwin-aarch64', 'linux-x86_64', 'windows-x86_64'];
+            const missingPlatforms = [];
+            const missingUpdaterAssets = [];
+            const missingUpdaterSignatureAssets = [];
+
+            for (const platform of requiredUpdaterPlatforms) {
+              const entry = latestJsonData.platforms?.[platform];
+              if (!entry?.url || !entry?.signature) {
+                missingPlatforms.push(platform);
+                continue;
+              }
+
+              const assetName = decodeURIComponent(
+                new URL(entry.url).pathname.split('/').pop() ?? '',
+              );
+              if (!names.includes(assetName)) {
+                missingUpdaterAssets.push(assetName);
+              }
+              if (!names.includes(`${assetName}.sig`)) {
+                missingUpdaterSignatureAssets.push(`${assetName}.sig`);
+              }
+            }
+
+            if (missingPlatforms.length > 0) {
+              core.setFailed(`latest.json is missing updater entries or signatures for: ${missingPlatforms.join(', ')}`);
+              return;
+            }
+
+            if (missingUpdaterAssets.length > 0) {
+              core.setFailed(`latest.json references updater assets that were not uploaded: ${missingUpdaterAssets.join(', ')}`);
+              return;
+            }
+
+            if (missingUpdaterSignatureAssets.length > 0) {
+              core.setFailed(`Missing updater signature assets referenced by latest.json: ${missingUpdaterSignatureAssets.join(', ')}`);
+              return;
+            }
+
+            core.info(`Found ${requiredDownloads.length} desktop downloads, latest.json platform entries, and ${signatures.length} updater signature assets.`);
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Generate SBOM and provenance metadata
+        env:
+          VERBATIM_RELEASE_VERSION: ${{ needs.create-release.outputs.version }}
+          VERBATIM_RELEASE_REVISION: ${{ github.sha }}
+        run: bun run release:metadata
+
+      - name: Publish SBOM and provenance metadata
+        uses: actions/github-script@v7
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const releaseId = Number('${{ needs.create-release.outputs.release-id }}');
+            const metadataDir = path.join(process.cwd(), 'dist', 'release-metadata');
+            const metadataAssets = [
+              {
+                name: 'SBOM.spdx.json',
+                contentType: 'application/spdx+json',
+                path: path.join(metadataDir, 'SBOM.spdx.json'),
+              },
+              {
+                name: 'RELEASE_PROVENANCE.json',
+                contentType: 'application/json',
+                path: path.join(metadataDir, 'RELEASE_PROVENANCE.json'),
+              },
+            ];
+
+            const { data: assets } = await github.rest.repos.listReleaseAssets({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: releaseId,
+              per_page: 100,
+            });
+
+            for (const asset of metadataAssets) {
+              const existing = assets.find((candidate) => candidate.name === asset.name);
+              if (existing) {
+                await github.rest.repos.deleteReleaseAsset({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  asset_id: existing.id,
+                });
+              }
+
+              const data = fs.readFileSync(asset.path);
+              await github.rest.repos.uploadReleaseAsset({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                release_id: releaseId,
+                name: asset.name,
+                data,
+                headers: {
+                  'content-type': asset.contentType,
+                  'content-length': data.length,
+                },
+              });
+            }
+
+      - name: Publish SHA-256 manifest
+        uses: actions/github-script@v7
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SIGNING_IDENTITY_LABEL: ${{ inputs.signing_identity_label }}
+        with:
+          script: |
+            const crypto = require('crypto');
+            const releaseId = Number('${{ needs.create-release.outputs.release-id }}');
+            const version = '${{ needs.create-release.outputs.version }}';
+            const signed = '${{ inputs.sign_binaries }}' === 'true';
+            const signingIdentityLabel = process.env.SIGNING_IDENTITY_LABEL?.trim() || null;
+
+            if (signed && !signingIdentityLabel) {
+              core.setFailed('signing_identity_label is required when sign_binaries is true.');
+              return;
+            }
+
+            const { data: assets } = await github.rest.repos.listReleaseAssets({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: releaseId,
+              per_page: 100,
+            });
+
+            const existingManifest = assets.find((asset) => asset.name === 'SHA256SUMS.txt');
+            if (existingManifest) {
+              await github.rest.repos.deleteReleaseAsset({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                asset_id: existingManifest.id,
+              });
+            }
+
+            const existingJsonManifest = assets.find((asset) => asset.name === 'RELEASE_MANIFEST.json');
+            if (existingJsonManifest) {
+              await github.rest.repos.deleteReleaseAsset({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                asset_id: existingJsonManifest.id,
+              });
+            }
+
+            async function downloadAsset(asset) {
+              const response = await fetch(asset.url, {
+                headers: {
+                  Accept: 'application/octet-stream',
+                  Authorization: `Bearer ${process.env.GITHUB_TOKEN}`,
+                },
+              });
+
+              if (!response.ok) {
+                throw new Error(`Failed to download ${asset.name}: ${response.status} ${response.statusText}`);
+              }
+
+              return Buffer.from(await response.arrayBuffer());
+            }
+
+            const latestJson = assets.find((asset) => asset.name === 'latest.json');
+            const updaterAssetsByName = new Map();
+            if (latestJson) {
+              const latestJsonData = JSON.parse((await downloadAsset(latestJson)).toString('utf8'));
+              for (const [platform, entry] of Object.entries(latestJsonData.platforms ?? {})) {
+                if (!entry?.url) continue;
+                const assetName = decodeURIComponent(
+                  new URL(entry.url).pathname.split('/').pop() ?? '',
+                );
+                updaterAssetsByName.set(assetName, {
+                  platform,
+                  signaturePresent: typeof entry.signature === 'string' && entry.signature.length > 0,
+                });
+              }
+            }
+
+            const names = assets.map((asset) => asset.name);
+            const sbomAsset = assets.find((asset) => asset.name === 'SBOM.spdx.json');
+            const provenanceAsset = assets.find((asset) => asset.name === 'RELEASE_PROVENANCE.json');
+            const missingMetadata = [
+              ['SBOM.spdx.json', sbomAsset],
+              ['RELEASE_PROVENANCE.json', provenanceAsset],
+            ].filter(([, asset]) => !asset).map(([name]) => name);
+
+            if (missingMetadata.length > 0) {
+              core.setFailed(`Missing release metadata assets: ${missingMetadata.join(', ')}`);
+              return;
+            }
+
+            const hashableAssets = assets
+              .filter((asset) => asset.name !== 'SHA256SUMS.txt' && asset.name !== 'RELEASE_MANIFEST.json')
+              .sort((a, b) => a.name.localeCompare(b.name));
+
+            const lines = [];
+            const manifestAssets = [];
+            for (const asset of hashableAssets) {
+              const data = await downloadAsset(asset);
+              const digest = crypto.createHash('sha256').update(data).digest('hex');
+              lines.push(`${digest}  ${asset.name}`);
+              const updater = updaterAssetsByName.get(asset.name);
+              manifestAssets.push({
+                name: asset.name,
+                size_bytes: asset.size,
+                sha256: digest,
+                content_type: asset.content_type,
+                browser_download_url: asset.browser_download_url,
+                updater_platform_key: updater?.platform ?? null,
+                updater_signature_in_latest_json: updater?.signaturePresent ?? false,
+                updater_signature_asset_present: names.includes(`${asset.name}.sig`),
+                signing_enabled: signed,
+                signing_identity: signed ? signingIdentityLabel : null,
+                provenance_url: provenanceAsset.browser_download_url,
+                sbom_url: sbomAsset.browser_download_url,
+              });
+            }
+
+            const manifest = `${lines.join('\n')}\n`;
+            const jsonManifest = `${JSON.stringify({
+              version,
+              generated_at: new Date().toISOString(),
+              signing_enabled: signed,
+              assets: manifestAssets,
+            }, null, 2)}\n`;
+
+            await github.rest.repos.uploadReleaseAsset({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: releaseId,
+              name: 'SHA256SUMS.txt',
+              data: Buffer.from(manifest, 'utf8'),
+              headers: {
+                'content-type': 'text/plain',
+                'content-length': Buffer.byteLength(manifest),
+              },
+            });
+
+            await github.rest.repos.uploadReleaseAsset({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: releaseId,
+              name: 'RELEASE_MANIFEST.json',
+              data: Buffer.from(jsonManifest, 'utf8'),
+              headers: {
+                'content-type': 'application/json',
+                'content-length': Buffer.byteLength(jsonManifest),
+              },
+            });
+
+            core.info(`Published SHA256SUMS.txt for ${hashableAssets.length} assets.`);
 
       - name: Publish release with download guidance
         uses: actions/github-script@v7
+        env:
+          SIGNING_IDENTITY_LABEL: ${{ inputs.signing_identity_label }}
         with:
           script: |
             const version = '${{ needs.create-release.outputs.version }}';
             const tag = `v${version}`;
             const releaseId = Number('${{ needs.create-release.outputs.release-id }}');
             const signed = '${{ inputs.sign_binaries }}' === 'true';
+            const signingIdentityLabel = process.env.SIGNING_IDENTITY_LABEL?.trim() || null;
             const latestDownload = (name) =>
               `https://github.com/${context.repo.owner}/${context.repo.repo}/releases/latest/download/${name}`;
 
@@ -149,7 +495,7 @@ jobs:
               ['Ubuntu x64', 'DEB', `Verbatim_${version}_amd64.deb`],
             ];
 
-            const downloadTable = [
+            const desktopDownloadTable = [
               '| Platform | Type | Download |',
               '| -------- | ---- | -------- |',
               ...rows.map(([platform, type, name]) =>
@@ -170,17 +516,25 @@ jobs:
               : '';
 
             const body = [
-              '## Downloads',
+              '## Desktop Downloads',
               '',
-              downloadTable,
+              desktopDownloadTable,
               '',
               'Use the setup `.exe` on Windows, `.dmg` on macOS Apple Silicon, or `.deb` on Ubuntu x64.',
+              '',
+              '## Android Downloads',
+              '',
+              'Android builds are not published from this desktop release workflow.',
               '',
               '## Signing Status',
               '',
               signed
-                ? 'This release was built with signing enabled.'
+                ? `This release was built with signing enabled. Signing identity: ${signingIdentityLabel}.`
                 : 'This release is unsigned. Windows SmartScreen and macOS Gatekeeper may warn before first launch.',
+              '',
+              '## Verification',
+              '',
+              `[SHA256SUMS.txt](${latestDownload('SHA256SUMS.txt')}) lists SHA-256 checksums for the release assets. [RELEASE_MANIFEST.json](${latestDownload('RELEASE_MANIFEST.json')}) includes file sizes, checksums, updater platform keys, updater signature presence, and signing/provenance fields. GitHub Artifact Attestations are generated for packaged desktop artifacts and can be verified with \`gh attestation verify <downloaded-file> -R ${context.repo.owner}/${context.repo.repo}\`. Updater signatures are published alongside updater artifacts and referenced by latest.json.`,
               generatedNotes,
             ].join('\n');
 

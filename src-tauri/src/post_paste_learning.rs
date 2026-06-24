@@ -9,6 +9,10 @@ const POST_PASTE_SETTLE_DELAY: Duration = Duration::from_millis(120);
 const POST_PASTE_POLL_INTERVAL: Duration = Duration::from_millis(150);
 const POST_PASTE_STABLE_EDIT_DELAY: Duration = Duration::from_millis(300);
 const POST_PASTE_LEARNING_WINDOW: Duration = Duration::from_secs(6);
+#[cfg(any(target_os = "macos", target_os = "linux", test))]
+const SELECTION_FIELD_SEPARATOR: &str = "\n--VERBATIM-SELECTED-TEXT--\n";
+#[cfg(any(target_os = "macos", target_os = "linux", test))]
+const TEXT_FIELD_SEPARATOR: &str = "\n--VERBATIM-FOCUSED-TEXT--\n";
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct FocusedTextSnapshot {
@@ -71,6 +75,10 @@ pub fn maybe_spawn_auto_add_watcher(
     inserted_text: String,
     before_paste: Option<FocusedTextSnapshot>,
 ) {
+    if crate::private_session::is_enabled(&app) {
+        return;
+    }
+
     let Some(before_paste) = before_paste else {
         return;
     };
@@ -188,6 +196,10 @@ fn learn_from_text_snapshots(
     after_paste_text: &str,
     after_edit_text: &str,
 ) -> Result<(), String> {
+    if crate::private_session::is_enabled(app) {
+        return Ok(());
+    }
+
     let Some(corrected_text) =
         extract_corrected_inserted_text(before_paste_text, after_paste_text, after_edit_text)
     else {
@@ -359,14 +371,7 @@ fn capture_platform_focused_text_snapshot() -> Result<FocusedTextSnapshot, Strin
 #[cfg(target_os = "macos")]
 fn capture_platform_focused_text_selection_snapshot() -> Result<FocusedTextSelectionSnapshot, String>
 {
-    let snapshot = macos_focused_text::capture()?;
-    Ok(FocusedTextSelectionSnapshot {
-        target_id: snapshot.target_id,
-        text: snapshot.text,
-        selection: FocusedTextSelection::Unsupported(
-            "selected-text capture is not implemented on macOS yet".to_string(),
-        ),
-    })
+    macos_focused_text::capture_with_selection()
 }
 
 #[cfg(target_os = "linux")]
@@ -377,14 +382,7 @@ fn capture_platform_focused_text_snapshot() -> Result<FocusedTextSnapshot, Strin
 #[cfg(target_os = "linux")]
 fn capture_platform_focused_text_selection_snapshot() -> Result<FocusedTextSelectionSnapshot, String>
 {
-    let snapshot = linux_focused_text::capture()?;
-    Ok(FocusedTextSelectionSnapshot {
-        target_id: snapshot.target_id,
-        text: snapshot.text,
-        selection: FocusedTextSelection::Unsupported(
-            "selected-text capture is not implemented on Linux yet".to_string(),
-        ),
-    })
+    linux_focused_text::capture_with_selection()
 }
 
 #[cfg(target_os = "windows")]
@@ -411,9 +409,42 @@ fn parse_snapshot_output(output: &[u8]) -> Result<FocusedTextSnapshot, String> {
     )
 }
 
+#[cfg(any(target_os = "macos", target_os = "linux", test))]
+fn parse_selection_snapshot_output(output: &[u8]) -> Result<FocusedTextSelectionSnapshot, String> {
+    let stdout = String::from_utf8_lossy(output);
+    let Some((target_id, rest)) = stdout.split_once(SELECTION_FIELD_SEPARATOR) else {
+        return Err("focused text selection command returned malformed output".to_string());
+    };
+    let Some((selected_text, focused_text)) = rest.split_once(TEXT_FIELD_SEPARATOR) else {
+        return Err("focused text selection command returned malformed output".to_string());
+    };
+
+    let target_id = target_id.trim().to_string();
+    if target_id.is_empty() {
+        return Err("focused text selection command returned an empty target id".to_string());
+    }
+
+    let selected_text = selected_text.trim_end_matches(['\r', '\n']).to_string();
+    let focused_text = focused_text.trim_end_matches(['\r', '\n']).to_string();
+    let selection = if selected_text.trim().is_empty() {
+        FocusedTextSelection::Empty
+    } else {
+        FocusedTextSelection::Selected(selected_text)
+    };
+
+    Ok(FocusedTextSelectionSnapshot {
+        target_id,
+        text: focused_text,
+        selection,
+    })
+}
+
 #[cfg(target_os = "macos")]
 mod macos_focused_text {
-    use super::{parse_snapshot_output, Command, FocusedTextSnapshot};
+    use super::{
+        parse_selection_snapshot_output, parse_snapshot_output, Command,
+        FocusedTextSelectionSnapshot, FocusedTextSnapshot,
+    };
 
     pub fn capture() -> Result<FocusedTextSnapshot, String> {
         let output = Command::new("osascript")
@@ -429,6 +460,22 @@ mod macos_focused_text {
         }
 
         parse_snapshot_output(&output.stdout)
+    }
+
+    pub fn capture_with_selection() -> Result<FocusedTextSelectionSnapshot, String> {
+        let output = Command::new("osascript")
+            .args(["-e", MACOS_FOCUSED_TEXT_SELECTION_SCRIPT])
+            .output()
+            .map_err(|error| format!("failed to run osascript: {}", error))?;
+
+        if !output.status.success() {
+            return Err(format!(
+                "macOS Accessibility selection snapshot failed: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            ));
+        }
+
+        parse_selection_snapshot_output(&output.stdout)
     }
 
     const MACOS_FOCUSED_TEXT_SCRIPT: &str = r#"
@@ -454,11 +501,39 @@ tell application "System Events"
   return targetId & linefeed & textValue
 end tell
 "#;
+
+    const MACOS_FOCUSED_TEXT_SELECTION_SCRIPT: &str = r#"
+on attrText(elementRef, attrName)
+  try
+    set attrValue to value of attribute attrName of elementRef
+    if attrValue is missing value then return ""
+    return attrValue as text
+  on error
+    return ""
+  end try
+end attrText
+
+tell application "System Events"
+  set frontApp to first application process whose frontmost is true
+  set focusedElement to value of attribute "AXFocusedUIElement" of frontApp
+  set textValue to my attrText(focusedElement, "AXValue")
+  set selectedText to my attrText(focusedElement, "AXSelectedText")
+
+  set targetParts to {unix id of frontApp as text, my attrText(focusedElement, "AXRole"), my attrText(focusedElement, "AXSubrole"), my attrText(focusedElement, "AXIdentifier"), my attrText(focusedElement, "AXTitle")}
+  set AppleScript's text item delimiters to "|"
+  set targetId to targetParts as text
+  set AppleScript's text item delimiters to ""
+  return targetId & linefeed & "--VERBATIM-SELECTED-TEXT--" & linefeed & selectedText & linefeed & "--VERBATIM-FOCUSED-TEXT--" & linefeed & textValue
+end tell
+"#;
 }
 
 #[cfg(target_os = "linux")]
 mod linux_focused_text {
-    use super::{parse_snapshot_output, Command, FocusedTextSnapshot};
+    use super::{
+        parse_selection_snapshot_output, parse_snapshot_output, Command,
+        FocusedTextSelectionSnapshot, FocusedTextSnapshot,
+    };
 
     pub fn capture() -> Result<FocusedTextSnapshot, String> {
         run_python("python3").or_else(|python3_error| {
@@ -486,6 +561,34 @@ mod linux_focused_text {
         }
 
         parse_snapshot_output(&output.stdout)
+    }
+
+    pub fn capture_with_selection() -> Result<FocusedTextSelectionSnapshot, String> {
+        run_selection_python("python3").or_else(|python3_error| {
+            run_selection_python("python").map_err(|python_error| {
+                format!(
+                    "Linux AT-SPI selection snapshot failed with python3 ({}) and python ({})",
+                    python3_error, python_error
+                )
+            })
+        })
+    }
+
+    fn run_selection_python(binary: &str) -> Result<FocusedTextSelectionSnapshot, String> {
+        let output = Command::new(binary)
+            .args(["-c", LINUX_FOCUSED_TEXT_SELECTION_SCRIPT])
+            .output()
+            .map_err(|error| format!("failed to run {binary}: {error}"))?;
+
+        if !output.status.success() {
+            return Err(format!(
+                "{} AT-SPI selection snapshot failed: {}",
+                binary,
+                String::from_utf8_lossy(&output.stderr).trim()
+            ));
+        }
+
+        parse_selection_snapshot_output(&output.stdout)
     }
 
     const LINUX_FOCUSED_TEXT_SCRIPT: &str = r#"
@@ -557,6 +660,96 @@ parts = [
 ]
 print("|".join(parts))
 print(text, end="")
+"#;
+
+    const LINUX_FOCUSED_TEXT_SELECTION_SCRIPT: &str = r#"
+import sys
+
+try:
+    import pyatspi
+except Exception as exc:
+    raise SystemExit(f"pyatspi is unavailable: {exc}")
+
+def active_window():
+    desktop = pyatspi.Registry.getDesktop(0)
+    for app in desktop:
+        for window in app:
+            try:
+                if window.getState().contains(pyatspi.STATE_ACTIVE):
+                    return app, window
+            except Exception:
+                pass
+    return None, None
+
+def find_focused(root, path=""):
+    try:
+        if root.getState().contains(pyatspi.STATE_FOCUSED):
+            return root, path
+    except Exception:
+        pass
+
+    try:
+        child_count = root.childCount
+    except Exception:
+        child_count = 0
+
+    for index in range(child_count):
+        try:
+            child = root.getChildAtIndex(index)
+        except Exception:
+            continue
+        found, found_path = find_focused(child, f"{path}/{index}")
+        if found is not None:
+            return found, found_path
+
+    return None, ""
+
+def accessible_text(obj):
+    try:
+        text = obj.queryText()
+        return text, text.getText(0, text.characterCount)
+    except Exception:
+        return None, None
+
+def selected_text(text):
+    try:
+        count = text.getNSelections()
+    except Exception:
+        return ""
+
+    selections = []
+    for index in range(count):
+        try:
+            start, end = text.getSelection(index)
+            if start != end:
+                selections.append(text.getText(start, end))
+        except Exception:
+            pass
+    return "".join(selections)
+
+app, window = active_window()
+if window is None:
+    raise SystemExit("no active AT-SPI window")
+
+focused, path = find_focused(window)
+if focused is None:
+    raise SystemExit("no focused AT-SPI element")
+
+text_iface, text_value = accessible_text(focused)
+if text_iface is None:
+    raise SystemExit("focused AT-SPI element has no readable text")
+
+parts = [
+    getattr(app, "name", "") or "",
+    getattr(window, "name", "") or "",
+    focused.getRoleName() if hasattr(focused, "getRoleName") else "",
+    path,
+]
+print("|".join(parts))
+print("--VERBATIM-SELECTED-TEXT--")
+print(selected_text(text_iface))
+print("--VERBATIM-FOCUSED-TEXT--")
+print(text_value, end="")
 "#;
 }
 
@@ -816,7 +1009,7 @@ mod windows_focused_text {
 mod tests {
     use super::{
         auto_learn_log_message, extract_corrected_inserted_text, focused_text_snapshot_from_parts,
-        POST_PASTE_LEARNING_WINDOW,
+        parse_selection_snapshot_output, FocusedTextSelection, POST_PASTE_LEARNING_WINDOW,
     };
     use std::time::Duration;
 
@@ -829,6 +1022,39 @@ mod tests {
         );
 
         assert_eq!(corrected.as_deref(), Some("meet with Robyn tomorrow"));
+    }
+
+    #[test]
+    fn parses_selection_snapshot_output_with_selected_text() {
+        let output = b"app|window|text|/0\n--VERBATIM-SELECTED-TEXT--\nselected line\n--VERBATIM-FOCUSED-TEXT--\nfocused text value";
+
+        let snapshot =
+            parse_selection_snapshot_output(output).expect("selection snapshot should parse");
+
+        assert_eq!(snapshot.target_id, "app|window|text|/0");
+        assert_eq!(snapshot.text, "focused text value");
+        assert_eq!(
+            snapshot.selection,
+            FocusedTextSelection::Selected("selected line".to_string())
+        );
+    }
+
+    #[test]
+    fn parses_selection_snapshot_output_with_empty_selection() {
+        let output = b"app|window|text|/0\n--VERBATIM-SELECTED-TEXT--\n\n--VERBATIM-FOCUSED-TEXT--\nfocused text value";
+
+        let snapshot =
+            parse_selection_snapshot_output(output).expect("selection snapshot should parse");
+
+        assert_eq!(snapshot.selection, FocusedTextSelection::Empty);
+    }
+
+    #[test]
+    fn rejects_malformed_selection_snapshot_output() {
+        let err = parse_selection_snapshot_output(b"app|window\nfocused text")
+            .expect_err("missing separators should fail");
+
+        assert!(err.contains("malformed output"));
     }
 
     #[test]

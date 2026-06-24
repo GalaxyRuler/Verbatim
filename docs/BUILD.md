@@ -95,6 +95,45 @@ The wrapper sets a short `CARGO_TARGET_DIR` before Tauri invokes Cargo. This
 avoids MSBuild `FileTracker` failures in the generated Whisper/Vulkan shader
 helper when CMake creates paths near Windows' legacy path limit.
 
+## Generated Bindings
+
+`src/bindings.ts` is generated from Rust commands, events, and exported types.
+Regenerate it after adding, removing, or changing backend commands or exported
+Rust types. The current generation path is a debug Tauri build:
+
+```bash
+bun run tauri build -- --debug
+```
+
+On Windows, use the repository wrapper or the short-target environment described
+above if a broader native build hits path-length or CMake generator failures.
+
+## Backend Test Modes
+
+Backend checks run in two useful modes:
+
+- `--no-default-features` compiles the backend without the native transcription
+  engine. Use this for settings, insertion, clipboard, history, cancellation,
+  model-catalog, and command logic that does not need real Whisper/ONNX runtime
+  linkage.
+- Default features compile the real transcription engine stack. Use this before
+  changing speech inference, model loading, audio-to-text behavior, accelerator
+  selection, or any code whose correctness depends on the native engine.
+
+Examples:
+
+```bash
+cargo test --manifest-path src-tauri/Cargo.toml operation_cancellation --lib --no-default-features --no-run
+cargo check --manifest-path src-tauri/Cargo.toml --no-default-features
+cargo test --manifest-path src-tauri/Cargo.toml model_catalog --lib --no-run
+```
+
+On Windows, prefer the repository wrapper scripts for broad backend checks
+because they set a short target directory and CMake/Ninja environment. If a
+default-feature test fails before crate compilation in a native dependency,
+report that as a native build environment failure rather than as proof that the
+Rust unit under test failed.
+
 ## Linux Install (from source)
 
 The raw binary (`src-tauri/target/release/verbatim`) cannot run standalone — it needs Tauri resource files (tray icons, sounds, VAD model) to be co-located at the expected path.

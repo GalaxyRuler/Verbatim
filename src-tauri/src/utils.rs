@@ -39,6 +39,12 @@ const SILERO_VAD_ASSET: RequiredResourceAsset = RequiredResourceAsset {
 pub fn cancel_current_operation(app: &AppHandle) {
     info!("Initiating operation cancellation...");
 
+    if let Some(cancellation_state) =
+        app.try_state::<crate::operation_cancellation::OperationCancellationState>()
+    {
+        cancellation_state.cancel_current_operation();
+    }
+
     // Unregister the cancel shortcut asynchronously
     shortcut::unregister_cancel_shortcut(app);
 
@@ -48,7 +54,7 @@ pub fn cancel_current_operation(app: &AppHandle) {
     audio_manager.cancel_recording();
 
     // Update tray icon and hide overlay
-    crate::overlay::emit_overlay_state_changed(app, "cancelled");
+    crate::overlay::emit_overlay_state_changed(app, crate::overlay::OverlayState::Cancelled);
     change_tray_icon(app, crate::tray::TrayIconState::Idle);
     hide_recording_overlay(app);
 

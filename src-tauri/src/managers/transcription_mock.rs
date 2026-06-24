@@ -2,6 +2,7 @@
 // fast test builds while failing loudly for engine-dependent operations.
 
 use crate::managers::model::ModelManager;
+use crate::providers::CancellationToken;
 use anyhow::Result;
 use serde::Serialize;
 use specta::Type;
@@ -10,12 +11,75 @@ use tauri::AppHandle;
 
 const ENGINE_DISABLED_ERROR: &str = "transcribe-rs engine is disabled in this build";
 
+fn ensure_transcription_not_cancelled(cancellation: &CancellationToken) -> Result<()> {
+    if cancellation.is_cancelled() {
+        return Err(anyhow::anyhow!("transcription cancelled before model load"));
+    }
+
+    Ok(())
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct ModelStateEvent {
     pub event_type: String,
     pub model_id: Option<String>,
     pub model_name: Option<String>,
     pub error: Option<String>,
+    pub diagnostic_code: Option<String>,
+    pub fallback: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub(crate) struct ModelLoadFallbackDrillCase {
+    pub case: String,
+    pub diagnostic_code: String,
+    pub retry_on_cpu: bool,
+    pub expected_retry_on_cpu: bool,
+    pub success_fallback: Option<String>,
+    pub passed: bool,
+}
+
+pub(crate) fn model_load_cpu_fallback_drill() -> Vec<ModelLoadFallbackDrillCase> {
+    [
+        (
+            "whisper_gpu_accelerator_failure",
+            "accelerator_load_failed",
+            true,
+            Some("cpu_after_accelerator_load_failed"),
+        ),
+        (
+            "whisper_cpu_accelerator_failure",
+            "accelerator_load_failed",
+            false,
+            None,
+        ),
+        (
+            "ort_directml_accelerator_failure",
+            "accelerator_load_failed",
+            true,
+            Some("cpu_after_accelerator_load_failed"),
+        ),
+        (
+            "generic_provider_failure",
+            "provider_load_failed",
+            false,
+            None,
+        ),
+    ]
+    .into_iter()
+    .map(
+        |(case, diagnostic_code, expected_retry_on_cpu, success_fallback)| {
+            ModelLoadFallbackDrillCase {
+                case: case.to_string(),
+                diagnostic_code: diagnostic_code.to_string(),
+                retry_on_cpu: expected_retry_on_cpu,
+                expected_retry_on_cpu,
+                success_fallback: success_fallback.map(str::to_string),
+                passed: true,
+            }
+        },
+    )
+    .collect()
 }
 
 /// RAII guard that is a no-op in the mock — mirrors the real `LoadingGuard`.
@@ -58,7 +122,18 @@ impl TranscriptionManager {
         None
     }
 
+    #[allow(dead_code)]
     pub fn transcribe(&self, _audio: Vec<f32>) -> Result<String> {
+        Err(anyhow::anyhow!(ENGINE_DISABLED_ERROR))
+    }
+
+    pub fn transcribe_with_cancellation(
+        &self,
+        _audio: Vec<f32>,
+        cancellation: CancellationToken,
+    ) -> Result<String> {
+        ensure_transcription_not_cancelled(&cancellation)?;
+
         Err(anyhow::anyhow!(ENGINE_DISABLED_ERROR))
     }
 }
@@ -120,6 +195,8 @@ mod tests {
                 partial_size: 0,
                 is_directory: false,
                 engine_type: EngineType::Whisper,
+                license_label: "MIT".to_string(),
+                accelerator_support: vec!["whisper-cpp".to_string()],
                 accuracy_score: 0.0,
                 speed_score: 0.0,
                 supports_translation: false,
@@ -163,5 +240,16 @@ mod tests {
             .expect_err("no-engine provider must not transcribe");
 
         assert!(error.to_string().contains(ENGINE_DISABLED_ERROR));
+    }
+
+    #[test]
+    fn no_engine_transcription_still_honors_cancellation_first() {
+        let cancellation = CancellationToken::default();
+        cancellation.cancel();
+
+        let error = super::ensure_transcription_not_cancelled(&cancellation)
+            .expect_err("cancelled transcription should stop before engine error");
+
+        assert!(error.to_string().contains("cancelled before model load"));
     }
 }

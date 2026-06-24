@@ -34,7 +34,10 @@ Write-Host "Bundles=$Bundles"
 
 Push-Location $repoRoot
 try {
-  & bun run tauri build -- --bundles $Bundles @TauriArgs
+  # No `--` before args: `bun run tauri build -- ...` keeps the `--` because an
+  # arg (`build`) precedes it (oven-sh/bun#4462), so Tauri routes `--bundles` to
+  # cargo. Without `--`, bun forwards the flags to the tauri CLI on all versions.
+  & bun run tauri build --bundles $Bundles @TauriArgs
   if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
   }

@@ -43,6 +43,8 @@ pub struct ModelInfo {
     pub partial_size: u64,
     pub is_directory: bool,
     pub engine_type: EngineType,
+    pub license_label: String,
+    pub accelerator_support: Vec<String>,
     pub accuracy_score: f32,        // 0.0 to 1.0, higher is more accurate
     pub speed_score: f32,           // 0.0 to 1.0, higher is faster
     pub supports_translation: bool, // Whether the model supports translating to English
@@ -103,6 +105,8 @@ impl ModelManager {
         if !models_dir.exists() {
             fs::create_dir_all(&models_dir)?;
         }
+
+        Self::prepare_native_smoke_model_fixture(&models_dir)?;
 
         let mut available_models = super::model_catalog::load_builtin_models()?;
 
@@ -306,6 +310,36 @@ impl ModelManager {
         Ok(())
     }
 
+    /// Prepare a tiny local model placeholder for packaged native smoke tests.
+    fn prepare_native_smoke_model_fixture(models_dir: &Path) -> Result<()> {
+        if std::env::var("VERBATIM_SMOKE_MODEL_FIXTURE").as_deref() != Ok("1") {
+            return Ok(());
+        }
+
+        let fixture_path = Self::write_native_smoke_model_fixture(models_dir)?;
+        info!(
+            "Prepared native smoke model fixture at {}",
+            fixture_path.display()
+        );
+
+        Ok(())
+    }
+
+    fn write_native_smoke_model_fixture(models_dir: &Path) -> Result<PathBuf> {
+        let fixture_path = models_dir.join("verbatim-smoke-model.bin");
+        fs::write(
+            &fixture_path,
+            [
+                "verbatim native smoke fixture",
+                "This is not a real speech model and must never be used for inference.",
+                "",
+            ]
+            .join("\n"),
+        )?;
+
+        Ok(fixture_path)
+    }
+
     /// Discover custom Whisper models (.bin files) in the models directory.
     /// Skips files that match predefined model filenames.
     fn discover_custom_whisper_models(
@@ -413,6 +447,8 @@ impl ModelManager {
                     partial_size: 0,
                     is_directory: false,
                     engine_type: EngineType::Whisper,
+                    license_label: "Unverified user-provided model".to_string(),
+                    accelerator_support: vec!["whisper-cpp".to_string()],
                     accuracy_score: 0.0, // Sentinel: UI hides score bars when both are 0
                     speed_score: 0.0,
                     supports_translation: false,
@@ -1019,6 +1055,8 @@ mod tests {
                 partial_size: 0,
                 is_directory: false,
                 engine_type: EngineType::Whisper,
+                license_label: "MIT".to_string(),
+                accelerator_support: vec!["whisper-cpp".to_string()],
                 accuracy_score: 0.5,
                 speed_score: 0.5,
                 supports_translation: true,
@@ -1082,6 +1120,31 @@ mod tests {
         let result = ModelManager::discover_custom_whisper_models(&models_dir, &mut models);
         assert!(result.is_ok());
         assert_eq!(models.len(), count_before);
+    }
+
+    #[test]
+    fn test_native_smoke_model_fixture_is_discovered_as_local_custom_model() {
+        let temp_dir = TempDir::new().unwrap();
+        let models_dir = temp_dir.path().to_path_buf();
+
+        let fixture_path = ModelManager::write_native_smoke_model_fixture(&models_dir).unwrap();
+        assert_eq!(
+            fixture_path.file_name().unwrap(),
+            "verbatim-smoke-model.bin"
+        );
+
+        let fixture_contents = fs::read_to_string(&fixture_path).unwrap();
+        assert!(fixture_contents.contains("must never be used for inference"));
+
+        let mut models = HashMap::new();
+        ModelManager::discover_custom_whisper_models(&models_dir, &mut models).unwrap();
+
+        let smoke_model = models.get("verbatim-smoke-model").unwrap();
+        assert_eq!(smoke_model.name, "Verbatim Smoke Model");
+        assert_eq!(smoke_model.filename, "verbatim-smoke-model.bin");
+        assert!(smoke_model.is_downloaded);
+        assert!(smoke_model.is_custom);
+        assert!(smoke_model.url.is_none());
     }
 
     // ── SHA256 verification tests ─────────────────────────────────────────────

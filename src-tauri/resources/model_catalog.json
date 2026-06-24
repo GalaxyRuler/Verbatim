@@ -13,8 +13,12 @@
     "speedScore": 0.85,
     "supportsTranslation": true,
     "isRecommended": false,
-    "supportedLanguages": { "set": "whisper" },
-    "supportsLanguageSelection": true
+    "supportedLanguages": {
+      "set": "whisper"
+    },
+    "supportsLanguageSelection": true,
+    "licenseLabel": "MIT",
+    "acceleratorSupport": ["whisper-cpp"]
   },
   {
     "id": "medium",
@@ -30,8 +34,12 @@
     "speedScore": 0.6,
     "supportsTranslation": true,
     "isRecommended": false,
-    "supportedLanguages": { "set": "whisper" },
-    "supportsLanguageSelection": true
+    "supportedLanguages": {
+      "set": "whisper"
+    },
+    "supportsLanguageSelection": true,
+    "licenseLabel": "MIT",
+    "acceleratorSupport": ["whisper-cpp"]
   },
   {
     "id": "turbo",
@@ -47,8 +55,12 @@
     "speedScore": 0.4,
     "supportsTranslation": false,
     "isRecommended": false,
-    "supportedLanguages": { "set": "whisper" },
-    "supportsLanguageSelection": true
+    "supportedLanguages": {
+      "set": "whisper"
+    },
+    "supportsLanguageSelection": true,
+    "licenseLabel": "MIT",
+    "acceleratorSupport": ["whisper-cpp"]
   },
   {
     "id": "large",
@@ -64,8 +76,12 @@
     "speedScore": 0.3,
     "supportsTranslation": true,
     "isRecommended": false,
-    "supportedLanguages": { "set": "whisper" },
-    "supportsLanguageSelection": true
+    "supportedLanguages": {
+      "set": "whisper"
+    },
+    "supportsLanguageSelection": true,
+    "licenseLabel": "MIT",
+    "acceleratorSupport": ["whisper-cpp"]
   },
   {
     "id": "breeze-asr",
@@ -81,8 +97,12 @@
     "speedScore": 0.35,
     "supportsTranslation": false,
     "isRecommended": false,
-    "supportedLanguages": { "set": "whisper" },
-    "supportsLanguageSelection": true
+    "supportedLanguages": {
+      "set": "whisper"
+    },
+    "supportsLanguageSelection": true,
+    "licenseLabel": "Requires upstream review",
+    "acceleratorSupport": ["whisper-cpp"]
   },
   {
     "id": "parakeet-tdt-0.6b-v2",
@@ -99,7 +119,9 @@
     "supportsTranslation": false,
     "isRecommended": false,
     "supportedLanguages": ["en"],
-    "supportsLanguageSelection": false
+    "supportsLanguageSelection": false,
+    "licenseLabel": "CC-BY-4.0",
+    "acceleratorSupport": ["onnx-runtime"]
   },
   {
     "id": "parakeet-tdt-0.6b-v3",
@@ -115,8 +137,12 @@
     "speedScore": 0.85,
     "supportsTranslation": false,
     "isRecommended": true,
-    "supportedLanguages": { "set": "parakeet-v3" },
-    "supportsLanguageSelection": false
+    "supportedLanguages": {
+      "set": "parakeet-v3"
+    },
+    "supportsLanguageSelection": false,
+    "licenseLabel": "CC-BY-4.0",
+    "acceleratorSupport": ["onnx-runtime"]
   },
   {
     "id": "moonshine-base",
@@ -133,7 +159,9 @@
     "supportsTranslation": false,
     "isRecommended": false,
     "supportedLanguages": ["en"],
-    "supportsLanguageSelection": false
+    "supportsLanguageSelection": false,
+    "licenseLabel": "MIT",
+    "acceleratorSupport": ["onnx-runtime"]
   },
   {
     "id": "moonshine-tiny-streaming-en",
@@ -150,7 +178,9 @@
     "supportsTranslation": false,
     "isRecommended": false,
     "supportedLanguages": ["en"],
-    "supportsLanguageSelection": false
+    "supportsLanguageSelection": false,
+    "licenseLabel": "MIT",
+    "acceleratorSupport": ["onnx-runtime"]
   },
   {
     "id": "moonshine-small-streaming-en",
@@ -167,7 +197,9 @@
     "supportsTranslation": false,
     "isRecommended": false,
     "supportedLanguages": ["en"],
-    "supportsLanguageSelection": false
+    "supportsLanguageSelection": false,
+    "licenseLabel": "MIT",
+    "acceleratorSupport": ["onnx-runtime"]
   },
   {
     "id": "moonshine-medium-streaming-en",
@@ -184,7 +216,9 @@
     "supportsTranslation": false,
     "isRecommended": false,
     "supportedLanguages": ["en"],
-    "supportsLanguageSelection": false
+    "supportsLanguageSelection": false,
+    "licenseLabel": "MIT",
+    "acceleratorSupport": ["onnx-runtime"]
   },
   {
     "id": "sense-voice-int8",
@@ -200,8 +234,12 @@
     "speedScore": 0.95,
     "supportsTranslation": false,
     "isRecommended": false,
-    "supportedLanguages": { "set": "sense-voice" },
-    "supportsLanguageSelection": true
+    "supportedLanguages": {
+      "set": "sense-voice"
+    },
+    "supportsLanguageSelection": true,
+    "licenseLabel": "Apache-2.0",
+    "acceleratorSupport": ["onnx-runtime"]
   },
   {
     "id": "gigaam-v3-e2e-ctc",
@@ -218,7 +256,9 @@
     "supportsTranslation": false,
     "isRecommended": false,
     "supportedLanguages": ["ru"],
-    "supportsLanguageSelection": false
+    "supportsLanguageSelection": false,
+    "licenseLabel": "MIT",
+    "acceleratorSupport": ["onnx-runtime"]
   },
   {
     "id": "canary-180m-flash",
@@ -235,7 +275,9 @@
     "supportsTranslation": true,
     "isRecommended": false,
     "supportedLanguages": ["en", "de", "es", "fr"],
-    "supportsLanguageSelection": true
+    "supportsLanguageSelection": true,
+    "licenseLabel": "CC-BY-4.0",
+    "acceleratorSupport": ["onnx-runtime"]
   },
   {
     "id": "canary-1b-v2",
@@ -251,8 +293,12 @@
     "speedScore": 0.7,
     "supportsTranslation": true,
     "isRecommended": false,
-    "supportedLanguages": { "set": "parakeet-v3" },
-    "supportsLanguageSelection": true
+    "supportedLanguages": {
+      "set": "parakeet-v3"
+    },
+    "supportsLanguageSelection": true,
+    "licenseLabel": "CC-BY-4.0",
+    "acceleratorSupport": ["onnx-runtime"]
   },
   {
     "id": "cohere-int8",
@@ -268,7 +314,11 @@
     "speedScore": 0.6,
     "supportsTranslation": false,
     "isRecommended": false,
-    "supportedLanguages": { "set": "cohere" },
-    "supportsLanguageSelection": true
+    "supportedLanguages": {
+      "set": "cohere"
+    },
+    "supportsLanguageSelection": true,
+    "licenseLabel": "Apache-2.0",
+    "acceleratorSupport": ["onnx-runtime"]
   }
 ]

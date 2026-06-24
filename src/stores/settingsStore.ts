@@ -2,12 +2,12 @@ import { create } from "zustand";
 import { subscribeWithSelector } from "zustand/middleware";
 import { listen } from "@tauri-apps/api/event";
 import type {
-  AppSettings as Settings,
   AudioDevice,
   FormattingLevel,
   TranslationRequestSettings,
   WhisperAcceleratorSetting,
   OrtAcceleratorSetting,
+  AppSettings as Settings,
 } from "@/bindings";
 import { commands } from "@/bindings";
 
@@ -51,6 +51,7 @@ interface SettingsStore {
   updatePostProcessApiKey: (
     providerId: string,
     apiKey: string,
+    sessionOnly?: boolean,
   ) => Promise<void>;
   updatePostProcessModel: (providerId: string, model: string) => Promise<void>;
   fetchPostProcessModels: (providerId: string) => Promise<string[]>;
@@ -66,7 +67,8 @@ interface SettingsStore {
   setCustomSounds: (sounds: { start: boolean; stop: boolean }) => void;
 }
 
-// Note: Default settings are now fetched from Rust via commands.getDefaultSettings()
+// Note: Default settings are fetched from Rust so platform-specific defaults
+// (like overlay_position, shortcuts, paste_method) work correctly.
 // This ensures platform-specific defaults (like overlay_position, shortcuts, paste_method) work correctly
 
 const DEFAULT_AUDIO_DEVICE: AudioDevice = {
@@ -158,7 +160,10 @@ const settingUpdaters: {
   auto_submit: (value) => commands.changeAutoSubmitSetting(value as boolean),
   auto_submit_key: (value) =>
     commands.changeAutoSubmitKeySetting(value as string),
+  history_enabled: (value) => commands.updateHistoryEnabled(value as boolean),
   history_limit: (value) => commands.updateHistoryLimit(value as number),
+  recordings_enabled: (value) =>
+    commands.updateRecordingsEnabled(value as boolean),
   post_process_enabled: (value) =>
     commands.changePostProcessEnabledSetting(value as boolean),
   formatting_level: (value) =>
@@ -487,7 +492,11 @@ export const useSettingsStore = create<SettingsStore>()(
         if (settingType === "base_url") {
           await commands.changePostProcessBaseUrlSetting(providerId, value);
         } else if (settingType === "api_key") {
-          await commands.changePostProcessApiKeySetting(providerId, value);
+          await commands.changePostProcessApiKeySetting(
+            providerId,
+            value,
+            false,
+          );
         } else if (settingType === "model") {
           await commands.changePostProcessModelSetting(providerId, value);
         }
@@ -548,7 +557,11 @@ export const useSettingsStore = create<SettingsStore>()(
       }
     },
 
-    updatePostProcessApiKey: async (providerId, apiKey) => {
+    updatePostProcessApiKey: async (
+      providerId,
+      apiKey,
+      sessionOnly = false,
+    ) => {
       // Clear cached models when API key changes - user should click refresh after
       set((state) => ({
         postProcessModelOptions: {
@@ -556,7 +569,28 @@ export const useSettingsStore = create<SettingsStore>()(
           [providerId]: [],
         },
       }));
-      return get().updatePostProcessSetting("api_key", providerId, apiKey);
+
+      const { setUpdating, refreshSettings } = get();
+      const updateKey = `post_process_api_key:${providerId}`;
+      setUpdating(updateKey, true);
+
+      try {
+        const result = await commands.changePostProcessApiKeySetting(
+          providerId,
+          apiKey,
+          sessionOnly,
+        );
+        if (result.status === "error") {
+          throw new Error(result.error);
+        }
+        await refreshSettings();
+      } catch (error) {
+        console.error("Failed to update post-process API key:", error);
+        await refreshSettings();
+        throw error;
+      } finally {
+        setUpdating(updateKey, false);
+      }
     },
 
     updatePostProcessModel: async (providerId, model) => {

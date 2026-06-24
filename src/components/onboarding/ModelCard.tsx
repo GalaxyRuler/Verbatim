@@ -148,7 +148,9 @@ const ModelCard: React.FC<ModelCardProps> = ({
               </Badge>
             )}
             {model.is_custom && (
-              <Badge variant="secondary">{t("modelSelector.custom")}</Badge>
+              <Badge variant="secondary">
+                {t("modelSelector.customUnverified")}
+              </Badge>
             )}
             {status === "switching" && (
               <Badge variant="secondary">
@@ -160,6 +162,11 @@ const ModelCard: React.FC<ModelCardProps> = ({
           <p className="text-text/60 text-sm leading-relaxed">
             {displayDescription}
           </p>
+          {model.is_custom && (
+            <p className="text-amber-700 text-xs leading-relaxed">
+              {t("modelSelector.customUnverifiedDescription")}
+            </p>
+          )}
         </div>
         {(model.accuracy_score > 0 || model.speed_score > 0) && (
           <div className="hidden sm:flex items-center ms-4">

@@ -98,7 +98,8 @@
     },
     "errors": {
       "loadModels": "Échec du chargement des modèles disponibles",
-      "downloadModel": "Échec du téléchargement du modèle : {{error}}"
+      "downloadModel": "Échec du téléchargement du modèle : {{error}}",
+      "selectModel": "Select a model to continue."
     },
     "permissions": {
       "title": "Autorisations requises",
@@ -118,6 +119,45 @@
       "errors": {
         "checkFailed": "Échec de la vérification des autorisations. Veuillez réessayer.",
         "requestFailed": "Échec de la demande d'autorisation. Veuillez réessayer."
+      }
+    },
+    "shortcut": {
+      "title": "Set Recording Shortcut",
+      "description": "Confirm the shortcut you will use to start dictation before finishing setup.",
+      "missing": "Assign a recording shortcut before continuing.",
+      "duplicate": "This recording shortcut is already assigned to another action. Choose a unique shortcut before continuing.",
+      "ready": "Recording shortcut is ready.",
+      "continue": "Continue"
+    },
+    "microphoneTest": {
+      "title": "Test Microphone",
+      "description": "Confirm Verbatim can open the selected microphone and see live input before finishing setup.",
+      "start": "Start test",
+      "stop": "Stop test",
+      "listening": "Listening for input",
+      "idle": "Ready to test",
+      "opened": "Microphone opened. Speak for a moment to check the live level meter.",
+      "ready": "Microphone input detected.",
+      "continue": "Continue",
+      "meterLabel": "Microphone input level"
+    },
+    "dictationTest": {
+      "title": "Test Dictation",
+      "description": "Record a short sample to confirm Verbatim can transcribe before it inserts text into other apps.",
+      "samplePrompt": "Say a short phrase, then stop recording to review the transcript.",
+      "start": "Start recording",
+      "stop": "Stop recording",
+      "transcribing": "Transcribing the test sample. This will not be saved to history.",
+      "copy": "Copy test text",
+      "copied": "Test text copied to your clipboard.",
+      "copyFailed": "No test text was copied.",
+      "recordAgain": "Record again",
+      "discardContinue": "Discard and continue",
+      "states": {
+        "idle": "Ready to record a test sample",
+        "recording": "Recording test sample",
+        "transcribing": "Transcribing test sample",
+        "ready": "Review the test transcript"
       }
     }
   },
@@ -150,7 +190,9 @@
       "languageOnly": "{{language}} uniquement"
     },
     "cancel": "Annuler",
-    "cancelDownload": "Annuler le téléchargement"
+    "cancelDownload": "Annuler le téléchargement",
+    "customUnverified": "Unverified",
+    "customUnverifiedDescription": "User-provided model. Verbatim has not verified this file, license, checksum, or behavior."
   },
   "settings": {
     "modelSettings": {
@@ -329,7 +371,13 @@
           "none": "Aucun",
           "externalScript": "Script externe"
         },
-        "externalScriptPlaceholder": "/chemin/vers/votre/script.sh"
+        "externalScriptPlaceholder": "/chemin/vers/votre/script.sh",
+        "linuxReadiness": {
+          "ready": "Linux session: {{session}} on {{desktop}}. Clipboard helper: {{clipboardHelper}}; paste helper: {{pasteHelper}}; direct helper: {{directHelper}}.",
+          "limited": "Linux session: {{session}} on {{desktop}}. Clipboard helper: {{clipboardHelper}}; paste helper: {{pasteHelper}}; direct helper: {{directHelper}}. Some insertion helpers are missing; switch paste method or install a compatible helper if insertion fails.",
+          "unknown": "Linux insertion readiness could not be checked.",
+          "none": "none"
+        }
       },
       "typingTool": {
         "title": "Outil de frappe",
@@ -463,7 +511,12 @@
         "apiKey": {
           "title": "Clé API",
           "description": "Clé API pour le fournisseur sélectionné.",
-          "placeholder": "sk-..."
+          "placeholder": "sk-...",
+          "storeAvailable": "OS credential store is available on {{platform}}. Saved provider API keys are stored outside app settings.",
+          "storeUnavailable": "OS credential store is unavailable on {{platform}}. Verbatim keeps an existing settings value to avoid key loss; avoid saving persistent remote API keys until this is resolved.",
+          "storeUnavailableLegacyRetained": "OS credential store is unavailable on {{platform}}. Verbatim retained {{count}} existing settings value to avoid key loss; use session-only API keys or fix the credential store before saving persistent remote API keys.",
+          "storeStatusUnknown": "Credential-store status could not be checked. Saved API keys may not be protected by the operating system credential store.",
+          "sessionOnly": "Use this API key for this session only"
         },
         "model": {
           "title": "Modèle",
@@ -549,7 +602,16 @@
       "cancelCorrection": "Cancel correction",
       "dictionaryLearned": "Added to custom words: {{words}}",
       "dictionaryNoCandidates": "No new custom words found in that correction.",
-      "dictionaryLearnError": "Failed to learn custom words. Please try again."
+      "dictionaryLearnError": "Failed to learn custom words. Please try again.",
+      "clearHistory": "Clear all history",
+      "clearHistoryConfirm": "Clear all history entries and linked recordings? This cannot be undone.",
+      "clearHistoryError": "Failed to clear history.",
+      "clearHistorySuccess": "History cleared.",
+      "clearRecordings": "Clear recordings",
+      "clearRecordingsConfirm": "Delete unsaved dictation recordings while keeping saved entries and transform-only text?",
+      "clearRecordingsError": "Failed to clear recordings.",
+      "clearRecordingsSuccess": "Recordings cleared.",
+      "retentionNote": "History can include raw transcripts, refined text, transform text, and linked WAV files. Saved entries are kept until you delete them."
     },
     "debug": {
       "title": "Débogage",
@@ -625,6 +687,71 @@
       "recordingBuffer": {
         "title": "Tampon d'enregistrement supplémentaire",
         "description": "Temps supplémentaire (en millisecondes) pour continuer l'enregistrement après avoir relâché la touche, pour capturer l'audio restant. 0 = pas de tampon supplémentaire."
+      },
+      "historyStorage": {
+        "description": "Save future transcript text in History.",
+        "label": "Save history"
+      },
+      "privateSession": {
+        "description": "Temporarily disable history, recordings, post-processing, transforms, retry, and learning for new dictations.",
+        "label": "Private Session"
+      },
+      "recordingStorage": {
+        "description": "Save WAV recordings with future dictation history entries.",
+        "disabledDescription": "Turn on history before saving recordings.",
+        "label": "Save recordings"
+      },
+      "diagnostics": {
+        "title": "Diagnostics",
+        "description": "Review app health, platform readiness, paths, and active runtime settings.",
+        "refresh": "Refresh",
+        "pathError": "Path unavailable: {{error}}",
+        "rows": {
+          "startup": "Startup",
+          "permissions": "Permissions",
+          "shortcuts": "Shortcuts",
+          "model": "Selected model",
+          "accelerator": "Accelerator",
+          "insertion": "Insertion",
+          "updates": "Updates",
+          "storage": "Storage",
+          "credentials": "Credential store",
+          "linuxHelpers": "Linux helpers"
+        },
+        "values": {
+          "ready": "Ready",
+          "failed": "Failed",
+          "starting": "Starting",
+          "unavailable": "Unavailable",
+          "none": "None",
+          "accessibilityGranted": "Accessibility granted",
+          "accessibilityMissing": "Accessibility missing",
+          "atSpiAvailable": "AT-SPI available",
+          "atSpiMissing": "AT-SPI unavailable",
+          "shortcuts": "{{assigned}} of {{total}} assigned",
+          "checksummed": "Checksummed",
+          "unverified": "Unverified",
+          "accelerator": "Whisper {{whisper}} / ORT {{ort}} / {{gpuCount}} GPU",
+          "storage": "History {{history}}, recordings {{recordings}}",
+          "noWarnings": "No warnings"
+        },
+        "permission": {
+          "allowed": "Allowed",
+          "denied": "Denied",
+          "unknown": "Unknown"
+        },
+        "details": {
+          "startupFailed": "{{step}}: {{message}}",
+          "windowsMicrophone": "Device {{device}}, app {{app}}, desktop apps {{desktop}}",
+          "linuxSession": "{{session}} on {{desktop}}; tray {{tray}}",
+          "model": "{{engine}}; downloaded {{downloaded}}; license {{license}}; accelerators {{accelerators}}; integrity {{integrity}}",
+          "accelerator": "ORT options: {{ort}}. GPU devices: {{devices}}",
+          "insertion": "Clipboard {{clipboard}}; typing tool {{typingTool}}; external script {{externalScript}}",
+          "updates": "Shows whether automatic update checks are enabled. Live update availability remains in the footer checker.",
+          "storage": "Private session {{privateSession}}; retention {{retention}}",
+          "credentialStore": "{{platform}} credential backend",
+          "credentialStoreRetainedLegacy": "Credential store is unavailable; {{count}} legacy API-key value remains in settings so it is not lost."
+        }
       }
     },
     "about": {
@@ -826,7 +953,26 @@
     "languageGuardPreview": "Preview: {{preview}}",
     "languageGuardPasteAnyway": "Paste anyway",
     "transformRecoveryCopiedTitle": "Transform Result Copied",
-    "transformRecoveryCopiedDescription": "The selected text was transformed, but Verbatim could not replace it in the active app. The result was copied to your clipboard."
+    "transformRecoveryCopiedDescription": "The selected text was transformed, but Verbatim could not replace it in the active app. The result was copied to your clipboard.",
+    "coordinatorFailedMessage": "The dictation coordinator stopped after repeated failures. Restart Verbatim to recover.",
+    "coordinatorFailedStep": "Dictation coordinator",
+    "coordinatorRestartedDescription": "Verbatim recovered the dictation worker. If this keeps happening, open logs from Debug settings.",
+    "coordinatorRestartedTitle": "Dictation service restarted",
+    "startupFailedDescription": "Verbatim could not finish startup. Use the recovery actions below, or open the logs for details.",
+    "startupFailedStep": "Failed step: {{step}}",
+    "startupFailedTitle": "Startup failed",
+    "startupOpenAppData": "Open App Data",
+    "startupOpenLogs": "Open Logs",
+    "startupResetSettings": "Reset Settings",
+    "startupResetSettingsFailed": "Failed to reset settings",
+    "startupResettingSettings": "Resetting...",
+    "startupRestart": "Restart Verbatim",
+    "startupUnknownStep": "Unknown startup step",
+    "targetChangedTitle": "Insertion Blocked",
+    "targetChangedDescription": "The active destination changed before Verbatim inserted text. Use Paste here only if the current field is the right destination.",
+    "targetChangedPasteHereAction": "Paste here",
+    "targetPrivacyExcludedTitle": "Recording Blocked",
+    "targetPrivacyExcludedDescription": "The active app matches a private-app exclusion. Verbatim did not start recording."
   },
   "appLanguage": {
     "title": "Langue de l'application",
@@ -868,7 +1014,8 @@
       "micFailed": "Microphone issue",
       "cancelled": "Cancelled",
       "transformCopied": "Transform copied"
-    }
+    },
+    "privateSession": "Private Session"
   },
   "android": {
     "tabs": {

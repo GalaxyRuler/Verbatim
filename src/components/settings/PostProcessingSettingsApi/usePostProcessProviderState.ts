@@ -15,7 +15,7 @@ type PostProcessProviderState = {
   handleBaseUrlChange: (value: string) => void;
   isBaseUrlUpdating: boolean;
   apiKey: string;
-  handleApiKeyChange: (value: string) => void;
+  handleApiKeyChange: (value: string, sessionOnly?: boolean) => void;
   isApiKeyUpdating: boolean;
   model: string;
   handleModelChange: (value: string) => void;
@@ -146,10 +146,10 @@ export const usePostProcessProviderState = (): PostProcessProviderState => {
   );
 
   const handleApiKeyChange = useCallback(
-    (value: string) => {
+    (value: string, sessionOnly = false) => {
       const trimmed = value.trim();
       if (trimmed !== apiKey) {
-        void updatePostProcessApiKey(selectedProviderId, trimmed);
+        void updatePostProcessApiKey(selectedProviderId, trimmed, sessionOnly);
       }
     },
     [apiKey, selectedProviderId, updatePostProcessApiKey],

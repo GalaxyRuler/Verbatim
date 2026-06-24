@@ -16,7 +16,11 @@ import {
   CancelIcon,
 } from "../components/icons";
 import "./RecordingOverlay.css";
-import { commands, type DictionaryEntry } from "@/bindings";
+import {
+  commands,
+  type DictionaryEntry,
+  type PrivateSessionStatus,
+} from "@/bindings";
 import i18n, { syncLanguageFromSettings } from "@/i18n";
 import {
   type DictationLanguageSelection,
@@ -86,6 +90,7 @@ const RecordingOverlay: React.FC = () => {
   const [isDockedExpanded, setIsDockedExpanded] = useState(false);
   const [isLanguagePickerOpen, setIsLanguagePickerOpen] = useState(false);
   const [state, setState] = useState<OverlayState>("recording");
+  const [privateSessionEnabled, setPrivateSessionEnabled] = useState(false);
   const [recentlyLearnedEntries, setRecentlyLearnedEntries] = useState<
     DictionaryEntry[]
   >([]);
@@ -101,6 +106,28 @@ const RecordingOverlay: React.FC = () => {
   const stateRef = useRef<OverlayState>("recording");
   const hasReceivedOverlayEventRef = useRef(false);
   const direction = getLanguageDirection(i18n.language);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    commands.getPrivateSessionStatus().then((result) => {
+      if (!cancelled && result.status === "ok") {
+        setPrivateSessionEnabled(result.data.enabled);
+      }
+    });
+
+    const unlisten = listen<PrivateSessionStatus>(
+      "private-session-changed",
+      (event) => {
+        setPrivateSessionEnabled(event.payload.enabled);
+      },
+    );
+
+    return () => {
+      cancelled = true;
+      unlisten.then((fn) => fn());
+    };
+  }, []);
 
   const setOverlayState = (nextState: OverlayState) => {
     stateRef.current = nextState;
@@ -135,19 +162,19 @@ const RecordingOverlay: React.FC = () => {
   const refreshLanguageMode = async () => {
     const result = await commands.getAppSettings();
     if (result.status !== "ok") return;
+    const settings = result.data;
 
     const dictationLanguageMode = getDictationLanguageMode({
-      dictationLanguageMode: result.data.dictation_language_mode,
-      selectedLanguage: result.data.selected_language,
-      adaptiveLanguageShortlist: result.data.adaptive_language_shortlist,
+      dictationLanguageMode: settings.dictation_language_mode,
+      selectedLanguage: settings.selected_language,
+      adaptiveLanguageShortlist: settings.adaptive_language_shortlist,
     });
 
     setLanguageSelection(
       getSettingsForDictationLanguageSelection({
         dictationLanguageMode,
-        selectedLanguage: result.data.selected_language ?? "auto",
-        adaptiveLanguageShortlist:
-          result.data.adaptive_language_shortlist ?? [],
+        selectedLanguage: settings.selected_language ?? "auto",
+        adaptiveLanguageShortlist: settings.adaptive_language_shortlist ?? [],
       }),
     );
   };
@@ -454,6 +481,11 @@ const RecordingOverlay: React.FC = () => {
     <>
       <div className="docked-status" role="status" aria-live="polite">
         <span className="docked-status-title">{t(stateLabelKeys[state])}</span>
+        {privateSessionEnabled && (
+          <span className="docked-status-detail">
+            {t("overlay.privateSession")}
+          </span>
+        )}
       </div>
       <div className="docked-actions">
         {state === "transform_copied" &&
@@ -703,7 +735,12 @@ const RecordingOverlay: React.FC = () => {
         <>
           <div className="overlay-left">{getIcon()}</div>
 
-          <div className="overlay-middle">
+          <div
+            className="overlay-middle"
+            role="status"
+            aria-live="polite"
+            aria-label={t(stateLabelKeys[state])}
+          >
             {state === "recording" && renderRecordingBars()}
             {state === "transcribing" && (
               <div className="transcribing-text">

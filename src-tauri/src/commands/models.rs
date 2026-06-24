@@ -134,6 +134,8 @@ pub fn switch_active_model(app: &AppHandle, model_id: &str) -> Result<(), String
                 model_id: Some(model_id.to_string()),
                 model_name: Some(model_info.name.clone()),
                 error: None,
+                diagnostic_code: None,
+                fallback: None,
             },
         );
         log::info!(

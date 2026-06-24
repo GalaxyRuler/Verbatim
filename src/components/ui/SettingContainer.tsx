@@ -50,15 +50,14 @@ export const SettingContainer: React.FC<SettingContainerProps> = ({
   const containerClasses = grouped
     ? "px-4 p-2"
     : "px-4 p-2 rounded-lg border border-mid-gray/20";
+  const disabledTextClass = disabled ? "text-mid-gray" : "";
 
   if (layout === "stacked") {
     if (descriptionMode === "tooltip") {
       return (
         <div className={containerClasses}>
           <div className="flex items-center gap-2 mb-2">
-            <h3
-              className={`text-sm font-medium ${disabled ? "opacity-50" : ""}`}
-            >
+            <h3 className={`text-sm font-medium ${disabledTextClass}`}>
               {title}
             </h3>
             <div
@@ -107,12 +106,10 @@ export const SettingContainer: React.FC<SettingContainerProps> = ({
     return (
       <div className={containerClasses}>
         <div className="mb-2">
-          <h3 className={`text-sm font-medium ${disabled ? "opacity-50" : ""}`}>
+          <h3 className={`text-sm font-medium ${disabledTextClass}`}>
             {title}
           </h3>
-          <p className={`text-sm ${disabled ? "opacity-50" : ""}`}>
-            {description}
-          </p>
+          <p className={`text-sm ${disabledTextClass}`}>{description}</p>
         </div>
         <div className="w-full">{children}</div>
       </div>
@@ -129,9 +126,7 @@ export const SettingContainer: React.FC<SettingContainerProps> = ({
       <div className={horizontalContainerClasses}>
         <div className="max-w-2/3">
           <div className="flex items-center gap-2">
-            <h3
-              className={`text-sm font-medium ${disabled ? "opacity-50" : ""}`}
-            >
+            <h3 className={`text-sm font-medium ${disabledTextClass}`}>
               {title}
             </h3>
             <div
@@ -181,12 +176,8 @@ export const SettingContainer: React.FC<SettingContainerProps> = ({
   return (
     <div className={horizontalContainerClasses}>
       <div className="max-w-2/3">
-        <h3 className={`text-sm font-medium ${disabled ? "opacity-50" : ""}`}>
-          {title}
-        </h3>
-        <p className={`text-sm ${disabled ? "opacity-50" : ""}`}>
-          {description}
-        </p>
+        <h3 className={`text-sm font-medium ${disabledTextClass}`}>{title}</h3>
+        <p className={`text-sm ${disabledTextClass}`}>{description}</p>
       </div>
       <div className="relative">{children}</div>
     </div>

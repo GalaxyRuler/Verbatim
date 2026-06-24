@@ -1,11 +1,16 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Dropdown } from "../ui/Dropdown";
 import { SettingContainer } from "../ui/SettingContainer";
 import { Input } from "../ui/Input";
 import { useSettings } from "../../hooks/useSettings";
 import { useOsType } from "../../hooks/useOsType";
-import type { PasteMethod } from "@/bindings";
+import {
+  commands,
+  type LinuxEnvironmentStatus,
+  type PasteMethod,
+} from "@/bindings";
+import { Alert } from "../ui/Alert";
 
 interface PasteMethodProps {
   descriptionMode?: "inline" | "tooltip";
@@ -17,6 +22,35 @@ export const PasteMethodSetting: React.FC<PasteMethodProps> = React.memo(
     const { t } = useTranslation();
     const { getSetting, updateSetting, isUpdating } = useSettings();
     const osType = useOsType();
+    const [linuxStatus, setLinuxStatus] =
+      useState<LinuxEnvironmentStatus | null>(null);
+    const [linuxStatusFailed, setLinuxStatusFailed] = useState(false);
+
+    useEffect(() => {
+      if (osType !== "linux") {
+        setLinuxStatus(null);
+        setLinuxStatusFailed(false);
+        return;
+      }
+
+      let isMounted = true;
+      commands
+        .getLinuxEnvironmentStatus()
+        .then((status) => {
+          if (!isMounted) return;
+          setLinuxStatus(status);
+          setLinuxStatusFailed(false);
+        })
+        .catch(() => {
+          if (!isMounted) return;
+          setLinuxStatus(null);
+          setLinuxStatusFailed(true);
+        });
+
+      return () => {
+        isMounted = false;
+      };
+    }, [osType]);
 
     const getPasteMethodOptions = (osType: string) => {
       const mod = osType === "macos" ? "Cmd" : "Ctrl";
@@ -72,6 +106,9 @@ export const PasteMethodSetting: React.FC<PasteMethodProps> = React.memo(
     const externalScriptPath = getSetting("external_script_path") || "";
 
     const pasteMethodOptions = getPasteMethodOptions(osType);
+    const noLinuxHelper = t(
+      "settings.advanced.pasteMethod.linuxReadiness.none",
+    );
 
     return (
       <SettingContainer
@@ -102,6 +139,32 @@ export const PasteMethodSetting: React.FC<PasteMethodProps> = React.memo(
               )}
               disabled={isUpdating("external_script_path")}
             />
+          )}
+          {osType === "linux" && linuxStatusFailed && (
+            <Alert variant="warning" contained>
+              {t("settings.advanced.pasteMethod.linuxReadiness.unknown")}
+            </Alert>
+          )}
+          {osType === "linux" && linuxStatus && (
+            <Alert
+              variant={linuxStatus.warnings.length > 0 ? "warning" : "success"}
+              contained
+            >
+              {t(
+                linuxStatus.warnings.length > 0
+                  ? "settings.advanced.pasteMethod.linuxReadiness.limited"
+                  : "settings.advanced.pasteMethod.linuxReadiness.ready",
+                {
+                  session: linuxStatus.session_type,
+                  desktop: linuxStatus.desktop,
+                  clipboardHelper:
+                    linuxStatus.clipboard_helper ?? noLinuxHelper,
+                  pasteHelper: linuxStatus.key_combo_helper ?? noLinuxHelper,
+                  directHelper:
+                    linuxStatus.direct_input_helper ?? noLinuxHelper,
+                },
+              )}
+            </Alert>
           )}
         </div>
       </SettingContainer>
