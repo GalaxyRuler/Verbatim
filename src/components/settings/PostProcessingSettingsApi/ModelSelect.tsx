@@ -7,6 +7,7 @@ type ModelSelectProps = {
   options: ModelOption[];
   disabled?: boolean;
   placeholder?: string;
+  ariaLabel?: string;
   isLoading?: boolean;
   onSelect: (value: string) => void;
   onCreate: (value: string) => void;
@@ -20,6 +21,7 @@ export const ModelSelect: React.FC<ModelSelectProps> = React.memo(
     options,
     disabled,
     placeholder,
+    ariaLabel,
     isLoading,
     onSelect,
     onCreate,
@@ -43,6 +45,7 @@ export const ModelSelect: React.FC<ModelSelectProps> = React.memo(
         onCreateOption={handleCreate}
         onBlur={onBlur}
         placeholder={placeholder}
+        ariaLabel={ariaLabel}
         disabled={disabled}
         isLoading={isLoading}
         isCreatable

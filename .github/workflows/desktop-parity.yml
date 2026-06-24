@@ -1,7 +1,7 @@
 name: "Desktop Parity"
 
-# Manual macOS Apple Silicon + Ubuntu x64 build lane. It proves the desktop
-# non-Windows targets from the same ref without waiting on the Windows job.
+# Manual desktop build lane for proving Windows x64, macOS Apple Silicon, and
+# Ubuntu x64 from the same ref without publishing a release.
 
 on:
   workflow_dispatch:
@@ -42,6 +42,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - platform: "windows-latest"
+            target: "x86_64-pc-windows-msvc"
+            release_args: ""
+            debug_args: "--debug"
           - platform: "macos-26"
             target: "aarch64-apple-darwin"
             release_args: "--target aarch64-apple-darwin"

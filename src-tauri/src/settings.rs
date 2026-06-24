@@ -12,6 +12,36 @@ use tauri_plugin_store::StoreExt;
 pub const APPLE_INTELLIGENCE_PROVIDER_ID: &str = "apple_intelligence";
 pub const APPLE_INTELLIGENCE_DEFAULT_MODEL_ID: &str = "Apple Intelligence";
 
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SettingsWriteDomain {
+    General,
+    Audio,
+    Insertion,
+    Privacy,
+    Models,
+    PostProcessing,
+    Diagnostics,
+    Adaptive,
+    Shortcuts,
+}
+
+impl SettingsWriteDomain {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            SettingsWriteDomain::General => "general",
+            SettingsWriteDomain::Audio => "audio",
+            SettingsWriteDomain::Insertion => "insertion",
+            SettingsWriteDomain::Privacy => "privacy",
+            SettingsWriteDomain::Models => "models",
+            SettingsWriteDomain::PostProcessing => "post_processing",
+            SettingsWriteDomain::Diagnostics => "diagnostics",
+            SettingsWriteDomain::Adaptive => "adaptive",
+            SettingsWriteDomain::Shortcuts => "shortcuts",
+        }
+    }
+}
+
 #[derive(Serialize, Debug, Clone, Copy, PartialEq, Eq, Type)]
 #[serde(rename_all = "lowercase")]
 pub enum LogLevel {
@@ -490,6 +520,10 @@ pub struct AppSettings {
     pub model_unload_timeout: ModelUnloadTimeout,
     #[serde(default = "default_word_correction_threshold")]
     pub word_correction_threshold: f64,
+    #[serde(default = "default_history_enabled")]
+    pub history_enabled: bool,
+    #[serde(default = "default_recordings_enabled")]
+    pub recordings_enabled: bool,
     #[serde(default = "default_history_limit")]
     pub history_limit: usize,
     #[serde(default = "default_recording_retention_period")]
@@ -648,6 +682,14 @@ fn default_paste_delay_ms() -> u64 {
 
 fn default_auto_submit() -> bool {
     false
+}
+
+fn default_history_enabled() -> bool {
+    true
+}
+
+fn default_recordings_enabled() -> bool {
+    true
 }
 
 fn default_history_limit() -> usize {
@@ -1030,15 +1072,19 @@ fn ensure_translation_defaults(settings: &mut AppSettings) -> bool {
     false
 }
 
+fn settings_value_has_key(settings_value: Option<&serde_json::Value>, key: &str) -> bool {
+    settings_value
+        .and_then(serde_json::Value::as_object)
+        .is_some_and(|settings| settings.contains_key(key))
+}
+
 #[cfg_attr(not(test), allow(dead_code))]
 fn ensure_dictionary_defaults(settings: &mut AppSettings) -> bool {
     crate::dictionary::sync_legacy_custom_words(settings)
 }
 
 fn settings_value_has_dictionary_entries(settings_value: Option<&serde_json::Value>) -> bool {
-    settings_value
-        .and_then(serde_json::Value::as_object)
-        .is_some_and(|settings| settings.contains_key("dictionary_entries"))
+    settings_value_has_key(settings_value, "dictionary_entries")
 }
 
 fn ensure_dictionary_defaults_for_loaded_value(
@@ -1195,6 +1241,8 @@ pub fn get_default_settings() -> AppSettings {
         snippets: Vec::new(),
         model_unload_timeout: ModelUnloadTimeout::default(),
         word_correction_threshold: default_word_correction_threshold(),
+        history_enabled: default_history_enabled(),
+        recordings_enabled: default_recordings_enabled(),
         history_limit: default_history_limit(),
         recording_retention_period: default_recording_retention_period(),
         paste_method: PasteMethod::default(),
@@ -1360,7 +1408,7 @@ fn recover_settings_from_unparseable_value(settings_value: &serde_json::Value) -
         }
     }
 
-    serde_json::from_value::<AppSettings>(merged_value).unwrap_or(default_settings)
+    serde_json::from_value(merged_value).unwrap_or(default_settings)
 }
 
 fn settings_store_file_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -1478,15 +1526,22 @@ pub fn load_or_create_app_settings(app: &AppHandle) -> AppSettings {
         settings_value_for_defaults.as_ref(),
     );
     let snippet_changed = ensure_snippet_defaults(&mut settings);
+    let credentials_changed = crate::credentials::prepare_post_process_api_keys_for_store(
+        &mut settings,
+        crate::credentials::CredentialStoreFailurePolicy::PreserveLegacyValue,
+    );
     if binding_changed
         || post_process_changed
         || adaptive_changed
         || translation_changed
         || dictionary_changed
         || snippet_changed
+        || credentials_changed
     {
         store.set("settings", serde_json::to_value(&settings).unwrap());
     }
+
+    crate::credentials::hydrate_post_process_api_keys(&mut settings);
 
     settings
 }
@@ -1542,7 +1597,85 @@ pub fn write_settings(app: &AppHandle, mut settings: AppSettings) {
 
     crate::dictionary::sync_legacy_custom_words(&mut settings);
     crate::snippets::sync_snippets(&mut settings);
+    crate::credentials::prepare_post_process_api_keys_for_store(
+        &mut settings,
+        crate::credentials::CredentialStoreFailurePolicy::RejectNewValue,
+    );
     store.set("settings", serde_json::to_value(&settings).unwrap());
+}
+
+pub(crate) fn write_settings_domain<F>(
+    app: &AppHandle,
+    domain: SettingsWriteDomain,
+    mutate: F,
+) -> Result<(), String>
+where
+    F: FnOnce(&mut AppSettings),
+{
+    try_write_settings_domain(app, domain, |settings| {
+        mutate(settings);
+        Ok(())
+    })
+}
+
+pub(crate) fn try_write_settings_domain<F>(
+    app: &AppHandle,
+    domain: SettingsWriteDomain,
+    mutate: F,
+) -> Result<(), String>
+where
+    F: FnOnce(&mut AppSettings) -> Result<(), String>,
+{
+    let mut settings = get_settings(app);
+    try_mutate_settings_domain(&mut settings, domain, mutate)?;
+    write_settings(app, settings);
+    Ok(())
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn mutate_settings_domain<F>(
+    settings: &mut AppSettings,
+    domain: SettingsWriteDomain,
+    mutate: F,
+) -> Result<(), String>
+where
+    F: FnOnce(&mut AppSettings),
+{
+    try_mutate_settings_domain(settings, domain, |settings| {
+        mutate(settings);
+        Ok(())
+    })
+}
+
+pub(crate) fn try_mutate_settings_domain<F>(
+    settings: &mut AppSettings,
+    _domain: SettingsWriteDomain,
+    mutate: F,
+) -> Result<(), String>
+where
+    F: FnOnce(&mut AppSettings) -> Result<(), String>,
+{
+    let mut next = settings.clone();
+    mutate(&mut next)?;
+    *settings = next;
+    Ok(())
+}
+
+pub fn reset_settings_to_defaults_with_backup(app: &AppHandle) -> Result<(), String> {
+    let store = app
+        .store(crate::portable::store_path(SETTINGS_STORE_PATH))
+        .map_err(|err| format!("initialize settings store: {err}"))?;
+
+    if let Some(settings_value) = store.get("settings") {
+        let backup_dir = settings_backup_directory(app)?;
+        backup_settings_value_to_dir(&backup_dir, &settings_value)?;
+    }
+
+    let default_settings = get_default_settings();
+    let default_value = serde_json::to_value(&default_settings)
+        .map_err(|err| format!("serialize default settings: {err}"))?;
+    store.set("settings", default_value);
+    Ok(())
 }
 
 pub fn get_bindings(app: &AppHandle) -> HashMap<String, ShortcutBinding> {
@@ -1578,6 +1711,24 @@ mod tests {
         let settings = get_default_settings();
         assert!(!settings.auto_submit);
         assert_eq!(settings.auto_submit_key, AutoSubmitKey::Enter);
+    }
+
+    #[test]
+    fn settings_domain_mutation_allows_declared_domain_only() {
+        let mut settings = get_default_settings();
+        settings.history_enabled = true;
+        settings.recordings_enabled = true;
+        settings.selected_model = "unchanged-model".to_string();
+
+        mutate_settings_domain(&mut settings, SettingsWriteDomain::Privacy, |settings| {
+            settings.history_enabled = false;
+            settings.recordings_enabled = false;
+        })
+        .expect("privacy mutation should be accepted");
+
+        assert!(!settings.history_enabled);
+        assert!(!settings.recordings_enabled);
+        assert_eq!(settings.selected_model, "unchanged-model");
     }
 
     #[test]
@@ -1680,6 +1831,19 @@ mod tests {
     fn default_settings_use_info_log_level() {
         let settings = get_default_settings();
         assert_eq!(settings.log_level, LogLevel::Info);
+    }
+
+    #[test]
+    fn default_settings_preserve_history_and_recording_storage() {
+        let settings = get_default_settings();
+
+        assert!(settings.history_enabled);
+        assert!(settings.recordings_enabled);
+        assert_eq!(settings.history_limit, 5);
+        assert_eq!(
+            settings.recording_retention_period,
+            RecordingRetentionPeriod::PreserveLimit
+        );
     }
 
     #[test]

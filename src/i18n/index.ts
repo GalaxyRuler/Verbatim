@@ -118,8 +118,10 @@ i18n.use(initReactI18next).init({
 export const syncLanguageFromSettings = async () => {
   try {
     const result = await commands.getAppSettings();
-    if (result.status === "ok" && result.data.app_language) {
-      const supported = getSupportedLanguage(result.data.app_language);
+    const settings = result.status === "ok" ? result.data : null;
+
+    if (settings?.app_language) {
+      const supported = getSupportedLanguage(settings.app_language);
       if (supported && supported !== i18n.language) {
         await changeAppLanguage(supported);
       }

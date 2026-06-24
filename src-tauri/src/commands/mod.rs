@@ -9,9 +9,9 @@ pub mod transcript;
 pub mod transcription;
 pub mod transform;
 
-use crate::settings::{get_settings, write_settings, AppSettings, LogLevel};
+use crate::settings::{get_settings, write_settings_domain, LogLevel, SettingsWriteDomain};
 use crate::utils::cancel_current_operation;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_opener::OpenerExt;
 
 #[tauri::command]
@@ -37,13 +37,28 @@ pub fn get_app_dir_path(app: AppHandle) -> Result<String, String> {
 
 #[tauri::command]
 #[specta::specta]
-pub fn get_app_settings(app: AppHandle) -> Result<AppSettings, String> {
-    Ok(get_settings(&app))
+pub fn get_app_settings(app: AppHandle) -> Result<crate::settings::AppSettings, String> {
+    let mut settings = get_settings(&app);
+    crate::credentials::redact_post_process_api_keys_for_frontend(&mut settings);
+    crate::credentials::redact_session_post_process_api_keys_for_frontend(&app, &mut settings);
+    Ok(settings)
 }
 
 #[tauri::command]
 #[specta::specta]
-pub fn get_default_settings() -> Result<AppSettings, String> {
+pub fn get_credential_store_status(app: AppHandle) -> crate::credentials::CredentialStoreStatus {
+    crate::credentials::credential_store_status_for_settings(&get_settings(&app))
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn get_linux_environment_status() -> crate::linux_readiness::LinuxEnvironmentStatus {
+    crate::linux_readiness::linux_environment_status()
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn get_default_settings() -> Result<crate::settings::AppSettings, String> {
     Ok(crate::settings::get_default_settings())
 }
 
@@ -67,9 +82,9 @@ pub fn set_log_level(app: AppHandle, level: LogLevel) -> Result<(), String> {
         std::sync::atomic::Ordering::Relaxed,
     );
 
-    let mut settings = get_settings(&app);
-    settings.log_level = level;
-    write_settings(&app, settings);
+    write_settings_domain(&app, SettingsWriteDomain::Diagnostics, |settings| {
+        settings.log_level = level;
+    })?;
 
     Ok(())
 }
@@ -116,6 +131,38 @@ pub fn open_app_data_dir(app: AppHandle) -> Result<(), String> {
         .map_err(|e| format!("Failed to open app data directory: {}", e))?;
 
     Ok(())
+}
+
+#[specta::specta]
+#[tauri::command]
+pub fn reset_settings_to_defaults(app: AppHandle) -> Result<(), String> {
+    crate::settings::reset_settings_to_defaults_with_backup(&app)
+        .map_err(|e| format!("Failed to reset settings: {}", e))
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn get_private_session_status(
+    app: AppHandle,
+) -> Result<crate::private_session::PrivateSessionStatus, String> {
+    let state = app
+        .try_state::<crate::private_session::PrivateSessionState>()
+        .ok_or_else(|| "Private session state is unavailable".to_string())?;
+    Ok(state.status())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn set_private_session_enabled(
+    app: AppHandle,
+    enabled: bool,
+) -> Result<crate::private_session::PrivateSessionStatus, String> {
+    let state = app
+        .try_state::<crate::private_session::PrivateSessionState>()
+        .ok_or_else(|| "Private session state is unavailable".to_string())?;
+    let status = state.set_enabled(enabled);
+    let _ = app.emit("private-session-changed", status.clone());
+    Ok(status)
 }
 
 /// Check if Apple Intelligence is available on this device.

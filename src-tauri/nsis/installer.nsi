@@ -889,6 +889,11 @@ Function un.onInit
   ${IfNot} ${Errors}
     StrCpy $UpdateMode 1
   ${EndIf}
+
+  ${GetOptions} $CMDLINE "/DELETEAPPDATA" $0
+  ${IfNot} ${Errors}
+    StrCpy $DeleteAppDataCheckboxState 1
+  ${EndIf}
 FunctionEnd
 
 Section Uninstall

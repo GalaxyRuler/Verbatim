@@ -559,10 +559,14 @@ impl HistoryManager {
 
         for (id, file_name) in entries {
             // Delete database entry
-            conn.execute(
+            deleted_count += conn.execute(
                 "DELETE FROM transcription_history WHERE id = ?1",
                 params![id],
             )?;
+
+            if file_name.trim().is_empty() {
+                continue;
+            }
 
             // Delete WAV file
             let file_path = self.recordings_dir.join(file_name);
@@ -571,7 +575,6 @@ impl HistoryManager {
                     error!("Failed to delete WAV file {}: {}", file_name, e);
                 } else {
                     debug!("Deleted old WAV file: {}", file_name);
-                    deleted_count += 1;
                 }
             }
         }
@@ -592,8 +595,8 @@ impl HistoryManager {
     }
 
     fn count_cleanup_candidates(conn: &Connection, limit: usize) -> Result<Vec<(i64, String)>> {
-        // Count-based retention protects recording history. Text-only transform
-        // entries stay visible but must not evict older WAV-backed dictation rows.
+        // Count-based retention protects dictation history. Text-only transform
+        // entries stay visible but must not evict older dictation rows.
         let mut stmt = conn.prepare(
             "SELECT id, file_name
              FROM transcription_history
@@ -617,6 +620,24 @@ impl HistoryManager {
         Ok(entries.into_iter().skip(limit).collect())
     }
 
+    fn unsaved_recording_file_candidates(conn: &Connection) -> Result<Vec<(i64, String)>> {
+        let mut stmt = conn.prepare(
+            "SELECT id, file_name
+             FROM transcription_history
+             WHERE saved = 0 AND transform_action IS NULL AND file_name != ''",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, i64>("id")?, row.get::<_, String>("file_name")?))
+        })?;
+
+        let mut entries = Vec::new();
+        for row in rows {
+            entries.push(row?);
+        }
+
+        Ok(entries)
+    }
+
     fn cleanup_by_time(
         &self,
         retention_period: crate::settings::RecordingRetentionPeriod,
@@ -634,7 +655,8 @@ impl HistoryManager {
 
         // Get all unsaved entries older than the cutoff timestamp
         let mut stmt = conn.prepare(
-            "SELECT id, file_name FROM transcription_history WHERE saved = 0 AND timestamp < ?1",
+            "SELECT id, file_name FROM transcription_history
+             WHERE saved = 0 AND timestamp < ?1 AND transform_action IS NULL",
         )?;
 
         let rows = stmt.query_map(params![cutoff_timestamp], |row| {
@@ -887,11 +909,13 @@ impl HistoryManager {
         // Get the entry to find the file name
         if let Some(entry) = self.get_entry_by_id(id).await? {
             // Delete the audio file first
-            let file_path = self.get_audio_file_path(&entry.file_name);
-            if file_path.exists() {
-                if let Err(e) = fs::remove_file(&file_path) {
-                    error!("Failed to delete audio file {}: {}", entry.file_name, e);
-                    // Continue with database deletion even if file deletion fails
+            if !entry.file_name.trim().is_empty() {
+                let file_path = self.get_audio_file_path(&entry.file_name);
+                if file_path.exists() {
+                    if let Err(e) = fs::remove_file(&file_path) {
+                        error!("Failed to delete audio file {}: {}", entry.file_name, e);
+                        // Continue with database deletion even if file deletion fails
+                    }
                 }
             }
         }
@@ -910,6 +934,48 @@ impl HistoryManager {
         }
 
         Ok(())
+    }
+
+    pub async fn clear_history(&self) -> Result<usize> {
+        let conn = self.get_connection()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, file_name
+             FROM transcription_history
+             WHERE transform_action IS NULL",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, i64>("id")?, row.get::<_, String>("file_name")?))
+        })?;
+
+        let mut recording_entries = Vec::new();
+        for row in rows {
+            recording_entries.push(row?);
+        }
+
+        for (_, file_name) in &recording_entries {
+            if file_name.trim().is_empty() {
+                continue;
+            }
+
+            let file_path = self.get_audio_file_path(file_name);
+            if file_path.exists() {
+                if let Err(e) = fs::remove_file(&file_path) {
+                    error!("Failed to delete audio file {}: {}", file_name, e);
+                }
+            }
+        }
+
+        let deleted = conn.execute("DELETE FROM transcription_history", [])?;
+        debug!("Cleared {} history entries", deleted);
+        Ok(deleted)
+    }
+
+    pub async fn clear_unsaved_recordings(&self) -> Result<usize> {
+        let conn = self.get_connection()?;
+        let entries = Self::unsaved_recording_file_candidates(&conn)?;
+        let deleted = self.delete_entries_and_files(&entries)?;
+        debug!("Cleared {} unsaved recording entries", deleted);
+        Ok(deleted)
     }
 
     fn format_timestamp_title(&self, timestamp: i64) -> String {
@@ -962,6 +1028,24 @@ mod tests {
     }
 
     fn insert_entry(conn: &Connection, timestamp: i64, text: &str, post_processed: Option<&str>) {
+        insert_entry_with_file_name(
+            conn,
+            timestamp,
+            &format!("verbatim-{}.wav", timestamp),
+            false,
+            text,
+            post_processed,
+        );
+    }
+
+    fn insert_entry_with_file_name(
+        conn: &Connection,
+        timestamp: i64,
+        file_name: &str,
+        saved: bool,
+        text: &str,
+        post_processed: Option<&str>,
+    ) {
         conn.execute(
             "INSERT INTO transcription_history (
                 file_name,
@@ -988,9 +1072,9 @@ mod tests {
                 transform_recovery_status
             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
             params![
-                format!("verbatim-{}.wav", timestamp),
+                file_name,
                 timestamp,
-                false,
+                saved,
                 format!("Recording {}", timestamp),
                 text,
                 post_processed,
@@ -1178,6 +1262,63 @@ mod tests {
 
         assert_eq!(candidates.len(), 1);
         assert_eq!(candidates[0].1, "verbatim-100.wav");
+    }
+
+    #[test]
+    fn count_cleanup_zero_limit_deletes_all_unsaved_dictation_history() {
+        let conn = setup_conn();
+        insert_entry(&conn, 100, "file-backed dictation", None);
+        insert_entry_with_file_name(&conn, 200, "", false, "text-only dictation", None);
+        insert_transform_entry(&conn, 300, "selected text", "polished selected text");
+
+        let candidates =
+            HistoryManager::count_cleanup_candidates(&conn, 0).expect("cleanup candidates");
+
+        assert_eq!(candidates.len(), 2);
+        assert!(candidates.iter().any(|(_, file_name)| file_name.is_empty()));
+        assert!(candidates
+            .iter()
+            .any(|(_, file_name)| file_name == "verbatim-100.wav"));
+    }
+
+    #[test]
+    fn count_cleanup_zero_limit_preserves_saved_dictation_history() {
+        let conn = setup_conn();
+        insert_entry_with_file_name(
+            &conn,
+            100,
+            "verbatim-100.wav",
+            true,
+            "saved dictation transcript",
+            None,
+        );
+        insert_entry(&conn, 200, "unsaved dictation transcript", None);
+
+        let candidates =
+            HistoryManager::count_cleanup_candidates(&conn, 0).expect("cleanup candidates");
+
+        assert_eq!(candidates, vec![(2, "verbatim-200.wav".to_string())]);
+    }
+
+    #[test]
+    fn clear_recordings_candidates_exclude_saved_text_only_and_transform_rows() {
+        let conn = setup_conn();
+        insert_entry(&conn, 100, "unsaved file-backed dictation", None);
+        insert_entry_with_file_name(&conn, 200, "", false, "text-only dictation", None);
+        insert_entry_with_file_name(
+            &conn,
+            300,
+            "verbatim-300.wav",
+            true,
+            "saved file-backed dictation",
+            None,
+        );
+        insert_transform_entry(&conn, 400, "selected text", "polished selected text");
+
+        let candidates =
+            HistoryManager::unsaved_recording_file_candidates(&conn).expect("recording candidates");
+
+        assert_eq!(candidates, vec![(1, "verbatim-100.wav".to_string())]);
     }
 
     #[test]

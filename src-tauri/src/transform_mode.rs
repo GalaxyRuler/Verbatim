@@ -1,6 +1,5 @@
 use log::debug;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use specta::Type;
 use std::fmt;
 use std::sync::Arc;
@@ -151,39 +150,75 @@ pub fn validate_transform_output(
         return Ok(());
     }
 
-    let evaluation =
-        crate::local_llm::evaluation::evaluate_post_processing_output(&task.selected_text, output);
-    if !evaluation.passed {
-        return Err(TransformModeError::OutputRejected(format!(
-            "transform output failed preservation checks: {:?}",
-            evaluation.issues
-        )));
-    }
-
-    crate::adaptive::processor::validate_unrequested_translation(&task.selected_text, output)
-        .map_err(TransformModeError::OutputRejected)
-}
-
-pub fn can_egress_transform_text(provider_base_url: &str, api_key: &str) -> bool {
-    crate::settings::is_local_post_process_base_url(provider_base_url) || !api_key.trim().is_empty()
-}
-
-fn strip_invisible_chars(text: &str) -> String {
-    text.replace(['\u{200B}', '\u{200C}', '\u{200D}', '\u{FEFF}'], "")
+    crate::text_processing::validate_preserved_text(&task.selected_text, output)
+        .map_err(|err| TransformModeError::OutputRejected(format!("transform output failed {err}")))
 }
 
 pub async fn execute_transform_task(
     app: &AppHandle,
     settings: &crate::settings::AppSettings,
     task: &TransformTask,
+    operation_token: Option<&crate::operation_cancellation::OperationToken>,
 ) -> Result<TransformExecutionResult, TransformModeError> {
     let prompt = build_transform_prompt(task);
+    let runtime = crate::runtime_settings::text_processing_provider_runtime(
+        settings,
+        crate::runtime_settings::TextProcessingIntent::ExplicitTransform,
+    );
 
-    if settings.local_llm.enabled {
-        return execute_with_managed_local_llm(app, settings, task, &prompt).await;
+    if runtime.uses_managed_local() {
+        return execute_with_managed_local_llm(app, settings, task, &prompt, operation_token).await;
     }
 
-    execute_with_configured_provider(settings, task, &prompt).await
+    let api_runtime = runtime
+        .api_provider()
+        .cloned()
+        .ok_or_else(|| transform_runtime_error(settings, runtime.skip_reason()))?;
+
+    execute_with_configured_provider(api_runtime, task, &prompt, operation_token).await
+}
+
+fn ensure_transform_not_cancelled(
+    operation_token: Option<&crate::operation_cancellation::OperationToken>,
+    stage: &str,
+) -> Result<(), TransformModeError> {
+    if operation_token.is_some_and(|token| token.is_cancelled()) {
+        return Err(TransformModeError::ProviderUnavailable(format!(
+            "Transform cancelled before {stage}"
+        )));
+    }
+
+    Ok(())
+}
+
+fn transform_runtime_error(
+    settings: &crate::settings::AppSettings,
+    reason: Option<crate::runtime_settings::TextProcessingSkipReason>,
+) -> TransformModeError {
+    let provider_id = settings.post_process_provider_id.clone();
+
+    match reason {
+        Some(crate::runtime_settings::TextProcessingSkipReason::MissingProvider) => {
+            TransformModeError::MissingProvider
+        }
+        Some(crate::runtime_settings::TextProcessingSkipReason::MissingModel) => {
+            TransformModeError::MissingModel(provider_id)
+        }
+        Some(crate::runtime_settings::TextProcessingSkipReason::RemoteMissingApiKey) => {
+            TransformModeError::MissingApiKey(provider_id)
+        }
+        Some(crate::runtime_settings::TextProcessingSkipReason::NotRequested) => {
+            TransformModeError::ProviderUnavailable(
+                "Transform was not requested by runtime settings".to_string(),
+            )
+        }
+        Some(crate::runtime_settings::TextProcessingSkipReason::DisabledBySettings) => {
+            TransformModeError::ProviderUnavailable(
+                "Transform provider is disabled by runtime settings".to_string(),
+            )
+        }
+        None => TransformModeError::MissingProvider,
+    }
 }
 
 async fn execute_with_managed_local_llm(
@@ -191,6 +226,7 @@ async fn execute_with_managed_local_llm(
     settings: &crate::settings::AppSettings,
     task: &TransformTask,
     prompt: &TransformPrompt,
+    operation_token: Option<&crate::operation_cancellation::OperationToken>,
 ) -> Result<TransformExecutionResult, TransformModeError> {
     let Some(manager) = app.try_state::<Arc<crate::local_llm::download::LocalLlmManager>>() else {
         return Err(TransformModeError::ProviderUnavailable(
@@ -212,6 +248,8 @@ async fn execute_with_managed_local_llm(
         task.action, endpoint.model_id
     );
 
+    ensure_transform_not_cancelled(operation_token, "managed local request")?;
+
     let content = crate::llm_client::send_chat_completion_with_schema(
         &endpoint.provider,
         String::new(),
@@ -232,7 +270,7 @@ async fn execute_with_managed_local_llm(
         )
     })?;
 
-    let text = strip_invisible_chars(&content);
+    let text = crate::text_processing::strip_invisible_chars(&content);
     validate_transform_output(task, &text)?;
 
     Ok(TransformExecutionResult {
@@ -243,112 +281,66 @@ async fn execute_with_managed_local_llm(
 }
 
 async fn execute_with_configured_provider(
-    settings: &crate::settings::AppSettings,
+    runtime: crate::runtime_settings::TextProcessingApiRuntime,
     task: &TransformTask,
     prompt: &TransformPrompt,
+    operation_token: Option<&crate::operation_cancellation::OperationToken>,
 ) -> Result<TransformExecutionResult, TransformModeError> {
-    let provider = settings
-        .active_post_process_provider()
-        .cloned()
-        .ok_or(TransformModeError::MissingProvider)?;
-    let model = settings
-        .post_process_models
-        .get(&provider.id)
-        .cloned()
-        .unwrap_or_default();
-
-    if model.trim().is_empty() {
-        return Err(TransformModeError::MissingModel(provider.id));
-    }
-
-    let api_key = settings
-        .post_process_api_keys
-        .get(&provider.id)
-        .cloned()
-        .unwrap_or_default();
-
-    if !can_egress_transform_text(&provider.base_url, &api_key) {
-        return Err(TransformModeError::MissingApiKey(provider.id));
-    }
-
-    let (reasoning_effort, reasoning) = match provider.id.as_str() {
-        "custom" => (Some("none".to_string()), None),
-        "openrouter" => (
-            None,
-            Some(crate::llm_client::ReasoningConfig {
-                effort: Some("none".to_string()),
-                exclude: Some(true),
-            }),
-        ),
-        _ => (None, None),
-    };
+    let provider = runtime.provider;
+    let model = runtime.model;
+    let api_key = runtime.api_key;
 
     let raw_text = if provider.supports_structured_output {
         let field = "transform";
-        let json_schema = serde_json::json!({
-            "type": "object",
-            "properties": {
-                field: {
-                    "type": "string",
-                    "description": "The transformed selected text"
-                }
-            },
-            "required": [field],
-            "additionalProperties": false
-        });
-
-        let content = crate::llm_client::send_chat_completion_with_schema(
-            &provider,
-            api_key,
-            &model,
+        let request = crate::text_processing::TextProviderRequest::transform_structured(
             prompt.user_content.clone(),
             Some(prompt.system_prompt.clone()),
-            Some(json_schema),
-            reasoning_effort,
-            reasoning,
-        )
-        .await
-        .map_err(|err| {
-            TransformModeError::ProviderUnavailable(format!(
-                "Transform failed for provider '{}': {err}",
-                provider.id
-            ))
-        })?
-        .ok_or_else(|| {
-            TransformModeError::ProviderUnavailable(format!(
-                "Transform provider '{}' returned no content",
-                provider.id
-            ))
-        })?;
+        );
+
+        ensure_transform_not_cancelled(operation_token, "structured provider request")?;
+
+        let content =
+            crate::text_processing::send_text_provider_request(&provider, api_key, &model, request)
+                .await
+                .map_err(|err| {
+                    TransformModeError::ProviderUnavailable(format!(
+                        "Transform failed for provider '{}': {err}",
+                        provider.id
+                    ))
+                })?
+                .ok_or_else(|| {
+                    TransformModeError::ProviderUnavailable(format!(
+                        "Transform provider '{}' returned no content",
+                        provider.id
+                    ))
+                })?;
 
         structured_transform_text(&content, field)?
     } else {
-        crate::llm_client::send_chat_completion_with_schema(
-            &provider,
-            api_key,
-            &model,
+        let request = crate::text_processing::TextProviderRequest::new(
             prompt.user_content.clone(),
             Some(prompt.system_prompt.clone()),
-            None,
-            reasoning_effort,
-            reasoning,
-        )
-        .await
-        .map_err(|err| {
-            TransformModeError::ProviderUnavailable(format!(
-                "Transform failed for provider '{}': {err}",
-                provider.id
-            ))
-        })?
-        .ok_or_else(|| {
-            TransformModeError::ProviderUnavailable(format!(
-                "Transform provider '{}' returned no content",
-                provider.id
-            ))
-        })?
+        );
+
+        ensure_transform_not_cancelled(operation_token, "provider request")?;
+
+        crate::text_processing::send_text_provider_request(&provider, api_key, &model, request)
+            .await
+            .map_err(|err| {
+                TransformModeError::ProviderUnavailable(format!(
+                    "Transform failed for provider '{}': {err}",
+                    provider.id
+                ))
+            })?
+            .ok_or_else(|| {
+                TransformModeError::ProviderUnavailable(format!(
+                    "Transform provider '{}' returned no content",
+                    provider.id
+                ))
+            })?
     };
 
-    let text = strip_invisible_chars(&raw_text);
+    let text = crate::text_processing::strip_invisible_chars(&raw_text);
     validate_transform_output(task, &text)?;
 
     Ok(TransformExecutionResult {
@@ -359,26 +351,79 @@ async fn execute_with_configured_provider(
 }
 
 fn structured_transform_text(content: &str, field: &str) -> Result<String, TransformModeError> {
-    let json = serde_json::from_str::<Value>(content).map_err(|err| {
-        TransformModeError::OutputRejected(format!(
-            "Structured transform response was not valid JSON: {err}"
-        ))
-    })?;
-
-    json.get(field)
-        .and_then(|value| value.as_str())
-        .map(ToOwned::to_owned)
-        .ok_or_else(|| {
-            TransformModeError::OutputRejected(format!(
-                "Structured transform response did not include a string '{}' field",
-                field
-            ))
-        })
+    crate::text_processing::extract_structured_text(content, field)
+        .map_err(|err| TransformModeError::OutputRejected(err.to_string()))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn transform_settings_for_provider(
+        base_url: &str,
+        api_key: &str,
+    ) -> crate::settings::AppSettings {
+        let mut settings = crate::settings::get_default_settings();
+        let provider_id = "transform-test-provider".to_string();
+
+        settings.local_llm.enabled = false;
+        settings.post_process_provider_id = provider_id.clone();
+        settings
+            .post_process_models
+            .insert(provider_id.clone(), "test-model".to_string());
+        settings
+            .post_process_providers
+            .push(crate::settings::PostProcessProvider {
+                id: provider_id.clone(),
+                label: "Transform Test Provider".to_string(),
+                base_url: base_url.to_string(),
+                allow_base_url_edit: true,
+                models_endpoint: None,
+                supports_structured_output: true,
+            });
+
+        if !api_key.is_empty() {
+            settings
+                .post_process_api_keys
+                .insert(provider_id, api_key.to_string());
+        }
+
+        settings
+    }
+
+    #[test]
+    fn cancelled_transform_token_blocks_provider_request_stage() {
+        let state = crate::operation_cancellation::OperationCancellationState::default();
+        let token = state.begin_operation();
+        state.cancel_current_operation();
+
+        let err = ensure_transform_not_cancelled(Some(&token), "provider request")
+            .expect_err("cancelled transform must not start provider request");
+
+        assert!(err.to_string().contains("provider request"));
+    }
+
+    fn transform_provider_is_available(base_url: &str, api_key: &str) -> bool {
+        let settings = transform_settings_for_provider(base_url, api_key);
+        crate::runtime_settings::text_processing_provider_runtime(
+            &settings,
+            crate::runtime_settings::TextProcessingIntent::ExplicitTransform,
+        )
+        .api_provider()
+        .is_some()
+    }
+
+    fn transform_provider_skip_reason(
+        base_url: &str,
+        api_key: &str,
+    ) -> Option<crate::runtime_settings::TextProcessingSkipReason> {
+        let settings = transform_settings_for_provider(base_url, api_key);
+        crate::runtime_settings::text_processing_provider_runtime(
+            &settings,
+            crate::runtime_settings::TextProcessingIntent::ExplicitTransform,
+        )
+        .skip_reason()
+    }
 
     #[test]
     fn non_translate_actions_require_selected_text() {
@@ -467,16 +512,22 @@ mod tests {
 
     #[test]
     fn remote_transform_provider_requires_api_key_before_selected_text_egress() {
-        assert!(!can_egress_transform_text("https://api.openai.com/v1", ""));
-        assert!(can_egress_transform_text(
+        assert_eq!(
+            transform_provider_skip_reason("https://api.openai.com/v1", ""),
+            Some(crate::runtime_settings::TextProcessingSkipReason::RemoteMissingApiKey)
+        );
+        assert!(transform_provider_is_available(
             "https://api.openai.com/v1",
             "sk-test"
         ));
-        assert!(can_egress_transform_text("http://127.0.0.1:1234/v1", ""));
-        assert!(!can_egress_transform_text(
-            "https://localhost.example.com/v1",
+        assert!(transform_provider_is_available(
+            "http://127.0.0.1:1234/v1",
             ""
         ));
+        assert_eq!(
+            transform_provider_skip_reason("https://localhost.example.com/v1", "",),
+            Some(crate::runtime_settings::TextProcessingSkipReason::RemoteMissingApiKey)
+        );
     }
 
     #[test]
@@ -486,6 +537,17 @@ mod tests {
                 .expect("valid structured transform");
 
         assert_eq!(result, "Polished selected text");
+    }
+
+    #[test]
+    fn shared_structured_text_parser_strips_invisible_characters() {
+        let result = crate::text_processing::extract_structured_text(
+            "{\"transform\":\"\u{200B}Polished\u{200D} text\u{FEFF}\"}",
+            "transform",
+        )
+        .expect("valid structured transform");
+
+        assert_eq!(result, "Polished text");
     }
 
     #[test]

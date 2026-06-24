@@ -24,6 +24,8 @@ struct BuiltinModelDefinition {
     size_mb: u64,
     is_directory: bool,
     engine_type: EngineType,
+    license_label: String,
+    accelerator_support: Vec<String>,
     accuracy_score: f32,
     speed_score: f32,
     supports_translation: bool,
@@ -82,6 +84,8 @@ impl BuiltinModelDefinition {
             partial_size: 0,
             is_directory: self.is_directory,
             engine_type: self.engine_type,
+            license_label: self.license_label,
+            accelerator_support: self.accelerator_support,
             accuracy_score: self.accuracy_score,
             speed_score: self.speed_score,
             supports_translation: self.supports_translation,
@@ -143,6 +147,7 @@ impl LanguageSet {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashSet;
 
     #[test]
     fn catalog_loads_builtin_models() {
@@ -171,5 +176,183 @@ mod tests {
             .as_deref()
             .expect("medium has download url")
             .ends_with("/whisper-medium-q4_1.bin"));
+    }
+
+    #[test]
+    fn downloadable_catalog_models_have_https_urls_and_sha256() {
+        let models = load_builtin_models().expect("catalog parses");
+
+        for model in models.values() {
+            let url = model.url.as_deref().expect("downloadable model URL");
+            assert!(
+                url.starts_with("https://"),
+                "{} must use HTTPS for downloads",
+                model.id
+            );
+
+            let sha256 = model.sha256.as_deref().expect("download checksum");
+            assert_eq!(sha256.len(), 64, "{} SHA-256 length", model.id);
+            assert!(
+                sha256.chars().all(|ch| ch.is_ascii_hexdigit()),
+                "{} SHA-256 must be hex",
+                model.id
+            );
+            assert!(
+                model.size_mb > 0,
+                "{} must declare a positive size",
+                model.id
+            );
+        }
+    }
+
+    #[test]
+    fn catalog_models_have_complete_language_and_score_metadata() {
+        let models = load_builtin_models().expect("catalog parses");
+
+        for model in models.values() {
+            assert!(!model.id.trim().is_empty(), "model id is required");
+            assert!(
+                !model.name.trim().is_empty(),
+                "{} name is required",
+                model.id
+            );
+            assert!(
+                !model.filename.trim().is_empty(),
+                "{} filename is required",
+                model.id
+            );
+            assert!(
+                !model.supported_languages.is_empty(),
+                "{} must declare supported languages",
+                model.id
+            );
+            assert!(
+                (0.0..=1.0).contains(&model.accuracy_score),
+                "{} accuracy score must be normalized",
+                model.id
+            );
+            assert!(
+                (0.0..=1.0).contains(&model.speed_score),
+                "{} speed score must be normalized",
+                model.id
+            );
+
+            let mut seen_languages = HashSet::new();
+            for language in &model.supported_languages {
+                assert_eq!(
+                    language.trim(),
+                    language,
+                    "{} language code must be trimmed",
+                    model.id
+                );
+                assert!(
+                    !language.is_empty(),
+                    "{} language code is required",
+                    model.id
+                );
+                assert!(
+                    seen_languages.insert(language),
+                    "{} has duplicate language code '{}'",
+                    model.id,
+                    language
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn catalog_models_have_license_and_accelerator_metadata() {
+        let models = load_builtin_models().expect("catalog parses");
+        let allowed_accelerators = HashSet::from(["whisper-cpp", "onnx-runtime"]);
+        let allowed_license_labels =
+            HashSet::from(["Apache-2.0", "CC-BY-4.0", "MIT", "Requires upstream review"]);
+
+        for model in models.values() {
+            assert!(
+                !model.license_label.trim().is_empty(),
+                "{} license label is required",
+                model.id
+            );
+            assert_eq!(
+                model.license_label.trim(),
+                model.license_label,
+                "{} license label must be trimmed",
+                model.id
+            );
+            assert!(
+                allowed_license_labels.contains(model.license_label.as_str()),
+                "{} unsupported license label '{}'",
+                model.id,
+                model.license_label
+            );
+            assert!(
+                !model.accelerator_support.is_empty(),
+                "{} accelerator support is required",
+                model.id
+            );
+
+            let mut seen_accelerators = HashSet::new();
+            for accelerator in &model.accelerator_support {
+                assert_eq!(
+                    accelerator.trim(),
+                    accelerator,
+                    "{} accelerator label must be trimmed",
+                    model.id
+                );
+                assert!(
+                    allowed_accelerators.contains(accelerator.as_str()),
+                    "{} unsupported accelerator family '{}'",
+                    model.id,
+                    accelerator
+                );
+                assert!(
+                    seen_accelerators.insert(accelerator),
+                    "{} has duplicate accelerator family '{}'",
+                    model.id,
+                    accelerator
+                );
+            }
+
+            let expected_accelerator = match model.engine_type {
+                EngineType::Whisper => "whisper-cpp",
+                EngineType::Parakeet
+                | EngineType::Moonshine
+                | EngineType::MoonshineStreaming
+                | EngineType::SenseVoice
+                | EngineType::GigaAM
+                | EngineType::Canary
+                | EngineType::Cohere => "onnx-runtime",
+            };
+            assert!(
+                model
+                    .accelerator_support
+                    .iter()
+                    .any(|accelerator| accelerator == expected_accelerator),
+                "{} must declare {} accelerator compatibility",
+                model.id,
+                expected_accelerator
+            );
+        }
+    }
+
+    #[test]
+    fn catalog_recommendation_and_translation_flags_are_consistent() {
+        let models = load_builtin_models().expect("catalog parses");
+        let recommended_count = models.values().filter(|model| model.is_recommended).count();
+
+        assert_eq!(
+            recommended_count, 1,
+            "exactly one built-in transcription model should be recommended"
+        );
+
+        for model in models.values() {
+            if model.supports_translation {
+                assert!(
+                    matches!(model.engine_type, EngineType::Whisper | EngineType::Canary),
+                    "{} translation support must be backed by an engine with translation capability",
+                    model.id
+                );
+            }
+        }
     }
 }

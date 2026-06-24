@@ -157,4 +157,43 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn local_llm_catalog_models_have_runtime_license_and_language_metadata() {
+        let models = load_builtin_local_llm_models().expect("catalog parses");
+
+        for model in models.values() {
+            assert!(!model.id.trim().is_empty(), "model id is required");
+            assert!(
+                !model.label.trim().is_empty(),
+                "{} label is required",
+                model.id
+            );
+            assert!(
+                !model.quantization.trim().is_empty(),
+                "{} quantization is required",
+                model.id
+            );
+            assert!(
+                model.context_window > 0,
+                "{} context window must be positive",
+                model.id
+            );
+            assert!(
+                !model.supported_language_notes.trim().is_empty(),
+                "{} language notes are required",
+                model.id
+            );
+            assert!(
+                !model.license_label.trim().is_empty(),
+                "{} license label is required",
+                model.id
+            );
+            assert!(
+                !model.runtime.trim().is_empty(),
+                "{} runtime is required",
+                model.id
+            );
+        }
+    }
 }

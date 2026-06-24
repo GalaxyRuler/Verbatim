@@ -3,7 +3,7 @@
   "identifier": "default",
   "description": "Capabilities for the app",
   "platforms": ["macOS", "windows", "linux"],
-  "windows": ["main", "recording_overlay"],
+  "windows": ["main"],
   "permissions": [
     "core:default",
     "opener:default",
@@ -20,7 +20,10 @@
     "fs:allow-resource-read-recursive",
     {
       "identifier": "fs:scope",
-      "allow": [{ "path": "$APPDATA" }, { "path": "$APPDATA/**/*" }]
+      "allow": [
+        { "path": "$APPDATA/recordings/*" },
+        { "path": "$EXE/Data/recordings/*" }
+      ]
     }
   ]
 }

@@ -99,6 +99,15 @@ foreach ($runtimeRoot in $runtimeRoots) {
 
 $selectedDir = $candidateDirs |
   Where-Object { $_ -and (Test-Path -LiteralPath $_) } |
+  Where-Object {
+    $candidate = $_
+    foreach ($dllName in $requiredDlls) {
+      if (-not (Test-Path -LiteralPath (Join-Path $candidate $dllName))) {
+        return $false
+      }
+    }
+    $true
+  } |
   Select-Object -First 1
 
 if (-not $selectedDir) {

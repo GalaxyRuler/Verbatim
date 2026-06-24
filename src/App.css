@@ -8,7 +8,7 @@
   --color-logo-primary: #2563eb;
   --color-logo-stroke: #0f1419;
   --color-text-stroke: #f6f6f6;
-  --color-mid-gray: #808080;
+  --color-mid-gray: #5f6368;
 }
 
 :root {
@@ -52,6 +52,7 @@
     --color-background: #0f1419;
     --color-logo-primary: #7aa2f7;
     --color-logo-stroke: #f3f4f6;
+    --color-mid-gray: #9ca3af;
   }
 }
 

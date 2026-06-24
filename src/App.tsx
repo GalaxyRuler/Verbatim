@@ -1,8 +1,9 @@
-import { useEffect, useState, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast, Toaster } from "sonner";
 import { useTranslation } from "react-i18next";
 import { listen } from "@tauri-apps/api/event";
 import { platform } from "@tauri-apps/plugin-os";
+import { relaunch } from "@tauri-apps/plugin-process";
 import {
   checkAccessibilityPermission,
   checkMicrophonePermission,
@@ -11,21 +12,46 @@ import { ModelStateEvent, RecordingErrorEvent } from "./lib/types/events";
 import "./App.css";
 import AccessibilityPermissions from "./components/AccessibilityPermissions";
 import Footer from "./components/footer";
-import Onboarding, { AccessibilityOnboarding } from "./components/onboarding";
+import Onboarding, {
+  AccessibilityOnboarding,
+  DictationReadinessOnboarding,
+  MicrophoneReadinessOnboarding,
+  ShortcutReadinessOnboarding,
+} from "./components/onboarding";
 import { Sidebar, SidebarSection, SECTIONS_CONFIG } from "./components/Sidebar";
 import { useSettings } from "./hooks/useSettings";
-import type { DictionaryEntry } from "@/bindings";
+import type { DictionaryEntry, StartupStatus } from "@/bindings";
 import { useDictionaryStore } from "./stores/dictionaryStore";
 import { useSettingsStore } from "./stores/settingsStore";
 import { commands } from "@/bindings";
 import { getLanguageDirection, initializeRTL } from "@/lib/utils/rtl";
+import { Alert } from "./components/ui/Alert";
+import { Button } from "./components/ui/Button";
 import AndroidApp from "./android/AndroidApp";
 
-type OnboardingStep = "accessibility" | "model" | "done";
+type OnboardingStep =
+  | "accessibility"
+  | "model"
+  | "shortcut"
+  | "microphone"
+  | "dictation"
+  | "done";
 
 type LanguageGuardBlockedEvent = {
   locked_language: string;
   preview: string;
+};
+
+type PasteRecoveryEvent = {
+  reason?: "paste_failure" | "target_changed" | "language_guard";
+  copied?: boolean;
+  paste_here_available?: boolean;
+};
+
+type CoordinatorHealthEvent = {
+  status: "restarted" | "disabled";
+  restart_count: number;
+  reason: string;
 };
 
 const renderSettingsContent = (section: SidebarSection) => {
@@ -57,10 +83,65 @@ function DesktopApp() {
     (state) => state.setRecentlyLearnedEntries,
   );
   const hasCompletedPostOnboardingInit = useRef(false);
+  const [startupStatus, setStartupStatus] = useState<StartupStatus | null>(
+    null,
+  );
+  const [isResettingSettings, setIsResettingSettings] = useState(false);
 
   useEffect(() => {
-    checkOnboardingStatus();
-  }, []);
+    let cancelled = false;
+
+    commands
+      .getStartupStatus()
+      .then((result) => {
+        if (cancelled) return;
+        setStartupStatus(result);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setStartupStatus({
+          status: "failed",
+          step: t("errors.startupUnknownStep"),
+          message: String(error),
+        });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [t]);
+
+  useEffect(() => {
+    if (startupStatus?.status === "ready") {
+      void checkOnboardingStatus();
+    }
+    if (startupStatus?.status === "failed") {
+      setOnboardingStep(null);
+    }
+  }, [startupStatus]);
+
+  useEffect(() => {
+    const unlisten = listen<CoordinatorHealthEvent>(
+      "transcription-coordinator-health",
+      (event) => {
+        if (event.payload.status === "disabled") {
+          setStartupStatus({
+            status: "failed",
+            step: t("errors.coordinatorFailedStep"),
+            message: t("errors.coordinatorFailedMessage"),
+          });
+          return;
+        }
+
+        toast.warning(t("errors.coordinatorRestartedTitle"), {
+          description: t("errors.coordinatorRestartedDescription"),
+        });
+      },
+    );
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [t]);
 
   // Initialize RTL direction when language changes
   useEffect(() => {
@@ -123,6 +204,10 @@ function DesktopApp() {
         toast.error(t("errors.noInputDeviceTitle"), {
           description: t("errors.noInputDevice"),
         });
+      } else if (error_type === "target_privacy_excluded") {
+        toast.warning(t("errors.targetPrivacyExcludedTitle"), {
+          description: t("errors.targetPrivacyExcludedDescription"),
+        });
       } else {
         toast.error(
           t("errors.recordingFailed", { error: detail ?? "Unknown error" }),
@@ -139,17 +224,45 @@ function DesktopApp() {
   // (see actions.rs `error!("Failed to paste transcription: ...")`),
   // so we show a localized, user-friendly message here instead of the raw error.
   useEffect(() => {
-    const unlisten = listen("paste-error", () => {
-      toast.error(t("errors.pasteFailedTitle"), {
-        description: `${t("errors.pasteFailed")} ${t("errors.pasteFailedCopiedHint")}`,
-        action: {
-          label: t("errors.pasteFailedCopyAction"),
-          onClick: () => {
-            void commands.copyLastTranscript();
+    const unlisten = listen<PasteRecoveryEvent | null>(
+      "paste-error",
+      (event) => {
+        const recovery = event.payload ?? {
+          reason: "paste_failure",
+          copied: true,
+          paste_here_available: false,
+        };
+
+        if (recovery.reason === "language_guard") {
+          return;
+        }
+
+        if (recovery.reason === "target_changed") {
+          toast.warning(t("errors.targetChangedTitle"), {
+            description: t("errors.targetChangedDescription"),
+            action: {
+              label: t("errors.targetChangedPasteHereAction"),
+              onClick: () => {
+                void commands.pasteLastTranscript();
+              },
+            },
+          });
+          return;
+        }
+
+        toast.error(t("errors.pasteFailedTitle"), {
+          description: recovery.copied
+            ? `${t("errors.pasteFailed")} ${t("errors.pasteFailedCopiedHint")}`
+            : t("errors.pasteFailed"),
+          action: {
+            label: t("errors.pasteFailedCopyAction"),
+            onClick: () => {
+              void commands.copyLastTranscript();
+            },
           },
-        },
-      });
-    });
+        });
+      },
+    );
     return () => {
       unlisten.then((fn) => fn());
     };
@@ -334,18 +447,116 @@ function DesktopApp() {
     }
   };
 
-  const handleAccessibilityComplete = () => {
+  const handleAccessibilityComplete = useCallback(() => {
     // Returning users already have models, skip to main app
     // New users need to select a model
     setOnboardingStep(isReturningUser ? "done" : "model");
+  }, [isReturningUser]);
+
+  const handleModelSelected = useCallback(() => {
+    // New users should confirm the recording shortcut before entering the app.
+    setOnboardingStep("shortcut");
+  }, []);
+
+  const handleShortcutReadinessComplete = useCallback(() => {
+    setOnboardingStep("microphone");
+  }, []);
+
+  const handleMicrophoneReadinessComplete = useCallback(() => {
+    setOnboardingStep("dictation");
+  }, []);
+
+  const handleDictationReadinessComplete = useCallback(() => {
+    setOnboardingStep("done");
+  }, []);
+
+  const handleRestart = () => {
+    void relaunch();
   };
 
-  const handleModelSelected = () => {
-    // Transition to main app - user has started a download
-    setOnboardingStep("done");
+  const handleResetSettings = async () => {
+    try {
+      setIsResettingSettings(true);
+      const result = await commands.resetSettingsToDefaults();
+      if (result.status === "error") {
+        throw new Error(String(result.error));
+      }
+      await relaunch();
+    } catch (error) {
+      setIsResettingSettings(false);
+      toast.error(t("errors.startupResetSettingsFailed"), {
+        description: String(error),
+      });
+    }
   };
 
   // Still checking onboarding status
+  if (startupStatus === null || startupStatus.status === "starting") {
+    return null;
+  }
+
+  if (startupStatus.status === "failed") {
+    return (
+      <div
+        dir={direction}
+        className="h-screen flex flex-col select-none cursor-default bg-background text-text"
+      >
+        <div className="flex-1 flex items-center justify-center p-6">
+          <div className="w-full max-w-xl flex flex-col gap-4">
+            <div>
+              <h1 className="text-xl font-semibold">
+                {t("errors.startupFailedTitle")}
+              </h1>
+              <p className="mt-2 text-sm text-mid-gray">
+                {t("errors.startupFailedDescription")}
+              </p>
+            </div>
+            <Alert variant="error">
+              {t("errors.startupFailedStep", {
+                step: startupStatus.step,
+              })}
+            </Alert>
+            <p className="text-sm text-mid-gray break-words">
+              {startupStatus.message}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="primary" onClick={handleRestart}>
+                {t("errors.startupRestart")}
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  void commands.openLogDir();
+                }}
+              >
+                {t("errors.startupOpenLogs")}
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  void commands.openAppDataDir();
+                }}
+              >
+                {t("errors.startupOpenAppData")}
+              </Button>
+              <Button
+                variant="danger-ghost"
+                disabled={isResettingSettings}
+                onClick={() => {
+                  void handleResetSettings();
+                }}
+              >
+                {isResettingSettings
+                  ? t("errors.startupResettingSettings")
+                  : t("errors.startupResetSettings")}
+              </Button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (onboardingStep === null) {
     return null;
   }
@@ -356,6 +567,30 @@ function DesktopApp() {
 
   if (onboardingStep === "model") {
     return <Onboarding onModelSelected={handleModelSelected} />;
+  }
+
+  if (onboardingStep === "shortcut") {
+    return (
+      <ShortcutReadinessOnboarding
+        onComplete={handleShortcutReadinessComplete}
+      />
+    );
+  }
+
+  if (onboardingStep === "microphone") {
+    return (
+      <MicrophoneReadinessOnboarding
+        onComplete={handleMicrophoneReadinessComplete}
+      />
+    );
+  }
+
+  if (onboardingStep === "dictation") {
+    return (
+      <DictationReadinessOnboarding
+        onComplete={handleDictationReadinessComplete}
+      />
+    );
   }
 
   return (
