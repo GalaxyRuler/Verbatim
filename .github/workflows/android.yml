@@ -34,6 +34,7 @@ jobs:
 
   e2e:
     runs-on: ubuntu-latest # HW-accelerated emulation is Linux-only
+    timeout-minutes: 60 # backstop: a dead-device `adb` once hung this job for the full 6h
     steps:
       - uses: actions/checkout@v4
       - name: Enable KVM
@@ -105,14 +106,21 @@ jobs:
           arch: x86_64
           force-avd-creation: false
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
+          # Capture logcat + screenshot INSIDE the script, while the emulator is still alive.
+          # A standalone post-step cannot: the action kills the emulator on script failure,
+          # after which `adb` blocks on "- waiting for device -" forever (this once hung the
+          # job for 6h). `timeout` guards each adb call as extra insurance.
           script: |
             adb install -r "${{ steps.apk.outputs.path }}"
+            set +e
             maestro test maestro/
-      - name: Failure artifacts (logcat + screenshots)
-        if: failure()
-        run: |
-          adb logcat -d > logcat.txt || true
-          adb exec-out screencap -p > screen.png || true
+            code=$?
+            if [ "$code" -ne 0 ]; then
+              echo "Maestro failed (exit $code); capturing diagnostics while the device is alive"
+              timeout 60 adb logcat -d > logcat.txt 2>/dev/null || true
+              timeout 60 adb exec-out screencap -p > screen.png 2>/dev/null || true
+            fi
+            exit $code
       - name: Upload failure artifacts
         if: failure()
         uses: actions/upload-artifact@v4

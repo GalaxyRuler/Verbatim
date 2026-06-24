@@ -1,9 +1,21 @@
-# Phase 0 / Task 0.2 — Maestro smoke flow: the app launches to onboarding.
+# Phase 0 / Task 0.2 — Maestro smoke flow: the app launches to onboarding (microphone step).
 # Run: maestro test maestro/   (needs a booted emulator/device + installed debug APK)
+#
+# The UI is a Tauri WebView (React). On a cold start — especially on a software-GPU CI
+# emulator — the WebView takes ~15-25s to paint, and its text only enters the accessibility
+# tree once rendered (verified on a local AVD: the tree is an empty WebView node at 9s, fully
+# populated with the microphone step by ~17s). A plain assertVisible races that cold load and
+# flakes, so wait explicitly with a generous timeout instead of the short default window.
 appId: com.galaxyruler.verbatim
 ---
 - launchApp
-- assertVisible: "Verbatim"
-# Onboarding step 1 (microphone permission) — copy comes from i18n "android.onboarding.microphone.*"
-- assertVisible:
-    text: ".*[Mm]icrophone.*"
+# First paint of the WebView shell.
+- extendedWaitUntil:
+    visible: "Verbatim"
+    timeout: 60000
+# Onboarding step 1 (microphone permission) — copy from i18n "android.onboarding.microphone.*"
+# ("Let Verbatim hear you" / "Verbatim needs your microphone to transcribe what you say.").
+- extendedWaitUntil:
+    visible:
+      text: ".*[Mm]icrophone.*"
+    timeout: 60000
