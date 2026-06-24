@@ -59,6 +59,9 @@ jobs:
       - name: Check translation consistency
         run: bun run check:translations
 
+      - name: Check public repository hygiene
+        run: bun run check:public-hygiene -- --all
+
       - name: Check Cargo Git dependency pins
         run: bun run check:cargo-git-pins
 
