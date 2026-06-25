@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-open-overlay-settings"
+description = "Enables the open_overlay_settings command without any pre-configured scope."
+commands.allow = ["open_overlay_settings"]
+
+[[permission]]
+identifier = "deny-open-overlay-settings"
+description = "Denies the open_overlay_settings command without any pre-configured scope."
+commands.deny = ["open_overlay_settings"]

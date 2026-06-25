@@ -749,6 +749,11 @@ fn run_native_smoke_resource_probe(app: &AppHandle) -> Vec<String> {
             }
         }
 
+        // `Image::from_path` is only available on desktop (see the cfg-gated
+        // import of `tauri::image::Image`). Native smoke is a desktop packaging
+        // feature, so decode-validation is desktop-only; on Android/iOS the
+        // file existence/size checks above are sufficient.
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
         if matches!(resource.kind, NativeSmokeResourceKind::Image) {
             if let Err(error) = Image::from_path(&path) {
                 failures.push(format!(
@@ -1351,6 +1356,11 @@ fn run_inner(cli_args: CliArgs) {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_store::Builder::default().build());
+
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        builder = builder.plugin(tauri_plugin_verbatim_android::init());
+    }
 
     #[cfg(target_os = "macos")]
     {

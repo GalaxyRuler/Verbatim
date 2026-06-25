@@ -1,0 +1,22 @@
+[default]
+description = "Default permissions for the plugin"
+# allow-registerListener/allow-removeListener authorize JS addPluginListener() to receive
+# Kotlin trigger() events (the native->JS push that replaces 1.2s polling, ADR-1).
+permissions = [
+  "allow-ping",
+  "allow-registerListener",
+  "allow-removeListener",
+  "allow-permission-snapshot",
+  "allow-native-transcript-history",
+  "allow-delete-history-entry",
+  "allow-sync-text-formatter",
+  "allow-bubble-corner-snapshot",
+  "allow-set-bubble-corner",
+  "allow-start-bubble",
+  "allow-stop-bubble",
+  "allow-request-microphone",
+  "allow-open-overlay-settings",
+  "allow-open-accessibility-settings",
+  "allow-request-speech-model-download",
+  "allow-open-external-url",
+]

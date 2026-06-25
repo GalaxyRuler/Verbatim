@@ -6589,6 +6589,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "tauri-plugin-verbatim-android"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-plugin",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "tauri-runtime"
 version = "2.10.0"
 source = "git+https://github.com/GalaxyRuler/tauri.git?rev=ad9ba9448b82b1a1628333ae06459e4def470db3#ad9ba9448b82b1a1628333ae06459e4def470db3"
@@ -7411,6 +7422,7 @@ dependencies = [
  "tauri-plugin-single-instance",
  "tauri-plugin-store",
  "tauri-plugin-updater",
+ "tauri-plugin-verbatim-android",
  "tauri-specta",
  "tempfile",
  "tokio",

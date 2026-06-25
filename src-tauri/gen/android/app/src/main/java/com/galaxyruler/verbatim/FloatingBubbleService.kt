@@ -37,6 +37,9 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
+import androidx.core.view.AccessibilityDelegateCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.accessibility.AccessibilityNodeInfoCompat
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.Locale
@@ -187,11 +190,54 @@ class FloatingBubbleService : Service() {
       background = pillBackground("#24202A")
       contentDescription = getString(R.string.bubble_idle)
       elevation = dp(8).toFloat()
+      // TalkBack: focus the bubble as one node and expose a click action so screen-reader
+      // users can drive it without the press-and-hold gesture.
+      isFocusable = true
+      isClickable = true
+      importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
     }
+
+    ViewCompat.setAccessibilityDelegate(
+      view,
+      object : AccessibilityDelegateCompat() {
+        override fun onInitializeAccessibilityNodeInfo(
+          host: View,
+          info: AccessibilityNodeInfoCompat,
+        ) {
+          super.onInitializeAccessibilityNodeInfo(host, info)
+          info.addAction(
+            AccessibilityNodeInfoCompat.AccessibilityActionCompat(
+              AccessibilityNodeInfoCompat.ACTION_CLICK,
+              bubbleActionLabel(),
+            ),
+          )
+        }
+
+        override fun performAccessibilityAction(host: View, action: Int, args: Bundle?): Boolean {
+          if (action == AccessibilityNodeInfoCompat.ACTION_CLICK) {
+            handleBubbleTap()
+            return true
+          }
+          return super.performAccessibilityAction(host, action, args)
+        }
+      },
+    )
 
     renderBubble(view)
     installDragHandler(view)
     return view
+  }
+
+  /** Label for the TalkBack click action, announced as "double tap to <label>" for each state. */
+  private fun bubbleActionLabel(): CharSequence = when (bubbleState) {
+    BubbleState.IDLE -> getString(R.string.bubble_idle)
+    BubbleState.RECORDING -> getString(R.string.bubble_stop)
+    BubbleState.INSERTED -> getString(R.string.bubble_dismiss)
+    BubbleState.FAILED ->
+      getString(
+        if (recoveryText.isNullOrBlank()) R.string.bubble_dismiss else R.string.bubble_retry_insert,
+      )
+    BubbleState.TRANSCRIBING -> getString(R.string.bubble_transcribing)
   }
 
   private fun installDragHandler(view: View) {
@@ -279,6 +325,11 @@ class FloatingBubbleService : Service() {
       BubbleState.TRANSCRIBING -> renderTranscribing(view)
       BubbleState.INSERTED -> renderInserted(view)
       BubbleState.FAILED -> renderFailed(view)
+    }
+    // The inner labels/bars/dots are decorative; TalkBack should announce only the bubble's
+    // contentDescription + click action, not each child.
+    for (index in 0 until view.childCount) {
+      view.getChildAt(index).importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
     }
   }
 
@@ -983,6 +1034,27 @@ class FloatingBubbleService : Service() {
       context
         .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         .getString(ANDROID_HISTORY_KEY, "[]") ?: "[]"
+
+    /** Remove the native history entry with the given id; returns the updated history JSON. */
+    fun deleteNativeHistoryEntry(context: Context, id: Long): String {
+      val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+      val stored = prefs.getString(ANDROID_HISTORY_KEY, "[]") ?: "[]"
+      return try {
+        val existing = JSONArray(stored)
+        val next = JSONArray()
+        for (index in 0 until existing.length()) {
+          val item = existing.optJSONObject(index) ?: continue
+          if (item.optLong("id", Long.MIN_VALUE) != id) {
+            next.put(item)
+          }
+        }
+        val result = next.toString()
+        prefs.edit().putString(ANDROID_HISTORY_KEY, result).apply()
+        result
+      } catch (_: Exception) {
+        stored
+      }
+    }
 
     fun syncTextFormatter(context: Context, snapshot: String) {
       if (snapshot.length > MAX_TEXT_FORMATTER_SNAPSHOT_CHARS) {
