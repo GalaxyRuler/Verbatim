@@ -10,11 +10,13 @@ on:
       - "src-tauri/gen/android/**"
       - "src-tauri/**"
       - "maestro/**"
+      - "scripts/check-android-so-alignment.ts"
       - ".github/workflows/android.yml"
   workflow_dispatch:
 
 env:
   NDK_VERSION: "28.2.13676358" # r28 — 16 KB-aligned by default (Gate G1)
+  SHERPA_ONNX_VERSION: "1.13.3"
 
 jobs:
   # Guard: a regeneration (`tauri android init`) must not silently delete committed custom native code.
@@ -57,6 +59,21 @@ jobs:
           path: ~/.bun/install/cache
           key: bun-${{ hashFiles('bun.lock') }}
       - run: bun install --frozen-lockfile
+      - name: Download official sherpa-onnx Android runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/sherpa-onnx-v${SHERPA_ONNX_VERSION}-android.tar.bz2"
+          extract_dir="$RUNNER_TEMP/sherpa-onnx-android"
+          curl -L -o "$archive" "https://github.com/k2-fsa/sherpa-onnx/releases/download/v${SHERPA_ONNX_VERSION}/sherpa-onnx-v${SHERPA_ONNX_VERSION}-android.tar.bz2"
+          mkdir -p "$extract_dir"
+          tar -xjf "$archive" -C "$extract_dir"
+          lib_path="$(find "$extract_dir" -type f -path '*/x86_64/*' -name 'libsherpa-onnx-c-api.so' -print -quit)"
+          if [[ -z "$lib_path" ]]; then
+            echo "Unable to find x86_64 libsherpa-onnx-c-api.so in official sherpa-onnx Android archive" >&2
+            exit 1
+          fi
+          echo "SHERPA_ONNX_LIB_DIR=$(dirname "$lib_path")" >> "$GITHUB_ENV"
       - name: Install Maestro
         run: |
           curl -Ls "https://get.maestro.mobile.dev" | bash
@@ -64,13 +81,15 @@ jobs:
       - name: Build debug APK (x86_64 for emulator)
         env:
           ANDROID_NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/${{ env.NDK_VERSION }}
-        run: bun run tauri android build --debug --target x86_64 --apk
+          ANDROID_NDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}/ndk/${{ env.NDK_VERSION }}
+        run: bun run tauri android build --debug --target x86_64 --apk --features android-asr
       # Run here, not as a standalone job: the build above generates gen/android's
       # tauri.settings.gradle (machine-specific, not committed), which gradle needs.
       - name: Kotlin unit tests
         working-directory: src-tauri/gen/android
         env:
           ANDROID_NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/${{ env.NDK_VERSION }}
+          ANDROID_NDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}/ndk/${{ env.NDK_VERSION }}
         # via bash so it runs regardless of the committed wrapper exec bit
         run: bash ./gradlew :app:testUniversalDebugUnitTest
       - name: Resolve APK path (deterministic; tauri merges a single --target to "universal")
@@ -82,6 +101,15 @@ jobs:
           test -f "$apk" || apk="$(find "$base" -name 'app-*-debug.apk' | head -1)"
           test -f "$apk" || { echo "::error::debug APK not found under $base"; exit 1; }
           echo "path=$apk" >> "$GITHUB_OUTPUT"
+      - name: Guard 16 KB Android .so alignment
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/${{ env.NDK_VERSION }}
+          ANDROID_NDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}/ndk/${{ env.NDK_VERSION }}
+          LLVM_OBJDUMP: ${{ env.ANDROID_SDK_ROOT }}/ndk/${{ env.NDK_VERSION }}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-objdump
+        run: >
+          bun scripts/check-android-so-alignment.ts
+          "${{ steps.apk.outputs.path }}"
+          "$SHERPA_ONNX_LIB_DIR"
       - name: AVD cache
         uses: actions/cache@v4
         id: avd-cache
