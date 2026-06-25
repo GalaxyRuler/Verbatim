@@ -235,6 +235,11 @@ jobs:
       - name: Run packaged smoke (Linux)
         if: runner.os == 'Linux'
         run: |
+          # The smoke launches the raw target/release binary (not the installed
+          # .deb), so the dynamically-linked onnxruntime must be discoverable at
+          # runtime. Without this the binary exits 127 (loader can't find
+          # libonnxruntime.so).
+          export LD_LIBRARY_PATH="${ORT_LIB_LOCATION:-}:${LD_LIBRARY_PATH:-}"
           smoke_args=(--artifact-dir native-smoke-artifacts)
           if [ -n "${VERBATIM_SMOKE_MICROPHONE:-}" ]; then
             smoke_args+=(--smoke-microphone "$VERBATIM_SMOKE_MICROPHONE")
