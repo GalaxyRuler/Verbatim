@@ -4,7 +4,7 @@ Verbatim is **one Tauri codebase** that targets desktop (Windows/macOS/Linux), A
 
 ## TL;DR
 
-- **One trunk: `main`.** It builds *all* platforms. There is **no separate "desktop branch" and "Android branch".**
+- **One trunk: `main`.** It builds _all_ platforms. There is **no separate "desktop branch" and "Android branch".**
 - **Platforms are separated by `#[cfg(...)]` + CI path filters, not by branches.**
 - **Feature branches are short-lived** — rebase often, merge fast (days, not weeks).
 
@@ -33,7 +33,7 @@ A permanent `android` (or `desktop`) branch would have to re-merge every change 
 - **Do not mark a path-filtered check as required.** A required check that is skipped by its `paths:` filter sits "Expected — waiting" and deadlocks the PR forever. To require a platform lane, first remove its path filter so it runs on every PR.
 - Non-required lanes (e.g. packaged-smoke) may be red without blocking merge; fix them in their own PRs.
 
-## When a separate branch *is* allowed
+## When a separate branch _is_ allowed
 
 - Short-lived feature / spike / docs branches (the norm).
 - A `release/x.y` branch **only** during release stabilization, deleted afterward.
