@@ -63,6 +63,7 @@ import { formatDateTime } from "@/utils/dateFormat";
 import {
   bubbleCornerSnapshot,
   deleteHistoryEntry,
+  engineDictationEnabled,
   nativeTranscriptHistory,
   onPermissions,
   openAccessibilitySettings,
@@ -71,6 +72,7 @@ import {
   permissionSnapshot,
   requestMicrophone,
   requestSpeechModelDownload,
+  setEngineDictationEnabled,
   setBubbleCorner as setNativeBubbleCorner,
   syncTextFormatter,
 } from "./bridge";
@@ -139,6 +141,8 @@ declare global {
       bubbleCornerSnapshot?: () => string;
       setBubbleCorner?: (corner: string) => string;
       openExternalUrl?: (url: string) => boolean;
+      engineDictationEnabled?: () => boolean;
+      setEngineDictationEnabled?: (enabled: boolean) => boolean;
     };
   }
 }
@@ -2266,6 +2270,7 @@ function SettingsTab({
   const [historyLimitDraft, setHistoryLimitDraft] = useState("100");
   const [bubbleCorner, setBubbleCorner] =
     useState<AndroidBubbleCorner>("top-right");
+  const [nativeEngineEnabled, setNativeEngineEnabled] = useState(false);
   const [version, setVersion] = useState("");
 
   const rawVolume = settings?.audio_feedback_volume ?? 0.5;
@@ -2324,6 +2329,10 @@ function SettingsTab({
   }, [settings?.overlay_position]);
 
   useEffect(() => {
+    void engineDictationEnabled().then(setNativeEngineEnabled);
+  }, []);
+
+  useEffect(() => {
     if (settingsSheet === "historyLimit") {
       setHistoryLimitDraft(String(historyLimit));
     }
@@ -2339,6 +2348,11 @@ function SettingsTab({
     setBubbleCorner(corner);
     void setNativeBubbleCorner(corner);
     closeSheet();
+  };
+
+  const handleNativeEngineToggle = async () => {
+    const next = await setEngineDictationEnabled(!nativeEngineEnabled);
+    setNativeEngineEnabled(next);
   };
 
   const handleLanguageSelect = async (language: SupportedLanguageCode) => {
@@ -2602,6 +2616,21 @@ function SettingsTab({
                   !settings?.mute_while_recording,
                 )
               }
+            />
+          </div>
+          <div className="android-settings-row">
+            <div>
+              <span>{t("android.settings.onDeviceEngine.title")}</span>
+              <div className="android-muted">
+                {nativeEngineEnabled
+                  ? t("android.settings.onDeviceEngine.engine")
+                  : t("android.settings.onDeviceEngine.fallback")}
+              </div>
+            </div>
+            <Switch
+              checked={nativeEngineEnabled}
+              label={t("android.settings.onDeviceEngine.title")}
+              onClick={() => void handleNativeEngineToggle()}
             />
           </div>
           <button

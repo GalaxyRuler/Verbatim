@@ -13,6 +13,8 @@ Default permissions for the plugin
 - `allow-sync-text-formatter`
 - `allow-bubble-corner-snapshot`
 - `allow-set-bubble-corner`
+- `allow-engine-dictation-enabled`
+- `allow-set-engine-dictation-enabled`
 - `allow-start-bubble`
 - `allow-stop-bubble`
 - `allow-request-microphone`
@@ -78,6 +80,32 @@ Enables the delete_history_entry command without any pre-configured scope.
 <td>
 
 Denies the delete_history_entry command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`verbatim-android:allow-engine-dictation-enabled`
+
+</td>
+<td>
+
+Enables the engine_dictation_enabled command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`verbatim-android:deny-engine-dictation-enabled`
+
+</td>
+<td>
+
+Denies the engine_dictation_enabled command without any pre-configured scope.
 
 </td>
 </tr>
@@ -364,6 +392,32 @@ Enables the set_bubble_corner command without any pre-configured scope.
 <td>
 
 Denies the set_bubble_corner command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`verbatim-android:allow-set-engine-dictation-enabled`
+
+</td>
+<td>
+
+Enables the set_engine_dictation_enabled command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`verbatim-android:deny-set-engine-dictation-enabled`
+
+</td>
+<td>
+
+Denies the set_engine_dictation_enabled command without any pre-configured scope.
 
 </td>
 </tr>

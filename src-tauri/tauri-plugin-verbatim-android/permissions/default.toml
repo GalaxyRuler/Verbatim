@@ -12,6 +12,8 @@ permissions = [
   "allow-sync-text-formatter",
   "allow-bubble-corner-snapshot",
   "allow-set-bubble-corner",
+  "allow-engine-dictation-enabled",
+  "allow-set-engine-dictation-enabled",
   "allow-start-bubble",
   "allow-stop-bubble",
   "allow-request-microphone",
