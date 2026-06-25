@@ -127,8 +127,8 @@ const RULES: Rule[] = [
   },
   {
     id: "github-token",
-    description: "GitHub personal access / app token.",
-    regex: /\bgh[pousr]_[A-Za-z0-9]{36,}\b/g,
+    description: "GitHub token (classic gh*_ and fine-grained github_pat_).",
+    regex: /\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{30,})\b/g,
   },
   {
     id: "slack-token",
