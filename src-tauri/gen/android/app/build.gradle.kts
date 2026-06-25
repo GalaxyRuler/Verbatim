@@ -13,6 +13,12 @@ val tauriProperties = Properties().apply {
     }
 }
 
+val sherpaOnnxLibDir = System.getenv("SHERPA_ONNX_LIB_DIR")
+val sherpaOnnxAndroidAbi = System.getenv("SHERPA_ONNX_ANDROID_ABI")
+    ?: inferSherpaOnnxAndroidAbi(sherpaOnnxLibDir)
+val stagedSherpaOnnxAndroidAbi = sherpaOnnxAndroidAbi ?: "unused"
+val stagedSherpaOnnxJniLibsDir = layout.buildDirectory.dir("generated/sherpa-onnx-jniLibs")
+
 android {
     compileSdk = 36
     namespace = "com.galaxyruler.verbatim"
@@ -30,7 +36,8 @@ android {
             isDebuggable = true
             isJniDebuggable = true
             isMinifyEnabled = false
-            packaging {                jniLibs.keepDebugSymbols.add("*/arm64-v8a/*.so")
+            packaging {
+                jniLibs.keepDebugSymbols.add("*/arm64-v8a/*.so")
                 jniLibs.keepDebugSymbols.add("*/armeabi-v7a/*.so")
                 jniLibs.keepDebugSymbols.add("*/x86/*.so")
                 jniLibs.keepDebugSymbols.add("*/x86_64/*.so")
@@ -55,6 +62,24 @@ android {
         unitTests.isIncludeAndroidResources = true
         unitTests.isReturnDefaultValues = true
     }
+    sourceSets {
+        getByName("main") {
+            jniLibs.srcDir(stagedSherpaOnnxJniLibsDir)
+        }
+    }
+}
+
+val stageSherpaOnnxJniLibs by tasks.registering(Copy::class) {
+    onlyIf { !sherpaOnnxLibDir.isNullOrBlank() && !sherpaOnnxAndroidAbi.isNullOrBlank() }
+    if (!sherpaOnnxLibDir.isNullOrBlank()) {
+        from(file(sherpaOnnxLibDir))
+    }
+    include("*.so")
+    into(stagedSherpaOnnxJniLibsDir.map { it.dir(stagedSherpaOnnxAndroidAbi) })
+}
+
+tasks.matching { it.name == "preBuild" }.configureEach {
+    dependsOn(stageSherpaOnnxJniLibs)
 }
 
 rust {
@@ -76,3 +101,18 @@ dependencies {
 }
 
 apply(from = "tauri.build.gradle.kts")
+
+fun inferSherpaOnnxAndroidAbi(libDir: String?): String? {
+    if (libDir.isNullOrBlank()) {
+        return null
+    }
+
+    val normalized = libDir.replace('\\', '/').lowercase()
+    return when {
+        "arm64" in normalized || "aarch64" in normalized -> "arm64-v8a"
+        "armeabi-v7a" in normalized || "armv7" in normalized -> "armeabi-v7a"
+        "x86_64" in normalized -> "x86_64"
+        Regex("(^|/)x86($|/)").containsMatchIn(normalized) -> "x86"
+        else -> null
+    }
+}
