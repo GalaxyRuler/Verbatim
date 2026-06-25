@@ -79,6 +79,14 @@ jobs:
       GGML_F16C: ${{ matrix.target != 'aarch64-apple-darwin' && 'OFF' || '' }}
 
     steps:
+      - name: Enable long paths (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" `
+            -Name "LongPathsEnabled" -Value 1 -PropertyType DWORD -Force
+          git config --system core.longpaths true
+
       - uses: actions/checkout@v4
 
       - uses: oven-sh/setup-bun@v2
@@ -151,19 +159,29 @@ jobs:
             choco install ninja -y --no-progress
           }
 
-      - name: Install Vulkan SDK (Windows x64)
-        if: runner.os == 'Windows'
+      - name: Install Vulkan SDK
+        # Linux also needs it: whisper-rs-sys' ggml-vulkan cmake requires glslc, which
+        # apt's glslang-tools does not provide (only glslangValidator). Matches native-backend.yml.
+        if: runner.os == 'Windows' || runner.os == 'Linux'
         uses: humbletim/install-vulkan-sdk@v1.2
         with:
           version: 1.4.309.0
           cache: true
+
+      - name: Verify Linux Vulkan shader compiler
+        if: runner.os == 'Linux'
+        run: |
+          command -v glslc
+          glslc --version
 
       - name: Configure Windows native build
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $drive = Split-Path -Qualifier $env:GITHUB_WORKSPACE
-          $targetDir = "$drive\t\verbatim-native-smoke"
+          # Keep CARGO_TARGET_DIR short: the deeply nested ggml-vulkan vulkan-shaders-gen
+          # ExternalProject TryCompile path overflows MAX_PATH (260) under a longer dir.
+          $targetDir = "$drive\t"
           New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
           echo "CARGO_TARGET_DIR=$targetDir" >> $env:GITHUB_ENV
           echo "CMAKE_GENERATOR=Ninja" >> $env:GITHUB_ENV
