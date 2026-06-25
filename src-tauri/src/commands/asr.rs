@@ -3,13 +3,15 @@
 use crate::asr::offline::OfflineRecognizer;
 use crate::asr::streaming::StreamingRecognizer;
 use crate::asr::AsrModelPaths;
+use once_cell::sync::Lazy;
 use serde::Serialize;
 use specta::Type;
 use std::path::PathBuf;
 use std::sync::Mutex;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter};
 
 const SAMPLE_RATE: i32 = 16_000;
+static GLOBAL_ASR_SESSION: Lazy<Mutex<Option<AsrCommandSession>>> = Lazy::new(|| Mutex::new(None));
 
 #[cfg_attr(not(test), allow(dead_code))]
 pub fn permission_ids() -> [&'static str; 3] {
@@ -17,9 +19,7 @@ pub fn permission_ids() -> [&'static str; 3] {
 }
 
 #[derive(Default)]
-pub struct AsrCommandState {
-    session: Mutex<Option<AsrCommandSession>>,
-}
+pub struct AsrCommandState;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum AsrCommandEvent {
@@ -32,6 +32,37 @@ pub struct AsrCommandSession {
     offline: OfflineRecognizer,
     buffered_samples: Vec<f32>,
     last_partial: String,
+}
+
+pub fn global_start(paths: AsrModelPaths, lang: &str) -> anyhow::Result<()> {
+    let session = AsrCommandSession::start(paths, lang)?;
+    let mut guard = GLOBAL_ASR_SESSION
+        .lock()
+        .map_err(|_| anyhow::anyhow!("ASR session lock is poisoned"))?;
+    *guard = Some(session);
+    Ok(())
+}
+
+pub fn global_feed_pcm(frames: &[f32]) -> anyhow::Result<Vec<AsrCommandEvent>> {
+    let mut guard = GLOBAL_ASR_SESSION
+        .lock()
+        .map_err(|_| anyhow::anyhow!("ASR session lock is poisoned"))?;
+    let session = guard
+        .as_mut()
+        .ok_or_else(|| anyhow::anyhow!("ASR session has not been started"))?;
+
+    session.feed_pcm(frames)
+}
+
+pub fn global_stop() -> anyhow::Result<Vec<AsrCommandEvent>> {
+    let mut guard = GLOBAL_ASR_SESSION
+        .lock()
+        .map_err(|_| anyhow::anyhow!("ASR session lock is poisoned"))?;
+    let mut session = guard
+        .take()
+        .ok_or_else(|| anyhow::anyhow!("ASR session has not been started"))?;
+
+    session.stop()
 }
 
 impl AsrCommandSession {
@@ -81,60 +112,20 @@ pub struct AsrTextPayload {
 #[specta::specta]
 pub fn asr_start(app: AppHandle, model_id: String, lang: String) -> Result<(), String> {
     let paths = AsrModelPaths::for_dir(&resolve_model_dir(&app, &model_id)?);
-    let session = AsrCommandSession::start(paths, &lang).map_err(|error| error.to_string())?;
-    let state = app
-        .try_state::<AsrCommandState>()
-        .ok_or_else(|| "ASR command state is unavailable".to_string())?;
-    let mut guard = state
-        .session
-        .lock()
-        .map_err(|_| "ASR command state lock is poisoned".to_string())?;
-
-    *guard = Some(session);
-    Ok(())
+    global_start(paths, &lang).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
 #[specta::specta]
 pub fn asr_feed_pcm(app: AppHandle, frames: Vec<f32>) -> Result<(), String> {
-    let events = {
-        let state = app
-            .try_state::<AsrCommandState>()
-            .ok_or_else(|| "ASR command state is unavailable".to_string())?;
-        let mut guard = state
-            .session
-            .lock()
-            .map_err(|_| "ASR command state lock is poisoned".to_string())?;
-        let session = guard
-            .as_mut()
-            .ok_or_else(|| "ASR session has not been started".to_string())?;
-
-        session
-            .feed_pcm(&frames)
-            .map_err(|error| error.to_string())?
-    };
-
+    let events = global_feed_pcm(&frames).map_err(|error| error.to_string())?;
     emit_events(&app, events)
 }
 
 #[tauri::command]
 #[specta::specta]
 pub fn asr_stop(app: AppHandle) -> Result<(), String> {
-    let events = {
-        let state = app
-            .try_state::<AsrCommandState>()
-            .ok_or_else(|| "ASR command state is unavailable".to_string())?;
-        let mut guard = state
-            .session
-            .lock()
-            .map_err(|_| "ASR command state lock is poisoned".to_string())?;
-        let mut session = guard
-            .take()
-            .ok_or_else(|| "ASR session has not been started".to_string())?;
-
-        session.stop().map_err(|error| error.to_string())?
-    };
-
+    let events = global_stop().map_err(|error| error.to_string())?;
     emit_events(&app, events)
 }
 
