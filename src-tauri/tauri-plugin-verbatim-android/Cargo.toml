@@ -2,7 +2,8 @@
 name = "tauri-plugin-verbatim-android"
 version = "0.1.0"
 authors = [ "GalaxyRuler" ]
-description = ""
+description = "Verbatim Android native bridge Tauri plugin"
+license = "MIT"
 edition = "2021"
 rust-version = "1.77.2"
 exclude = ["/examples", "/dist-js", "/guest-js", "/node_modules"]
