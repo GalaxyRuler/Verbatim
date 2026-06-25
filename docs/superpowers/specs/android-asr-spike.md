@@ -171,3 +171,112 @@ Recommended maintainer decision:
 1. Patch or fork `sherpa-rs-sys` so generated bindings and vendored headers match sherpa-onnx `v1.13.3` or newer, then repeat Task 1 Step 2-4.
 2. Alternatively, use sherpa-onnx's official Rust API if it now supersedes `sherpa-rs`; repeat the same 16 KB alignment and AVD smoke checks before wiring the plugin.
 3. Do not ship a non-16 KB-compliant prebuilt or rely on the `sherpa-rs 0.6.8` default `v1.12.9` binary download.
+
+## Amendment 1 Re-Spike - Official sherpa-onnx crate
+
+Date: 2026-06-25
+
+Plan amendment: Use the official `sherpa-onnx` crate instead of third-party `sherpa-rs`.
+
+### Step 2 - Cross-Compile Official sherpa-onnx Crate for Android
+
+Scratch directory:
+
+```text
+C:\CodexScratch\verbatim-android-asr-g0-official\official-sherpa-onnx-android-smoke
+```
+
+Pinned Rust crate:
+
+```toml
+sherpa-onnx = { version = "=1.13.3", default-features = false, features = ["shared"] }
+```
+
+Android toolchain:
+
+```text
+ANDROID_NDK_HOME=C:\Users\Admin\AppData\Local\Android\Sdk\ndk\28.2.13676358
+```
+
+Build commands:
+
+```powershell
+$env:SHERPA_ONNX_LIB_DIR = 'C:\CodexScratch\verbatim-android-asr-g0-official\android-arm64-v1.13.3\lib'
+cargo build --release --target aarch64-linux-android
+
+$env:SHERPA_ONNX_LIB_DIR = 'C:\CodexScratch\verbatim-android-asr-g0-official\android-x86_64-v1.13.3\lib'
+cargo build --release --target x86_64-linux-android
+```
+
+Result: PASS for both `aarch64-linux-android` and `x86_64-linux-android`.
+
+API surface confirmed in `sherpa-onnx 1.13.3`:
+
+- Offline ASR: `OfflineRecognizer`, `OfflineRecognizerConfig`, `OfflineWhisperModelConfig`
+- Streaming ASR: `OnlineRecognizer`, `OnlineRecognizerConfig`, `OnlineTransducerModelConfig`
+- VAD: `VoiceActivityDetector`, `VadModelConfig`, `SileroVadModelConfig`
+- WAV I/O: `Wave::read`
+
+The official crate's build script does not auto-download Android archives, but it honors `SHERPA_ONNX_LIB_DIR` for Android targets. The scratch build used `SHERPA_ONNX_LIB_DIR` pointed at the verified `v1.13.3` ABI-specific `lib` directories copied from `sherpa-onnx-v1.13.3-android.tar.bz2`.
+
+### Step 3 - Verify Alignment
+
+Command:
+
+```powershell
+$objdump = "$env:LOCALAPPDATA\Android\Sdk\ndk\28.2.13676358\toolchains\llvm\prebuilt\windows-x86_64\bin\llvm-objdump.exe"
+& $objdump -p <lib>.so
+```
+
+Runtime library alignment:
+
+| ABI | Library | Min LOAD align | Result |
+| --- | --- | --- | --- |
+| arm64-v8a | libonnxruntime.so | 2**14 | PASS |
+| arm64-v8a | libsherpa-onnx-c-api.so | 2**14 | PASS |
+| x86_64 | libonnxruntime.so | 2**14 | PASS |
+| x86_64 | libsherpa-onnx-c-api.so | 2**14 | PASS |
+
+Result: PASS.
+
+### Step 4 - AVD Smoke Transcription
+
+AVD:
+
+```text
+Verbatim_API_35_x86_64
+```
+
+Model:
+
+```text
+sherpa-onnx-whisper-tiny.en.tar.bz2
+```
+
+Fixture:
+
+```text
+sherpa-onnx-whisper-tiny.en/test_wavs/0.wav
+```
+
+Command:
+
+```powershell
+adb shell "cd /data/local/tmp/verbatim-asr-official-smoke && LD_LIBRARY_PATH=/data/local/tmp/verbatim-asr-official-smoke/lib ./official-sherpa-onnx-android-smoke /data/local/tmp/verbatim-asr-official-smoke/model /data/local/tmp/verbatim-asr-official-smoke/wav/0.wav"
+```
+
+Observed output:
+
+```text
+creating recognizer
+reading wav
+transcribing 16000 Hz, 106000 samples
+transcription returned
+After early nightfall, the yellow lamps would light up here and there the squalid quarter of the brothels.
+```
+
+Result: PASS. The official crate removes the previous ABI-skew crash and returns non-empty text on the AVD.
+
+### Step 5 - Checkpoint
+
+Task 1 is green under Amendment 1. Proceed to Task 2 using the official `sherpa-onnx` crate.
