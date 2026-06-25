@@ -2,6 +2,7 @@ mod actions;
 pub mod adaptive;
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 mod apple_intelligence;
+pub mod asr;
 mod audio_feedback;
 pub mod audio_toolkit;
 pub mod cli;
