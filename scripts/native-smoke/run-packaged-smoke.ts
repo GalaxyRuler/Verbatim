@@ -302,8 +302,12 @@ function resolveAppPath(explicit: string | undefined): string {
   const candidates =
     hostPlatform === "win32"
       ? [
+          // Cargo package name is "verbatim", so the raw binary is verbatim.exe;
+          // "Verbatim"/"verbatim-app" kept for productName/legacy layouts.
+          join(targetDir, "release", "verbatim.exe"),
           join(targetDir, "release", "Verbatim.exe"),
           join(targetDir, "release", "verbatim-app.exe"),
+          join(targetDir, "x86_64-pc-windows-msvc", "release", "verbatim.exe"),
           join(targetDir, "x86_64-pc-windows-msvc", "release", "Verbatim.exe"),
           join(
             targetDir,
@@ -335,12 +339,17 @@ function resolveAppPath(explicit: string | undefined): string {
               "MacOS",
               "Verbatim",
             ),
+            join(targetDir, "aarch64-apple-darwin", "release", "verbatim"),
             join(targetDir, "aarch64-apple-darwin", "release", "verbatim-app"),
+            join(targetDir, "release", "verbatim"),
             join(targetDir, "release", "verbatim-app"),
           ]
         : [
+            // Cargo package name is "verbatim", so the raw binary is "verbatim".
+            join(targetDir, "release", "verbatim"),
             join(targetDir, "release", "verbatim-app"),
             join(targetDir, "release", "Verbatim"),
+            join(targetDir, "x86_64-unknown-linux-gnu", "release", "verbatim"),
             join(
               targetDir,
               "x86_64-unknown-linux-gnu",
