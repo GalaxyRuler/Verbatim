@@ -2,6 +2,7 @@ mod actions;
 pub mod adaptive;
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 mod apple_intelligence;
+pub mod asr;
 mod audio_feedback;
 pub mod audio_toolkit;
 pub mod cli;
@@ -11,6 +12,7 @@ mod credentials;
 mod dictation_transaction;
 mod dictionary;
 mod dictionary_learning;
+mod elevation_watch;
 mod helpers;
 mod input;
 mod insertion;
@@ -749,6 +751,11 @@ fn run_native_smoke_resource_probe(app: &AppHandle) -> Vec<String> {
             }
         }
 
+        // `Image::from_path` is only available on desktop (see the cfg-gated
+        // import of `tauri::image::Image`). Native smoke is a desktop packaging
+        // feature, so decode-validation is desktop-only; on Android/iOS the
+        // file existence/size checks above are sufficient.
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
         if matches!(resource.kind, NativeSmokeResourceKind::Image) {
             if let Err(error) = Image::from_path(&path) {
                 failures.push(format!(
@@ -1352,6 +1359,11 @@ fn run_inner(cli_args: CliArgs) {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_store::Builder::default().build());
 
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        builder = builder.plugin(tauri_plugin_verbatim_android::init());
+    }
+
     #[cfg(target_os = "macos")]
     {
         builder = builder.plugin(tauri_plugin_macos_permissions::init());
@@ -1360,6 +1372,7 @@ fn run_inner(cli_args: CliArgs) {
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         builder = builder
+            .plugin(tauri_plugin_notification::init())
             .plugin(tauri_plugin_updater::Builder::new().build())
             .plugin(tauri_plugin_global_shortcut::Builder::new().build())
             .plugin(tauri_plugin_autostart::init(
@@ -1483,6 +1496,12 @@ fn run_inner(cli_args: CliArgs) {
             std::thread::spawn(|| {
                 let _ = crate::managers::transcription::get_available_accelerators();
             });
+
+            // Warn when a higher-integrity ("run as administrator") window is in
+            // the foreground: Windows UIPI silently blocks our keyboard capture
+            // there, so the dictation shortcut does nothing. Windows-only;
+            // compiles to a no-op on other platforms.
+            elevation_watch::spawn(app_handle.clone());
 
             // If start_hidden but tray is disabled, we must show the window
             // anyway. Without a tray icon, the dock is the only way back in.

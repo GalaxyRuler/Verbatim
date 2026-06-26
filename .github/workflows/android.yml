@@ -1,0 +1,159 @@
+# Phase 0 / Task 0.3 — Android CI: Kotlin unit tests + emulator E2E (Maestro).
+# Incorporates v2 audit fixes: caching, deterministic APK path, failure artifacts,
+# regeneration guard, and a note that ARM64 performance (Gate G2) cannot run on hosted x86_64 runners.
+name: android
+
+on:
+  pull_request:
+    paths:
+      - "src/android/**"
+      - "src-tauri/gen/android/**"
+      - "src-tauri/**"
+      - "maestro/**"
+      - "scripts/check-android-so-alignment.ts"
+      - ".github/workflows/android.yml"
+  workflow_dispatch:
+
+env:
+  NDK_VERSION: "28.2.13676358" # r28 — 16 KB-aligned by default (Gate G1)
+  SHERPA_ONNX_VERSION: "1.13.3"
+
+jobs:
+  # Guard: a regeneration (`tauri android init`) must not silently delete committed custom native code.
+  regen-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assert custom native files present
+        shell: bash
+        run: |
+          set -e
+          base="src-tauri/gen/android/app/src/main/java/com/galaxyruler/verbatim"
+          for f in MainActivity.kt FloatingBubbleService.kt VerbatimAccessibilityService.kt AndroidSpeechSupport.kt; do
+            test -f "$base/$f" || { echo "::error::missing committed native file $base/$f"; exit 1; }
+          done
+          test -f "src-tauri/gen/android/app/src/test/java/com/galaxyruler/verbatim/SmokeTest.kt" || { echo "::error::missing SmokeTest.kt"; exit 1; }
+
+  e2e:
+    runs-on: ubuntu-latest # HW-accelerated emulation is Linux-only
+    timeout-minutes: 60 # backstop: a dead-device `adb` once hung this job for the full 6h
+    steps:
+      - uses: actions/checkout@v4
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: "21" }
+      - uses: oven-sh/setup-bun@v2
+      - uses: dtolnay/rust-toolchain@stable
+        with: { targets: x86_64-linux-android }
+      - uses: android-actions/setup-android@v3
+      - name: Install NDK
+        run: sdkmanager "ndk;${{ env.NDK_VERSION }}"
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: "src-tauri -> target" }
+      - uses: actions/cache@v4 # bun deps
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ hashFiles('bun.lock') }}
+      - run: bun install --frozen-lockfile
+      - name: Download official sherpa-onnx Android runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/sherpa-onnx-v${SHERPA_ONNX_VERSION}-android.tar.bz2"
+          extract_dir="$RUNNER_TEMP/sherpa-onnx-android"
+          curl -L -o "$archive" "https://github.com/k2-fsa/sherpa-onnx/releases/download/v${SHERPA_ONNX_VERSION}/sherpa-onnx-v${SHERPA_ONNX_VERSION}-android.tar.bz2"
+          mkdir -p "$extract_dir"
+          tar -xjf "$archive" -C "$extract_dir"
+          lib_path="$(find "$extract_dir" -type f -path '*/x86_64/*' -name 'libsherpa-onnx-c-api.so' -print -quit)"
+          if [[ -z "$lib_path" ]]; then
+            echo "Unable to find x86_64 libsherpa-onnx-c-api.so in official sherpa-onnx Android archive" >&2
+            exit 1
+          fi
+          echo "SHERPA_ONNX_LIB_DIR=$(dirname "$lib_path")" >> "$GITHUB_ENV"
+      - name: Install Maestro
+        run: |
+          curl -Ls "https://get.maestro.mobile.dev" | bash
+          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
+      - name: Build debug APK (x86_64 for emulator)
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/${{ env.NDK_VERSION }}
+          ANDROID_NDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}/ndk/${{ env.NDK_VERSION }}
+        run: bun run tauri android build --debug --target x86_64 --apk --features android-asr
+      # Run here, not as a standalone job: the build above generates gen/android's
+      # tauri.settings.gradle (machine-specific, not committed), which gradle needs.
+      - name: Kotlin unit tests
+        working-directory: src-tauri/gen/android
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/${{ env.NDK_VERSION }}
+          ANDROID_NDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}/ndk/${{ env.NDK_VERSION }}
+        # via bash so it runs regardless of the committed wrapper exec bit
+        run: bash ./gradlew :app:testUniversalDebugUnitTest
+      - name: Resolve APK path (deterministic; tauri merges a single --target to "universal")
+        id: apk
+        run: |
+          set -e
+          base="src-tauri/gen/android/app/build/outputs/apk"
+          apk="$base/universal/debug/app-universal-debug.apk"
+          test -f "$apk" || apk="$(find "$base" -name 'app-*-debug.apk' | head -1)"
+          test -f "$apk" || { echo "::error::debug APK not found under $base"; exit 1; }
+          echo "path=$apk" >> "$GITHUB_OUTPUT"
+      - name: Guard 16 KB Android .so alignment
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/${{ env.NDK_VERSION }}
+          ANDROID_NDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}/ndk/${{ env.NDK_VERSION }}
+          LLVM_OBJDUMP: ${{ env.ANDROID_SDK_ROOT }}/ndk/${{ env.NDK_VERSION }}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-objdump
+        run: >
+          bun scripts/check-android-so-alignment.ts
+          "${{ steps.apk.outputs.path }}"
+          "$SHERPA_ONNX_LIB_DIR"
+      - name: AVD cache
+        uses: actions/cache@v4
+        id: avd-cache
+        with:
+          path: |
+            ~/.android/avd/*
+            ~/.android/adb*
+          key: avd-34
+      - name: Create AVD snapshot (cache miss)
+        if: steps.avd-cache.outputs.cache-hit != 'true'
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          force-avd-creation: false
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
+          script: echo "avd warmed"
+      - name: E2E (Maestro)
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          force-avd-creation: false
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
+          # Capture logcat + screenshot INSIDE the script, while the emulator is still alive.
+          # A standalone post-step cannot: the action kills the emulator on script failure,
+          # after which `adb` blocks on "- waiting for device -" forever (this once hung the
+          # job for 6h). `timeout` guards each adb call. Kept to single logical lines — the
+          # action's `sh` mis-parses a multi-line `if/fi` block here.
+          script: |
+            adb install -r "${{ steps.apk.outputs.path }}"
+            maestro test maestro/ || { code=$?; echo "Maestro failed ($code); capturing diagnostics while the device is alive"; timeout 60 adb logcat -d > logcat.txt 2>/dev/null || true; timeout 60 adb exec-out screencap -p > screen.png 2>/dev/null || true; exit $code; }
+      - name: Upload failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-failure
+          path: |
+            logcat.txt
+            screen.png
+            ~/.maestro/tests/**
+
+# NOTE (Gate G2): x86_64 emulators cannot establish ARM64 ASR latency/RAM/thermal behavior.
+# Physical-device benchmarks (Snapdragon 6xx/7xx + a flagship) must run on a self-hosted/device-farm
+# lane, scheduled separately — they are NOT part of this PR gate.
+# NOTE (Maestro): standard runtime permission dialogs are automatable, but Accessibility/overlay
+# Settings and OEM permission managers are not — those flows need Appium/UiAutomator (added with Phase 2).

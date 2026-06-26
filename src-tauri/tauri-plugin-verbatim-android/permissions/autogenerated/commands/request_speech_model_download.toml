@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-request-speech-model-download"
+description = "Enables the request_speech_model_download command without any pre-configured scope."
+commands.allow = ["request_speech_model_download"]
+
+[[permission]]
+identifier = "deny-request-speech-model-download"
+description = "Denies the request_speech_model_download command without any pre-configured scope."
+commands.deny = ["request_speech_model_download"]

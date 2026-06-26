@@ -546,7 +546,7 @@
 .android-post-process-option {
   color: inherit;
   font: inherit;
-  text-align: left;
+  text-align: start;
   width: 100%;
 }
 
@@ -577,7 +577,7 @@
   justify-content: space-between;
   min-height: 58px;
   padding: 0 16px;
-  text-align: left;
+  text-align: start;
   width: 100%;
 }
 
@@ -589,7 +589,7 @@
 .android-settings-row .android-muted {
   margin: 0;
   max-width: 48%;
-  text-align: right;
+  text-align: end;
 }
 
 .android-settings-row.android-panel {
@@ -741,7 +741,7 @@
   justify-content: space-between;
   min-height: 56px;
   padding: 12px 14px;
-  text-align: left;
+  text-align: start;
   width: 100%;
 }
 

@@ -34,12 +34,10 @@ import {
   Star,
   Sun,
   Trash2,
-  Volume1,
   X,
 } from "lucide-react";
 import {
   commands,
-  type AudioDevice,
   type DictionaryEntry,
   type HistoryEntry,
   type LLMPrompt,
@@ -56,11 +54,26 @@ import {
   type SupportedLanguageCode,
 } from "@/i18n";
 import { getDisplayVersion } from "@/lib/appVersion";
+import { getLanguageDirection, initializeRTL } from "@/lib/utils/rtl";
 import { useDictionaryStore } from "@/stores/dictionaryStore";
 import { useModelStore } from "@/stores/modelStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useSnippetsStore } from "@/stores/snippetsStore";
 import { formatDateTime } from "@/utils/dateFormat";
+import {
+  bubbleCornerSnapshot,
+  deleteHistoryEntry,
+  nativeTranscriptHistory,
+  onPermissions,
+  openAccessibilitySettings,
+  openExternalUrl,
+  openOverlaySettings,
+  permissionSnapshot,
+  requestMicrophone,
+  requestSpeechModelDownload,
+  setBubbleCorner as setNativeBubbleCorner,
+  syncTextFormatter,
+} from "./bridge";
 import "./AndroidApp.css";
 
 type AndroidTab = "home" | "history" | "models" | "settings";
@@ -71,8 +84,6 @@ type SettingsSubscreen =
   | { type: "postProcessing" }
   | { type: "about" };
 type SettingsSheet =
-  | "microphone"
-  | "output"
   | "bubblePosition"
   | "appLanguage"
   | "historyLimit"
@@ -126,7 +137,7 @@ declare global {
       startBubble: () => void;
       stopBubble: () => void;
       bubbleCornerSnapshot?: () => string;
-      setBubbleCorner?: (corner: AndroidBubbleCorner) => string;
+      setBubbleCorner?: (corner: string) => string;
       openExternalUrl?: (url: string) => boolean;
     };
   }
@@ -152,7 +163,6 @@ const tabs: Array<{ id: AndroidTab; labelKey: string; icon: typeof Home }> = [
 ];
 
 const ANDROID_EXCLUDED_POST_PROCESS_PROVIDERS = new Set(["apple_intelligence"]);
-const DEFAULT_DEVICE_VALUE = "Default";
 const VERBATIM_SOURCE_URL = "https://github.com/GalaxyRuler/Verbatim";
 const HANDY_SOURCE_URL = "https://github.com/cjpais/Handy";
 const androidBubbleCorners: AndroidBubbleCorner[] = [
@@ -162,22 +172,20 @@ const androidBubbleCorners: AndroidBubbleCorner[] = [
   "bottom-right",
 ];
 
-const safeBridge = () => window.VerbatimAndroid;
-
 const openAndroidExternalUrl = (url: string) => {
-  safeBridge()?.openExternalUrl?.(url);
+  void openExternalUrl(url);
+};
+
+const shareTranscript = (text: string) => {
+  if (typeof navigator.share === "function") {
+    void navigator.share({ text }).catch(() => undefined);
+    return;
+  }
+  void navigator.clipboard.writeText(text).catch(() => undefined);
 };
 
 const isAndroidPostProcessProvider = (provider: PostProcessProvider) =>
   !ANDROID_EXCLUDED_POST_PROCESS_PROVIDERS.has(provider.id);
-
-const parsePermissions = (value: string): AndroidPermissionSnapshot => {
-  try {
-    return { ...defaultPermissions, ...JSON.parse(value) };
-  } catch {
-    return defaultPermissions;
-  }
-};
 
 const normalizeBubbleCorner = (
   value: string | null | undefined,
@@ -185,14 +193,6 @@ const normalizeBubbleCorner = (
   androidBubbleCorners.includes(value as AndroidBubbleCorner)
     ? (value as AndroidBubbleCorner)
     : "top-right";
-
-const normalizeDeviceSetting = (value: string | null | undefined): string => {
-  if (!value || value.toLowerCase() === "default") {
-    return DEFAULT_DEVICE_VALUE;
-  }
-
-  return value;
-};
 
 const normalizeRetentionPeriod = (
   value: string | null | undefined,
@@ -215,27 +215,6 @@ const normalizeRetentionPeriod = (
   }
 };
 
-const deviceOptions = (devices: AudioDevice[], defaultLabel: string) => {
-  const seen = new Set(["default"]);
-  return [
-    { value: DEFAULT_DEVICE_VALUE, label: defaultLabel, description: "" },
-    ...devices.flatMap((device) => {
-      const normalized = device.name.toLowerCase();
-      if (seen.has(normalized)) {
-        return [];
-      }
-      seen.add(normalized);
-      return [
-        {
-          value: device.name,
-          label: device.name,
-          description: device.is_default ? defaultLabel : "",
-        },
-      ];
-    }),
-  ];
-};
-
 const soundThemeOptions: SoundTheme[] = ["marimba", "pop", "custom"];
 
 const retentionPeriods: AndroidRetentionPeriod[] = [
@@ -255,11 +234,12 @@ const historyEntryFromAndroidSnapshot = (
   }
 
   const id = Number(entry.id);
-  const timestamp = Number(entry.timestamp);
-  const fallbackTimestamp = Date.now();
-  const normalizedTimestamp = Number.isFinite(timestamp)
-    ? timestamp
-    : fallbackTimestamp;
+  // Native writes System.currentTimeMillis() (ms); the rest of the app (and formatDateTime)
+  // use Unix SECONDS, so normalize here to avoid the "year 58436" mis-scale.
+  const timestampMs = Number(entry.timestamp);
+  const normalizedTimestamp = Math.floor(
+    (Number.isFinite(timestampMs) ? timestampMs : Date.now()) / 1000,
+  );
   return {
     id: Number.isFinite(id) ? id : normalizedTimestamp,
     file_name: "android-native",
@@ -294,8 +274,8 @@ const historyEntryFromAndroidSnapshot = (
 const historyDisplayText = (entry: HistoryEntry): string =>
   entry.post_processed_text || entry.transcription_text;
 
-const readAndroidNativeHistory = (): HistoryEntry[] => {
-  const snapshot = safeBridge()?.nativeTranscriptHistory?.();
+const readAndroidNativeHistory = async (): Promise<HistoryEntry[]> => {
+  const snapshot = await nativeTranscriptHistory();
   if (!snapshot) {
     return [];
   }
@@ -392,22 +372,13 @@ const useAndroidTextFormatterSync = () => {
   const loadSnippetEntries = useSnippetsStore((store) => store.loadEntries);
 
   useEffect(() => {
-    if (!safeBridge()?.syncTextFormatter) {
-      return;
-    }
-
     void Promise.all([loadDictionaryEntries(), loadSnippetEntries()]).catch(
       () => undefined,
     );
   }, [loadDictionaryEntries, loadSnippetEntries]);
 
   useEffect(() => {
-    const bridge = safeBridge();
-    if (!bridge?.syncTextFormatter) {
-      return;
-    }
-
-    bridge.syncTextFormatter(
+    void syncTextFormatter(
       JSON.stringify({
         dictionary_entries: dictionaryEntries.map((entry) => ({
           phrase: entry.phrase,
@@ -440,18 +411,31 @@ export default function AndroidApp() {
   useAndroidTextFormatterSync();
 
   const refreshPermissions = useCallback(() => {
-    const snapshot = safeBridge()?.permissionSnapshot();
-    if (snapshot) {
-      setPermissions(parsePermissions(snapshot));
-    }
+    void permissionSnapshot().then((snapshot) => {
+      if (snapshot && Object.keys(snapshot).length > 0) {
+        setPermissions({
+          ...defaultPermissions,
+          ...(snapshot as Partial<AndroidPermissionSnapshot>),
+        });
+      }
+    });
   }, []);
 
   useEffect(() => {
     refreshPermissions();
-    const interval = window.setInterval(refreshPermissions, 1200);
+    // Push-based updates from the native plugin replace the old 1.2s polling (ADR-1).
+    let listener: { unregister: () => void } | undefined;
+    void onPermissions((snapshot) =>
+      setPermissions({
+        ...defaultPermissions,
+        ...(snapshot as Partial<AndroidPermissionSnapshot>),
+      }),
+    ).then((registered) => {
+      listener = registered;
+    });
     window.addEventListener("focus", refreshPermissions);
     return () => {
-      window.clearInterval(interval);
+      listener?.unregister();
       window.removeEventListener("focus", refreshPermissions);
     };
   }, [refreshPermissions]);
@@ -459,6 +443,12 @@ export default function AndroidApp() {
   useEffect(() => {
     window.localStorage.setItem("verbatim.android.theme", theme);
   }, [theme]);
+
+  // Apply text direction for RTL locales (Arabic/Hebrew/...). The i18n languageChanged
+  // listener handles later switches; this covers the initial load on the Android entry.
+  useEffect(() => {
+    initializeRTL(i18n.language);
+  }, [i18n.language]);
 
   const allPermissionsReady =
     permissions.microphone &&
@@ -486,7 +476,10 @@ export default function AndroidApp() {
   const showSettingsBack = activeTab === "settings" && !!settingsSubscreen;
 
   return (
-    <div className={`android-app android-theme-${theme}`}>
+    <div
+      className={`android-app android-theme-${theme}`}
+      dir={getLanguageDirection(i18n.language)}
+    >
       <main className="android-shell">
         <header className="android-top-bar">
           <div className="android-top-title">
@@ -597,7 +590,6 @@ function AndroidOnboarding({
   refreshPermissions: () => void;
 }) {
   const { t } = useTranslation();
-  const bridge = safeBridge();
   const speechPackCalloutKey = (() => {
     switch (permissions.onDeviceSpeechModelStatus) {
       case "ready":
@@ -620,7 +612,7 @@ function AndroidOnboarding({
       title: t("android.onboarding.microphone.title"),
       description: t("android.onboarding.microphone.description"),
       action: t("android.onboarding.microphone.action"),
-      onClick: () => bridge?.requestMicrophone(),
+      onClick: () => void requestMicrophone(),
       callout: null,
     },
     {
@@ -628,7 +620,7 @@ function AndroidOnboarding({
       title: t("android.onboarding.overlay.title"),
       description: t("android.onboarding.overlay.description"),
       action: t("android.onboarding.overlay.action"),
-      onClick: () => bridge?.openOverlaySettings(),
+      onClick: () => void openOverlaySettings(),
       callout: t("android.onboarding.overlay.callout"),
     },
     {
@@ -636,7 +628,7 @@ function AndroidOnboarding({
       title: t("android.onboarding.accessibility.title"),
       description: t("android.onboarding.accessibility.description"),
       action: t("android.onboarding.accessibility.action"),
-      onClick: () => bridge?.openAccessibilitySettings(),
+      onClick: () => void openAccessibilitySettings(),
       callout: t("android.onboarding.accessibility.callout"),
     },
     {
@@ -654,7 +646,7 @@ function AndroidOnboarding({
       title: t("android.onboarding.speechPack.title"),
       description: t("android.onboarding.speechPack.description"),
       action: t("android.onboarding.speechPack.action"),
-      onClick: () => bridge?.requestSpeechModelDownload(),
+      onClick: () => void requestSpeechModelDownload(),
       callout: t(speechPackCalloutKey),
     },
   ];
@@ -735,23 +727,22 @@ function HomeTab({
   const activeModel = models.find((model) => model.id === currentModel);
   const selectedLanguage = settings?.selected_language || t("common.default");
 
-  const loadLastEntry = useCallback(() => {
-    const nativeEntries = readAndroidNativeHistory();
+  const loadLastEntry = useCallback(async () => {
+    const nativeEntries = await readAndroidNativeHistory();
     if (nativeEntries.length > 0) {
       setLastEntry(nativeEntries[0]);
       return;
     }
 
-    commands.getHistoryEntries(null, 1).then((result) => {
-      if (result.status === "ok") {
-        setLastEntry(result.data.entries[0] ?? null);
-      }
-    });
+    const result = await commands.getHistoryEntries(null, 1);
+    if (result.status === "ok") {
+      setLastEntry(result.data.entries[0] ?? null);
+    }
   }, []);
 
   useEffect(() => {
-    loadLastEntry();
-    const interval = window.setInterval(loadLastEntry, 1500);
+    void loadLastEntry();
+    const interval = window.setInterval(() => void loadLastEntry(), 1500);
     return () => window.clearInterval(interval);
   }, [loadLastEntry]);
 
@@ -849,7 +840,11 @@ function HomeTab({
               <Copy size={17} />
               <span>{t("android.actions.copy")}</span>
             </button>
-            <button type="button" className="android-action">
+            <button
+              type="button"
+              className="android-action"
+              onClick={() => shareTranscript(historyDisplayText(lastEntry))}
+            >
               <Share2 size={17} />
               <span>{t("android.actions.share")}</span>
             </button>
@@ -866,23 +861,30 @@ function HistoryTab() {
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [search, setSearch] = useState("");
 
-  const loadEntries = useCallback(() => {
-    const nativeEntries = readAndroidNativeHistory();
+  const loadEntries = useCallback(async () => {
+    const nativeEntries = await readAndroidNativeHistory();
     if (nativeEntries.length > 0) {
       setEntries(nativeEntries);
       return;
     }
 
-    commands.getHistoryEntries(null, 30).then((result) => {
-      if (result.status === "ok") {
-        setEntries(result.data.entries);
-      }
-    });
+    const result = await commands.getHistoryEntries(null, 30);
+    if (result.status === "ok") {
+      setEntries(result.data.entries);
+    }
   }, []);
 
   useEffect(() => {
-    loadEntries();
+    void loadEntries();
   }, [loadEntries]);
+
+  const handleDeleteEntry = useCallback(
+    async (id: number) => {
+      await deleteHistoryEntry(id);
+      await loadEntries();
+    },
+    [loadEntries],
+  );
 
   const filteredEntries = entries.filter((entry) =>
     historyDisplayText(entry).toLowerCase().includes(search.toLowerCase()),
@@ -910,7 +912,16 @@ function HistoryTab() {
               <article
                 key={entry.id}
                 className="android-history-card"
+                role="button"
+                tabIndex={0}
+                aria-expanded={expanded}
                 onClick={() => setExpandedId(expanded ? null : entry.id)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    setExpandedId(expanded ? null : entry.id);
+                  }
+                }}
               >
                 <div className="android-card-header">
                   <div>
@@ -942,11 +953,25 @@ function HistoryTab() {
                       <Copy size={17} />
                       <span>{t("android.actions.copy")}</span>
                     </button>
-                    <button type="button" className="android-action">
-                      <BookOpen size={17} />
-                      <span>{t("settings.history.learnCorrection")}</span>
+                    <button
+                      type="button"
+                      className="android-action"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        shareTranscript(historyDisplayText(entry));
+                      }}
+                    >
+                      <Share2 size={17} />
+                      <span>{t("android.actions.share")}</span>
                     </button>
-                    <button type="button" className="android-action">
+                    <button
+                      type="button"
+                      className="android-action"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void handleDeleteEntry(entry.id);
+                      }}
+                    >
                       <Trash2 size={17} />
                       <span>{t("common.delete")}</span>
                     </button>
@@ -2231,16 +2256,8 @@ function SettingsTab({
   openAbout: () => void;
 }) {
   const { t, i18n } = useTranslation();
-  const {
-    settings,
-    updateSetting,
-    audioDevices,
-    outputDevices,
-    audioFeedbackEnabled,
-    isUpdating,
-    refreshAudioDevices,
-    refreshOutputDevices,
-  } = useSettings();
+  const { settings, updateSetting, audioFeedbackEnabled, isUpdating } =
+    useSettings();
   const customSounds = useSettingsStore((state) => state.customSounds);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [settingsSheet, setSettingsSheet] = useState<SettingsSheet | null>(
@@ -2251,20 +2268,6 @@ function SettingsTab({
     useState<AndroidBubbleCorner>("top-right");
   const [version, setVersion] = useState("");
 
-  const selectedMicrophone = normalizeDeviceSetting(
-    settings?.selected_microphone,
-  );
-  const selectedOutput = normalizeDeviceSetting(
-    settings?.selected_output_device,
-  );
-  const microphoneOptions = useMemo(
-    () => deviceOptions(audioDevices, t("common.default")),
-    [audioDevices, t],
-  );
-  const outputOptions = useMemo(
-    () => deviceOptions(outputDevices, t("common.default")),
-    [outputDevices, t],
-  );
   const rawVolume = settings?.audio_feedback_volume ?? 0.5;
   const volumePercent = Math.round(
     rawVolume <= 1 ? rawVolume * 100 : rawVolume,
@@ -2289,16 +2292,6 @@ function SettingsTab({
     settings?.recording_retention_period,
   );
   const selectedSoundTheme = settings?.sound_theme || "marimba";
-  const selectedMicrophoneLabel =
-    selectedMicrophone === DEFAULT_DEVICE_VALUE
-      ? t("common.default")
-      : audioDevices.find((device) => device.name === selectedMicrophone)
-          ?.name || selectedMicrophone;
-  const selectedOutputLabel =
-    selectedOutput === DEFAULT_DEVICE_VALUE
-      ? t("common.default")
-      : outputDevices.find((device) => device.name === selectedOutput)?.name ||
-        selectedOutput;
   const visibleSoundThemeOptions = useMemo(
     () =>
       soundThemeOptions.filter(
@@ -2323,34 +2316,20 @@ function SettingsTab({
   }, []);
 
   useEffect(() => {
-    setBubbleCorner(
-      normalizeBubbleCorner(
-        safeBridge()?.bubbleCornerSnapshot?.() ?? settings?.overlay_position,
+    void bubbleCornerSnapshot().then((corner) =>
+      setBubbleCorner(
+        normalizeBubbleCorner(corner ?? settings?.overlay_position),
       ),
     );
   }, [settings?.overlay_position]);
 
   useEffect(() => {
-    if (settingsSheet === "microphone") {
-      void refreshAudioDevices();
-    }
-    if (settingsSheet === "output") {
-      void refreshOutputDevices();
-    }
     if (settingsSheet === "historyLimit") {
       setHistoryLimitDraft(String(historyLimit));
     }
-  }, [historyLimit, refreshAudioDevices, refreshOutputDevices, settingsSheet]);
+  }, [historyLimit, settingsSheet]);
 
   const closeSheet = () => setSettingsSheet(null);
-
-  const handleDeviceSelect = async (
-    setting: "selected_microphone" | "selected_output_device",
-    value: string,
-  ) => {
-    await updateSetting(setting, value);
-    closeSheet();
-  };
 
   const handleVolumeChange = (value: number) => {
     void updateSetting("audio_feedback_volume", value / 100);
@@ -2358,7 +2337,7 @@ function SettingsTab({
 
   const handleBubbleCornerSelect = (corner: AndroidBubbleCorner) => {
     setBubbleCorner(corner);
-    safeBridge()?.setBubbleCorner?.(corner);
+    void setNativeBubbleCorner(corner);
     closeSheet();
   };
 
@@ -2443,69 +2422,6 @@ function SettingsTab({
   const renderSettingsSheet = () => {
     if (!settingsSheet) {
       return null;
-    }
-
-    if (settingsSheet === "microphone") {
-      return (
-        <AndroidSettingsSheet
-          title={t("settings.sound.microphone.title")}
-          onClose={closeSheet}
-        >
-          <button
-            type="button"
-            className="android-action android-sheet-action"
-            onClick={() => void refreshAudioDevices()}
-          >
-            <RefreshCw size={17} />
-            <span>{t("android.settings.refreshDevices")}</span>
-          </button>
-          <div className="android-picker-list">
-            {microphoneOptions.map((option) =>
-              renderPickerOption({
-                selected: selectedMicrophone === option.value,
-                label: option.label,
-                description: option.description,
-                optionKey: option.value,
-                onClick: () =>
-                  void handleDeviceSelect("selected_microphone", option.value),
-              }),
-            )}
-          </div>
-        </AndroidSettingsSheet>
-      );
-    }
-
-    if (settingsSheet === "output") {
-      return (
-        <AndroidSettingsSheet
-          title={t("settings.sound.outputDevice.title")}
-          onClose={closeSheet}
-        >
-          <button
-            type="button"
-            className="android-action android-sheet-action"
-            onClick={() => void refreshOutputDevices()}
-          >
-            <RefreshCw size={17} />
-            <span>{t("android.settings.refreshDevices")}</span>
-          </button>
-          <div className="android-picker-list">
-            {outputOptions.map((option) =>
-              renderPickerOption({
-                selected: selectedOutput === option.value,
-                label: option.label,
-                description: option.description,
-                optionKey: option.value,
-                onClick: () =>
-                  void handleDeviceSelect(
-                    "selected_output_device",
-                    option.value,
-                  ),
-              }),
-            )}
-          </div>
-        </AndroidSettingsSheet>
-      );
     }
 
     if (settingsSheet === "bubblePosition") {
@@ -2643,15 +2559,6 @@ function SettingsTab({
           <h2>{t("android.settings.general")}</h2>
         </div>
         <div className="android-settings-group">
-          <button
-            type="button"
-            className="android-settings-row"
-            onClick={() => setSettingsSheet("microphone")}
-          >
-            <span>{t("settings.sound.microphone.title")}</span>
-            <span className="android-muted">{selectedMicrophoneLabel}</span>
-            <ChevronRight size={18} />
-          </button>
           <div className="android-settings-row">
             <span>{t("settings.sound.audioFeedback.label")}</span>
             <Switch
@@ -2822,15 +2729,6 @@ function SettingsTab({
                 {soundThemeLabel(selectedSoundTheme)}
               </span>
               <Music size={18} />
-            </button>
-            <button
-              type="button"
-              className="android-settings-row"
-              onClick={() => setSettingsSheet("output")}
-            >
-              <span>{t("settings.sound.outputDevice.title")}</span>
-              <span className="android-muted">{selectedOutputLabel}</span>
-              <Volume1 size={18} />
             </button>
           </div>
         )}

@@ -11,6 +11,7 @@ default-run = "verbatim"
 # Desktop builds opt into this from Tauri config and Windows cargo wrappers.
 # Android uses the no-engine stubs until mobile ASR is implemented.
 default = []
+android-asr = ["dep:sherpa-onnx"]
 silero-vad-engine = ["dep:vad-rs"]
 transcribe-rs-engine = ["dep:transcribe-rs"]
 
@@ -91,10 +92,15 @@ tauri-plugin-dialog = "2.6"
 [target.'cfg(unix)'.dependencies]
 signal-hook = "0.3"
 
+[target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
+tauri-plugin-verbatim-android = { path = "tauri-plugin-verbatim-android" }
+sherpa-onnx = { version = "1.13", default-features = false, features = ["shared"], optional = true }
+
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 rdev = { git = "https://github.com/rustdesk-org/rdev", rev = "a90dbe1172f8832f54c97c62e823c5a34af5fdfe" }
 tauri-plugin-autostart = "2.5.1"
 tauri-plugin-global-shortcut = "2.3.1"
+tauri-plugin-notification = "2.3.1"
 tauri-plugin-single-instance = "2.3.2"
 tauri-plugin-updater = "2.10.0"
 verbatim-keys = { path = "crates/verbatim-keys" }

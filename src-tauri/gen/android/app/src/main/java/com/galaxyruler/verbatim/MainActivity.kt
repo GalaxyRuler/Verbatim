@@ -38,6 +38,18 @@ class MainActivity : TauriActivity() {
     }
   }
 
+  override fun onRequestPermissionsResult(
+    requestCode: Int,
+    permissions: Array<out String>,
+    grantResults: IntArray,
+  ) {
+    super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+    // Push fresh state to the webview immediately after a permission decision (previously this
+    // override was missing, so a grant only surfaced via polling). The plugin's onResume()
+    // re-emits as a safety net.
+    VerbatimAndroidPlugin.instance?.emitPermissions()
+  }
+
   private fun hasMicrophonePermission(): Boolean =
     ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
       PackageManager.PERMISSION_GRANTED

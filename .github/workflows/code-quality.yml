@@ -1,41 +1,12 @@
 name: "code quality"
+# No path filters: the public-hygiene gate scans the whole tree (`--all`), so this
+# workflow must run on every push/PR — a backend-only change (e.g. src-tauri/src/**)
+# must not be able to skip the hygiene/quality checks.
 on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths:
-      - "src/**"
-      - "docs/**"
-      - "README.md"
-      - "package.json"
-      - "bun.lock"
-      - "deny.toml"
-      - "src-tauri/Cargo.toml"
-      - "src-tauri/Cargo.lock"
-      - ".eslintrc*"
-      - "eslint.config.*"
-      - ".prettierrc*"
-      - "tsconfig*"
-      - "tailwind.config.*"
-      - "scripts/**"
-      - ".github/workflows/**"
   pull_request:
-    paths:
-      - "src/**"
-      - "docs/**"
-      - "README.md"
-      - "package.json"
-      - "bun.lock"
-      - "deny.toml"
-      - "src-tauri/Cargo.toml"
-      - "src-tauri/Cargo.lock"
-      - ".eslintrc*"
-      - "eslint.config.*"
-      - ".prettierrc*"
-      - "tsconfig*"
-      - "tailwind.config.*"
-      - "scripts/**"
-      - ".github/workflows/**"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -58,6 +29,9 @@ jobs:
 
       - name: Check translation consistency
         run: bun run check:translations
+
+      - name: Check public repository hygiene
+        run: bun run check:public-hygiene -- --all
 
       - name: Check Cargo Git dependency pins
         run: bun run check:cargo-git-pins
