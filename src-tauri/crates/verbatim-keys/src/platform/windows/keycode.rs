@@ -218,7 +218,7 @@ pub fn vk_to_key(vk_code: u16, is_extended: bool) -> Option<Key> {
         vk::OEM_5 => Some(Key::Backslash),
         vk::OEM_6 => Some(Key::RightBracket),
         vk::OEM_7 => Some(Key::Quote),
-        vk::OEM_8 => Some(Key::Grave),    // backtick on UK layout
+        vk::OEM_8 => Some(Key::Grave),     // backtick on UK layout
         vk::OEM_102 => Some(Key::Section), // ISO extra key
 
         // Lock keys
@@ -227,6 +227,137 @@ pub fn vk_to_key(vk_code: u16, is_extended: bool) -> Option<Key> {
         vk::SCROLL => Some(Key::ScrollLock),
 
         _ => None,
+    }
+}
+
+/// Convert Key to Windows virtual key code for RegisterHotKey.
+///
+/// RegisterHotKey does not expose extended-key state, so keys that require
+/// that distinction are intentionally not mapped here.
+pub fn vk_from_key(key: Key) -> Option<u16> {
+    match key {
+        Key::A => Some(0x41),
+        Key::B => Some(0x42),
+        Key::C => Some(0x43),
+        Key::D => Some(0x44),
+        Key::E => Some(0x45),
+        Key::F => Some(0x46),
+        Key::G => Some(0x47),
+        Key::H => Some(0x48),
+        Key::I => Some(0x49),
+        Key::J => Some(0x4A),
+        Key::K => Some(0x4B),
+        Key::L => Some(0x4C),
+        Key::M => Some(0x4D),
+        Key::N => Some(0x4E),
+        Key::O => Some(0x4F),
+        Key::P => Some(0x50),
+        Key::Q => Some(0x51),
+        Key::R => Some(0x52),
+        Key::S => Some(0x53),
+        Key::T => Some(0x54),
+        Key::U => Some(0x55),
+        Key::V => Some(0x56),
+        Key::W => Some(0x57),
+        Key::X => Some(0x58),
+        Key::Y => Some(0x59),
+        Key::Z => Some(0x5A),
+
+        Key::Num0 => Some(0x30),
+        Key::Num1 => Some(0x31),
+        Key::Num2 => Some(0x32),
+        Key::Num3 => Some(0x33),
+        Key::Num4 => Some(0x34),
+        Key::Num5 => Some(0x35),
+        Key::Num6 => Some(0x36),
+        Key::Num7 => Some(0x37),
+        Key::Num8 => Some(0x38),
+        Key::Num9 => Some(0x39),
+
+        Key::Keypad0 => Some(vk::NUMPAD0),
+        Key::Keypad1 => Some(vk::NUMPAD1),
+        Key::Keypad2 => Some(vk::NUMPAD2),
+        Key::Keypad3 => Some(vk::NUMPAD3),
+        Key::Keypad4 => Some(vk::NUMPAD4),
+        Key::Keypad5 => Some(vk::NUMPAD5),
+        Key::Keypad6 => Some(vk::NUMPAD6),
+        Key::Keypad7 => Some(vk::NUMPAD7),
+        Key::Keypad8 => Some(vk::NUMPAD8),
+        Key::Keypad9 => Some(vk::NUMPAD9),
+        Key::KeypadMultiply => Some(vk::MULTIPLY),
+        Key::KeypadPlus => Some(vk::ADD),
+        Key::KeypadMinus => Some(vk::SUBTRACT),
+        Key::KeypadDecimal => Some(vk::DECIMAL),
+        Key::KeypadDivide => Some(vk::DIVIDE),
+
+        Key::Return => Some(vk::RETURN),
+
+        Key::F1 => Some(vk::F1),
+        Key::F2 => Some(vk::F2),
+        Key::F3 => Some(vk::F3),
+        Key::F4 => Some(vk::F4),
+        Key::F5 => Some(vk::F5),
+        Key::F6 => Some(vk::F6),
+        Key::F7 => Some(vk::F7),
+        Key::F8 => Some(vk::F8),
+        Key::F9 => Some(vk::F9),
+        Key::F10 => Some(vk::F10),
+        Key::F11 => Some(vk::F11),
+        Key::F12 => Some(vk::F12),
+        Key::F13 => Some(vk::F13),
+        Key::F14 => Some(vk::F14),
+        Key::F15 => Some(vk::F15),
+        Key::F16 => Some(vk::F16),
+        Key::F17 => Some(vk::F17),
+        Key::F18 => Some(vk::F18),
+        Key::F19 => Some(vk::F19),
+        Key::F20 => Some(vk::F20),
+
+        Key::Delete => Some(vk::BACK),
+        Key::ForwardDelete => Some(vk::DELETE),
+        Key::Insert => Some(vk::INSERT),
+        Key::Tab => Some(vk::TAB),
+        Key::Escape => Some(vk::ESCAPE),
+        Key::Space => Some(vk::SPACE),
+        Key::PageUp => Some(vk::PRIOR),
+        Key::PageDown => Some(vk::NEXT),
+        Key::End => Some(vk::END),
+        Key::Home => Some(vk::HOME),
+        Key::LeftArrow => Some(vk::LEFT),
+        Key::UpArrow => Some(vk::UP),
+        Key::RightArrow => Some(vk::RIGHT),
+        Key::DownArrow => Some(vk::DOWN),
+
+        Key::Semicolon => Some(vk::OEM_1),
+        Key::Equal => Some(vk::OEM_PLUS),
+        Key::Comma => Some(vk::OEM_COMMA),
+        Key::Minus => Some(vk::OEM_MINUS),
+        Key::Period => Some(vk::OEM_PERIOD),
+        Key::Slash => Some(vk::OEM_2),
+        Key::Grave => Some(vk::OEM_3),
+        Key::LeftBracket => Some(vk::OEM_4),
+        Key::Backslash => Some(vk::OEM_5),
+        Key::RightBracket => Some(vk::OEM_6),
+        Key::Quote => Some(vk::OEM_7),
+        Key::Section => Some(vk::OEM_102),
+
+        Key::CapsLock => Some(vk::CAPITAL),
+        Key::NumLock => Some(vk::NUMLOCK),
+        Key::ScrollLock => Some(vk::SCROLL),
+
+        Key::KeypadEnter
+        | Key::KeypadClear
+        | Key::KeypadEquals
+        | Key::KeypadComma
+        | Key::JisYen
+        | Key::JisUnderscore
+        | Key::JisEisu
+        | Key::JisKana
+        | Key::MouseLeft
+        | Key::MouseRight
+        | Key::MouseMiddle
+        | Key::MouseX1
+        | Key::MouseX2 => None,
     }
 }
 

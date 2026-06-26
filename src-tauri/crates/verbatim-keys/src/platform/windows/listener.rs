@@ -1,26 +1,34 @@
 //! Windows low-level keyboard hook implementation
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 
 use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
+use windows::Win32::System::SystemInformation::GetTickCount64;
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    RegisterHotKey, UnregisterHotKey, HOT_KEY_MODIFIERS, MOD_ALT, MOD_CONTROL, MOD_NOREPEAT,
+    MOD_SHIFT, MOD_WIN,
+};
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, DispatchMessageW, MsgWaitForMultipleObjects, PeekMessageW, SetWindowsHookExW,
     TranslateMessage, UnhookWindowsHookEx, KBDLLHOOKSTRUCT, LLKHF_EXTENDED, MSG, MSLLHOOKSTRUCT,
-    PM_REMOVE, QS_ALLINPUT, WH_KEYBOARD_LL, WH_MOUSE_LL, WM_KEYDOWN, WM_LBUTTONDOWN,
+    PM_REMOVE, QS_ALLINPUT, WH_KEYBOARD_LL, WH_MOUSE_LL, WM_HOTKEY, WM_KEYDOWN, WM_LBUTTONDOWN,
     WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_QUIT, WM_RBUTTONDOWN, WM_RBUTTONUP,
     WM_SYSKEYDOWN, WM_XBUTTONDOWN, WM_XBUTTONUP,
 };
 
 use crate::error::Result;
 use crate::platform::state::BlockingHotkeys;
-use crate::types::{Key, KeyEvent, Modifiers};
+use crate::types::{Hotkey, Key, KeyEvent, Modifiers};
 
-use super::keycode::{vk_to_key, vk_to_modifier};
+use super::keycode::{vk_from_key, vk_to_key, vk_to_modifier};
 
 const HOOK_LOOP_TIMEOUT_MS: u32 = 10;
+const WM_HOTKEY_DEDUP_MS: u64 = 50;
+const MAX_HOTKEY_ID: i32 = 0xBFFF;
 
 /// Thread-local state for the keyboard hook callback.
 ///
@@ -30,6 +38,13 @@ struct HookContext {
     event_sender: Sender<KeyEvent>,
     current_modifiers: Modifiers,
     blocking_hotkeys: Option<BlockingHotkeys>,
+    last_ll_fire_ms: Arc<AtomicU64>,
+}
+
+#[derive(Default)]
+struct RegisteredHotkeyState {
+    desired: HashSet<Hotkey>,
+    registered: HashMap<i32, Hotkey>,
 }
 
 thread_local! {
@@ -37,11 +52,25 @@ thread_local! {
 }
 
 /// Drain all pending thread messages and return `true` if WM_QUIT was received.
-fn drain_thread_messages(msg: &mut MSG) -> bool {
+fn drain_thread_messages(
+    msg: &mut MSG,
+    registered_hotkeys: &HashMap<i32, Hotkey>,
+    event_sender: &Sender<KeyEvent>,
+    last_ll_fire_ms: &AtomicU64,
+) -> bool {
     unsafe {
         while PeekMessageW(msg, None, 0, 0, PM_REMOVE).as_bool() {
             if msg.message == WM_QUIT {
                 return true;
+            }
+            if msg.message == WM_HOTKEY {
+                handle_registered_hotkey_message(
+                    msg,
+                    registered_hotkeys,
+                    event_sender,
+                    last_ll_fire_ms,
+                );
+                continue;
             }
             let _ = TranslateMessage(msg);
             DispatchMessageW(msg);
@@ -50,11 +79,144 @@ fn drain_thread_messages(msg: &mut MSG) -> bool {
     false
 }
 
+fn handle_registered_hotkey_message(
+    msg: &MSG,
+    registered_hotkeys: &HashMap<i32, Hotkey>,
+    event_sender: &Sender<KeyEvent>,
+    last_ll_fire_ms: &AtomicU64,
+) {
+    let id = msg.wParam.0 as i32;
+    let Some(hotkey) = registered_hotkeys.get(&id) else {
+        return;
+    };
+
+    let now = unsafe { GetTickCount64() };
+    let last_ll_fire = last_ll_fire_ms.load(Ordering::Relaxed);
+    if last_ll_fire != 0 && now.saturating_sub(last_ll_fire) < WM_HOTKEY_DEDUP_MS {
+        return;
+    }
+
+    let _ = event_sender.send(KeyEvent {
+        modifiers: hotkey.modifiers,
+        key: hotkey.key,
+        is_key_down: true,
+        changed_modifier: None,
+    });
+}
+
 /// Wait for new input/messages or until timeout expires.
 fn wait_for_message_or_timeout(timeout_ms: u32) {
     unsafe {
         let _ = MsgWaitForMultipleObjects(None, false, timeout_ms, QS_ALLINPUT);
     }
+}
+
+fn sync_registered_hotkeys(
+    blocking_hotkeys: &Option<BlockingHotkeys>,
+    state: &mut RegisteredHotkeyState,
+) {
+    let Some(desired) = snapshot_registerable_hotkeys(blocking_hotkeys) else {
+        return;
+    };
+
+    if desired == state.desired {
+        return;
+    }
+
+    unregister_hotkeys(&mut state.registered);
+    state.desired = desired.clone();
+
+    let mut hotkeys: Vec<Hotkey> = desired.into_iter().collect();
+    hotkeys.sort_by_key(|hotkey| hotkey.to_string());
+
+    for (index, hotkey) in hotkeys.into_iter().enumerate() {
+        let id = index as i32 + 1;
+        if id > MAX_HOTKEY_ID {
+            eprintln!(
+                "Skipping RegisterHotKey fallback for {}: too many hotkeys",
+                hotkey
+            );
+            break;
+        }
+
+        let Some((modifiers, vk)) = register_hotkey_args(hotkey) else {
+            continue;
+        };
+
+        match unsafe { RegisterHotKey(None, id, modifiers, vk) } {
+            Ok(()) => {
+                state.registered.insert(id, hotkey);
+            }
+            Err(e) => {
+                eprintln!(
+                    "Failed to register WM_HOTKEY fallback for {}: {:?}",
+                    hotkey, e
+                );
+            }
+        }
+    }
+}
+
+fn snapshot_registerable_hotkeys(
+    blocking_hotkeys: &Option<BlockingHotkeys>,
+) -> Option<HashSet<Hotkey>> {
+    let Some(hotkeys) = blocking_hotkeys else {
+        return Some(HashSet::new());
+    };
+
+    let hotkeys = hotkeys.lock().ok()?;
+    Some(
+        hotkeys
+            .iter()
+            .copied()
+            .filter(|hotkey| register_hotkey_args(*hotkey).is_some())
+            .collect(),
+    )
+}
+
+fn unregister_hotkeys(registered_hotkeys: &mut HashMap<i32, Hotkey>) {
+    for id in registered_hotkeys.keys().copied().collect::<Vec<_>>() {
+        let _ = unsafe { UnregisterHotKey(None, id) };
+    }
+    registered_hotkeys.clear();
+}
+
+fn register_hotkey_args(hotkey: Hotkey) -> Option<(HOT_KEY_MODIFIERS, u32)> {
+    let key = hotkey.key?;
+    let vk = vk_from_key(key)? as u32;
+    let modifiers = hot_key_modifiers_from_modifiers(hotkey.modifiers)?;
+    Some((modifiers, vk))
+}
+
+fn hot_key_modifiers_from_modifiers(modifiers: Modifiers) -> Option<HOT_KEY_MODIFIERS> {
+    if modifiers.contains(Modifiers::FN)
+        || has_side_specific_modifier(modifiers, Modifiers::CMD_LEFT, Modifiers::CMD_RIGHT)
+        || has_side_specific_modifier(modifiers, Modifiers::CTRL_LEFT, Modifiers::CTRL_RIGHT)
+        || has_side_specific_modifier(modifiers, Modifiers::OPT_LEFT, Modifiers::OPT_RIGHT)
+        || has_side_specific_modifier(modifiers, Modifiers::SHIFT_LEFT, Modifiers::SHIFT_RIGHT)
+    {
+        return None;
+    }
+
+    let mut hotkey_modifiers = MOD_NOREPEAT;
+    if modifiers.contains(Modifiers::CMD) {
+        hotkey_modifiers |= MOD_WIN;
+    }
+    if modifiers.contains(Modifiers::CTRL) {
+        hotkey_modifiers |= MOD_CONTROL;
+    }
+    if modifiers.contains(Modifiers::OPT) {
+        hotkey_modifiers |= MOD_ALT;
+    }
+    if modifiers.contains(Modifiers::SHIFT) {
+        hotkey_modifiers |= MOD_SHIFT;
+    }
+
+    Some(hotkey_modifiers)
+}
+
+fn has_side_specific_modifier(modifiers: Modifiers, left: Modifiers, right: Modifiers) -> bool {
+    modifiers.contains(left) ^ modifiers.contains(right)
 }
 
 /// Internal listener state returned to KeyboardListener
@@ -73,12 +235,18 @@ pub(crate) fn spawn(blocking_hotkeys: Option<BlockingHotkeys>) -> Result<Windows
     let thread_blocking = blocking_hotkeys.clone();
 
     let handle = thread::spawn(move || {
+        let message_sender = tx.clone();
+        let last_ll_fire_ms = Arc::new(AtomicU64::new(0));
+        let hook_last_ll_fire_ms = Arc::clone(&last_ll_fire_ms);
+        let registration_blocking_hotkeys = thread_blocking.clone();
+
         // Initialize thread-local hook context
         HOOK_CONTEXT.with(|ctx| {
             *ctx.borrow_mut() = Some(HookContext {
                 event_sender: tx,
                 current_modifiers: Modifiers::empty(),
                 blocking_hotkeys: thread_blocking,
+                last_ll_fire_ms: hook_last_ll_fire_ms,
             });
         });
 
@@ -112,14 +280,22 @@ pub(crate) fn spawn(blocking_hotkeys: Option<BlockingHotkeys>) -> Result<Windows
         // Message loop - required for low-level hooks to function.
         // Keep the short timeout so shutdown polling behavior remains unchanged.
         let mut msg = MSG::default();
+        let mut registered_hotkeys = RegisteredHotkeyState::default();
         loop {
             // Check if we should stop
             if !thread_running.load(Ordering::SeqCst) {
                 break;
             }
 
+            sync_registered_hotkeys(&registration_blocking_hotkeys, &mut registered_hotkeys);
+
             // Process all pending messages
-            if drain_thread_messages(&mut msg) {
+            if drain_thread_messages(
+                &mut msg,
+                &registered_hotkeys.registered,
+                &message_sender,
+                &last_ll_fire_ms,
+            ) {
                 break;
             }
 
@@ -130,6 +306,7 @@ pub(crate) fn spawn(blocking_hotkeys: Option<BlockingHotkeys>) -> Result<Windows
 
         // Clean up the hooks
         unsafe {
+            unregister_hotkeys(&mut registered_hotkeys.registered);
             let _ = UnhookWindowsHookEx(kb_hook);
             let _ = UnhookWindowsHookEx(mouse_hook);
         }
@@ -187,6 +364,10 @@ unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: 
                     // Check if modifier-only combo should be blocked
                     should_block =
                         should_block_hotkey(&ctx.blocking_hotkeys, ctx.current_modifiers, None);
+                    if should_block && is_key_down {
+                        ctx.last_ll_fire_ms
+                            .store(unsafe { GetTickCount64() }, Ordering::Relaxed);
+                    }
 
                     let _ = ctx.event_sender.send(KeyEvent {
                         modifiers: ctx.current_modifiers,
@@ -199,6 +380,10 @@ unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: 
                 // Regular key event
                 should_block =
                     should_block_hotkey(&ctx.blocking_hotkeys, ctx.current_modifiers, Some(key));
+                if should_block && is_key_down {
+                    ctx.last_ll_fire_ms
+                        .store(unsafe { GetTickCount64() }, Ordering::Relaxed);
+                }
 
                 let _ = ctx.event_sender.send(KeyEvent {
                     modifiers: ctx.current_modifiers,
@@ -308,6 +493,14 @@ mod tests {
     use std::time::{Duration, Instant};
     use windows::Win32::UI::WindowsAndMessaging::PostQuitMessage;
 
+    fn drain_test_messages(msg: &mut MSG) -> bool {
+        let registered_hotkeys = HashMap::new();
+        let (tx, _rx) = mpsc::channel();
+        let last_ll_fire_ms = AtomicU64::new(0);
+
+        drain_thread_messages(msg, &registered_hotkeys, &tx, &last_ll_fire_ms)
+    }
+
     fn clear_message_queue() {
         let mut msg = MSG::default();
         unsafe { while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {} }
@@ -349,7 +542,67 @@ mod tests {
             PostQuitMessage(0);
         }
         let mut msg = MSG::default();
-        assert!(drain_thread_messages(&mut msg));
+        assert!(drain_test_messages(&mut msg));
         clear_message_queue();
+    }
+
+    #[test]
+    fn register_hotkey_args_use_no_repeat_and_generic_modifier_flags() {
+        let hotkey = Hotkey::new(Modifiers::CTRL | Modifiers::OPT, Key::Space).unwrap();
+        let (modifiers, vk) = register_hotkey_args(hotkey).unwrap();
+
+        assert_eq!(vk, 0x20);
+        assert_eq!(modifiers, MOD_NOREPEAT | MOD_CONTROL | MOD_ALT);
+    }
+
+    #[test]
+    fn register_hotkey_args_skip_side_specific_modifiers() {
+        let hotkey = Hotkey::new(Modifiers::CTRL_RIGHT, Key::Space).unwrap();
+
+        assert!(register_hotkey_args(hotkey).is_none());
+    }
+
+    #[test]
+    fn register_hotkey_args_skip_unsupported_keys() {
+        let hotkey = Hotkey::new(Modifiers::CTRL, Key::MouseLeft).unwrap();
+
+        assert!(register_hotkey_args(hotkey).is_none());
+    }
+
+    #[test]
+    fn wm_hotkey_message_sends_key_down_event() {
+        let hotkey = Hotkey::new(Modifiers::CTRL, Key::Space).unwrap();
+        let registered_hotkeys = HashMap::from([(1, hotkey)]);
+        let (tx, rx) = mpsc::channel();
+        let last_ll_fire_ms = AtomicU64::new(0);
+        let msg = MSG {
+            message: WM_HOTKEY,
+            wParam: WPARAM(1),
+            ..MSG::default()
+        };
+
+        handle_registered_hotkey_message(&msg, &registered_hotkeys, &tx, &last_ll_fire_ms);
+
+        let event = rx.try_recv().unwrap();
+        assert_eq!(event.modifiers, Modifiers::CTRL);
+        assert_eq!(event.key, Some(Key::Space));
+        assert!(event.is_key_down);
+    }
+
+    #[test]
+    fn wm_hotkey_message_skips_recent_ll_hook_fire() {
+        let hotkey = Hotkey::new(Modifiers::CTRL, Key::Space).unwrap();
+        let registered_hotkeys = HashMap::from([(1, hotkey)]);
+        let (tx, rx) = mpsc::channel();
+        let last_ll_fire_ms = AtomicU64::new(unsafe { GetTickCount64() });
+        let msg = MSG {
+            message: WM_HOTKEY,
+            wParam: WPARAM(1),
+            ..MSG::default()
+        };
+
+        handle_registered_hotkey_message(&msg, &registered_hotkeys, &tx, &last_ll_fire_ms);
+
+        assert!(rx.try_recv().is_err());
     }
 }
