@@ -450,9 +450,9 @@ const installTauriMocks = async (
                 return { value: va?.engineDictationEnabled?.() ?? false };
               case "set_engine_dictation_enabled":
                 return {
-                  value: va?.setEngineDictationEnabled?.(
-                    args?.enabled as boolean,
-                  ) ?? false,
+                  value:
+                    va?.setEngineDictationEnabled?.(args?.enabled as boolean) ??
+                    false,
                 };
               case "start_bubble":
                 va?.startBubble();
