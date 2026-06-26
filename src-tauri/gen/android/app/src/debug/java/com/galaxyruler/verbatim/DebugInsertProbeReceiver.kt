@@ -6,15 +6,18 @@ import android.content.Intent
 
 class DebugInsertProbeReceiver : BroadcastReceiver() {
   override fun onReceive(context: Context, intent: Intent?) {
-    if (intent?.action != ACTION_DEBUG_INSERT_PROBE) {
-      return
+    when (intent?.action) {
+      ACTION_DEBUG_INSERT_PROBE -> FloatingBubbleService.startDebugInsertionProbe(context)
+      ACTION_DEBUG_ENGINE_WAV_SMOKE ->
+        FloatingBubbleService.startDebugEngineWavSmoke(context, intent.getStringExtra(EXTRA_DEBUG_WAV_PATH))
     }
-
-    FloatingBubbleService.startDebugInsertionProbe(context)
   }
 
   companion object {
     private const val ACTION_DEBUG_INSERT_PROBE =
       "com.galaxyruler.verbatim.action.DEBUG_INSERT_PROBE"
+    private const val ACTION_DEBUG_ENGINE_WAV_SMOKE =
+      "com.galaxyruler.verbatim.action.DEBUG_ENGINE_WAV_SMOKE"
+    private const val EXTRA_DEBUG_WAV_PATH = "wav_path"
   }
 }
