@@ -1126,6 +1126,11 @@
         "bottomLeft": "Bottom left",
         "bottomRight": "Bottom right"
       },
+      "onDeviceEngine": {
+        "title": "On-device engine (beta)",
+        "engine": "Verbatim engine",
+        "fallback": "OS speech recognizer fallback"
+      },
       "soundTheme": {
         "marimba": "Marimba",
         "pop": "Pop",
