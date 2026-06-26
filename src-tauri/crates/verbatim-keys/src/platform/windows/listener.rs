@@ -9,8 +9,9 @@ use std::thread::{self, JoinHandle};
 use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::SystemInformation::GetTickCount64;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    RegisterHotKey, UnregisterHotKey, HOT_KEY_MODIFIERS, MOD_ALT, MOD_CONTROL, MOD_NOREPEAT,
-    MOD_SHIFT, MOD_WIN,
+    GetAsyncKeyState, RegisterHotKey, UnregisterHotKey, HOT_KEY_MODIFIERS, MOD_ALT, MOD_CONTROL,
+    MOD_NOREPEAT, MOD_SHIFT, MOD_WIN, VK_CONTROL, VK_LCONTROL, VK_LMENU, VK_LSHIFT, VK_LWIN,
+    VK_MENU, VK_RCONTROL, VK_RMENU, VK_RSHIFT, VK_RWIN, VK_SHIFT,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, DispatchMessageW, MsgWaitForMultipleObjects, PeekMessageW, SetWindowsHookExW,
@@ -45,6 +46,72 @@ struct HookContext {
 struct RegisteredHotkeyState {
     desired: HashSet<Hotkey>,
     registered: HashMap<i32, Hotkey>,
+}
+
+#[derive(Default)]
+struct ModifierOnlyPoller {
+    hotkeys: Vec<Hotkey>,
+    desired: HashSet<Hotkey>,
+    prev_active: HashMap<u64, bool>,
+}
+
+impl ModifierOnlyPoller {
+    fn poll(&mut self, sender: &Sender<KeyEvent>, last_ll_fire_ms: &AtomicU64) {
+        let now_ms = unsafe { GetTickCount64() };
+        self.poll_with_combo_state(sender, last_ll_fire_ms, now_ms, all_combo_keys_down);
+    }
+
+    #[cfg(test)]
+    fn poll_with_key_state<F>(
+        &mut self,
+        sender: &Sender<KeyEvent>,
+        last_ll_fire_ms: &AtomicU64,
+        now_ms: u64,
+        mut is_down: F,
+    ) where
+        F: FnMut(u16) -> bool,
+    {
+        self.poll_with_combo_state(sender, last_ll_fire_ms, now_ms, |hotkey| {
+            all_combo_keys_down_with(hotkey, &mut is_down)
+        });
+    }
+
+    fn poll_with_combo_state<F>(
+        &mut self,
+        sender: &Sender<KeyEvent>,
+        last_ll_fire_ms: &AtomicU64,
+        now_ms: u64,
+        mut is_combo_down: F,
+    ) where
+        F: FnMut(Hotkey) -> bool,
+    {
+        for hotkey in &self.hotkeys {
+            let bits = u64::from(hotkey.modifiers.bits());
+            let is_active = is_combo_down(*hotkey);
+            let was_active = *self.prev_active.get(&bits).unwrap_or(&false);
+
+            if is_active && !was_active {
+                let last_ll_fire = last_ll_fire_ms.load(Ordering::Relaxed);
+                if last_ll_fire == 0 || now_ms.saturating_sub(last_ll_fire) >= WM_HOTKEY_DEDUP_MS {
+                    let _ = sender.send(KeyEvent {
+                        modifiers: hotkey.modifiers,
+                        key: None,
+                        is_key_down: true,
+                        changed_modifier: None,
+                    });
+                }
+            } else if !is_active && was_active {
+                let _ = sender.send(KeyEvent {
+                    modifiers: hotkey.modifiers,
+                    key: None,
+                    is_key_down: false,
+                    changed_modifier: None,
+                });
+            }
+
+            self.prev_active.insert(bits, is_active);
+        }
+    }
 }
 
 thread_local! {
@@ -109,6 +176,157 @@ fn wait_for_message_or_timeout(timeout_ms: u32) {
     unsafe {
         let _ = MsgWaitForMultipleObjects(None, false, timeout_ms, QS_ALLINPUT);
     }
+}
+
+fn sync_modifier_only_poller(
+    blocking_hotkeys: &Option<BlockingHotkeys>,
+    poller: &mut ModifierOnlyPoller,
+) {
+    let Some(desired) = snapshot_modifier_only_hotkeys(blocking_hotkeys) else {
+        return;
+    };
+
+    if desired == poller.desired {
+        return;
+    }
+
+    poller.desired = desired.clone();
+
+    let mut hotkeys: Vec<Hotkey> = desired.into_iter().collect();
+    hotkeys.sort_by_key(|hotkey| hotkey.to_string());
+    poller.hotkeys = hotkeys;
+
+    let active_bits = poller
+        .desired
+        .iter()
+        .map(|hotkey| u64::from(hotkey.modifiers.bits()))
+        .collect::<HashSet<_>>();
+    poller
+        .prev_active
+        .retain(|bits, _| active_bits.contains(bits));
+}
+
+fn snapshot_modifier_only_hotkeys(
+    blocking_hotkeys: &Option<BlockingHotkeys>,
+) -> Option<HashSet<Hotkey>> {
+    let Some(hotkeys) = blocking_hotkeys else {
+        return Some(HashSet::new());
+    };
+
+    let hotkeys = hotkeys.lock().ok()?;
+    Some(
+        hotkeys
+            .iter()
+            .copied()
+            .filter(|hotkey| is_modifier_only_pollable(*hotkey))
+            .collect(),
+    )
+}
+
+fn is_modifier_only_pollable(hotkey: Hotkey) -> bool {
+    hotkey.key.is_none()
+        && !hotkey.modifiers.is_empty()
+        && !hotkey.modifiers.contains(Modifiers::FN)
+        && !modifier_vks(hotkey.modifiers).is_empty()
+}
+
+fn modifier_vks(modifiers: Modifiers) -> Vec<u16> {
+    let mut vks = Vec::new();
+
+    push_modifier_group_vks(
+        &mut vks,
+        modifiers,
+        Modifiers::CTRL_LEFT,
+        Modifiers::CTRL_RIGHT,
+        VK_LCONTROL.0,
+        VK_RCONTROL.0,
+        Some(VK_CONTROL.0),
+    );
+    push_modifier_group_vks(
+        &mut vks,
+        modifiers,
+        Modifiers::SHIFT_LEFT,
+        Modifiers::SHIFT_RIGHT,
+        VK_LSHIFT.0,
+        VK_RSHIFT.0,
+        Some(VK_SHIFT.0),
+    );
+    push_modifier_group_vks(
+        &mut vks,
+        modifiers,
+        Modifiers::OPT_LEFT,
+        Modifiers::OPT_RIGHT,
+        VK_LMENU.0,
+        VK_RMENU.0,
+        Some(VK_MENU.0),
+    );
+    push_modifier_group_vks(
+        &mut vks,
+        modifiers,
+        Modifiers::CMD_LEFT,
+        Modifiers::CMD_RIGHT,
+        VK_LWIN.0,
+        VK_RWIN.0,
+        None,
+    );
+
+    vks
+}
+
+fn push_modifier_group_vks(
+    vks: &mut Vec<u16>,
+    modifiers: Modifiers,
+    left: Modifiers,
+    right: Modifiers,
+    left_vk: u16,
+    right_vk: u16,
+    generic_vk: Option<u16>,
+) {
+    let has_left = modifiers.contains(left);
+    let has_right = modifiers.contains(right);
+
+    if has_left && has_right {
+        if let Some(vk) = generic_vk {
+            vks.push(vk);
+        } else {
+            vks.push(left_vk);
+            vks.push(right_vk);
+        }
+    } else if has_left {
+        vks.push(left_vk);
+    } else if has_right {
+        vks.push(right_vk);
+    }
+}
+
+fn is_vk_down(vk: u16) -> bool {
+    (unsafe { GetAsyncKeyState(vk as i32) } as u16 & 0x8000) != 0
+}
+
+fn all_combo_keys_down(hotkey: Hotkey) -> bool {
+    all_combo_keys_down_with(hotkey, &mut is_vk_down)
+}
+
+fn all_combo_keys_down_with<F>(hotkey: Hotkey, is_down: &mut F) -> bool
+where
+    F: FnMut(u16) -> bool,
+{
+    if !is_modifier_only_pollable(hotkey) {
+        return false;
+    }
+
+    let mut required_vks = modifier_vks(hotkey.modifiers);
+    let generic_cmd = hotkey.modifiers.contains(Modifiers::CMD);
+
+    if generic_cmd {
+        required_vks.retain(|vk| *vk != VK_LWIN.0 && *vk != VK_RWIN.0);
+    }
+
+    if required_vks.into_iter().any(|vk| !is_down(vk)) {
+        return false;
+    }
+
+    !generic_cmd || is_down(VK_LWIN.0) || is_down(VK_RWIN.0)
 }
 
 fn sync_registered_hotkeys(
@@ -281,6 +499,7 @@ pub(crate) fn spawn(blocking_hotkeys: Option<BlockingHotkeys>) -> Result<Windows
         // Keep the short timeout so shutdown polling behavior remains unchanged.
         let mut msg = MSG::default();
         let mut registered_hotkeys = RegisteredHotkeyState::default();
+        let mut modifier_poller = ModifierOnlyPoller::default();
         loop {
             // Check if we should stop
             if !thread_running.load(Ordering::SeqCst) {
@@ -288,6 +507,7 @@ pub(crate) fn spawn(blocking_hotkeys: Option<BlockingHotkeys>) -> Result<Windows
             }
 
             sync_registered_hotkeys(&registration_blocking_hotkeys, &mut registered_hotkeys);
+            sync_modifier_only_poller(&registration_blocking_hotkeys, &mut modifier_poller);
 
             // Process all pending messages
             if drain_thread_messages(
@@ -298,6 +518,8 @@ pub(crate) fn spawn(blocking_hotkeys: Option<BlockingHotkeys>) -> Result<Windows
             ) {
                 break;
             }
+
+            modifier_poller.poll(&message_sender, &last_ll_fire_ms);
 
             // Wait for messages or timeout — unlike thread::sleep, this returns
             // immediately when a message arrives, so hook callbacks are never delayed.
@@ -604,5 +826,67 @@ mod tests {
         handle_registered_hotkey_message(&msg, &registered_hotkeys, &tx, &last_ll_fire_ms);
 
         assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn modifier_vks_maps_right_ctrl_right_shift() {
+        let vks = modifier_vks(Modifiers::CTRL_RIGHT | Modifiers::SHIFT_RIGHT);
+
+        assert_eq!(vks, vec![VK_RCONTROL.0, VK_RSHIFT.0]);
+    }
+
+    #[test]
+    fn modifier_poller_emits_down_once_and_up_on_transition() {
+        let hotkey = Hotkey::new(Modifiers::CTRL_RIGHT | Modifiers::SHIFT_RIGHT, None).unwrap();
+        let mut poller = ModifierOnlyPoller {
+            hotkeys: vec![hotkey],
+            desired: HashSet::from([hotkey]),
+            prev_active: HashMap::new(),
+        };
+        let (tx, rx) = mpsc::channel();
+        let last_ll_fire_ms = AtomicU64::new(0);
+
+        let inactive = HashSet::<u16>::new();
+        poller.poll_with_key_state(&tx, &last_ll_fire_ms, 100, |vk| inactive.contains(&vk));
+        assert!(rx.try_recv().is_err());
+
+        let active = HashSet::from([VK_RCONTROL.0, VK_RSHIFT.0]);
+        poller.poll_with_key_state(&tx, &last_ll_fire_ms, 110, |vk| active.contains(&vk));
+        let event = rx.try_recv().unwrap();
+        assert_eq!(event.modifiers, hotkey.modifiers);
+        assert_eq!(event.key, None);
+        assert!(event.is_key_down);
+        assert!(rx.try_recv().is_err());
+
+        poller.poll_with_key_state(&tx, &last_ll_fire_ms, 120, |vk| active.contains(&vk));
+        assert!(rx.try_recv().is_err());
+
+        poller.poll_with_key_state(&tx, &last_ll_fire_ms, 130, |vk| inactive.contains(&vk));
+        let event = rx.try_recv().unwrap();
+        assert_eq!(event.modifiers, hotkey.modifiers);
+        assert_eq!(event.key, None);
+        assert!(!event.is_key_down);
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn modifier_poller_dedups_recent_ll_hook_fire() {
+        let hotkey = Hotkey::new(Modifiers::CTRL_RIGHT | Modifiers::SHIFT_RIGHT, None).unwrap();
+        let mut poller = ModifierOnlyPoller {
+            hotkeys: vec![hotkey],
+            desired: HashSet::from([hotkey]),
+            prev_active: HashMap::new(),
+        };
+        let (tx, rx) = mpsc::channel();
+        let last_ll_fire_ms = AtomicU64::new(100);
+        let active = HashSet::from([VK_RCONTROL.0, VK_RSHIFT.0]);
+
+        poller.poll_with_key_state(&tx, &last_ll_fire_ms, 120, |vk| active.contains(&vk));
+
+        assert!(rx.try_recv().is_err());
+        assert_eq!(
+            poller.prev_active.get(&u64::from(hotkey.modifiers.bits())),
+            Some(&true)
+        );
     }
 }
