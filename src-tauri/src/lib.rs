@@ -1432,6 +1432,12 @@ fn run_inner(cli_args: CliArgs) {
             match initialize_core_logic(&app_handle) {
                 Ok(()) => {
                     startup_state.set_ready();
+                    // ModelManager::new (inside initialize_core_logic) auto-selects and
+                    // persists settings.selected_model. The snapshot read above predates that,
+                    // so refresh just the persisted model selection — otherwise the native-smoke
+                    // status below reports selected_model_configured=false even though a model
+                    // was selected. Runtime-only CLI overrides on `settings` are preserved.
+                    settings.selected_model = get_settings(&app.handle()).selected_model;
                 }
                 Err(error) => {
                     log::error!("Verbatim startup failed: {}", error);
