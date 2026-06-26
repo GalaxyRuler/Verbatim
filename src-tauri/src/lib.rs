@@ -12,6 +12,7 @@ mod credentials;
 mod dictation_transaction;
 mod dictionary;
 mod dictionary_learning;
+mod elevation_watch;
 mod helpers;
 mod input;
 mod insertion;
@@ -1371,6 +1372,7 @@ fn run_inner(cli_args: CliArgs) {
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         builder = builder
+            .plugin(tauri_plugin_notification::init())
             .plugin(tauri_plugin_updater::Builder::new().build())
             .plugin(tauri_plugin_global_shortcut::Builder::new().build())
             .plugin(tauri_plugin_autostart::init(
@@ -1488,6 +1490,12 @@ fn run_inner(cli_args: CliArgs) {
             std::thread::spawn(|| {
                 let _ = crate::managers::transcription::get_available_accelerators();
             });
+
+            // Warn when a higher-integrity ("run as administrator") window is in
+            // the foreground: Windows UIPI silently blocks our keyboard capture
+            // there, so the dictation shortcut does nothing. Windows-only;
+            // compiles to a no-op on other platforms.
+            elevation_watch::spawn(app_handle.clone());
 
             // If start_hidden but tray is disabled, we must show the window
             // anyway. Without a tray icon, the dock is the only way back in.
