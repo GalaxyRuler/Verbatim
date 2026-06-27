@@ -14,6 +14,7 @@ permissions = [
   "allow-set-bubble-corner",
   "allow-engine-dictation-enabled",
   "allow-set-engine-dictation-enabled",
+  "allow-set-engine-model-id",
   "allow-start-bubble",
   "allow-stop-bubble",
   "allow-request-microphone",

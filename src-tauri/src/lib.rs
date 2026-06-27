@@ -1171,6 +1171,12 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::asr::asr_start,
             commands::asr::asr_feed_pcm,
             commands::asr::asr_stop,
+            commands::asr::asr_list_model_packs,
+            commands::asr::asr_get_model_pack_state,
+            commands::asr::asr_download_model_pack,
+            commands::asr::asr_cancel_model_download,
+            commands::asr::asr_select_model_pack,
+            commands::asr::asr_delete_model_pack,
             commands::cancel_operation,
             commands::is_portable,
             commands::get_app_dir_path,
@@ -1390,6 +1396,7 @@ fn run_inner(cli_args: CliArgs) {
         .manage(private_session::PrivateSessionState::default())
         .manage(credentials::SessionCredentialState::default())
         .manage(commands::asr::AsrCommandState::default())
+        .manage(asr::models::AndroidAsrModelManager::default())
         .setup(move |app| {
             specta_builder.mount_events(app);
 

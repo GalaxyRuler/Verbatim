@@ -12,6 +12,7 @@ const COMMANDS: &[&str] = &[
   "set_bubble_corner",
   "engine_dictation_enabled",
   "set_engine_dictation_enabled",
+  "set_engine_model_id",
   "start_bubble",
   "stop_bubble",
   "request_microphone",

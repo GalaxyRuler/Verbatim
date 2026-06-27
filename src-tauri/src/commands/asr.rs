@@ -1,5 +1,6 @@
 //! Android on-device ASR command surface.
 
+use crate::asr::models::{AndroidAsrModelManager, AndroidAsrModelPackState};
 use crate::asr::offline::OfflineRecognizer;
 use crate::asr::streaming::StreamingRecognizer;
 use crate::asr::AsrModelPaths;
@@ -8,7 +9,7 @@ use serde::Serialize;
 use specta::Type;
 use std::path::PathBuf;
 use std::sync::Mutex;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, State};
 
 const SAMPLE_RATE: i32 = 16_000;
 static GLOBAL_ASR_SESSION: Lazy<Mutex<Option<AsrCommandSession>>> = Lazy::new(|| Mutex::new(None));
@@ -127,6 +128,86 @@ pub fn asr_feed_pcm(app: AppHandle, frames: Vec<f32>) -> Result<(), String> {
 pub fn asr_stop(app: AppHandle) -> Result<(), String> {
     let events = global_stop().map_err(|error| error.to_string())?;
     emit_events(&app, events)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn asr_list_model_packs(
+    app: AppHandle,
+    manager: State<'_, AndroidAsrModelManager>,
+) -> Result<Vec<AndroidAsrModelPackState>, String> {
+    manager
+        .list_for_app(&app)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn asr_get_model_pack_state(
+    app: AppHandle,
+    manager: State<'_, AndroidAsrModelManager>,
+    model_id: String,
+) -> Result<AndroidAsrModelPackState, String> {
+    manager
+        .pack_state_for_app(&app, &model_id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn asr_download_model_pack(
+    app: AppHandle,
+    manager: State<'_, AndroidAsrModelManager>,
+    model_id: String,
+) -> Result<(), String> {
+    let result = manager
+        .download_pack(&app, &model_id)
+        .await
+        .map_err(|error| error.to_string());
+
+    if let Err(ref error) = result {
+        let _ = app.emit(
+            "android-asr-model-failed",
+            serde_json::json!({ "modelId": &model_id, "error": error }),
+        );
+    }
+
+    result
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn asr_cancel_model_download(
+    manager: State<'_, AndroidAsrModelManager>,
+    model_id: String,
+) -> Result<(), String> {
+    manager
+        .cancel_download(&model_id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn asr_select_model_pack(
+    app: AppHandle,
+    manager: State<'_, AndroidAsrModelManager>,
+    model_id: String,
+) -> Result<AndroidAsrModelPackState, String> {
+    manager
+        .select_pack(&app, &model_id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn asr_delete_model_pack(
+    app: AppHandle,
+    manager: State<'_, AndroidAsrModelManager>,
+    model_id: String,
+) -> Result<(), String> {
+    manager
+        .delete_pack(&app, &model_id)
+        .map_err(|error| error.to_string())
 }
 
 fn emit_events(app: &AppHandle, events: Vec<AsrCommandEvent>) -> Result<(), String> {

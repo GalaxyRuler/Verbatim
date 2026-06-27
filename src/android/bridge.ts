@@ -6,6 +6,7 @@ import {
   invoke,
   type PluginListener,
 } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 const PLUGIN = "verbatim-android";
 
@@ -14,6 +15,34 @@ const raw = () => window.VerbatimAndroid;
 function cmd<T>(name: string, args?: Record<string, unknown>): Promise<T> {
   return invoke<T>(`plugin:${PLUGIN}|${name}`, args);
 }
+
+function appCmd<T>(name: string, args?: Record<string, unknown>): Promise<T> {
+  return invoke<T>(name, args);
+}
+
+export type AndroidAsrModelPackState = {
+  id: string;
+  displayName: string;
+  description: string;
+  language: string;
+  sizeMb: number;
+  isInstalled: boolean;
+  isDownloading: boolean;
+  isActive: boolean;
+  isSelectable: boolean;
+  downloadPhase: string;
+  downloadProgress: number;
+  missingFiles: string[];
+};
+
+export type AndroidAsrDownloadProgress = {
+  modelId: string;
+  phase: string;
+  file?: string | null;
+  downloaded: number;
+  total: number;
+  percentage: number;
+};
 
 // ---- State (pull + push) ----
 
@@ -117,6 +146,69 @@ export async function setEngineDictationEnabled(
   } catch {
     return raw()?.setEngineDictationEnabled?.(enabled) ?? enabled;
   }
+}
+
+export async function setEngineModelId(modelId: string): Promise<string> {
+  try {
+    return (
+      (await cmd<{ value?: string }>("set_engine_model_id", { modelId }))
+        .value ?? modelId
+    );
+  } catch {
+    return raw()?.setEngineModelId?.(modelId) ?? modelId;
+  }
+}
+
+export async function listAndroidAsrModelPacks(): Promise<
+  AndroidAsrModelPackState[]
+> {
+  return appCmd<AndroidAsrModelPackState[]>("asr_list_model_packs");
+}
+
+export async function downloadAndroidAsrModelPack(
+  modelId: string,
+): Promise<void> {
+  await appCmd<void>("asr_download_model_pack", { modelId });
+}
+
+export async function cancelAndroidAsrModelDownload(
+  modelId: string,
+): Promise<void> {
+  await appCmd<void>("asr_cancel_model_download", { modelId });
+}
+
+export async function selectAndroidAsrModelPack(
+  modelId: string,
+): Promise<AndroidAsrModelPackState> {
+  const state = await appCmd<AndroidAsrModelPackState>(
+    "asr_select_model_pack",
+    { modelId },
+  );
+  await setEngineModelId(modelId);
+  return state;
+}
+
+export async function deleteAndroidAsrModelPack(
+  modelId: string,
+): Promise<void> {
+  await appCmd<void>("asr_delete_model_pack", { modelId });
+}
+
+export function onAndroidAsrModelProgress(
+  cb: (progress: AndroidAsrDownloadProgress) => void,
+): Promise<UnlistenFn> {
+  return listen<AndroidAsrDownloadProgress>(
+    "android-asr-model-progress",
+    (event) => cb(event.payload),
+  );
+}
+
+export function onAndroidAsrModelChanged(
+  cb: (modelId: string) => void,
+): Promise<UnlistenFn> {
+  return listen<string>("android-asr-model-changed", (event) =>
+    cb(event.payload),
+  );
 }
 
 export async function startBubble(): Promise<void> {
