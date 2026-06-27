@@ -484,6 +484,10 @@
       "dockedPill": {
         "label": "Docked Pill",
         "description": "Keep a tiny pill available at the bottom of the current screen. Click it to expand controls."
+      },
+      "elevatedWarning": {
+        "label": "Varna om appar med förhöjd behörighet",
+        "description": "Visa en avisering när den aktiva appen körs som administratör och blockerar diktering"
       }
     },
     "postProcessing": {
@@ -1153,6 +1157,12 @@
         "pop": "Pop",
         "custom": "Custom"
       }
+    }
+  },
+  "notifications": {
+    "elevatedWindow": {
+      "title": "Diktering är inte tillgänglig här",
+      "body": "{{app}} körs som administratör, så Windows hindrar Verbatim från att skriva i den. Starta om {{app}} normalt, eller kör Verbatim som administratör också."
     }
   }
 }

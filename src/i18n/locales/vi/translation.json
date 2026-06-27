@@ -484,6 +484,10 @@
       "dockedPill": {
         "label": "Docked Pill",
         "description": "Keep a tiny pill available at the bottom of the current screen. Click it to expand controls."
+      },
+      "elevatedWarning": {
+        "label": "Cảnh báo về ứng dụng chạy quyền cao",
+        "description": "Hiển thị thông báo khi ứng dụng đang focus chạy với quyền quản trị viên và chặn đọc chính tả"
       }
     },
     "postProcessing": {
@@ -1153,6 +1157,12 @@
         "pop": "Pop",
         "custom": "Custom"
       }
+    }
+  },
+  "notifications": {
+    "elevatedWindow": {
+      "title": "Không thể đọc chính tả tại đây",
+      "body": "{{app}} đang chạy với quyền quản trị viên, nên Windows chặn Verbatim nhập văn bản vào đó. Hãy khởi động lại {{app}} bình thường, hoặc chạy Verbatim cũng với quyền quản trị viên."
     }
   }
 }

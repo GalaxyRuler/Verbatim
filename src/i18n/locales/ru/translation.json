@@ -484,6 +484,10 @@
       "dockedPill": {
         "label": "Docked Pill",
         "description": "Keep a tiny pill available at the bottom of the current screen. Click it to expand controls."
+      },
+      "elevatedWarning": {
+        "label": "Предупреждать о приложениях с повышенными правами",
+        "description": "Показывать уведомление, когда активное приложение запущено от имени администратора и блокирует диктовку"
       }
     },
     "postProcessing": {
@@ -1153,6 +1157,12 @@
         "pop": "Pop",
         "custom": "Custom"
       }
+    }
+  },
+  "notifications": {
+    "elevatedWindow": {
+      "title": "Диктовка здесь недоступна",
+      "body": "{{app}} запущено от имени администратора, поэтому Windows блокирует ввод текста из Verbatim. Перезапустите {{app}} обычным образом или запустите Verbatim тоже от имени администратора."
     }
   }
 }
