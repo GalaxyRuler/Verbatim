@@ -52,6 +52,11 @@ class SetEngineDictationArgs {
   var enabled: Boolean = false
 }
 
+@InvokeArg
+class SetEngineModelIdArgs {
+  var modelId: String = ""
+}
+
 /**
  * The real Tauri plugin for Verbatim's Android native surface. It lives in the APP module
  * (com.galaxyruler.verbatim) — not the plugin's android library — so it can reach the app's
@@ -146,6 +151,14 @@ class VerbatimAndroidPlugin(private val activity: Activity) : Plugin(activity) {
     val args = invoke.parseArgs(SetEngineDictationArgs::class.java)
     val ret = JSObject()
     ret.put("value", FloatingBubbleService.setEngineDictationEnabled(activity, args.enabled))
+    invoke.resolve(ret)
+  }
+
+  @Command
+  fun setEngineModelId(invoke: Invoke) {
+    val args = invoke.parseArgs(SetEngineModelIdArgs::class.java)
+    val ret = JSObject()
+    ret.put("value", FloatingBubbleService.setEngineModelId(activity, args.modelId))
     invoke.resolve(ret)
   }
 

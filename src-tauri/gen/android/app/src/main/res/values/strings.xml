@@ -14,6 +14,7 @@
     <string name="bubble_permissions_needed">Permissions needed</string>
     <string name="bubble_speech_missing">Speech unavailable</string>
     <string name="bubble_speech_pack_missing">Offline speech missing</string>
+    <string name="bubble_asr_model_missing">Download a Verbatim model first</string>
     <string name="bubble_language_unsupported">Language unsupported</string>
     <string name="bubble_recognizer_busy">Speech busy</string>
     <string name="bubble_microphone_blocked">Mic unavailable</string>

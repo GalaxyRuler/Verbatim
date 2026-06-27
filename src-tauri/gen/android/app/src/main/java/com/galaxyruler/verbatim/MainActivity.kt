@@ -201,6 +201,10 @@ class MainActivity : TauriActivity() {
     }
 
     @JavascriptInterface
+    fun setEngineModelId(modelId: String): String =
+      FloatingBubbleService.setEngineModelId(activity, modelId)
+
+    @JavascriptInterface
     fun startBubble() {
       activity.runOnUiThread {
         if (activity.hasOverlayPermission()) {

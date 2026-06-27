@@ -476,9 +476,15 @@ class FloatingBubbleService : Service() {
       return
     }
 
-    if (isEngineDictationEnabled()) {
+    if (isEngineDictationEnabled() && isEngineModelInstalled()) {
       startEngineDictation()
       return
+    }
+    if (isEngineDictationEnabled()) {
+      logAsr(
+        "engine dictation enabled but selected model is not installed; falling back to OS recognizer",
+      )
+      Toast.makeText(this, R.string.bubble_asr_model_missing, Toast.LENGTH_SHORT).show()
     }
 
     if (!isOnDeviceSpeechRecognitionAvailable()) {
@@ -769,16 +775,11 @@ class FloatingBubbleService : Service() {
       .getBoolean(ENGINE_DICTATION_ENABLED_KEY, false)
 
   private fun engineModelDir(): String {
-    val modelId = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-      .getString(ENGINE_MODEL_ID_KEY, DEFAULT_ENGINE_MODEL_ID)
-      ?: DEFAULT_ENGINE_MODEL_ID
-    val modelPath = File(modelId)
-    if (modelPath.isAbsolute) {
-      return modelPath.absolutePath
-    }
-
-    return File(filesDir, "models/android-asr/$modelId").absolutePath
+    return EngineModelSelectionStore.engineModelDir(this)
   }
+
+  private fun isEngineModelInstalled(): Boolean =
+    EngineModelSelectionStore.isEngineModelInstalled(this, REQUIRED_ENGINE_MODEL_FILES)
 
   private fun logAsr(message: String) {
     if (BuildConfig.DEBUG) {
@@ -1261,8 +1262,16 @@ class FloatingBubbleService : Service() {
     private const val ANDROID_HISTORY_KEY = "native_transcript_history"
     private const val TEXT_FORMATTER_KEY = "native_text_formatter_snapshot"
     private const val ENGINE_DICTATION_ENABLED_KEY = "native_engine_dictation_enabled"
-    private const val ENGINE_MODEL_ID_KEY = "native_engine_model_id"
-    private const val DEFAULT_ENGINE_MODEL_ID = "default"
+    private val REQUIRED_ENGINE_MODEL_FILES = arrayOf(
+      "streaming/encoder.onnx",
+      "streaming/decoder.onnx",
+      "streaming/joiner.onnx",
+      "streaming/tokens.txt",
+      "whisper/encoder.onnx",
+      "whisper/decoder.onnx",
+      "whisper/tokens.txt",
+      "silero_vad_v4.onnx",
+    )
     private const val ASR_LOG_TAG = "VerbatimASR"
     private const val BUBBLE_LOG_TAG = "FloatingBubble"
     private const val BUBBLE_X_KEY = "bubble_x"
@@ -1387,6 +1396,11 @@ class FloatingBubbleService : Service() {
         .apply()
       return enabled
     }
+
+    fun engineModelId(context: Context): String = EngineModelSelectionStore.engineModelId(context)
+
+    fun setEngineModelId(context: Context, modelId: String): String =
+      EngineModelSelectionStore.setEngineModelId(context, modelId)
 
     fun bubbleCornerSnapshot(context: Context): String {
       val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)

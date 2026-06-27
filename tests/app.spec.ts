@@ -222,12 +222,39 @@ const installTauriMocks = async (
     currentModel?: string;
     hasAnyModels?: boolean;
     firstRun?: boolean;
+    androidAsrPacks?: Array<Record<string, unknown>>;
   } = {},
 ) => {
   const availableModels = mockOptions.availableModels ?? models;
   const currentModel = mockOptions.currentModel ?? "small";
   const hasAnyModelsOverride = mockOptions.hasAnyModels;
   const firstRun = Boolean(mockOptions.firstRun);
+  const androidAsrPacks = mockOptions.androidAsrPacks ?? [
+    {
+      id: "g3-zipformer-whisper-tiny-en",
+      displayName: "English On-device Starter",
+      description: "Streaming Zipformer + Whisper tiny.en + Silero VAD",
+      sizeMb: 141,
+      installedDir:
+        "/data/user/0/com.galaxyruler.verbatim/models/android-asr/g3-zipformer-whisper-tiny-en",
+      isInstalled: false,
+      isDownloading: false,
+      isActive: false,
+      isSelectable: false,
+      downloadPhase: "available",
+      downloadProgress: 0,
+      missingFiles: [
+        "streaming/encoder.onnx",
+        "streaming/decoder.onnx",
+        "streaming/joiner.onnx",
+        "streaming/tokens.txt",
+        "whisper/encoder.onnx",
+        "whisper/decoder.onnx",
+        "whisper/tokens.txt",
+        "silero_vad_v4.onnx",
+      ],
+    },
+  ];
 
   await page.addInitScript(
     ({
@@ -237,6 +264,7 @@ const installTauriMocks = async (
       currentModel,
       hasAnyModelsOverride,
       firstRun,
+      androidAsrPacks,
       localPostProcessingModels,
       initialHistoryEntries,
       osType,
@@ -290,6 +318,9 @@ const installTauriMocks = async (
               }
             : { ...model },
       );
+      let androidAsrRows = [
+        ...((androidAsrPacks as Array<Record<string, unknown>>) ?? []),
+      ];
       let historyRows = [
         ...((initialHistoryEntries as Array<Record<string, unknown>>) ?? []),
       ];
@@ -412,6 +443,7 @@ const installTauriMocks = async (
                   syncTextFormatter: (snapshot: string) => void;
                   engineDictationEnabled?: () => boolean;
                   setEngineDictationEnabled?: (enabled: boolean) => boolean;
+                  setEngineModelId?: (modelId: string) => string;
                   startBubble: () => void;
                   stopBubble: () => void;
                 };
@@ -453,6 +485,12 @@ const installTauriMocks = async (
                   value:
                     va?.setEngineDictationEnabled?.(args?.enabled as boolean) ??
                     false,
+                };
+              case "set_engine_model_id":
+                return {
+                  value:
+                    va?.setEngineModelId?.(args?.modelId as string) ??
+                    (args?.modelId as string),
                 };
               case "start_bubble":
                 va?.startBubble();
@@ -686,6 +724,106 @@ const installTauriMocks = async (
               );
             case "get_available_models":
               return modelRows;
+            case "asr_list_model_packs":
+              return androidAsrRows;
+            case "asr_download_model_pack": {
+              const modelId = args?.modelId as string;
+              androidAsrRows = androidAsrRows.map((model) =>
+                model.id === modelId
+                  ? {
+                      ...model,
+                      isDownloading: true,
+                      downloadPhase: "downloading",
+                      downloadProgress: 42,
+                    }
+                  : model,
+              );
+              emitEvent("android-asr-model-progress", {
+                modelId,
+                phase: "downloading",
+                downloaded: 42,
+                total: 100,
+                percentage: 42,
+              });
+
+              return new Promise((resolve) => {
+                setTimeout(() => {
+                  androidAsrRows = androidAsrRows.map((model) =>
+                    model.id === modelId
+                      ? {
+                          ...model,
+                          isDownloading: true,
+                          downloadPhase: "verifying",
+                          downloadProgress: 100,
+                        }
+                      : model,
+                  );
+                  emitEvent("android-asr-model-progress", {
+                    modelId,
+                    phase: "verifying",
+                    downloaded: 100,
+                    total: 100,
+                    percentage: 100,
+                  });
+                }, 100);
+                setTimeout(() => {
+                  androidAsrRows = androidAsrRows.map((model) =>
+                    model.id === modelId
+                      ? {
+                          ...model,
+                          isInstalled: true,
+                          isDownloading: false,
+                          isSelectable: true,
+                          downloadPhase: "ready",
+                          downloadProgress: 100,
+                          missingFiles: [],
+                        }
+                      : model,
+                  );
+                  emitEvent("android-asr-model-changed", modelId);
+                  resolve(null);
+                }, 250);
+              });
+            }
+            case "asr_cancel_model_download":
+              androidAsrRows = androidAsrRows.map((model) =>
+                model.id === args?.modelId
+                  ? {
+                      ...model,
+                      isDownloading: false,
+                      downloadPhase: "available",
+                      downloadProgress: 0,
+                    }
+                  : model,
+              );
+              return null;
+            case "asr_select_model_pack": {
+              const modelId = args?.modelId as string;
+              androidAsrRows = androidAsrRows.map((model) => ({
+                ...model,
+                isActive: model.id === modelId,
+              }));
+              return androidAsrRows.find((model) => model.id === modelId);
+            }
+            case "asr_delete_model_pack": {
+              const modelId = args?.modelId as string;
+              androidAsrRows = androidAsrRows.map((model) =>
+                model.id === modelId
+                  ? {
+                      ...model,
+                      isInstalled: false,
+                      isDownloading: false,
+                      isActive: false,
+                      isSelectable: false,
+                      downloadPhase: "available",
+                      downloadProgress: 0,
+                      missingFiles: ["streaming/encoder.onnx"],
+                    }
+                  : model,
+              );
+              emitEvent("android-asr-model-changed", modelId);
+              return null;
+            }
             case "download_model": {
               const modelId = args?.modelId as string;
               modelRows = modelRows.map((model) =>
@@ -1035,6 +1173,7 @@ const installTauriMocks = async (
       currentModel,
       hasAnyModelsOverride,
       firstRun,
+      androidAsrPacks,
       localPostProcessingModels: localLlmModels,
       initialHistoryEntries: historyEntries,
       osType,
@@ -1075,6 +1214,7 @@ const installAndroidBridgeMock = async (
           syncTextFormatter: (snapshot: string) => void;
           engineDictationEnabled: () => boolean;
           setEngineDictationEnabled: (enabled: boolean) => boolean;
+          setEngineModelId: (modelId: string) => string;
           startBubble: () => void;
           stopBubble: () => void;
         };
@@ -1084,6 +1224,7 @@ const installAndroidBridgeMock = async (
       testWindow.__VERBATIM_ANDROID_BRIDGE_CALLS__ = [];
       testWindow.__VERBATIM_ANDROID_FORMATTER_SNAPSHOTS__ = [];
       let engineDictationEnabled = false;
+      let engineModelId = "default";
       testWindow.VerbatimAndroid = {
         permissionSnapshot: () => JSON.stringify(snapshot),
         nativeTranscriptHistory: () => JSON.stringify(nativeHistoryEntries),
@@ -1121,6 +1262,13 @@ const installAndroidBridgeMock = async (
             `setEngineDictationEnabled:${enabled}`,
           );
           return engineDictationEnabled;
+        },
+        setEngineModelId: (modelId: string) => {
+          engineModelId = modelId;
+          testWindow.__VERBATIM_ANDROID_BRIDGE_CALLS__.push(
+            `setEngineModelId:${modelId}`,
+          );
+          return engineModelId;
         },
         startBubble: () => undefined,
         stopBubble: () => undefined,
@@ -1383,6 +1531,77 @@ test.describe("Verbatim App", () => {
     await expect(
       page.getByText("Native Android formatted transcript"),
     ).toBeVisible();
+  });
+
+  test("android Models tab downloads verifies selects and deletes ASR packs", async ({
+    page,
+  }) => {
+    await installTauriMocks(page, {}, [], "android");
+    await installAndroidBridgeMock(page, {
+      microphone: true,
+      overlay: true,
+      accessibility: true,
+      bubbleRunning: true,
+      speechRecognizerAvailable: true,
+      onDeviceSpeechRecognizerAvailable: true,
+      onDeviceSpeechLanguageAvailable: true,
+    });
+
+    await page.goto("/");
+    await page.getByRole("button", { name: "Models" }).click();
+
+    const packCard = page
+      .getByRole("article")
+      .filter({ hasText: "English On-device Starter" });
+    await expect(
+      packCard.getByRole("heading", { name: "English On-device Starter" }),
+    ).toBeVisible();
+    await expect(packCard.getByText("Available")).toBeVisible();
+    await packCard.getByRole("button", { name: "Download" }).click();
+
+    await expect(packCard.getByText("Downloading 42%")).toBeVisible();
+    await expect(packCard.getByText("Verifying")).toBeVisible();
+    await expect(packCard.getByText("Ready")).toBeVisible();
+
+    await packCard.getByRole("button", { name: "Select" }).click();
+    await expect(packCard.getByText("Active")).toBeVisible();
+
+    await packCard.getByRole("button", { name: "Delete" }).click();
+    await expect(packCard.getByText("Available")).toBeVisible();
+
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            (
+              window as typeof window & {
+                __VERBATIM_TEST_COMMANDS__?: string[];
+              }
+            ).__VERBATIM_TEST_COMMANDS__ ?? [],
+        ),
+      )
+      .toEqual(
+        expect.arrayContaining([
+          "asr_list_model_packs",
+          "asr_download_model_pack",
+          "asr_select_model_pack",
+          "asr_delete_model_pack",
+        ]),
+      );
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            (
+              window as typeof window & {
+                __VERBATIM_ANDROID_BRIDGE_CALLS__?: string[];
+              }
+            ).__VERBATIM_ANDROID_BRIDGE_CALLS__ ?? [],
+        ),
+      )
+      .toContain(
+        "setEngineModelId:/data/user/0/com.galaxyruler.verbatim/models/android-asr/g3-zipformer-whisper-tiny-en",
+      );
   });
 
   test("android shell syncs formatter rules to native bridge", async ({

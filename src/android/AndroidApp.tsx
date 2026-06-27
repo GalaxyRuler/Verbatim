@@ -14,6 +14,7 @@ import {
   ChevronRight,
   Copy,
   Cpu,
+  Download,
   ExternalLink,
   FileText,
   History,
@@ -41,7 +42,6 @@ import {
   type DictionaryEntry,
   type HistoryEntry,
   type LLMPrompt,
-  type ModelInfo,
   type PostProcessProvider,
   type RecordingRetentionPeriod,
   type SnippetEntry,
@@ -62,9 +62,15 @@ import { useSnippetsStore } from "@/stores/snippetsStore";
 import { formatDateTime } from "@/utils/dateFormat";
 import {
   bubbleCornerSnapshot,
+  cancelAndroidAsrModelDownload,
   deleteHistoryEntry,
+  deleteAndroidAsrModelPack,
+  downloadAndroidAsrModelPack,
   engineDictationEnabled,
+  listAndroidAsrModelPacks,
   nativeTranscriptHistory,
+  onAndroidAsrModelChanged,
+  onAndroidAsrModelProgress,
   onPermissions,
   openAccessibilitySettings,
   openExternalUrl,
@@ -72,9 +78,12 @@ import {
   permissionSnapshot,
   requestMicrophone,
   requestSpeechModelDownload,
+  selectAndroidAsrModelPack,
   setEngineDictationEnabled,
   setBubbleCorner as setNativeBubbleCorner,
   syncTextFormatter,
+  type AndroidAsrDownloadProgress,
+  type AndroidAsrModelPackState,
 } from "./bridge";
 import "./AndroidApp.css";
 
@@ -143,6 +152,7 @@ declare global {
       openExternalUrl?: (url: string) => boolean;
       engineDictationEnabled?: () => boolean;
       setEngineDictationEnabled?: (enabled: boolean) => boolean;
+      setEngineModelId?: (modelId: string) => string;
     };
   }
 }
@@ -1589,25 +1599,112 @@ function AndroidSnippetList({
 
 function ModelsTab() {
   const { t } = useTranslation();
-  const {
-    models,
-    currentModel,
-    downloadingModels,
-    downloadProgress,
-    selectModel,
-    downloadModel,
-    cancelDownload,
-    deleteModel,
-  } = useModelStore();
+  const [packs, setPacks] = useState<AndroidAsrModelPackState[]>([]);
+  const [progressById, setProgressById] = useState<
+    Record<string, AndroidAsrDownloadProgress>
+  >({});
+  const [busyIds, setBusyIds] = useState<Record<string, true>>({});
+  const [error, setError] = useState<string | null>(null);
 
-  const downloaded = models.filter(
-    (model) => model.is_downloaded || model.id in downloadingModels,
+  const refreshPacks = useCallback(async () => {
+    try {
+      const next = await listAndroidAsrModelPacks();
+      setPacks(next);
+      setError(null);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshPacks();
+    let unlistenProgress: (() => void) | undefined;
+    let unlistenChanged: (() => void) | undefined;
+
+    void onAndroidAsrModelProgress((progress) => {
+      setProgressById((current) => ({
+        ...current,
+        [progress.modelId]: progress,
+      }));
+      setPacks((current) =>
+        current.map((pack) =>
+          pack.id === progress.modelId
+            ? {
+                ...pack,
+                isDownloading:
+                  progress.phase === "downloading" ||
+                  progress.phase === "verifying" ||
+                  progress.phase === "installing",
+                downloadPhase: progress.phase,
+                downloadProgress: progress.percentage,
+              }
+            : pack,
+        ),
+      );
+    }).then((unlisten) => {
+      unlistenProgress = unlisten;
+    });
+
+    void onAndroidAsrModelChanged(() => {
+      setProgressById({});
+      void refreshPacks();
+    }).then((unlisten) => {
+      unlistenChanged = unlisten;
+    });
+
+    return () => {
+      unlistenProgress?.();
+      unlistenChanged?.();
+    };
+  }, [refreshPacks]);
+
+  const runPackAction = useCallback(
+    async (modelId: string, action: () => Promise<void>) => {
+      setBusyIds((current) => ({ ...current, [modelId]: true }));
+      setError(null);
+      try {
+        await action();
+        await refreshPacks();
+      } catch (caught) {
+        setError(caught instanceof Error ? caught.message : String(caught));
+      } finally {
+        setBusyIds((current) => {
+          const next = { ...current };
+          delete next[modelId];
+          return next;
+        });
+      }
+    },
+    [refreshPacks],
   );
-  const available = models.filter(
-    (model) => !model.is_downloaded && !(model.id in downloadingModels),
+
+  const handleDownload = useCallback(
+    (modelId: string) =>
+      runPackAction(modelId, () => downloadAndroidAsrModelPack(modelId)),
+    [runPackAction],
   );
-  const storageMb = downloaded.reduce(
-    (total, model) => total + (model.is_downloaded ? model.size_mb : 0),
+  const handleCancel = useCallback(
+    (modelId: string) =>
+      runPackAction(modelId, () => cancelAndroidAsrModelDownload(modelId)),
+    [runPackAction],
+  );
+  const handleSelect = useCallback(
+    (modelId: string) =>
+      runPackAction(modelId, async () => {
+        await selectAndroidAsrModelPack(modelId);
+      }),
+    [runPackAction],
+  );
+  const handleDelete = useCallback(
+    (modelId: string) =>
+      runPackAction(modelId, () => deleteAndroidAsrModelPack(modelId)),
+    [runPackAction],
+  );
+
+  const installed = packs.filter((pack) => pack.isInstalled);
+  const available = packs.filter((pack) => !pack.isInstalled);
+  const storageMb = installed.reduce(
+    (total, model) => total + (model.isInstalled ? model.sizeMb : 0),
     0,
   );
 
@@ -1623,58 +1720,83 @@ function ModelsTab() {
         </span>
       </div>
 
+      {error && (
+        <div className="android-callout android-callout-warning" role="alert">
+          {t("android.models.error", { error })}
+        </div>
+      )}
+
       <ModelSection
         title={t("android.models.downloaded")}
-        models={downloaded}
-        currentModel={currentModel}
-        downloadingModels={downloadingModels}
-        downloadProgress={downloadProgress}
-        onSelect={selectModel}
-        onDownload={downloadModel}
-        onCancel={cancelDownload}
-        onDelete={deleteModel}
+        packs={installed}
+        progressById={progressById}
+        busyIds={busyIds}
+        onSelect={handleSelect}
+        onDownload={handleDownload}
+        onCancel={handleCancel}
+        onDelete={handleDelete}
       />
       <ModelSection
         title={t("android.models.available")}
-        models={available}
-        currentModel={currentModel}
-        downloadingModels={downloadingModels}
-        downloadProgress={downloadProgress}
-        onSelect={selectModel}
-        onDownload={downloadModel}
-        onCancel={cancelDownload}
-        onDelete={deleteModel}
+        packs={available}
+        progressById={progressById}
+        busyIds={busyIds}
+        onSelect={handleSelect}
+        onDownload={handleDownload}
+        onCancel={handleCancel}
+        onDelete={handleDelete}
       />
+      {packs.length === 0 && (
+        <section className="android-section">
+          <div className="android-panel android-empty-state">
+            <p className="android-muted">{t("android.models.empty")}</p>
+          </div>
+        </section>
+      )}
     </>
   );
 }
 
 function ModelSection({
   title,
-  models,
-  currentModel,
-  downloadingModels,
-  downloadProgress,
+  packs,
+  progressById,
+  busyIds,
   onSelect,
   onDownload,
   onCancel,
   onDelete,
 }: {
   title: string;
-  models: ModelInfo[];
-  currentModel: string;
-  downloadingModels: Record<string, true>;
-  downloadProgress: Record<string, { percentage: number }>;
-  onSelect: (modelId: string) => Promise<boolean>;
-  onDownload: (modelId: string) => Promise<boolean>;
-  onCancel: (modelId: string) => Promise<boolean>;
-  onDelete: (modelId: string) => Promise<boolean>;
+  packs: AndroidAsrModelPackState[];
+  progressById: Record<string, AndroidAsrDownloadProgress>;
+  busyIds: Record<string, true>;
+  onSelect: (modelId: string) => void;
+  onDownload: (modelId: string) => void;
+  onCancel: (modelId: string) => void;
+  onDelete: (modelId: string) => void;
 }) {
   const { t } = useTranslation();
 
-  if (models.length === 0) {
+  if (packs.length === 0) {
     return null;
   }
+
+  const statusLabel = (pack: AndroidAsrModelPackState) => {
+    const progress = pack.isDownloading ? progressById[pack.id] : undefined;
+    const phase = progress?.phase ?? pack.downloadPhase;
+    if (pack.isActive) return t("android.models.status.active");
+    if (phase === "downloading") {
+      const percentage = Math.round(
+        progress?.percentage ?? pack.downloadProgress ?? 0,
+      );
+      return t("android.models.status.downloading", { percentage });
+    }
+    if (phase === "verifying") return t("android.models.status.verifying");
+    if (phase === "installing") return t("android.models.status.installing");
+    if (pack.isInstalled) return t("android.models.status.ready");
+    return t("android.models.status.available");
+  };
 
   return (
     <section className="android-section">
@@ -1682,32 +1804,31 @@ function ModelSection({
         <h2>{title}</h2>
       </div>
       <div className="android-list">
-        {models.map((model) => {
-          const active = model.id === currentModel;
-          const downloading = model.id in downloadingModels;
-          const progress = downloadProgress[model.id]?.percentage ?? 0;
+        {packs.map((pack) => {
+          const busy = pack.id in busyIds;
+          const downloading =
+            pack.isDownloading ||
+            progressById[pack.id]?.phase === "downloading" ||
+            progressById[pack.id]?.phase === "verifying" ||
+            progressById[pack.id]?.phase === "installing";
           return (
             <article
-              key={model.id}
+              key={pack.id}
               className={`android-model-card ${
-                active ? "android-active-model" : ""
+                pack.isActive ? "android-active-model" : ""
               }`}
             >
               <div className="android-model-row">
                 <div>
-                  <h3>{model.name}</h3>
-                  <p className="android-muted">{model.description}</p>
+                  <h3>{pack.displayName}</h3>
+                  <p className="android-muted">{pack.description}</p>
                 </div>
-                {active && (
-                  <span className="android-badge">
-                    {t("modelSelector.active")}
-                  </span>
-                )}
+                <span className="android-badge">{statusLabel(pack)}</span>
               </div>
-              {downloading && (
+              {pack.missingFiles.length > 0 && !downloading && (
                 <p className="android-muted">
-                  {t("modelSelector.downloading", {
-                    percentage: Math.round(progress),
+                  {t("android.models.missingFiles", {
+                    count: pack.missingFiles.length,
                   })}
                 </p>
               )}
@@ -1716,38 +1837,44 @@ function ModelSection({
                   <button
                     type="button"
                     className="android-action"
-                    onClick={() => onCancel(model.id)}
+                    disabled={busy}
+                    onClick={() => onCancel(pack.id)}
                   >
-                    {t("modelSelector.cancel")}
+                    <X size={17} />
+                    <span>{t("android.models.actions.cancel")}</span>
                   </button>
-                ) : model.is_downloaded ? (
+                ) : pack.isInstalled ? (
                   <>
-                    {!active && (
+                    {!pack.isActive && (
                       <button
                         type="button"
                         className="android-action android-primary-action"
-                        onClick={() => onSelect(model.id)}
+                        disabled={busy || !pack.isSelectable}
+                        onClick={() => onSelect(pack.id)}
                       >
-                        {t("android.actions.switchModel")}
+                        <Check size={17} />
+                        <span>{t("android.models.actions.select")}</span>
                       </button>
                     )}
-                    {!active && (
-                      <button
-                        type="button"
-                        className="android-action"
-                        onClick={() => onDelete(model.id)}
-                      >
-                        {t("common.delete")}
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      className="android-action"
+                      disabled={busy}
+                      onClick={() => onDelete(pack.id)}
+                    >
+                      <Trash2 size={17} />
+                      <span>{t("android.models.actions.delete")}</span>
+                    </button>
                   </>
                 ) : (
                   <button
                     type="button"
                     className="android-action android-primary-action"
-                    onClick={() => onDownload(model.id)}
+                    disabled={busy}
+                    onClick={() => onDownload(pack.id)}
                   >
-                    {t("onboarding.download")}
+                    <Download size={17} />
+                    <span>{t("android.models.actions.download")}</span>
                   </button>
                 )}
               </div>

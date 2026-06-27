@@ -1106,7 +1106,24 @@
     "models": {
       "storage": "{{count}} MB used",
       "downloaded": "Downloaded",
-      "available": "Available"
+      "available": "Available",
+      "empty": "No Android ASR model packs are available.",
+      "error": "Model action failed: {{error}}",
+      "missingFiles": "{{count}} required files missing",
+      "status": {
+        "available": "Available",
+        "downloading": "Downloading {{percentage}}%",
+        "verifying": "Verifying",
+        "installing": "Installing",
+        "ready": "Ready",
+        "active": "Active"
+      },
+      "actions": {
+        "download": "Download",
+        "cancel": "Cancel",
+        "select": "Select",
+        "delete": "Delete"
+      }
     },
     "settings": {
       "general": "General",
