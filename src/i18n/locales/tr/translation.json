@@ -484,6 +484,10 @@
       "dockedPill": {
         "label": "Docked Pill",
         "description": "Keep a tiny pill available at the bottom of the current screen. Click it to expand controls."
+      },
+      "elevatedWarning": {
+        "label": "Yükseltilmiş uygulamalar hakkında uyar",
+        "description": "Etkin uygulama yönetici olarak çalışıp dikteyi engellediğinde bildirim göster"
       }
     },
     "postProcessing": {
@@ -1153,6 +1157,12 @@
         "pop": "Pop",
         "custom": "Custom"
       }
+    }
+  },
+  "notifications": {
+    "elevatedWindow": {
+      "title": "Dikte burada kullanılamıyor",
+      "body": "{{app}} yönetici olarak çalışıyor, bu nedenle Windows, Verbatim'in buraya yazmasını engelliyor. {{app}} uygulamasını normal şekilde yeniden başlatın veya Verbatim'i de yönetici olarak çalıştırın."
     }
   }
 }

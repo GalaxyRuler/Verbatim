@@ -484,6 +484,10 @@
       "dockedPill": {
         "label": "Docked Pill",
         "description": "Keep a tiny pill available at the bottom of the current screen. Click it to expand controls."
+      },
+      "elevatedWarning": {
+        "label": "권한 상승 앱 경고",
+        "description": "활성 앱이 관리자 권한으로 실행되어 받아쓰기를 차단할 때 알림 표시"
       }
     },
     "postProcessing": {
@@ -1153,6 +1157,12 @@
         "pop": "Pop",
         "custom": "Custom"
       }
+    }
+  },
+  "notifications": {
+    "elevatedWindow": {
+      "title": "여기서는 받아쓰기를 사용할 수 없습니다",
+      "body": "{{app}}이(가) 관리자 권한으로 실행 중이므로 Windows가 Verbatim의 입력을 차단합니다. {{app}}을(를) 일반적으로 다시 실행하거나 Verbatim도 관리자 권한으로 실행하세요."
     }
   }
 }

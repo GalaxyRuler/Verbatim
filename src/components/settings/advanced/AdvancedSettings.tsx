@@ -21,6 +21,7 @@ import { PrivateSessionToggle } from "../PrivateSession";
 import { RecordingRetentionPeriodSelector } from "../RecordingRetentionPeriod";
 import { ExperimentalToggle } from "../ExperimentalToggle";
 import { DockedPill } from "../DockedPill";
+import { ElevatedWarningToggle } from "../ElevatedWarningToggle";
 import { useSettings } from "../../../hooks/useSettings";
 import { KeyboardImplementationSelector } from "../debug/KeyboardImplementationSelector";
 import { AccelerationSelector } from "../AccelerationSelector";
@@ -42,6 +43,7 @@ export const AdvancedSettings: React.FC = () => {
         <ShowOverlay descriptionMode="tooltip" grouped={true} />
         <DockedPill descriptionMode="tooltip" grouped={true} />
         <ModelUnloadTimeoutSetting descriptionMode="tooltip" grouped={true} />
+        <ElevatedWarningToggle descriptionMode="tooltip" grouped={true} />
         <ExperimentalToggle descriptionMode="tooltip" grouped={true} />
       </SettingsGroup>
 

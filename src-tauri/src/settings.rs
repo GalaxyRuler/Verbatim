@@ -502,6 +502,8 @@ pub struct AppSettings {
     pub overlay_position: OverlayPosition,
     #[serde(default)]
     pub docked_pill_enabled: bool,
+    #[serde(default = "default_warn_on_elevated_target")]
+    pub warn_on_elevated_target: bool,
     #[serde(default = "default_debug_mode")]
     pub debug_mode: bool,
     #[serde(default = "default_log_level")]
@@ -662,6 +664,10 @@ fn default_overlay_position() -> OverlayPosition {
 
 fn default_debug_mode() -> bool {
     false
+}
+
+fn default_warn_on_elevated_target() -> bool {
+    true
 }
 
 fn default_log_level() -> LogLevel {
@@ -1232,6 +1238,7 @@ pub fn get_default_settings() -> AppSettings {
         dictation_language_mode: DictationLanguageMode::default(),
         overlay_position: default_overlay_position(),
         docked_pill_enabled: false,
+        warn_on_elevated_target: true,
         debug_mode: false,
         log_level: default_log_level(),
         custom_words: Vec::new(),

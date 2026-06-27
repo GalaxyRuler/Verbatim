@@ -484,6 +484,10 @@
       "dockedPill": {
         "label": "Docked Pill",
         "description": "Keep a tiny pill available at the bottom of the current screen. Click it to expand controls."
+      },
+      "elevatedWarning": {
+        "label": "Upozorňovat na aplikace se zvýšenými právy",
+        "description": "Zobrazit oznámení, když aktivní aplikace běží jako správce a blokuje diktování"
       }
     },
     "postProcessing": {
@@ -1153,6 +1157,12 @@
         "pop": "Pop",
         "custom": "Custom"
       }
+    }
+  },
+  "notifications": {
+    "elevatedWindow": {
+      "title": "Diktování zde není k dispozici",
+      "body": "{{app}} běží jako správce, takže Windows blokuje psaní z Verbatim. Spusťte {{app}} znovu běžným způsobem, nebo spusťte jako správce i Verbatim."
     }
   }
 }

@@ -484,6 +484,10 @@
       "dockedPill": {
         "label": "Docked Pill",
         "description": "Keep a tiny pill available at the bottom of the current screen. Click it to expand controls."
+      },
+      "elevatedWarning": {
+        "label": "管理者権限アプリを警告する",
+        "description": "アクティブなアプリが管理者として実行され、音声入力がブロックされたときに通知を表示します"
       }
     },
     "postProcessing": {
@@ -1153,6 +1157,12 @@
         "pop": "Pop",
         "custom": "Custom"
       }
+    }
+  },
+  "notifications": {
+    "elevatedWindow": {
+      "title": "ここでは音声入力を利用できません",
+      "body": "{{app}} は管理者として実行されているため、Windows により Verbatim からの入力がブロックされています。{{app}} を通常の方法で起動し直すか、Verbatim も管理者として実行してください。"
     }
   }
 }

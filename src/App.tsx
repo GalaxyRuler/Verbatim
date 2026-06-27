@@ -2,6 +2,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { toast, Toaster } from "sonner";
 import { useTranslation } from "react-i18next";
 import { listen } from "@tauri-apps/api/event";
+import {
+  isPermissionGranted,
+  requestPermission,
+  sendNotification,
+} from "@tauri-apps/plugin-notification";
 import { platform } from "@tauri-apps/plugin-os";
 import { relaunch } from "@tauri-apps/plugin-process";
 import {
@@ -40,6 +45,10 @@ type OnboardingStep =
 type LanguageGuardBlockedEvent = {
   locked_language: string;
   preview: string;
+};
+
+type DictationBlockedEvent = {
+  app_name: string;
 };
 
 type PasteRecoveryEvent = {
@@ -310,6 +319,35 @@ function DesktopApp() {
             },
           },
         });
+      },
+    );
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [t]);
+
+  // Surface a native OS notification when the focused app runs at a higher
+  // integrity level than Verbatim (e.g. "run as administrator"), which makes
+  // Windows silently block dictation there. Native (not in-app) because the
+  // main window is usually hidden in the tray. Text is localized here.
+  useEffect(() => {
+    const unlisten = listen<DictationBlockedEvent>(
+      "dictation-blocked-elevated",
+      async (event) => {
+        const app = event.payload.app_name;
+        try {
+          let granted = await isPermissionGranted();
+          if (!granted) {
+            granted = (await requestPermission()) === "granted";
+          }
+          if (!granted) return;
+          sendNotification({
+            title: t("notifications.elevatedWindow.title"),
+            body: t("notifications.elevatedWindow.body", { app }),
+          });
+        } catch {
+          // Notifications are best-effort; never break the app over a toast.
+        }
       },
     );
     return () => {

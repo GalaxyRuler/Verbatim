@@ -29,8 +29,7 @@ mod imp {
     use std::collections::HashSet;
     use std::time::Duration;
 
-    use tauri::AppHandle;
-    use tauri_plugin_notification::NotificationExt;
+    use tauri::{AppHandle, Emitter};
 
     use windows::Win32::Foundation::{CloseHandle, HANDLE, HWND};
     use windows::Win32::Security::{
@@ -42,6 +41,14 @@ mod imp {
         PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
     };
     use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
+
+    /// Emitted to the frontend when a higher-integrity foreground window is
+    /// detected. The frontend localizes and shows the native notification so the
+    /// message follows the user's language (see `notifications.elevatedWindow.*`).
+    #[derive(Clone, serde::Serialize)]
+    struct DictationBlockedEvent {
+        app_name: String,
+    }
 
     const POLL_INTERVAL: Duration = Duration::from_secs(2);
     // Bound the dedup set so a session that churns through many elevated PIDs
@@ -78,6 +85,13 @@ mod imp {
 
             // Higher-integrity foreground window: keyboard input is isolated from
             // us by UIPI, so the dictation shortcut can't fire here.
+            //
+            // Honor the user setting, read live so the toggle takes effect without
+            // a restart. Skip without marking the pid so re-enabling can still warn.
+            if !crate::settings::get_settings(&app).warn_on_elevated_target {
+                continue;
+            }
+
             warned.insert(pid);
             if warned.len() > MAX_TRACKED_PIDS {
                 warned.clear();
@@ -90,19 +104,11 @@ mod imp {
                  integrity level than Verbatim; dictation input is blocked by Windows UIPI"
             );
 
-            let body = format!(
-                "{app_name} is running as administrator, so Windows blocks Verbatim from typing \
-                 into it. Relaunch {app_name} normally, or run Verbatim as administrator too."
+            // The frontend localizes and shows the native notification.
+            let _ = app.emit(
+                "dictation-blocked-elevated",
+                DictationBlockedEvent { app_name },
             );
-            if let Err(error) = app
-                .notification()
-                .builder()
-                .title("Dictation unavailable here")
-                .body(body)
-                .show()
-            {
-                log::warn!("elevation_watch: failed to show notification: {error}");
-            }
         }
     }
 

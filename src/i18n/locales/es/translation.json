@@ -484,6 +484,10 @@
       "dockedPill": {
         "label": "Docked Pill",
         "description": "Keep a tiny pill available at the bottom of the current screen. Click it to expand controls."
+      },
+      "elevatedWarning": {
+        "label": "Avisar sobre apps con privilegios elevados",
+        "description": "Mostrar una notificación cuando la app activa se ejecuta como administrador y bloquea el dictado"
       }
     },
     "postProcessing": {
@@ -1153,6 +1157,12 @@
         "pop": "Pop",
         "custom": "Custom"
       }
+    }
+  },
+  "notifications": {
+    "elevatedWindow": {
+      "title": "Dictado no disponible aquí",
+      "body": "{{app}} se está ejecutando como administrador, por lo que Windows impide que Verbatim escriba en ella. Reinicia {{app}} normalmente o ejecuta Verbatim también como administrador."
     }
   }
 }

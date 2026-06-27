@@ -484,6 +484,10 @@
       "dockedPill": {
         "label": "Docked Pill",
         "description": "Keep a tiny pill available at the bottom of the current screen. Click it to expand controls."
+      },
+      "elevatedWarning": {
+        "label": "提示以管理员身份运行的应用",
+        "description": "当前台应用以管理员身份运行并阻止听写时显示通知"
       }
     },
     "postProcessing": {
@@ -1153,6 +1157,12 @@
         "pop": "Pop",
         "custom": "Custom"
       }
+    }
+  },
+  "notifications": {
+    "elevatedWindow": {
+      "title": "此处无法使用听写",
+      "body": "{{app}} 正在以管理员身份运行，因此 Windows 阻止 Verbatim 向其输入。请以正常方式重新启动 {{app}}，或同样以管理员身份运行 Verbatim。"
     }
   }
 }
