@@ -5,6 +5,9 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.media.AudioFormat
+import android.media.AudioRecord
+import android.media.MediaRecorder
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -27,6 +30,7 @@ import android.provider.Settings
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
+import android.util.Log
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -42,7 +46,10 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.accessibility.AccessibilityNodeInfoCompat
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
+import java.io.FileInputStream
 import java.util.Locale
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -55,6 +62,9 @@ class FloatingBubbleService : Service() {
   private var bubbleState = BubbleState.IDLE
   private var foregroundActive = false
   private var recoveryText: String? = null
+  private var livePartialText: String? = null
+  private var engineCaptureThread: Thread? = null
+  private val engineRecording = AtomicBoolean(false)
   private var failureMessageResId = R.string.bubble_failed
   private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -71,6 +81,12 @@ class FloatingBubbleService : Service() {
       insertDebugProbe()
       return START_STICKY
     }
+    if (BuildConfig.DEBUG && intent?.action == ACTION_DEBUG_ENGINE_WAV_SMOKE) {
+      inputTargetActive = true
+      updateBubbleVisibility()
+      startDebugEngineWavSmoke(intent.getStringExtra(EXTRA_DEBUG_WAV_PATH))
+      return START_STICKY
+    }
 
     when (intent?.action) {
       ACTION_INPUT_TARGET_ACTIVE -> inputTargetActive = true
@@ -85,6 +101,7 @@ class FloatingBubbleService : Service() {
   override fun onDestroy() {
     speechRecognizer?.destroy()
     speechRecognizer = null
+    stopEngineCapture()
     stopMicrophoneForeground()
     bubbleView?.let { view ->
       windowManager?.removeView(view)
@@ -173,8 +190,10 @@ class FloatingBubbleService : Service() {
     speechRecognizer?.cancel()
     speechRecognizer?.destroy()
     speechRecognizer = null
+    stopEngineCapture()
     stopMicrophoneForeground()
     recoveryText = null
+    livePartialText = null
     bubbleState = BubbleState.IDLE
     bubbleView?.let { view ->
       windowManager?.removeView(view)
@@ -351,7 +370,14 @@ class FloatingBubbleService : Service() {
     view.minimumHeight = 0
     view.setPadding(dp(16), dp(10), dp(10), dp(10))
     view.background = pillBackground("#3F1010")
-    view.addView(label(getString(R.string.bubble_recording), Color.WHITE, 14, true))
+    view.addView(
+      label(
+        livePartialText?.takeIf { it.isNotBlank() } ?: getString(R.string.bubble_recording),
+        Color.WHITE,
+        14,
+        true,
+      ),
+    )
     repeat(5) { index ->
       val bar = View(this).apply {
         background = pillBackground("#FFB4AB")
@@ -431,7 +457,11 @@ class FloatingBubbleService : Service() {
       BubbleState.RECORDING -> {
         bubbleState = BubbleState.TRANSCRIBING
         bubbleView?.let { renderBubble(it) }
-        speechRecognizer?.stopListening()
+        if (engineRecording.get()) {
+          stopEngineDictation()
+        } else {
+          speechRecognizer?.stopListening()
+        }
       }
       BubbleState.TRANSCRIBING -> Unit
       BubbleState.INSERTED -> resetToIdle()
@@ -443,6 +473,11 @@ class FloatingBubbleService : Service() {
     if (!hasRequiredPermissions()) {
       showFailure(R.string.bubble_permissions_needed, null)
       Toast.makeText(this, R.string.bubble_permission_missing, Toast.LENGTH_LONG).show()
+      return
+    }
+
+    if (isEngineDictationEnabled()) {
+      startEngineDictation()
       return
     }
 
@@ -463,6 +498,7 @@ class FloatingBubbleService : Service() {
       return
     }
 
+    livePartialText = null
     speechRecognizer?.destroy()
     speechRecognizer = createSpeechRecognizer().apply {
       setRecognitionListener(object : RecognitionListener {
@@ -520,6 +556,241 @@ class FloatingBubbleService : Service() {
 
   private fun createSpeechRecognizer(): SpeechRecognizer =
     SpeechRecognizer.createOnDeviceSpeechRecognizer(this)
+
+  private fun startEngineDictation() {
+    if (!startMicrophoneForeground()) {
+      return
+    }
+
+    livePartialText = null
+    val listener = createEngineListener()
+
+    val modelDir = engineModelDir()
+    val lang = Locale.getDefault().language.ifBlank { "en" }
+    logAsr("nativeAsrStart called lang=$lang modelDir=$modelDir")
+    if (!nativeAsrStart(modelDir, lang, listener)) {
+      logAsr("nativeAsrStart returned false")
+      stopMicrophoneForeground()
+      showFailure(R.string.bubble_listen_failed, null)
+      return
+    }
+    logAsr("nativeAsrStart returned true")
+
+    engineRecording.set(true)
+    bubbleState = BubbleState.RECORDING
+    bubbleView?.let { renderBubble(it) }
+    engineCaptureThread = Thread({ runEngineCaptureLoop() }, "verbatim-asr-capture").apply {
+      isDaemon = true
+      start()
+    }
+  }
+
+  private fun createEngineListener(): AsrEngineListener =
+    object : AsrEngineListener {
+      override fun onAsrPartial(text: String) {
+        logAsr("onPartial callback len=${text.length}")
+        mainHandler.post {
+          livePartialText = text.trim().takeIf { it.isNotBlank() }
+          if (bubbleState == BubbleState.RECORDING) {
+            bubbleView?.let { renderBubble(it) }
+            logBubble("partial text rendered in bubble")
+          }
+        }
+      }
+
+      override fun onAsrFinal(text: String) {
+        logAsr("onFinal callback len=${text.length}")
+        mainHandler.post {
+          stopMicrophoneForeground()
+          engineRecording.set(false)
+          handleRecognizedText(text)
+        }
+      }
+
+      override fun onAsrError(message: String) {
+        logAsr("onError callback len=${message.length}")
+        mainHandler.post {
+          stopEngineCapture()
+          stopMicrophoneForeground()
+          showFailure(R.string.bubble_listen_failed, null)
+          Toast
+            .makeText(this@FloatingBubbleService, R.string.bubble_listen_failed, Toast.LENGTH_SHORT)
+            .show()
+        }
+      }
+    }
+
+  private fun startDebugEngineWavSmoke(wavPath: String?) {
+    if (wavPath.isNullOrBlank()) {
+      logAsr("debug WAV smoke missing wav path")
+      return
+    }
+
+    if (!startMicrophoneForeground()) {
+      return
+    }
+
+    livePartialText = null
+    val listener = createEngineListener()
+    val modelDir = engineModelDir()
+    val lang = Locale.getDefault().language.ifBlank { "en" }
+    logAsr("nativeAsrStart called lang=$lang modelDir=$modelDir debugWav=$wavPath")
+    if (!nativeAsrStart(modelDir, lang, listener)) {
+      logAsr("nativeAsrStart returned false")
+      stopMicrophoneForeground()
+      showFailure(R.string.bubble_listen_failed, null)
+      return
+    }
+    logAsr("nativeAsrStart returned true")
+
+    engineRecording.set(true)
+    bubbleState = BubbleState.RECORDING
+    bubbleView?.let { renderBubble(it) }
+    engineCaptureThread = Thread({ runDebugWavFeedLoop(wavPath) }, "verbatim-asr-debug-wav").apply {
+      isDaemon = true
+      start()
+    }
+  }
+
+  private fun stopEngineDictation() {
+    stopEngineCapture()
+    livePartialText = null
+    logAsr("nativeAsrStop called")
+    if (!nativeAsrStop()) {
+      logAsr("nativeAsrStop returned false")
+      stopMicrophoneForeground()
+      showFailure(R.string.bubble_listen_failed, null)
+    } else {
+      logAsr("nativeAsrStop returned true")
+    }
+  }
+
+  private fun stopEngineCapture() {
+    engineRecording.set(false)
+    engineCaptureThread?.interrupt()
+    engineCaptureThread = null
+  }
+
+  private fun runEngineCaptureLoop() {
+    var recorder: AudioRecord? = null
+    try {
+      val minBufferSize = AudioRecord.getMinBufferSize(
+        PcmFrameNormalizer.SAMPLE_RATE,
+        AudioFormat.CHANNEL_IN_MONO,
+        AudioFormat.ENCODING_PCM_16BIT,
+      )
+      val bufferSize = max(minBufferSize, PcmFrameNormalizer.FRAME_SIZE * 2 * 4)
+      recorder = AudioRecord(
+        MediaRecorder.AudioSource.VOICE_RECOGNITION,
+        PcmFrameNormalizer.SAMPLE_RATE,
+        AudioFormat.CHANNEL_IN_MONO,
+        AudioFormat.ENCODING_PCM_16BIT,
+        bufferSize,
+      )
+
+      recorder.startRecording()
+      val buffer = ByteArray(PcmFrameNormalizer.FRAME_SIZE * 2)
+      while (engineRecording.get() && !Thread.currentThread().isInterrupted) {
+        val read = recorder.read(buffer, 0, buffer.size)
+        if (read > 0) {
+          PcmFrameNormalizer.pcm16LeToFloatFrames(buffer.copyOf(read)).forEach { frame ->
+            if (!nativeAsrFeedPcm(frame)) {
+              engineRecording.set(false)
+            }
+          }
+        }
+      }
+    } catch (_: SecurityException) {
+      mainHandler.post {
+        stopMicrophoneForeground()
+        showFailure(R.string.bubble_permissions_needed, null)
+      }
+    } catch (_: RuntimeException) {
+      mainHandler.post {
+        stopMicrophoneForeground()
+        showFailure(R.string.bubble_listen_failed, null)
+      }
+    } finally {
+      try {
+        recorder?.stop()
+      } catch (_: RuntimeException) {
+      }
+      recorder?.release()
+    }
+  }
+
+  private fun runDebugWavFeedLoop(wavPath: String) {
+    try {
+      FileInputStream(File(wavPath)).use { input ->
+        val skipped = input.skip(WAV_HEADER_BYTES)
+        if (skipped < WAV_HEADER_BYTES) {
+          throw IllegalArgumentException("invalid WAV header")
+        }
+
+        val buffer = ByteArray(PcmFrameNormalizer.FRAME_SIZE * 2 * 4)
+        while (engineRecording.get() && !Thread.currentThread().isInterrupted) {
+          val read = input.read(buffer)
+          if (read <= 0) {
+            break
+          }
+
+          PcmFrameNormalizer.pcm16LeToFloatFrames(buffer.copyOf(read)).forEach { frame ->
+            if (!nativeAsrFeedPcm(frame)) {
+              engineRecording.set(false)
+              return@forEach
+            }
+            Thread.sleep(DEBUG_WAV_FRAME_SLEEP_MS)
+          }
+        }
+      }
+      mainHandler.post {
+        bubbleState = BubbleState.TRANSCRIBING
+        bubbleView?.let { renderBubble(it) }
+      }
+      logAsr("nativeAsrStop called")
+      if (!nativeAsrStop()) {
+        logAsr("nativeAsrStop returned false")
+      } else {
+        logAsr("nativeAsrStop returned true")
+      }
+    } catch (error: Exception) {
+      logAsr("debug WAV feed failed type=${error.javaClass.simpleName}")
+      mainHandler.post {
+        stopMicrophoneForeground()
+        showFailure(R.string.bubble_listen_failed, null)
+      }
+    } finally {
+      engineRecording.set(false)
+    }
+  }
+
+  private fun isEngineDictationEnabled(): Boolean =
+    getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+      .getBoolean(ENGINE_DICTATION_ENABLED_KEY, false)
+
+  private fun engineModelDir(): String {
+    val modelId = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+      .getString(ENGINE_MODEL_ID_KEY, DEFAULT_ENGINE_MODEL_ID)
+      ?: DEFAULT_ENGINE_MODEL_ID
+    val modelPath = File(modelId)
+    if (modelPath.isAbsolute) {
+      return modelPath.absolutePath
+    }
+
+    return File(filesDir, "models/android-asr/$modelId").absolutePath
+  }
+
+  private fun logAsr(message: String) {
+    if (BuildConfig.DEBUG) {
+      Log.i(ASR_LOG_TAG, message)
+    }
+  }
+
+  private fun logBubble(message: String) {
+    if (BuildConfig.DEBUG) {
+      Log.i(BUBBLE_LOG_TAG, message)
+    }
+  }
 
   private fun speechErrorMessage(error: Int): Int =
     when (error) {
@@ -897,6 +1168,22 @@ class FloatingBubbleService : Service() {
     val to: String,
   )
 
+  private external fun nativeAsrStart(
+    modelDir: String,
+    lang: String,
+    listener: AsrEngineListener,
+  ): Boolean
+
+  private external fun nativeAsrFeedPcm(frames: FloatArray): Boolean
+
+  private external fun nativeAsrStop(): Boolean
+
+  private interface AsrEngineListener {
+    fun onAsrPartial(text: String)
+    fun onAsrFinal(text: String)
+    fun onAsrError(message: String)
+  }
+
   private class VerbatimBubbleIconView(context: Context) : View(context) {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
       color = Color.WHITE
@@ -973,6 +1260,11 @@ class FloatingBubbleService : Service() {
     private const val PREFS_NAME = "verbatim_android"
     private const val ANDROID_HISTORY_KEY = "native_transcript_history"
     private const val TEXT_FORMATTER_KEY = "native_text_formatter_snapshot"
+    private const val ENGINE_DICTATION_ENABLED_KEY = "native_engine_dictation_enabled"
+    private const val ENGINE_MODEL_ID_KEY = "native_engine_model_id"
+    private const val DEFAULT_ENGINE_MODEL_ID = "default"
+    private const val ASR_LOG_TAG = "VerbatimASR"
+    private const val BUBBLE_LOG_TAG = "FloatingBubble"
     private const val BUBBLE_X_KEY = "bubble_x"
     private const val BUBBLE_Y_KEY = "bubble_y"
     private const val BUBBLE_CORNER_KEY = "bubble_corner"
@@ -989,11 +1281,20 @@ class FloatingBubbleService : Service() {
     private const val FOREGROUND_NOTIFICATION_ID = 4808
     private const val ACTION_DEBUG_INSERT_PROBE =
       "com.galaxyruler.verbatim.action.DEBUG_INSERT_PROBE"
+    private const val ACTION_DEBUG_ENGINE_WAV_SMOKE =
+      "com.galaxyruler.verbatim.action.DEBUG_ENGINE_WAV_SMOKE"
+    private const val EXTRA_DEBUG_WAV_PATH = "wav_path"
     private const val ACTION_INPUT_TARGET_ACTIVE =
       "com.galaxyruler.verbatim.action.INPUT_TARGET_ACTIVE"
     private const val ACTION_INPUT_TARGET_INACTIVE =
       "com.galaxyruler.verbatim.action.INPUT_TARGET_INACTIVE"
     private const val DEBUG_INSERTION_TEXT = "Verbatim Android insertion probe"
+    private const val WAV_HEADER_BYTES = 44L
+    private const val DEBUG_WAV_FRAME_SLEEP_MS = 10L
+
+    init {
+      System.loadLibrary("verbatim_app_lib")
+    }
 
     @Volatile
     private var instance: FloatingBubbleService? = null
@@ -1073,6 +1374,20 @@ class FloatingBubbleService : Service() {
       }
     }
 
+    fun isEngineDictationEnabled(context: Context): Boolean =
+      context
+        .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        .getBoolean(ENGINE_DICTATION_ENABLED_KEY, false)
+
+    fun setEngineDictationEnabled(context: Context, enabled: Boolean): Boolean {
+      context
+        .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        .edit()
+        .putBoolean(ENGINE_DICTATION_ENABLED_KEY, enabled)
+        .apply()
+      return enabled
+    }
+
     fun bubbleCornerSnapshot(context: Context): String {
       val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
       val savedCorner = prefs.getString(BUBBLE_CORNER_KEY, null)
@@ -1112,6 +1427,21 @@ class FloatingBubbleService : Service() {
       instance?.insertDebugProbe() ?: try {
         context.startService(Intent(context, FloatingBubbleService::class.java).apply {
           action = ACTION_DEBUG_INSERT_PROBE
+        })
+      } catch (_: IllegalStateException) {
+        // Debug-only adb hook; production builds do not register its receiver.
+      }
+    }
+
+    fun startDebugEngineWavSmoke(context: Context, wavPath: String?) {
+      if (!BuildConfig.DEBUG) {
+        return
+      }
+
+      try {
+        context.startService(Intent(context, FloatingBubbleService::class.java).apply {
+          action = ACTION_DEBUG_ENGINE_WAV_SMOKE
+          putExtra(EXTRA_DEBUG_WAV_PATH, wavPath)
         })
       } catch (_: IllegalStateException) {
         // Debug-only adb hook; production builds do not register its receiver.

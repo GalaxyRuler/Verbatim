@@ -1,3 +1,5 @@
+#[cfg(target_os = "android")]
+pub mod jni_bridge;
 pub mod models;
 pub mod offline;
 pub mod streaming;

@@ -47,6 +47,11 @@ class DeleteHistoryArgs {
   var id: Long = 0
 }
 
+@InvokeArg
+class SetEngineDictationArgs {
+  var enabled: Boolean = false
+}
+
 /**
  * The real Tauri plugin for Verbatim's Android native surface. It lives in the APP module
  * (com.galaxyruler.verbatim) — not the plugin's android library — so it can reach the app's
@@ -126,6 +131,21 @@ class VerbatimAndroidPlugin(private val activity: Activity) : Plugin(activity) {
     val args = invoke.parseArgs(SetBubbleCornerArgs::class.java)
     val ret = JSObject()
     ret.put("value", FloatingBubbleService.setBubbleCorner(activity, args.corner))
+    invoke.resolve(ret)
+  }
+
+  @Command
+  fun engineDictationEnabled(invoke: Invoke) {
+    val ret = JSObject()
+    ret.put("value", FloatingBubbleService.isEngineDictationEnabled(activity))
+    invoke.resolve(ret)
+  }
+
+  @Command
+  fun setEngineDictationEnabled(invoke: Invoke) {
+    val args = invoke.parseArgs(SetEngineDictationArgs::class.java)
+    val ret = JSObject()
+    ret.put("value", FloatingBubbleService.setEngineDictationEnabled(activity, args.enabled))
     invoke.resolve(ret)
   }
 

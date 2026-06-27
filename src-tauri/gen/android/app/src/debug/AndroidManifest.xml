@@ -6,6 +6,7 @@
             android:exported="true">
             <intent-filter>
                 <action android:name="com.galaxyruler.verbatim.action.DEBUG_INSERT_PROBE" />
+                <action android:name="com.galaxyruler.verbatim.action.DEBUG_ENGINE_WAV_SMOKE" />
             </intent-filter>
         </receiver>
     </application>

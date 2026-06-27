@@ -410,6 +410,8 @@ const installTauriMocks = async (
                   openAccessibilitySettings: () => void;
                   requestSpeechModelDownload: () => void;
                   syncTextFormatter: (snapshot: string) => void;
+                  engineDictationEnabled?: () => boolean;
+                  setEngineDictationEnabled?: (enabled: boolean) => boolean;
                   startBubble: () => void;
                   stopBubble: () => void;
                 };
@@ -444,6 +446,14 @@ const installTauriMocks = async (
               case "request_speech_model_download":
                 va?.requestSpeechModelDownload();
                 return null;
+              case "engine_dictation_enabled":
+                return { value: va?.engineDictationEnabled?.() ?? false };
+              case "set_engine_dictation_enabled":
+                return {
+                  value:
+                    va?.setEngineDictationEnabled?.(args?.enabled as boolean) ??
+                    false,
+                };
               case "start_bubble":
                 va?.startBubble();
                 return null;
@@ -1063,6 +1073,8 @@ const installAndroidBridgeMock = async (
           openAccessibilitySettings: () => void;
           requestSpeechModelDownload: () => void;
           syncTextFormatter: (snapshot: string) => void;
+          engineDictationEnabled: () => boolean;
+          setEngineDictationEnabled: (enabled: boolean) => boolean;
           startBubble: () => void;
           stopBubble: () => void;
         };
@@ -1071,6 +1083,7 @@ const installAndroidBridgeMock = async (
       };
       testWindow.__VERBATIM_ANDROID_BRIDGE_CALLS__ = [];
       testWindow.__VERBATIM_ANDROID_FORMATTER_SNAPSHOTS__ = [];
+      let engineDictationEnabled = false;
       testWindow.VerbatimAndroid = {
         permissionSnapshot: () => JSON.stringify(snapshot),
         nativeTranscriptHistory: () => JSON.stringify(nativeHistoryEntries),
@@ -1100,6 +1113,14 @@ const installAndroidBridgeMock = async (
           testWindow.__VERBATIM_ANDROID_FORMATTER_SNAPSHOTS__.push(
             formatterSnapshot,
           );
+        },
+        engineDictationEnabled: () => engineDictationEnabled,
+        setEngineDictationEnabled: (enabled: boolean) => {
+          engineDictationEnabled = enabled;
+          testWindow.__VERBATIM_ANDROID_BRIDGE_CALLS__.push(
+            `setEngineDictationEnabled:${enabled}`,
+          );
+          return engineDictationEnabled;
         },
         startBubble: () => undefined,
         stopBubble: () => undefined,
@@ -1805,6 +1826,53 @@ test.describe("Verbatim App", () => {
           ]),
         }),
       );
+  });
+
+  test("android settings toggle on-device engine while OS recognizer remains fallback", async ({
+    page,
+  }) => {
+    await installTauriMocks(
+      page,
+      {
+        audio_feedback: true,
+        app_language: "en",
+      },
+      [],
+      "android",
+    );
+    await installAndroidBridgeMock(page, {
+      microphone: true,
+      overlay: true,
+      accessibility: true,
+      bubbleRunning: true,
+      speechRecognizerAvailable: true,
+      onDeviceSpeechRecognizerAvailable: true,
+      onDeviceSpeechLanguageAvailable: true,
+    });
+
+    await page.goto("/");
+    await page.getByRole("button", { name: "Settings" }).click();
+
+    const engineToggle = page.getByRole("button", {
+      name: "On-device engine (beta)",
+    });
+    await expect(engineToggle).toHaveAttribute("aria-pressed", "false");
+    await expect(page.getByText("OS speech recognizer fallback")).toBeVisible();
+
+    await engineToggle.click();
+
+    await expect(engineToggle).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByText("Verbatim engine")).toBeVisible();
+    await expect
+      .poll(async () =>
+        page.evaluate(() => {
+          const win = window as typeof window & {
+            __VERBATIM_ANDROID_BRIDGE_CALLS__: string[];
+          };
+          return win.__VERBATIM_ANDROID_BRIDGE_CALLS__;
+        }),
+      )
+      .toContain("setEngineDictationEnabled:true");
   });
 
   test("android settings exposes about source and license details", async ({

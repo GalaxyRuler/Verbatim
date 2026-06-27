@@ -92,6 +92,33 @@ export async function setBubbleCorner(corner: string): Promise<void> {
   }
 }
 
+export async function engineDictationEnabled(): Promise<boolean> {
+  try {
+    return (
+      (await cmd<{ value?: boolean }>("engine_dictation_enabled")).value ??
+      false
+    );
+  } catch {
+    return raw()?.engineDictationEnabled?.() ?? false;
+  }
+}
+
+export async function setEngineDictationEnabled(
+  enabled: boolean,
+): Promise<boolean> {
+  try {
+    return (
+      (
+        await cmd<{ value?: boolean }>("set_engine_dictation_enabled", {
+          enabled,
+        })
+      ).value ?? enabled
+    );
+  } catch {
+    return raw()?.setEngineDictationEnabled?.(enabled) ?? enabled;
+  }
+}
+
 export async function startBubble(): Promise<void> {
   try {
     await cmd<void>("start_bubble");

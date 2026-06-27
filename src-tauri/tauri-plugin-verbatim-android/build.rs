@@ -10,6 +10,8 @@ const COMMANDS: &[&str] = &[
   "sync_text_formatter",
   "bubble_corner_snapshot",
   "set_bubble_corner",
+  "engine_dictation_enabled",
+  "set_engine_dictation_enabled",
   "start_bubble",
   "stop_bubble",
   "request_microphone",

@@ -7513,6 +7513,7 @@ dependencies = [
  "gtk",
  "gtk-layer-shell",
  "hound",
+ "jni",
  "keyring",
  "log",
  "natural",

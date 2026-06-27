@@ -1168,6 +1168,9 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             trigger_update_check,
             show_main_window_command,
             get_startup_status,
+            commands::asr::asr_start,
+            commands::asr::asr_feed_pcm,
+            commands::asr::asr_stop,
             commands::cancel_operation,
             commands::is_portable,
             commands::get_app_dir_path,
@@ -1386,6 +1389,7 @@ fn run_inner(cli_args: CliArgs) {
         .manage(StartupState::default())
         .manage(private_session::PrivateSessionState::default())
         .manage(credentials::SessionCredentialState::default())
+        .manage(commands::asr::AsrCommandState::default())
         .setup(move |app| {
             specta_builder.mount_events(app);
 
