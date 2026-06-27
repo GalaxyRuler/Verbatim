@@ -481,6 +481,9 @@ class FloatingBubbleService : Service() {
       return
     }
     if (isEngineDictationEnabled()) {
+      logAsr(
+        "engine dictation enabled but selected model is not installed; falling back to OS recognizer",
+      )
       Toast.makeText(this, R.string.bubble_asr_model_missing, Toast.LENGTH_SHORT).show()
     }
 
@@ -772,21 +775,11 @@ class FloatingBubbleService : Service() {
       .getBoolean(ENGINE_DICTATION_ENABLED_KEY, false)
 
   private fun engineModelDir(): String {
-    val modelId = engineModelId(this)
-    val modelPath = File(modelId)
-    if (modelPath.isAbsolute) {
-      return modelPath.absolutePath
-    }
-
-    return File(filesDir, "models/android-asr/$modelId").absolutePath
+    return EngineModelSelectionStore.engineModelDir(this)
   }
 
-  private fun isEngineModelInstalled(): Boolean {
-    val modelDir = File(engineModelDir())
-    return REQUIRED_ENGINE_MODEL_FILES.all { relativePath ->
-      File(modelDir, relativePath).isFile
-    }
-  }
+  private fun isEngineModelInstalled(): Boolean =
+    EngineModelSelectionStore.isEngineModelInstalled(this, REQUIRED_ENGINE_MODEL_FILES)
 
   private fun logAsr(message: String) {
     if (BuildConfig.DEBUG) {

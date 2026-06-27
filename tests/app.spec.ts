@@ -235,6 +235,8 @@ const installTauriMocks = async (
       displayName: "English On-device Starter",
       description: "Streaming Zipformer + Whisper tiny.en + Silero VAD",
       sizeMb: 141,
+      installedDir:
+        "/data/user/0/com.galaxyruler.verbatim/models/android-asr/g3-zipformer-whisper-tiny-en",
       isInstalled: false,
       isDownloading: false,
       isActive: false,
@@ -801,7 +803,7 @@ const installTauriMocks = async (
                 ...model,
                 isActive: model.id === modelId,
               }));
-              return null;
+              return androidAsrRows.find((model) => model.id === modelId);
             }
             case "asr_delete_model_pack": {
               const modelId = args?.modelId as string;
@@ -1585,6 +1587,20 @@ test.describe("Verbatim App", () => {
           "asr_select_model_pack",
           "asr_delete_model_pack",
         ]),
+      );
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            (
+              window as typeof window & {
+                __VERBATIM_ANDROID_BRIDGE_CALLS__?: string[];
+              }
+            ).__VERBATIM_ANDROID_BRIDGE_CALLS__ ?? [],
+        ),
+      )
+      .toContain(
+        "setEngineModelId:/data/user/0/com.galaxyruler.verbatim/models/android-asr/g3-zipformer-whisper-tiny-en",
       );
   });
 

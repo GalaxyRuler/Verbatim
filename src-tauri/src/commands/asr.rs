@@ -1,6 +1,8 @@
 //! Android on-device ASR command surface.
 
-use crate::asr::models::{AndroidAsrModelManager, AndroidAsrModelPackState};
+use crate::asr::models::{
+    installed_pack_dir_for_app, AndroidAsrModelManager, AndroidAsrModelPackState,
+};
 use crate::asr::offline::OfflineRecognizer;
 use crate::asr::streaming::StreamingRecognizer;
 use crate::asr::AsrModelPaths;
@@ -231,8 +233,7 @@ fn resolve_model_dir(app: &AppHandle, model_id: &str) -> Result<PathBuf, String>
         return Ok(path);
     }
 
-    crate::portable::app_data_dir(app)
-        .map(|dir| dir.join("models").join("android-asr").join(model_id))
+    installed_pack_dir_for_app(app, model_id)
         .map_err(|error| format!("Failed to resolve Android ASR model directory: {error}"))
 }
 

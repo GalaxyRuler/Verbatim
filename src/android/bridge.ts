@@ -26,6 +26,7 @@ export type AndroidAsrModelPackState = {
   description: string;
   language: string;
   sizeMb: number;
+  installedDir: string;
   isInstalled: boolean;
   isDownloading: boolean;
   isActive: boolean;
@@ -184,7 +185,7 @@ export async function selectAndroidAsrModelPack(
     "asr_select_model_pack",
     { modelId },
   );
-  await setEngineModelId(modelId);
+  await setEngineModelId(state.installedDir || modelId);
   return state;
 }
 

@@ -50,6 +50,7 @@ pub struct AndroidAsrModelPackState {
     pub description: String,
     pub language: String,
     pub size_mb: u64,
+    pub installed_dir: String,
     pub is_installed: bool,
     pub is_downloading: bool,
     pub is_active: bool,
@@ -188,7 +189,7 @@ impl AndroidAsrModelManager {
         model_id: &str,
     ) -> Result<AndroidAsrModelPackState> {
         let pack = pack_by_id(model_id)?;
-        let pack_dir = pack_dir(root, &pack.id);
+        let pack_dir = installed_pack_dir_for_root(root, &pack.id);
         let missing_files = missing_files(&pack, &pack_dir)?;
         let is_downloading = self.is_downloading(&pack.id);
         let is_installed = missing_files.is_empty();
@@ -199,6 +200,7 @@ impl AndroidAsrModelManager {
             description: pack.description,
             language: pack.language,
             size_mb: pack.size_mb,
+            installed_dir: pack_dir.to_string_lossy().into_owned(),
             is_installed,
             is_downloading,
             is_active: active_model_id == Some(model_id) && is_installed,
@@ -547,6 +549,17 @@ fn models_root_for_app(app: &AppHandle) -> Result<PathBuf> {
         .join(MODELS_SUBDIR))
 }
 
+pub(crate) fn installed_pack_dir_for_app(app: &AppHandle, model_id: &str) -> Result<PathBuf> {
+    Ok(installed_pack_dir_for_root(
+        &models_root_for_app(app)?,
+        model_id,
+    ))
+}
+
+fn installed_pack_dir_for_root(root: &Path, model_id: &str) -> PathBuf {
+    pack_dir(root, model_id)
+}
+
 fn pack_dir(root: &Path, model_id: &str) -> PathBuf {
     root.join(model_id)
 }
@@ -780,6 +793,7 @@ mod tests {
         assert!(state.is_installed);
         assert!(state.is_selectable);
         assert!(state.is_active);
+        assert_eq!(state.installed_dir, pack_dir.to_string_lossy().into_owned());
         assert!(state.missing_files.is_empty());
     }
 
