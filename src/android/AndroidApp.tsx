@@ -63,14 +63,22 @@ import { formatDateTime } from "@/utils/dateFormat";
 import {
   bubbleCornerSnapshot,
   cancelAndroidAsrModelDownload,
+  cancelAndroidLlmModelDownload,
   deleteHistoryEntry,
   deleteAndroidAsrModelPack,
+  deleteAndroidLlmModelPack,
   downloadAndroidAsrModelPack,
+  downloadAndroidLlmModelPack,
   engineDictationEnabled,
   listAndroidAsrModelPacks,
+  listAndroidLlmModelPacks,
+  llmPostProcessingEnabled,
+  llmPostProcessingSupport,
   nativeTranscriptHistory,
   onAndroidAsrModelChanged,
   onAndroidAsrModelProgress,
+  onAndroidLlmModelChanged,
+  onAndroidLlmModelProgress,
   onPermissions,
   openAccessibilitySettings,
   openExternalUrl,
@@ -79,11 +87,16 @@ import {
   requestMicrophone,
   requestSpeechModelDownload,
   selectAndroidAsrModelPack,
+  selectAndroidLlmModelPack,
   setEngineDictationEnabled,
+  setLlmPostProcessingEnabled,
   setBubbleCorner as setNativeBubbleCorner,
   syncTextFormatter,
   type AndroidAsrDownloadProgress,
   type AndroidAsrModelPackState,
+  type AndroidLlmDownloadProgress,
+  type AndroidLlmModelPackState,
+  type AndroidLlmSupportSnapshot,
 } from "./bridge";
 import "./AndroidApp.css";
 
@@ -122,6 +135,12 @@ type AndroidSpeechModelStatus =
   | "downloading"
   | "error"
   | "unsupported";
+type AndroidModelPackState =
+  | AndroidAsrModelPackState
+  | AndroidLlmModelPackState;
+type AndroidModelDownloadProgress =
+  | AndroidAsrDownloadProgress
+  | AndroidLlmDownloadProgress;
 
 type AndroidPermissionSnapshot = {
   microphone: boolean;
@@ -133,6 +152,13 @@ type AndroidPermissionSnapshot = {
   onDeviceSpeechRecognizerAvailable: boolean;
   onDeviceSpeechLanguageAvailable: boolean;
   onDeviceSpeechModelStatus: AndroidSpeechModelStatus;
+  llmPostProcessingSupported: boolean;
+  llmPostProcessingReason: string;
+  llmTotalRamMb: number;
+  llmAvailableRamMb: number;
+  llmMinRamMb: number;
+  llmHardware: string;
+  llmSocModel: string;
 };
 
 declare global {
@@ -153,6 +179,10 @@ declare global {
       engineDictationEnabled?: () => boolean;
       setEngineDictationEnabled?: (enabled: boolean) => boolean;
       setEngineModelId?: (modelId: string) => string;
+      llmPostProcessingSupport?: () => AndroidLlmSupportSnapshot;
+      llmPostProcessingEnabled?: () => boolean;
+      setLlmPostProcessingEnabled?: (enabled: boolean) => boolean;
+      setLlmModelId?: (modelId: string) => string;
     };
   }
 }
@@ -167,6 +197,23 @@ const defaultPermissions: AndroidPermissionSnapshot = {
   onDeviceSpeechRecognizerAvailable: false,
   onDeviceSpeechLanguageAvailable: false,
   onDeviceSpeechModelStatus: "unknown",
+  llmPostProcessingSupported: false,
+  llmPostProcessingReason: "requiresHighEndSoc",
+  llmTotalRamMb: 0,
+  llmAvailableRamMb: 0,
+  llmMinRamMb: 8192,
+  llmHardware: "",
+  llmSocModel: "",
+};
+
+const defaultLlmSupportSnapshot: AndroidLlmSupportSnapshot = {
+  supported: false,
+  reason: "requiresHighEndSoc",
+  totalRamMb: 0,
+  availableRamMb: 0,
+  minRamMb: 8192,
+  hardware: "",
+  socModel: "",
 };
 
 const tabs: Array<{ id: AndroidTab; labelKey: string; icon: typeof Home }> = [
@@ -313,10 +360,12 @@ const readAndroidNativeHistory = async (): Promise<HistoryEntry[]> => {
 
 const Switch = ({
   checked,
+  disabled = false,
   label,
   onClick,
 }: {
   checked: boolean;
+  disabled?: boolean;
   label: string;
   onClick?: () => void;
 }) => (
@@ -324,6 +373,7 @@ const Switch = ({
     type="button"
     aria-label={label}
     aria-pressed={checked}
+    disabled={disabled}
     className={`android-switch ${checked ? "android-switch-on" : ""}`}
     onClick={onClick}
   >
@@ -1599,17 +1649,22 @@ function AndroidSnippetList({
 
 function ModelsTab() {
   const { t } = useTranslation();
-  const [packs, setPacks] = useState<AndroidAsrModelPackState[]>([]);
+  const [asrPacks, setAsrPacks] = useState<AndroidAsrModelPackState[]>([]);
+  const [llmPacks, setLlmPacks] = useState<AndroidLlmModelPackState[]>([]);
   const [progressById, setProgressById] = useState<
-    Record<string, AndroidAsrDownloadProgress>
+    Record<string, AndroidModelDownloadProgress>
   >({});
   const [busyIds, setBusyIds] = useState<Record<string, true>>({});
   const [error, setError] = useState<string | null>(null);
 
   const refreshPacks = useCallback(async () => {
     try {
-      const next = await listAndroidAsrModelPacks();
-      setPacks(next);
+      const [nextAsr, nextLlm] = await Promise.all([
+        listAndroidAsrModelPacks(),
+        listAndroidLlmModelPacks(),
+      ]);
+      setAsrPacks(nextAsr);
+      setLlmPacks(nextLlm);
       setError(null);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
@@ -1618,43 +1673,52 @@ function ModelsTab() {
 
   useEffect(() => {
     void refreshPacks();
-    let unlistenProgress: (() => void) | undefined;
-    let unlistenChanged: (() => void) | undefined;
+    let unlistenAsrProgress: (() => void) | undefined;
+    let unlistenAsrChanged: (() => void) | undefined;
+    let unlistenLlmProgress: (() => void) | undefined;
+    let unlistenLlmChanged: (() => void) | undefined;
 
     void onAndroidAsrModelProgress((progress) => {
       setProgressById((current) => ({
         ...current,
         [progress.modelId]: progress,
       }));
-      setPacks((current) =>
-        current.map((pack) =>
-          pack.id === progress.modelId
-            ? {
-                ...pack,
-                isDownloading:
-                  progress.phase === "downloading" ||
-                  progress.phase === "verifying" ||
-                  progress.phase === "installing",
-                downloadPhase: progress.phase,
-                downloadProgress: progress.percentage,
-              }
-            : pack,
-        ),
+      setAsrPacks((current) => applyModelProgress(current, progress));
+    }).then((unlisten) => {
+      unlistenAsrProgress = unlisten;
+    });
+
+    void onAndroidLlmModelProgress((progress) => {
+      setProgressById((current) => ({
+        ...current,
+        [progress.modelId]: progress,
+      }));
+      setLlmPacks((current) =>
+        applyModelProgress<AndroidLlmModelPackState>(current, progress),
       );
     }).then((unlisten) => {
-      unlistenProgress = unlisten;
+      unlistenLlmProgress = unlisten;
     });
 
     void onAndroidAsrModelChanged(() => {
       setProgressById({});
       void refreshPacks();
     }).then((unlisten) => {
-      unlistenChanged = unlisten;
+      unlistenAsrChanged = unlisten;
+    });
+
+    void onAndroidLlmModelChanged(() => {
+      setProgressById({});
+      void refreshPacks();
+    }).then((unlisten) => {
+      unlistenLlmChanged = unlisten;
     });
 
     return () => {
-      unlistenProgress?.();
-      unlistenChanged?.();
+      unlistenAsrProgress?.();
+      unlistenAsrChanged?.();
+      unlistenLlmProgress?.();
+      unlistenLlmChanged?.();
     };
   }, [refreshPacks]);
 
@@ -1700,10 +1764,34 @@ function ModelsTab() {
       runPackAction(modelId, () => deleteAndroidAsrModelPack(modelId)),
     [runPackAction],
   );
+  const handleLlmDownload = useCallback(
+    (modelId: string) =>
+      runPackAction(modelId, () => downloadAndroidLlmModelPack(modelId)),
+    [runPackAction],
+  );
+  const handleLlmCancel = useCallback(
+    (modelId: string) =>
+      runPackAction(modelId, () => cancelAndroidLlmModelDownload(modelId)),
+    [runPackAction],
+  );
+  const handleLlmSelect = useCallback(
+    (modelId: string) =>
+      runPackAction(modelId, async () => {
+        await selectAndroidLlmModelPack(modelId);
+      }),
+    [runPackAction],
+  );
+  const handleLlmDelete = useCallback(
+    (modelId: string) =>
+      runPackAction(modelId, () => deleteAndroidLlmModelPack(modelId)),
+    [runPackAction],
+  );
 
-  const installed = packs.filter((pack) => pack.isInstalled);
-  const available = packs.filter((pack) => !pack.isInstalled);
-  const storageMb = installed.reduce(
+  const installedAsr = asrPacks.filter((pack) => pack.isInstalled);
+  const availableAsr = asrPacks.filter((pack) => !pack.isInstalled);
+  const installedLlm = llmPacks.filter((pack) => pack.isInstalled);
+  const availableLlm = llmPacks.filter((pack) => !pack.isInstalled);
+  const storageMb = [...installedAsr, ...installedLlm].reduce(
     (total, model) => total + (model.isInstalled ? model.sizeMb : 0),
     0,
   );
@@ -1727,8 +1815,8 @@ function ModelsTab() {
       )}
 
       <ModelSection
-        title={t("android.models.downloaded")}
-        packs={installed}
+        title={t("android.models.asrDownloaded")}
+        packs={installedAsr}
         progressById={progressById}
         busyIds={busyIds}
         onSelect={handleSelect}
@@ -1737,8 +1825,8 @@ function ModelsTab() {
         onDelete={handleDelete}
       />
       <ModelSection
-        title={t("android.models.available")}
-        packs={available}
+        title={t("android.models.asrAvailable")}
+        packs={availableAsr}
         progressById={progressById}
         busyIds={busyIds}
         onSelect={handleSelect}
@@ -1746,7 +1834,27 @@ function ModelsTab() {
         onCancel={handleCancel}
         onDelete={handleDelete}
       />
-      {packs.length === 0 && (
+      <ModelSection
+        title={t("android.models.cleanupDownloaded")}
+        packs={installedLlm}
+        progressById={progressById}
+        busyIds={busyIds}
+        onSelect={handleLlmSelect}
+        onDownload={handleLlmDownload}
+        onCancel={handleLlmCancel}
+        onDelete={handleLlmDelete}
+      />
+      <ModelSection
+        title={t("android.models.cleanupAvailable")}
+        packs={availableLlm}
+        progressById={progressById}
+        busyIds={busyIds}
+        onSelect={handleLlmSelect}
+        onDownload={handleLlmDownload}
+        onCancel={handleLlmCancel}
+        onDelete={handleLlmDelete}
+      />
+      {asrPacks.length === 0 && llmPacks.length === 0 && (
         <section className="android-section">
           <div className="android-panel android-empty-state">
             <p className="android-muted">{t("android.models.empty")}</p>
@@ -1754,6 +1862,25 @@ function ModelsTab() {
         </section>
       )}
     </>
+  );
+}
+
+function applyModelProgress<T extends AndroidModelPackState>(
+  packs: T[],
+  progress: AndroidModelDownloadProgress,
+): T[] {
+  return packs.map((pack) =>
+    pack.id === progress.modelId
+      ? {
+          ...pack,
+          isDownloading:
+            progress.phase === "downloading" ||
+            progress.phase === "verifying" ||
+            progress.phase === "installing",
+          downloadPhase: progress.phase,
+          downloadProgress: progress.percentage,
+        }
+      : pack,
   );
 }
 
@@ -1768,8 +1895,8 @@ function ModelSection({
   onDelete,
 }: {
   title: string;
-  packs: AndroidAsrModelPackState[];
-  progressById: Record<string, AndroidAsrDownloadProgress>;
+  packs: AndroidModelPackState[];
+  progressById: Record<string, AndroidModelDownloadProgress>;
   busyIds: Record<string, true>;
   onSelect: (modelId: string) => void;
   onDownload: (modelId: string) => void;
@@ -1782,7 +1909,7 @@ function ModelSection({
     return null;
   }
 
-  const statusLabel = (pack: AndroidAsrModelPackState) => {
+  const statusLabel = (pack: AndroidModelPackState) => {
     const progress = pack.isDownloading ? progressById[pack.id] : undefined;
     const phase = progress?.phase ?? pack.downloadPhase;
     if (pack.isActive) return t("android.models.status.active");
@@ -2398,6 +2525,10 @@ function SettingsTab({
   const [bubbleCorner, setBubbleCorner] =
     useState<AndroidBubbleCorner>("top-right");
   const [nativeEngineEnabled, setNativeEngineEnabled] = useState(false);
+  const [llmCleanupEnabled, setLlmCleanupEnabled] = useState(false);
+  const [llmSupport, setLlmSupport] = useState<AndroidLlmSupportSnapshot>(
+    defaultLlmSupportSnapshot,
+  );
   const [version, setVersion] = useState("");
 
   const rawVolume = settings?.audio_feedback_volume ?? 0.5;
@@ -2460,6 +2591,16 @@ function SettingsTab({
   }, []);
 
   useEffect(() => {
+    void Promise.all([
+      llmPostProcessingSupport(),
+      llmPostProcessingEnabled(),
+    ]).then(([support, enabled]) => {
+      setLlmSupport(support);
+      setLlmCleanupEnabled(enabled && support.supported);
+    });
+  }, []);
+
+  useEffect(() => {
     if (settingsSheet === "historyLimit") {
       setHistoryLimitDraft(String(historyLimit));
     }
@@ -2480,6 +2621,14 @@ function SettingsTab({
   const handleNativeEngineToggle = async () => {
     const next = await setEngineDictationEnabled(!nativeEngineEnabled);
     setNativeEngineEnabled(next);
+  };
+
+  const handleLlmCleanupToggle = async () => {
+    if (!llmSupport.supported) {
+      return;
+    }
+    const next = await setLlmPostProcessingEnabled(!llmCleanupEnabled);
+    setLlmCleanupEnabled(next);
   };
 
   const handleLanguageSelect = async (language: SupportedLanguageCode) => {
@@ -2530,6 +2679,19 @@ function SettingsTab({
 
   const soundThemeLabel = (soundTheme: SoundTheme) =>
     t(`android.settings.soundTheme.${soundTheme}`);
+
+  const llmReasonLabel = t(
+    `android.settings.llmCleanup.reasons.${llmSupport.reason}`,
+    {
+      minRamGb: Math.ceil(llmSupport.minRamMb / 1024),
+      totalRamGb: Math.round(llmSupport.totalRamMb / 1024),
+    },
+  );
+  const llmCleanupStatus = llmSupport.supported
+    ? llmCleanupEnabled
+      ? t("android.settings.llmCleanup.enabled")
+      : t("android.settings.llmCleanup.disabled")
+    : llmReasonLabel;
 
   const renderPickerOption = ({
     selected,
@@ -2758,6 +2920,22 @@ function SettingsTab({
               checked={nativeEngineEnabled}
               label={t("android.settings.onDeviceEngine.title")}
               onClick={() => void handleNativeEngineToggle()}
+            />
+          </div>
+          <div
+            className={`android-settings-row ${
+              llmSupport.supported ? "" : "android-settings-row-disabled"
+            }`}
+          >
+            <div className="android-settings-copy">
+              <span>{t("android.settings.llmCleanup.title")}</span>
+              <div className="android-muted">{llmCleanupStatus}</div>
+            </div>
+            <Switch
+              checked={llmCleanupEnabled}
+              disabled={!llmSupport.supported}
+              label={t("android.settings.llmCleanup.title")}
+              onClick={() => void handleLlmCleanupToggle()}
             />
           </div>
           <button

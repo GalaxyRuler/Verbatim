@@ -64,6 +64,7 @@ class FloatingBubbleService : Service() {
   private var recoveryText: String? = null
   private var livePartialText: String? = null
   private var engineCaptureThread: Thread? = null
+  private var llmCleanupThread: Thread? = null
   private val engineRecording = AtomicBoolean(false)
   private var failureMessageResId = R.string.bubble_failed
   private val mainHandler = Handler(Looper.getMainLooper())
@@ -87,6 +88,15 @@ class FloatingBubbleService : Service() {
       startDebugEngineWavSmoke(intent.getStringExtra(EXTRA_DEBUG_WAV_PATH))
       return START_STICKY
     }
+    if (BuildConfig.DEBUG && intent?.action == ACTION_DEBUG_LLM_CLEANUP_SMOKE) {
+      inputTargetActive = true
+      updateBubbleVisibility()
+      startDebugLlmCleanupSmoke(
+        intent.getStringExtra(EXTRA_DEBUG_RAW_TEXT),
+        intent.getStringExtra(EXTRA_DEBUG_MODEL_PATH),
+      )
+      return START_STICKY
+    }
 
     when (intent?.action) {
       ACTION_INPUT_TARGET_ACTIVE -> inputTargetActive = true
@@ -102,6 +112,8 @@ class FloatingBubbleService : Service() {
     speechRecognizer?.destroy()
     speechRecognizer = null
     stopEngineCapture()
+    stopLlmCleanup()
+    AndroidLlmPostProcessor.resetEngine()
     stopMicrophoneForeground()
     bubbleView?.let { view ->
       windowManager?.removeView(view)
@@ -191,6 +203,7 @@ class FloatingBubbleService : Service() {
     speechRecognizer?.destroy()
     speechRecognizer = null
     stopEngineCapture()
+    stopLlmCleanup()
     stopMicrophoneForeground()
     recoveryText = null
     livePartialText = null
@@ -677,6 +690,11 @@ class FloatingBubbleService : Service() {
     engineCaptureThread = null
   }
 
+  private fun stopLlmCleanup() {
+    llmCleanupThread?.interrupt()
+    llmCleanupThread = null
+  }
+
   private fun runEngineCaptureLoop() {
     var recorder: AudioRecord? = null
     try {
@@ -780,6 +798,15 @@ class FloatingBubbleService : Service() {
 
   private fun isEngineModelInstalled(): Boolean =
     EngineModelSelectionStore.isEngineModelInstalled(this, REQUIRED_ENGINE_MODEL_FILES)
+
+  private fun isLlmPostProcessingEnabled(): Boolean =
+    FloatingBubbleService.isLlmPostProcessingEnabled(this)
+
+  private fun llmModelPath(): String =
+    AndroidLlmModelSelectionStore.llmModelPath(this, REQUIRED_LLM_MODEL_FILES)
+
+  private fun isLlmModelInstalled(): Boolean =
+    AndroidLlmModelSelectionStore.isLlmModelInstalled(this, REQUIRED_LLM_MODEL_FILES)
 
   private fun logAsr(message: String) {
     if (BuildConfig.DEBUG) {
@@ -885,7 +912,100 @@ class FloatingBubbleService : Service() {
       return
     }
 
-    insertOrRecover(applyNativeTextFormatter(rawText), rawText)
+    if (startLlmCleanupIfReady(rawText)) {
+      return
+    }
+
+    insertRecognizedText(rawText, rawText)
+  }
+
+  private fun insertRecognizedText(text: String, rawText: String) {
+    insertOrRecover(applyNativeTextFormatter(text), rawText)
+  }
+
+  private fun startLlmCleanupIfReady(rawText: String): Boolean {
+    if (!isLlmPostProcessingEnabled()) {
+      return false
+    }
+
+    val support = FloatingBubbleService.llmPostProcessingSupport(this)
+    if (!support.supported) {
+      logBubble("LLM cleanup skipped reason=${support.reason}")
+      return false
+    }
+
+    if (!isLlmModelInstalled()) {
+      logBubble("LLM cleanup skipped missing model")
+      return false
+    }
+
+    val modelPath = llmModelPath()
+    stopLlmCleanup()
+    bubbleState = BubbleState.TRANSCRIBING
+    bubbleView?.let { renderBubble(it) }
+
+    lateinit var cleanupThread: Thread
+    cleanupThread = Thread(
+      {
+        val cleaned = try {
+          AndroidLlmPostProcessor.cleanUpOrNull(
+            context = this,
+            rawText = rawText,
+            modelPath = modelPath,
+          )
+        } catch (_: Exception) {
+          null
+        }
+
+        mainHandler.post {
+          if (llmCleanupThread !== cleanupThread) {
+            return@post
+          }
+          llmCleanupThread = null
+          insertRecognizedText(cleaned ?: rawText, rawText)
+        }
+      },
+      "verbatim-llm-cleanup-request",
+    ).apply {
+      isDaemon = true
+    }
+
+    llmCleanupThread = cleanupThread
+    cleanupThread.start()
+    return true
+  }
+
+  private fun startDebugLlmCleanupSmoke(rawText: String?, modelPath: String?) {
+    if (rawText.isNullOrBlank()) {
+      logBubble("debug LLM cleanup smoke missing raw text")
+      return
+    }
+
+    val installedPath = if (modelPath.isNullOrBlank()) llmModelPath() else modelPath
+    stopLlmCleanup()
+    lateinit var cleanupThread: Thread
+    cleanupThread = Thread(
+      {
+        val cleaned = AndroidLlmPostProcessor.cleanUpOrNull(
+          context = this,
+          rawText = rawText,
+          modelPath = installedPath,
+        )
+        logBubble(
+          "debug LLM cleanup smoke rawLen=${rawText.length} cleanedLen=${cleaned?.length ?: 0}",
+        )
+        mainHandler.post {
+          if (llmCleanupThread === cleanupThread) {
+            llmCleanupThread = null
+          }
+        }
+      },
+      "verbatim-llm-debug-smoke",
+    ).apply {
+      isDaemon = true
+    }
+    llmCleanupThread = cleanupThread
+    cleanupThread.start()
   }
 
   private fun insertOrRecover(
@@ -1262,6 +1382,7 @@ class FloatingBubbleService : Service() {
     private const val ANDROID_HISTORY_KEY = "native_transcript_history"
     private const val TEXT_FORMATTER_KEY = "native_text_formatter_snapshot"
     private const val ENGINE_DICTATION_ENABLED_KEY = "native_engine_dictation_enabled"
+    private const val LLM_POST_PROCESSING_ENABLED_KEY = "native_llm_post_processing_enabled"
     private val REQUIRED_ENGINE_MODEL_FILES = arrayOf(
       "streaming/encoder.onnx",
       "streaming/decoder.onnx",
@@ -1272,6 +1393,7 @@ class FloatingBubbleService : Service() {
       "whisper/tokens.txt",
       "silero_vad_v4.onnx",
     )
+    private val REQUIRED_LLM_MODEL_FILES = arrayOf("qwen2.5-0.5b-instruct-q8.task")
     private const val ASR_LOG_TAG = "VerbatimASR"
     private const val BUBBLE_LOG_TAG = "FloatingBubble"
     private const val BUBBLE_X_KEY = "bubble_x"
@@ -1292,12 +1414,17 @@ class FloatingBubbleService : Service() {
       "com.galaxyruler.verbatim.action.DEBUG_INSERT_PROBE"
     private const val ACTION_DEBUG_ENGINE_WAV_SMOKE =
       "com.galaxyruler.verbatim.action.DEBUG_ENGINE_WAV_SMOKE"
+    private const val ACTION_DEBUG_LLM_CLEANUP_SMOKE =
+      "com.galaxyruler.verbatim.action.DEBUG_LLM_CLEANUP_SMOKE"
     private const val EXTRA_DEBUG_WAV_PATH = "wav_path"
+    private const val EXTRA_DEBUG_RAW_TEXT = "raw_text"
+    private const val EXTRA_DEBUG_MODEL_PATH = "model_path"
     private const val ACTION_INPUT_TARGET_ACTIVE =
       "com.galaxyruler.verbatim.action.INPUT_TARGET_ACTIVE"
     private const val ACTION_INPUT_TARGET_INACTIVE =
       "com.galaxyruler.verbatim.action.INPUT_TARGET_INACTIVE"
     private const val DEBUG_INSERTION_TEXT = "Verbatim Android insertion probe"
+    private const val DEBUG_LLM_RAW_TEXT = "hello comma this is a verbatim cleanup smoke test"
     private const val WAV_HEADER_BYTES = 44L
     private const val DEBUG_WAV_FRAME_SLEEP_MS = 10L
 
@@ -1402,6 +1529,35 @@ class FloatingBubbleService : Service() {
     fun setEngineModelId(context: Context, modelId: String): String =
       EngineModelSelectionStore.setEngineModelId(context, modelId)
 
+    fun llmPostProcessingSupport(context: Context): AndroidLlmSupportSnapshot =
+      AndroidLlmPostProcessorSupport.snapshot(context)
+
+    fun isLlmPostProcessingEnabled(context: Context): Boolean {
+      val support = llmPostProcessingSupport(context)
+      if (!support.supported) {
+        return false
+      }
+      return context
+        .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        .getBoolean(LLM_POST_PROCESSING_ENABLED_KEY, false)
+    }
+
+    fun setLlmPostProcessingEnabled(context: Context, enabled: Boolean): Boolean {
+      val next = enabled && llmPostProcessingSupport(context).supported
+      context
+        .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        .edit()
+        .putBoolean(LLM_POST_PROCESSING_ENABLED_KEY, next)
+        .apply()
+      return next
+    }
+
+    fun llmModelId(context: Context): String =
+      AndroidLlmModelSelectionStore.llmModelId(context)
+
+    fun setLlmModelId(context: Context, modelId: String): String =
+      AndroidLlmModelSelectionStore.setLlmModelId(context, modelId)
+
     fun bubbleCornerSnapshot(context: Context): String {
       val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
       val savedCorner = prefs.getString(BUBBLE_CORNER_KEY, null)
@@ -1456,6 +1612,26 @@ class FloatingBubbleService : Service() {
         context.startService(Intent(context, FloatingBubbleService::class.java).apply {
           action = ACTION_DEBUG_ENGINE_WAV_SMOKE
           putExtra(EXTRA_DEBUG_WAV_PATH, wavPath)
+        })
+      } catch (_: IllegalStateException) {
+        // Debug-only adb hook; production builds do not register its receiver.
+      }
+    }
+
+    fun startDebugLlmCleanupSmoke(
+      context: Context,
+      rawText: String?,
+      modelPath: String? = null,
+    ) {
+      if (!BuildConfig.DEBUG) {
+        return
+      }
+
+      try {
+        context.startService(Intent(context, FloatingBubbleService::class.java).apply {
+          action = ACTION_DEBUG_LLM_CLEANUP_SMOKE
+          putExtra(EXTRA_DEBUG_RAW_TEXT, rawText ?: DEBUG_LLM_RAW_TEXT)
+          putExtra(EXTRA_DEBUG_MODEL_PATH, modelPath)
         })
       } catch (_: IllegalStateException) {
         // Debug-only adb hook; production builds do not register its receiver.

@@ -592,6 +592,26 @@
   text-align: end;
 }
 
+.android-settings-copy {
+  min-width: 0;
+  padding: 10px 12px 10px 0;
+}
+
+.android-settings-copy .android-muted {
+  max-width: none;
+  overflow-wrap: anywhere;
+  text-align: start;
+}
+
+.android-settings-row-disabled {
+  opacity: 0.58;
+}
+
+.android-settings-row-disabled .android-switch,
+.android-switch:disabled {
+  cursor: not-allowed;
+}
+
 .android-settings-row.android-panel {
   background: var(--android-surface);
   border: 1px solid var(--android-outline);

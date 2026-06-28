@@ -223,6 +223,7 @@ const installTauriMocks = async (
     hasAnyModels?: boolean;
     firstRun?: boolean;
     androidAsrPacks?: Array<Record<string, unknown>>;
+    androidLlmPacks?: Array<Record<string, unknown>>;
   } = {},
 ) => {
   const availableModels = mockOptions.availableModels ?? models;
@@ -255,6 +256,29 @@ const installTauriMocks = async (
       ],
     },
   ];
+  const androidLlmPacks = mockOptions.androidLlmPacks ?? [
+    {
+      id: "g4-qwen2_5-0_5b-litert-q8",
+      displayName: "Qwen2.5 cleanup 0.5B",
+      description: "LiteRT-LM cleanup model for punctuation and capitalization",
+      runtime: "LiteRT-LM 0.13.1",
+      license: "Apache-2.0",
+      quantization: "q8 ekv1280",
+      sizeMb: 522,
+      minRamMb: 8192,
+      installedDir:
+        "/data/user/0/com.galaxyruler.verbatim/models/android-llm-postproc/g4-qwen2_5-0_5b-litert-q8",
+      modelPath:
+        "/data/user/0/com.galaxyruler.verbatim/models/android-llm-postproc/g4-qwen2_5-0_5b-litert-q8/qwen2.5-0.5b-instruct-q8.task",
+      isInstalled: false,
+      isDownloading: false,
+      isActive: false,
+      isSelectable: false,
+      downloadPhase: "available",
+      downloadProgress: 0,
+      missingFiles: ["qwen2.5-0.5b-instruct-q8.task"],
+    },
+  ];
 
   await page.addInitScript(
     ({
@@ -265,6 +289,7 @@ const installTauriMocks = async (
       hasAnyModelsOverride,
       firstRun,
       androidAsrPacks,
+      androidLlmPacks,
       localPostProcessingModels,
       initialHistoryEntries,
       osType,
@@ -320,6 +345,9 @@ const installTauriMocks = async (
       );
       let androidAsrRows = [
         ...((androidAsrPacks as Array<Record<string, unknown>>) ?? []),
+      ];
+      let androidLlmRows = [
+        ...((androidLlmPacks as Array<Record<string, unknown>>) ?? []),
       ];
       let historyRows = [
         ...((initialHistoryEntries as Array<Record<string, unknown>>) ?? []),
@@ -444,6 +472,10 @@ const installTauriMocks = async (
                   engineDictationEnabled?: () => boolean;
                   setEngineDictationEnabled?: (enabled: boolean) => boolean;
                   setEngineModelId?: (modelId: string) => string;
+                  llmPostProcessingSupport?: () => Record<string, unknown>;
+                  llmPostProcessingEnabled?: () => boolean;
+                  setLlmPostProcessingEnabled?: (enabled: boolean) => boolean;
+                  setLlmModelId?: (modelId: string) => string;
                   startBubble: () => void;
                   stopBubble: () => void;
                 };
@@ -490,6 +522,23 @@ const installTauriMocks = async (
                 return {
                   value:
                     va?.setEngineModelId?.(args?.modelId as string) ??
+                    (args?.modelId as string),
+                };
+              case "llm_post_processing_support":
+                return va?.llmPostProcessingSupport?.() ?? {};
+              case "llm_post_processing_enabled":
+                return { value: va?.llmPostProcessingEnabled?.() ?? false };
+              case "set_llm_post_processing_enabled":
+                return {
+                  value:
+                    va?.setLlmPostProcessingEnabled?.(
+                      args?.enabled as boolean,
+                    ) ?? false,
+                };
+              case "set_llm_model_id":
+                return {
+                  value:
+                    va?.setLlmModelId?.(args?.modelId as string) ??
                     (args?.modelId as string),
                 };
               case "start_bubble":
@@ -822,6 +871,106 @@ const installTauriMocks = async (
                   : model,
               );
               emitEvent("android-asr-model-changed", modelId);
+              return null;
+            }
+            case "llm_list_model_packs":
+              return androidLlmRows;
+            case "llm_download_model_pack": {
+              const modelId = args?.modelId as string;
+              androidLlmRows = androidLlmRows.map((model) =>
+                model.id === modelId
+                  ? {
+                      ...model,
+                      isDownloading: true,
+                      downloadPhase: "downloading",
+                      downloadProgress: 42,
+                    }
+                  : model,
+              );
+              emitEvent("android-llm-model-progress", {
+                modelId,
+                phase: "downloading",
+                downloaded: 42,
+                total: 100,
+                percentage: 42,
+              });
+
+              return new Promise((resolve) => {
+                setTimeout(() => {
+                  androidLlmRows = androidLlmRows.map((model) =>
+                    model.id === modelId
+                      ? {
+                          ...model,
+                          isDownloading: true,
+                          downloadPhase: "verifying",
+                          downloadProgress: 100,
+                        }
+                      : model,
+                  );
+                  emitEvent("android-llm-model-progress", {
+                    modelId,
+                    phase: "verifying",
+                    downloaded: 100,
+                    total: 100,
+                    percentage: 100,
+                  });
+                }, 100);
+                setTimeout(() => {
+                  androidLlmRows = androidLlmRows.map((model) =>
+                    model.id === modelId
+                      ? {
+                          ...model,
+                          isInstalled: true,
+                          isDownloading: false,
+                          isSelectable: true,
+                          downloadPhase: "ready",
+                          downloadProgress: 100,
+                          missingFiles: [],
+                        }
+                      : model,
+                  );
+                  emitEvent("android-llm-model-changed", modelId);
+                  resolve(null);
+                }, 250);
+              });
+            }
+            case "llm_cancel_model_download":
+              androidLlmRows = androidLlmRows.map((model) =>
+                model.id === args?.modelId
+                  ? {
+                      ...model,
+                      isDownloading: false,
+                      downloadPhase: "available",
+                      downloadProgress: 0,
+                    }
+                  : model,
+              );
+              return null;
+            case "llm_select_model_pack": {
+              const modelId = args?.modelId as string;
+              androidLlmRows = androidLlmRows.map((model) => ({
+                ...model,
+                isActive: model.id === modelId,
+              }));
+              return androidLlmRows.find((model) => model.id === modelId);
+            }
+            case "llm_delete_model_pack": {
+              const modelId = args?.modelId as string;
+              androidLlmRows = androidLlmRows.map((model) =>
+                model.id === modelId
+                  ? {
+                      ...model,
+                      isInstalled: false,
+                      isDownloading: false,
+                      isActive: false,
+                      isSelectable: false,
+                      downloadPhase: "available",
+                      downloadProgress: 0,
+                      missingFiles: ["qwen2.5-0.5b-instruct-q8.task"],
+                    }
+                  : model,
+              );
+              emitEvent("android-llm-model-changed", modelId);
               return null;
             }
             case "download_model": {
@@ -1174,6 +1323,7 @@ const installTauriMocks = async (
       hasAnyModelsOverride,
       firstRun,
       androidAsrPacks,
+      androidLlmPacks,
       localPostProcessingModels: localLlmModels,
       initialHistoryEntries: historyEntries,
       osType,
@@ -1193,6 +1343,13 @@ const installAndroidBridgeMock = async (
     onDeviceSpeechRecognizerAvailable: boolean;
     onDeviceSpeechLanguageAvailable?: boolean;
     onDeviceSpeechModelStatus?: string;
+    llmPostProcessingSupported?: boolean;
+    llmPostProcessingReason?: string;
+    llmTotalRamMb?: number;
+    llmAvailableRamMb?: number;
+    llmMinRamMb?: number;
+    llmHardware?: string;
+    llmSocModel?: string;
   },
   nativeHistoryEntries: Array<Record<string, unknown>> = [],
   bubbleCorner = "top-right",
@@ -1215,6 +1372,10 @@ const installAndroidBridgeMock = async (
           engineDictationEnabled: () => boolean;
           setEngineDictationEnabled: (enabled: boolean) => boolean;
           setEngineModelId: (modelId: string) => string;
+          llmPostProcessingSupport: () => Record<string, unknown>;
+          llmPostProcessingEnabled: () => boolean;
+          setLlmPostProcessingEnabled: (enabled: boolean) => boolean;
+          setLlmModelId: (modelId: string) => string;
           startBubble: () => void;
           stopBubble: () => void;
         };
@@ -1225,6 +1386,8 @@ const installAndroidBridgeMock = async (
       testWindow.__VERBATIM_ANDROID_FORMATTER_SNAPSHOTS__ = [];
       let engineDictationEnabled = false;
       let engineModelId = "default";
+      let llmCleanupEnabled = false;
+      let llmModelId = "default";
       testWindow.VerbatimAndroid = {
         permissionSnapshot: () => JSON.stringify(snapshot),
         nativeTranscriptHistory: () => JSON.stringify(nativeHistoryEntries),
@@ -1269,6 +1432,36 @@ const installAndroidBridgeMock = async (
             `setEngineModelId:${modelId}`,
           );
           return engineModelId;
+        },
+        llmPostProcessingSupport: () => ({
+          supported: Boolean(snapshot.llmPostProcessingSupported),
+          reason:
+            snapshot.llmPostProcessingReason ??
+            (snapshot.llmPostProcessingSupported
+              ? "supported"
+              : "requiresHighEndSoc"),
+          totalRamMb: snapshot.llmTotalRamMb ?? 0,
+          availableRamMb: snapshot.llmAvailableRamMb ?? 0,
+          minRamMb: snapshot.llmMinRamMb ?? 8192,
+          hardware: snapshot.llmHardware ?? "",
+          socModel: snapshot.llmSocModel ?? "",
+        }),
+        llmPostProcessingEnabled: () =>
+          llmCleanupEnabled && Boolean(snapshot.llmPostProcessingSupported),
+        setLlmPostProcessingEnabled: (enabled: boolean) => {
+          llmCleanupEnabled =
+            enabled && Boolean(snapshot.llmPostProcessingSupported);
+          testWindow.__VERBATIM_ANDROID_BRIDGE_CALLS__.push(
+            `setLlmPostProcessingEnabled:${enabled}`,
+          );
+          return llmCleanupEnabled;
+        },
+        setLlmModelId: (modelId: string) => {
+          llmModelId = modelId;
+          testWindow.__VERBATIM_ANDROID_BRIDGE_CALLS__.push(
+            `setLlmModelId:${modelId}`,
+          );
+          return llmModelId;
         },
         startBubble: () => undefined,
         stopBubble: () => undefined,
@@ -2092,6 +2285,58 @@ test.describe("Verbatim App", () => {
         }),
       )
       .toContain("setEngineDictationEnabled:true");
+  });
+
+  test("android settings keeps LLM cleanup off and disabled when unsupported", async ({
+    page,
+  }) => {
+    await installTauriMocks(
+      page,
+      {
+        audio_feedback: true,
+        app_language: "en",
+      },
+      [],
+      "android",
+    );
+    await installAndroidBridgeMock(page, {
+      microphone: true,
+      overlay: true,
+      accessibility: true,
+      bubbleRunning: true,
+      speechRecognizerAvailable: true,
+      onDeviceSpeechRecognizerAvailable: true,
+      onDeviceSpeechLanguageAvailable: true,
+      llmPostProcessingSupported: false,
+      llmPostProcessingReason: "requires8GbRam",
+      llmTotalRamMb: 6144,
+      llmAvailableRamMb: 2048,
+      llmMinRamMb: 8192,
+      llmHardware: "qcom",
+      llmSocModel: "SM8550",
+    });
+
+    await page.goto("/");
+    await page.getByRole("button", { name: "Settings" }).click();
+
+    const cleanupToggle = page.getByRole("button", {
+      name: "On-device cleanup (beta)",
+    });
+    await expect(cleanupToggle).toHaveAttribute("aria-pressed", "false");
+    await expect(cleanupToggle).toBeDisabled();
+    await expect(page.getByText("Requires at least 8 GB RAM.")).toBeVisible();
+
+    await cleanupToggle.click({ force: true });
+    await expect
+      .poll(async () =>
+        page.evaluate(() => {
+          const win = window as typeof window & {
+            __VERBATIM_ANDROID_BRIDGE_CALLS__: string[];
+          };
+          return win.__VERBATIM_ANDROID_BRIDGE_CALLS__;
+        }),
+      )
+      .not.toContain("setLlmPostProcessingEnabled:true");
   });
 
   test("android settings exposes about source and license details", async ({

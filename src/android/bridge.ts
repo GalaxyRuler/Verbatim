@@ -20,11 +20,10 @@ function appCmd<T>(name: string, args?: Record<string, unknown>): Promise<T> {
   return invoke<T>(name, args);
 }
 
-export type AndroidAsrModelPackState = {
+type AndroidModelPackStateBase = {
   id: string;
   displayName: string;
   description: string;
-  language: string;
   sizeMb: number;
   installedDir: string;
   isInstalled: boolean;
@@ -36,6 +35,18 @@ export type AndroidAsrModelPackState = {
   missingFiles: string[];
 };
 
+export type AndroidAsrModelPackState = AndroidModelPackStateBase & {
+  language: string;
+};
+
+export type AndroidLlmModelPackState = AndroidModelPackStateBase & {
+  runtime: string;
+  license: string;
+  quantization: string;
+  minRamMb: number;
+  modelPath: string;
+};
+
 export type AndroidAsrDownloadProgress = {
   modelId: string;
   phase: string;
@@ -43,6 +54,18 @@ export type AndroidAsrDownloadProgress = {
   downloaded: number;
   total: number;
   percentage: number;
+};
+
+export type AndroidLlmDownloadProgress = AndroidAsrDownloadProgress;
+
+export type AndroidLlmSupportSnapshot = {
+  supported: boolean;
+  reason: string;
+  totalRamMb: number;
+  availableRamMb: number;
+  minRamMb: number;
+  hardware: string;
+  socModel: string;
 };
 
 // ---- State (pull + push) ----
@@ -160,6 +183,68 @@ export async function setEngineModelId(modelId: string): Promise<string> {
   }
 }
 
+const defaultLlmSupport: AndroidLlmSupportSnapshot = {
+  supported: false,
+  reason: "requiresHighEndSoc",
+  totalRamMb: 0,
+  availableRamMb: 0,
+  minRamMb: 8192,
+  hardware: "",
+  socModel: "",
+};
+
+export async function llmPostProcessingSupport(): Promise<AndroidLlmSupportSnapshot> {
+  try {
+    return (
+      (await cmd<AndroidLlmSupportSnapshot>("llm_post_processing_support")) ??
+      defaultLlmSupport
+    );
+  } catch {
+    return (
+      raw()?.llmPostProcessingSupport?.() ??
+      normalizeLlmSupport(raw()?.permissionSnapshot?.())
+    );
+  }
+}
+
+export async function llmPostProcessingEnabled(): Promise<boolean> {
+  try {
+    return (
+      (await cmd<{ value?: boolean }>("llm_post_processing_enabled")).value ??
+      false
+    );
+  } catch {
+    return raw()?.llmPostProcessingEnabled?.() ?? false;
+  }
+}
+
+export async function setLlmPostProcessingEnabled(
+  enabled: boolean,
+): Promise<boolean> {
+  try {
+    return (
+      (
+        await cmd<{ value?: boolean }>("set_llm_post_processing_enabled", {
+          enabled,
+        })
+      ).value ?? enabled
+    );
+  } catch {
+    return raw()?.setLlmPostProcessingEnabled?.(enabled) ?? enabled;
+  }
+}
+
+export async function setLlmModelId(modelId: string): Promise<string> {
+  try {
+    return (
+      (await cmd<{ value?: string }>("set_llm_model_id", { modelId })).value ??
+      modelId
+    );
+  } catch {
+    return raw()?.setLlmModelId?.(modelId) ?? modelId;
+  }
+}
+
 export async function listAndroidAsrModelPacks(): Promise<
   AndroidAsrModelPackState[]
 > {
@@ -195,6 +280,41 @@ export async function deleteAndroidAsrModelPack(
   await appCmd<void>("asr_delete_model_pack", { modelId });
 }
 
+export async function listAndroidLlmModelPacks(): Promise<
+  AndroidLlmModelPackState[]
+> {
+  return appCmd<AndroidLlmModelPackState[]>("llm_list_model_packs");
+}
+
+export async function downloadAndroidLlmModelPack(
+  modelId: string,
+): Promise<void> {
+  await appCmd<void>("llm_download_model_pack", { modelId });
+}
+
+export async function cancelAndroidLlmModelDownload(
+  modelId: string,
+): Promise<void> {
+  await appCmd<void>("llm_cancel_model_download", { modelId });
+}
+
+export async function selectAndroidLlmModelPack(
+  modelId: string,
+): Promise<AndroidLlmModelPackState> {
+  const state = await appCmd<AndroidLlmModelPackState>(
+    "llm_select_model_pack",
+    { modelId },
+  );
+  await setLlmModelId(state.installedDir || modelId);
+  return state;
+}
+
+export async function deleteAndroidLlmModelPack(
+  modelId: string,
+): Promise<void> {
+  await appCmd<void>("llm_delete_model_pack", { modelId });
+}
+
 export function onAndroidAsrModelProgress(
   cb: (progress: AndroidAsrDownloadProgress) => void,
 ): Promise<UnlistenFn> {
@@ -210,6 +330,47 @@ export function onAndroidAsrModelChanged(
   return listen<string>("android-asr-model-changed", (event) =>
     cb(event.payload),
   );
+}
+
+export function onAndroidLlmModelProgress(
+  cb: (progress: AndroidLlmDownloadProgress) => void,
+): Promise<UnlistenFn> {
+  return listen<AndroidLlmDownloadProgress>(
+    "android-llm-model-progress",
+    (event) => cb(event.payload),
+  );
+}
+
+export function onAndroidLlmModelChanged(
+  cb: (modelId: string) => void,
+): Promise<UnlistenFn> {
+  return listen<string>("android-llm-model-changed", (event) =>
+    cb(event.payload),
+  );
+}
+
+function normalizeLlmSupport(
+  snapshotJson: string | undefined,
+): AndroidLlmSupportSnapshot {
+  if (!snapshotJson) {
+    return defaultLlmSupport;
+  }
+  try {
+    const snapshot = JSON.parse(snapshotJson) as Record<string, unknown>;
+    return {
+      supported: Boolean(snapshot.llmPostProcessingSupported),
+      reason: String(
+        snapshot.llmPostProcessingReason ?? defaultLlmSupport.reason,
+      ),
+      totalRamMb: Number(snapshot.llmTotalRamMb ?? 0),
+      availableRamMb: Number(snapshot.llmAvailableRamMb ?? 0),
+      minRamMb: Number(snapshot.llmMinRamMb ?? defaultLlmSupport.minRamMb),
+      hardware: String(snapshot.llmHardware ?? ""),
+      socModel: String(snapshot.llmSocModel ?? ""),
+    };
+  } catch {
+    return defaultLlmSupport;
+  }
 }
 
 export async function startBubble(): Promise<void> {
