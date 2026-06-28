@@ -58,6 +58,8 @@ Use these labels for public issues derived from this tracker:
 
 ## CI Evidence
 
+- 2026-06-28: Packaged native-smoke drills executed on the `Agent-Dev-01` Windows VM (homelab direct-VM lane) against the installed dev build, no rebuild or audio required: baseline startup `status=ready` with tray init, configured model, and available credential store (0 retained legacy keys); coordinator panic drill produced `restarted -> disabled` health states (AUD-012); forced startup-failure drill produced a `failed` recovery status with tray suppressed (AUD-011). Confirms the AUD-008/011/012/014 packaged-status validations on a real Windows VM. Real-audio/model dictation drills (AUD-002/003/004/005/006/007/016/017) still require a machine with real audio and a non-smoke model.
+
 - 2026-06-28: `main` at `d2de40e8` is green across `code-quality`, `rust-tests`, `nix-build`, `repo-health`, and all three production backends (`Windows x64`, `macOS ARM64`, `Ubuntu x64`). Branch protection (Ruleset) is active on `main`, closing the AUD-008 manual owner action.
 - 2026-06-28: Added a desktop "elevated foreground window" diagnostic (`elevation_watch`) so dictation that is silently blocked by Windows UIPI (a higher-integrity / "run as administrator" focused app) now surfaces a localized native notification, with an Advanced toggle (`warn_on_elevated_target`). Verified firing in real use; complements AUD-005/AUD-016 insertion/onboarding diagnostics.
 - 2026-06-23: `native backend` GitHub Actions run 28038758304 passed at commit `edea3639` for `Windows x64 production backend`, `macOS ARM64 production backend`, and `Ubuntu x64 production backend`.
