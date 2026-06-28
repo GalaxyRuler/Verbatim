@@ -33,6 +33,8 @@ jobs:
             test -f "$base/$f" || { echo "::error::missing committed native file $base/$f"; exit 1; }
           done
           test -f "src-tauri/gen/android/app/src/test/java/com/galaxyruler/verbatim/SmokeTest.kt" || { echo "::error::missing SmokeTest.kt"; exit 1; }
+          test -f "src-tauri/gen/android/debug.keystore" || { echo "::error::missing deterministic debug keystore"; exit 1; }
+          grep -q "storeFile = debugKeystoreFile" "src-tauri/gen/android/app/build.gradle.kts" || { echo "::error::debug signing config is not wired to debug.keystore"; exit 1; }
 
   e2e:
     runs-on: ubuntu-latest # HW-accelerated emulation is Linux-only
@@ -140,6 +142,7 @@ jobs:
           # job for 6h). `timeout` guards each adb call. Kept to single logical lines — the
           # action's `sh` mis-parses a multi-line `if/fi` block here.
           script: |
+            adb uninstall com.galaxyruler.verbatim || true
             adb install -r "${{ steps.apk.outputs.path }}"
             maestro test maestro/ || { code=$?; echo "Maestro failed ($code); capturing diagnostics while the device is alive"; timeout 60 adb logcat -d > logcat.txt 2>/dev/null || true; timeout 60 adb exec-out screencap -p > screen.png 2>/dev/null || true; exit $code; }
       - name: Upload failure artifacts

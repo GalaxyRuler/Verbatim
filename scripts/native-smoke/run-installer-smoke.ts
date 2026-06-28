@@ -4,14 +4,14 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
-  readdirSync,
   rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir, platform } from "node:os";
+import { homedir, tmpdir, platform } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { findFiles, findMountedMacApp } from "./installer-smoke-utils.js";
 
 type CommandResult = {
   stdout: string;
@@ -209,7 +209,7 @@ async function installMacDmg(): Promise<string> {
   );
 
   try {
-    const mountedApp = findFirstFile(mountDir, ".app");
+    const mountedApp = findMountedMacApp(mountDir);
     await runCommand(
       "ditto",
       [mountedApp, join(installDir, basename(mountedApp))],
@@ -325,27 +325,6 @@ function findFirstFile(root: string, extension: string): string {
   return found;
 }
 
-function findFiles(root: string, extension: string): string[] {
-  const files: string[] = [];
-  const walk = (current: string) => {
-    for (const entry of readdirSync(current)) {
-      const fullPath = join(current, entry);
-      const stat = statSync(fullPath);
-      if (stat.isDirectory()) {
-        if (fullPath.endsWith(extension)) {
-          files.push(fullPath);
-        } else {
-          walk(fullPath);
-        }
-      } else if (entry.endsWith(extension)) {
-        files.push(fullPath);
-      }
-    }
-  };
-  walk(root);
-  return files;
-}
-
 function runCommand(
   command: string,
   commandArgs: string[],
@@ -427,8 +406,15 @@ function prepareWindowsAppDataProbe(
   cycle: string,
 ): NonNullable<typeof windowsAppDataProbe> {
   const bundleIdentifier = readBundleIdentifier();
-  const roamingRoot = join(tempRoot, `user-profile-${cycle}`, "Roaming");
-  const localRoot = join(tempRoot, `user-profile-${cycle}`, "Local");
+  // NSIS resolves $APPDATA/$LOCALAPPDATA from current-user shell folders, not env overrides.
+  const roamingRoot = readCurrentWindowsShellFolder("APPDATA", [
+    "AppData",
+    "Roaming",
+  ]);
+  const localRoot = readCurrentWindowsShellFolder("LOCALAPPDATA", [
+    "AppData",
+    "Local",
+  ]);
   const roamingAppDir = join(roamingRoot, bundleIdentifier);
   const localAppDir = join(localRoot, bundleIdentifier);
   const markerFiles = [
@@ -437,6 +423,9 @@ function prepareWindowsAppDataProbe(
     join(roamingAppDir, "recordings", "probe.wav"),
     join(localAppDir, "cache", "probe.bin"),
   ];
+
+  assertWindowsAppDataProbeTargetIsClean(roamingAppDir);
+  assertWindowsAppDataProbeTargetIsClean(localAppDir);
 
   for (const markerFile of markerFiles) {
     mkdirSync(dirname(markerFile), { recursive: true });
@@ -452,13 +441,38 @@ function prepareWindowsAppDataProbe(
   };
 }
 
-function windowsUninstallEnv(): NodeJS.ProcessEnv {
-  if (!windowsAppDataProbe) return process.env;
-  return {
-    ...process.env,
-    APPDATA: windowsAppDataProbe.roamingRoot,
-    LOCALAPPDATA: windowsAppDataProbe.localRoot,
+function readCurrentWindowsShellFolder(
+  envName: "APPDATA" | "LOCALAPPDATA",
+  fallbackParts: string[],
+): string {
+  const value = process.env[envName];
+  if (value && value.trim().length > 0) {
+    return value;
+  }
+  return join(homedir(), ...fallbackParts);
+}
+
+function assertWindowsAppDataProbeTargetIsClean(appDir: string): void {
+  if (!existsSync(appDir)) return;
+  throw new Error(
+    `Windows installer smoke refuses to run /DELETEAPPDATA against existing app data: ${appDir}`,
+  );
+}
+
+function cleanupWindowsAppDataProbe(): void {
+  if (!windowsAppDataProbe) return;
+  const cleanedAppDirs = [
+    windowsAppDataProbe.roamingAppDir,
+    windowsAppDataProbe.localAppDir,
+  ];
+  for (const appDir of cleanedAppDirs) {
+    rmSync(appDir, { recursive: true, force: true });
+  }
+  summary.windowsAppDataProbeCleanup = {
+    cleanedAppDirs,
   };
+  windowsAppDataProbe = null;
+  writeSummary();
 }
 
 async function runWindowsUninstallCycle(options: {
@@ -471,31 +485,37 @@ async function runWindowsUninstallCycle(options: {
     ? ["/S", "/P", "/DELETEAPPDATA"]
     : ["/S", "/P"];
 
-  await runCommand(
-    windowsUninstallerPath,
-    uninstallArgs,
-    options.logName,
-    120_000,
-    { env: windowsUninstallEnv() },
-  );
-
-  if (options.appPath && !(await waitForPathMissing(options.appPath, 10_000))) {
-    throw new Error(
-      `Installed app still exists after uninstall: ${options.appPath}`,
+  try {
+    await runCommand(
+      windowsUninstallerPath,
+      uninstallArgs,
+      options.logName,
+      120_000,
     );
-  }
 
-  if (windowsInstallDir && existsSync(windowsInstallDir)) {
-    writeFileSync(
-      join(artifactDir, `${options.logName}-install-dir-remaining.log`),
-      `Install directory remains after uninstall: ${windowsInstallDir}`,
-    );
-  }
+    if (
+      options.appPath &&
+      !(await waitForPathMissing(options.appPath, 10_000))
+    ) {
+      throw new Error(
+        `Installed app still exists after uninstall: ${options.appPath}`,
+      );
+    }
 
-  if (options.deleteAppData) {
-    verifyWindowsDeleteAppDataUninstallRemovedAppData();
-  } else {
-    verifyWindowsSilentUninstallPreservedAppData();
+    if (windowsInstallDir && existsSync(windowsInstallDir)) {
+      writeFileSync(
+        join(artifactDir, `${options.logName}-install-dir-remaining.log`),
+        `Install directory remains after uninstall: ${windowsInstallDir}`,
+      );
+    }
+
+    if (options.deleteAppData) {
+      verifyWindowsDeleteAppDataUninstallRemovedAppData();
+    } else {
+      verifyWindowsSilentUninstallPreservedAppData();
+    }
+  } finally {
+    cleanupWindowsAppDataProbe();
   }
 }
 

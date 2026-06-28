@@ -18,6 +18,7 @@ val sherpaOnnxAndroidAbi = System.getenv("SHERPA_ONNX_ANDROID_ABI")
     ?: inferSherpaOnnxAndroidAbi(sherpaOnnxLibDir)
 val stagedSherpaOnnxAndroidAbi = sherpaOnnxAndroidAbi ?: "unused"
 val stagedSherpaOnnxJniLibsDir = layout.buildDirectory.dir("generated/sherpa-onnx-jniLibs")
+val debugKeystoreFile = rootProject.file("debug.keystore")
 
 android {
     compileSdk = 36
@@ -30,8 +31,18 @@ android {
         versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
         versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")
     }
+    signingConfigs {
+        getByName("debug") {
+            // Throwaway debug-only key committed so CI/emulator installs share one stable signature.
+            storeFile = debugKeystoreFile
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
     buildTypes {
         getByName("debug") {
+            signingConfig = signingConfigs.getByName("debug")
             manifestPlaceholders["usesCleartextTraffic"] = "true"
             isDebuggable = true
             isJniDebuggable = true
