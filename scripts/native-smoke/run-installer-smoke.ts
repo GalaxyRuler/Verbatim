@@ -179,14 +179,6 @@ async function installWindowsNormal(
       `Installed Windows uninstaller was not found: ${windowsUninstallerPath}`,
     );
   }
-  windowsAppDataProbe = prepareWindowsAppDataProbe(cycle);
-  summary.windowsAppDataProbe = {
-    cycle,
-    seededRoaming: true,
-    seededLocal: true,
-    expectedDeleteAppData: cycle === "delete-app-data",
-  };
-  writeSummary();
   return appPath;
 }
 
@@ -448,6 +440,17 @@ function prepareWindowsAppDataProbe(
   };
 }
 
+function seedWindowsAppDataProbe(cycle: string): void {
+  windowsAppDataProbe = prepareWindowsAppDataProbe(cycle);
+  summary.windowsAppDataProbe = {
+    cycle,
+    seededRoaming: true,
+    seededLocal: true,
+    expectedDeleteAppData: cycle === "delete-app-data",
+  };
+  writeSummary();
+}
+
 function readCurrentWindowsShellFolder(
   envName: "APPDATA" | "LOCALAPPDATA",
   fallbackParts: string[],
@@ -501,6 +504,10 @@ async function runWindowsUninstallCycle(options: {
     : ["/S", "/P"];
 
   try {
+    seedWindowsAppDataProbe(
+      options.deleteAppData ? "delete-app-data" : "preserve-app-data",
+    );
+
     await runCommand(
       windowsUninstallerPath,
       uninstallArgs,
