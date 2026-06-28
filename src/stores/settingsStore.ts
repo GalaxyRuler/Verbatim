@@ -11,6 +11,12 @@ import type {
 } from "@/bindings";
 import { commands } from "@/bindings";
 
+// Guard so the backend "model-state-changed" subscription is attached at most
+// once, even if initialize() runs again (e.g. the useSettings effect re-fires
+// before isLoading flips). Without this the listener would stack and
+// refreshSettings would run N times per event.
+let modelStateListenerAttached = false;
+
 interface SettingsStore {
   settings: Settings | null;
   defaultSettings: Settings | null;
@@ -660,9 +666,13 @@ export const useSettingsStore = create<SettingsStore>()(
 
       // Re-fetch settings when the backend changes them (e.g. language
       // reset during model switch). The backend is the source of truth.
-      listen("model-state-changed", () => {
-        get().refreshSettings();
-      });
+      // Attach once for the app lifetime to avoid stacking listeners.
+      if (!modelStateListenerAttached) {
+        modelStateListenerAttached = true;
+        listen("model-state-changed", () => {
+          get().refreshSettings();
+        });
+      }
     },
   })),
 );
