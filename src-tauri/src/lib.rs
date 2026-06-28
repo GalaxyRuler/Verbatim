@@ -431,9 +431,7 @@ fn initialize_core_logic(app_handle: &AppHandle) -> Result<(), StartupError> {
         let initial_icon_path = tray::get_icon_path(initial_theme, tray::TrayIconState::Idle);
         let initial_icon_path = init_step(
             "tray icon path",
-            app_handle
-                .path()
-                .resolve(initial_icon_path, tauri::path::BaseDirectory::Resource),
+            crate::utils::resolve_resource_path(app_handle, initial_icon_path),
         )?;
         let initial_icon = init_step("tray icon image", Image::from_path(initial_icon_path))?;
 

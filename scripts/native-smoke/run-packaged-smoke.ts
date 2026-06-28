@@ -374,11 +374,12 @@ async function runSingleInstancePhase(): Promise<void> {
 
   await delay(1000);
   const secondary = await runSpawnedProcess(
-    spawnApp(["--debug", "--no-tray", "--cancel"], secondaryLogPrefix, 1000),
+    spawnApp(["--debug", "--no-tray"], secondaryLogPrefix, 1000),
     secondaryLogPrefix,
     10000,
   );
   expectCleanExit(secondaryLogPrefix, secondary);
+  assertNoSmokeStatus(secondaryLogPrefix);
 
   const primaryResult = await runSpawnedProcess(
     primary,
@@ -389,6 +390,15 @@ async function runSingleInstancePhase(): Promise<void> {
   assertSmokeStatus(primaryLogPrefix, {
     requireTrayVisible: false,
   });
+}
+
+function assertNoSmokeStatus(logPrefix: string): void {
+  const statusPath = join(artifactDir, `${logPrefix}.status.json`);
+  if (existsSync(statusPath)) {
+    throw new Error(
+      `${logPrefix} wrote native smoke status, so the duplicate process reached app setup instead of delegating to the primary instance: ${statusPath}`,
+    );
+  }
 }
 
 async function runDesktopTargetDrill(): Promise<void> {
