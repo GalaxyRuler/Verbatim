@@ -132,20 +132,26 @@ fn resolve_required_resource_asset(
 
 fn resource_resolver_paths(app: &AppHandle, relative_path: &str) -> anyhow::Result<Vec<PathBuf>> {
     let mut candidates = Vec::new();
-    let resolved = app
+    let mut resolve_errors = Vec::new();
+
+    match app
         .path()
         .resolve(relative_path, tauri::path::BaseDirectory::Resource)
-        .map_err(|e| anyhow::anyhow!("Failed to resolve resource path {relative_path}: {e}"))?;
-    push_unique_path(&mut candidates, resolved);
+    {
+        Ok(resolved) => push_unique_path(&mut candidates, resolved),
+        Err(error) => resolve_errors.push(format!("resource path {relative_path}: {error}")),
+    }
 
     if let Some(flattened_path) = flattened_model_resource_path(relative_path) {
-        let flattened = app
+        match app
             .path()
             .resolve(&flattened_path, tauri::path::BaseDirectory::Resource)
-            .map_err(|e| {
-                anyhow::anyhow!("Failed to resolve flattened resource path {flattened_path}: {e}")
-            })?;
-        push_unique_path(&mut candidates, flattened);
+        {
+            Ok(flattened) => push_unique_path(&mut candidates, flattened),
+            Err(error) => {
+                resolve_errors.push(format!("flattened resource path {flattened_path}: {error}"))
+            }
+        }
     }
 
     let exe_path = std::env::current_exe().ok();
@@ -156,6 +162,17 @@ fn resource_resolver_paths(app: &AppHandle, relative_path: &str) -> anyhow::Resu
         current_dir.as_deref(),
     ) {
         push_unique_path(&mut candidates, candidate);
+    }
+
+    if candidates.is_empty() {
+        let details = if resolve_errors.is_empty() {
+            "no candidate paths were available".to_string()
+        } else {
+            resolve_errors.join("; ")
+        };
+        return Err(anyhow::anyhow!(
+            "Failed to resolve resource path {relative_path}: {details}"
+        ));
     }
 
     Ok(candidates)
@@ -181,9 +198,11 @@ fn adjacent_resource_candidate_paths(
     let mut roots = Vec::new();
     if let Some(exe_dir) = exe_path.and_then(Path::parent) {
         roots.push(exe_dir.to_path_buf());
+        push_macos_bundle_resource_root(&mut roots, exe_dir);
     }
     if let Some(current_dir) = current_dir {
         roots.push(current_dir.to_path_buf());
+        push_macos_bundle_resource_root(&mut roots, current_dir);
     }
 
     let mut relative_paths = vec![PathBuf::from(relative_path)];
@@ -202,6 +221,24 @@ fn adjacent_resource_candidate_paths(
     }
 
     candidates
+}
+
+fn push_macos_bundle_resource_root(roots: &mut Vec<PathBuf>, root: &Path) {
+    if root.file_name().and_then(|name| name.to_str()) != Some("MacOS") {
+        return;
+    }
+
+    let Some(contents_dir) = root.parent() else {
+        return;
+    };
+    if contents_dir.file_name().and_then(|name| name.to_str()) != Some("Contents") {
+        return;
+    }
+
+    let resource_root = contents_dir.join("Resources");
+    if !roots.contains(&resource_root) {
+        roots.push(resource_root);
+    }
 }
 
 fn copy_verified_resource_to_target(
@@ -431,6 +468,22 @@ mod tests {
             "/opt/verbatim/resources/models/silero_vad_v4.onnx",
         )));
         assert!(candidates.contains(&PathBuf::from("/opt/verbatim/resources/silero_vad_v4.onnx",)));
+    }
+
+    #[test]
+    fn adjacent_resource_candidates_include_copied_macos_app_bundle_resources() {
+        let bundle_root = PathBuf::from("Applications").join("Verbatim.app");
+        let exe_path = bundle_root.join("Contents").join("MacOS").join("Verbatim");
+        let candidates =
+            adjacent_resource_candidate_paths("resources/tray_idle.png", Some(&exe_path), None);
+
+        assert!(candidates.contains(
+            &bundle_root
+                .join("Contents")
+                .join("Resources")
+                .join("resources")
+                .join("tray_idle.png")
+        ));
     }
 
     #[test]

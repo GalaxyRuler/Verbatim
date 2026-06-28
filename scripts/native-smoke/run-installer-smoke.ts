@@ -179,14 +179,6 @@ async function installWindowsNormal(
       `Installed Windows uninstaller was not found: ${windowsUninstallerPath}`,
     );
   }
-  windowsAppDataProbe = prepareWindowsAppDataProbe(cycle);
-  summary.windowsAppDataProbe = {
-    cycle,
-    seededRoaming: true,
-    seededLocal: true,
-    expectedDeleteAppData: cycle === "delete-app-data",
-  };
-  writeSummary();
   return appPath;
 }
 
@@ -210,11 +202,18 @@ async function installMacDmg(): Promise<string> {
 
   try {
     const mountedApp = findMountedMacApp(mountDir);
+    const installedAppBundle = join(installDir, basename(mountedApp));
     await runCommand(
       "ditto",
-      [mountedApp, join(installDir, basename(mountedApp))],
+      [mountedApp, installedAppBundle],
       "macos-copy-app",
       120_000,
+    );
+    await runCommand(
+      "xattr",
+      ["-cr", installedAppBundle],
+      "macos-clear-quarantine",
+      60_000,
     );
   } finally {
     await runCommand(
@@ -424,8 +423,8 @@ function prepareWindowsAppDataProbe(
     join(localAppDir, "cache", "probe.bin"),
   ];
 
-  assertWindowsAppDataProbeTargetIsClean(roamingAppDir);
-  assertWindowsAppDataProbeTargetIsClean(localAppDir);
+  assertWindowsAppDataProbeTargetCanBeSeeded(roamingAppDir);
+  assertWindowsAppDataProbeTargetCanBeSeeded(localAppDir);
 
   for (const markerFile of markerFiles) {
     mkdirSync(dirname(markerFile), { recursive: true });
@@ -441,6 +440,17 @@ function prepareWindowsAppDataProbe(
   };
 }
 
+function seedWindowsAppDataProbe(cycle: string): void {
+  windowsAppDataProbe = prepareWindowsAppDataProbe(cycle);
+  summary.windowsAppDataProbe = {
+    cycle,
+    seededRoaming: true,
+    seededLocal: true,
+    expectedDeleteAppData: cycle === "delete-app-data",
+  };
+  writeSummary();
+}
+
 function readCurrentWindowsShellFolder(
   envName: "APPDATA" | "LOCALAPPDATA",
   fallbackParts: string[],
@@ -452,10 +462,18 @@ function readCurrentWindowsShellFolder(
   return join(homedir(), ...fallbackParts);
 }
 
-function assertWindowsAppDataProbeTargetIsClean(appDir: string): void {
+function assertWindowsAppDataProbeTargetCanBeSeeded(appDir: string): void {
   if (!existsSync(appDir)) return;
+  if (allowsExistingWindowsAppDataProbeTarget()) return;
   throw new Error(
-    `Windows installer smoke refuses to run /DELETEAPPDATA against existing app data: ${appDir}`,
+    `Windows installer smoke refuses to run /DELETEAPPDATA against existing app data: ${appDir}. Run on a clean profile or set VERBATIM_INSTALLER_SMOKE_ALLOW_EXISTING_APPDATA=1 only for disposable CI profiles.`,
+  );
+}
+
+function allowsExistingWindowsAppDataProbeTarget(): boolean {
+  return (
+    process.env.GITHUB_ACTIONS === "true" ||
+    process.env.VERBATIM_INSTALLER_SMOKE_ALLOW_EXISTING_APPDATA === "1"
   );
 }
 
@@ -486,6 +504,10 @@ async function runWindowsUninstallCycle(options: {
     : ["/S", "/P"];
 
   try {
+    seedWindowsAppDataProbe(
+      options.deleteAppData ? "delete-app-data" : "preserve-app-data",
+    );
+
     await runCommand(
       windowsUninstallerPath,
       uninstallArgs,
