@@ -12,6 +12,8 @@ jobs:
   build-test:
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     strategy:
       fail-fast: false
       matrix:
