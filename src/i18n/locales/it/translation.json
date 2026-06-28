@@ -948,6 +948,7 @@
     "recordingFailed": "Impossibile avviare la registrazione: {{error}}",
     "modelLoadFailed": "Impossibile caricare il modello: {{model}}",
     "modelLoadFailedUnknown": "modello sconosciuto",
+    "gpuUnavailableUsingCpu": "GPU transcription unavailable on this hardware - using CPU.",
     "pasteFailedTitle": "Impossibile incollare il testo",
     "pasteFailed": "Non è stato possibile incollare il testo nell'applicazione attiva.",
     "pasteFailedCopiedHint": "The text was copied to your clipboard so you can paste it manually.",

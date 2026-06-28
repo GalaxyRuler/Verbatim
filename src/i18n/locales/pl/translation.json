@@ -948,6 +948,7 @@
     "recordingFailed": "Nie udało się rozpocząć nagrywania: {{error}}",
     "modelLoadFailed": "Nie udało się załadować modelu: {{model}}",
     "modelLoadFailedUnknown": "nieznany model",
+    "gpuUnavailableUsingCpu": "GPU transcription unavailable on this hardware - using CPU.",
     "pasteFailedTitle": "Nie udało się wkleić tekstu",
     "pasteFailed": "Nie można było wkleić tekstu do aktywnej aplikacji.",
     "pasteFailedCopiedHint": "The text was copied to your clipboard so you can paste it manually.",

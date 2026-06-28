@@ -1287,6 +1287,29 @@ fn run_inner(cli_args: CliArgs) {
     // Detect portable mode before anything else
     portable::init();
 
+    if let Some(model_path) = cli_args.whisper_gpu_preflight.as_deref() {
+        #[cfg(feature = "transcribe-rs-engine")]
+        {
+            match providers::run_whisper_gpu_preflight(
+                model_path,
+                cli_args.whisper_gpu_preflight_device,
+            ) {
+                Ok(()) => std::process::exit(0),
+                Err(error) => {
+                    eprintln!("{error}");
+                    std::process::exit(1);
+                }
+            }
+        }
+
+        #[cfg(not(feature = "transcribe-rs-engine"))]
+        {
+            let _ = model_path;
+            eprintln!("Whisper GPU preflight requires the transcribe-rs engine");
+            std::process::exit(2);
+        }
+    }
+
     // Parse console logging directives from RUST_LOG, falling back to info-level logging
     // when the variable is unset
     let console_filter = build_console_filter();

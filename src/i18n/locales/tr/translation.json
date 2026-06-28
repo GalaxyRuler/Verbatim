@@ -948,6 +948,7 @@
     "recordingFailed": "Kayıt başlatılamadı: {{error}}",
     "modelLoadFailed": "Model yüklenemedi: {{model}}",
     "modelLoadFailedUnknown": "bilinmeyen model",
+    "gpuUnavailableUsingCpu": "GPU transcription unavailable on this hardware - using CPU.",
     "pasteFailedTitle": "Metin yapıştırılamadı",
     "pasteFailed": "Metin etkin uygulamaya yapıştırılamadı.",
     "pasteFailedCopiedHint": "The text was copied to your clipboard so you can paste it manually.",

@@ -14,10 +14,11 @@ use ::transcribe_rs::{
         sense_voice::{SenseVoiceModel, SenseVoiceParams},
         Quantization,
     },
-    whisper_cpp::{WhisperEngine, WhisperInferenceParams},
+    whisper_cpp::{WhisperEngine, WhisperInferenceParams, WhisperLoadParams},
     SpeechModel, TranscribeOptions,
 };
 use anyhow::Result;
+use std::path::Path;
 
 pub enum LoadedEngine {
     Whisper(WhisperEngine),
@@ -48,6 +49,47 @@ impl Default for TranscribeRsProvider {
     fn default() -> Self {
         Self::new()
     }
+}
+
+pub(crate) fn resolve_whisper_gpu_device(use_gpu: bool, requested_device: i32) -> i32 {
+    if !use_gpu {
+        return 0;
+    }
+
+    if requested_device == ::transcribe_rs::accel::GPU_DEVICE_AUTO {
+        0
+    } else {
+        requested_device
+    }
+}
+
+pub(crate) fn whisper_load_params_from_globals() -> WhisperLoadParams {
+    let accelerator = ::transcribe_rs::accel::get_whisper_accelerator();
+    let use_gpu = accelerator.use_gpu();
+    WhisperLoadParams {
+        use_gpu,
+        flash_attn: false,
+        gpu_device: resolve_whisper_gpu_device(
+            use_gpu,
+            ::transcribe_rs::accel::get_whisper_gpu_device(),
+        ),
+    }
+}
+
+pub fn run_whisper_gpu_preflight(model_path: &Path, gpu_device: i32) -> Result<()> {
+    let params = WhisperLoadParams {
+        use_gpu: true,
+        flash_attn: false,
+        gpu_device: resolve_whisper_gpu_device(true, gpu_device),
+    };
+    let mut engine = WhisperEngine::load_with_params(model_path, params)
+        .map_err(|e| anyhow::anyhow!("Whisper GPU preflight load failed: {}", e))?;
+    let audio = vec![0.0_f32; 16_000];
+    let inference_params = WhisperInferenceParams::default();
+    engine
+        .transcribe_with(&audio, &inference_params)
+        .map_err(|e| anyhow::anyhow!("Whisper GPU preflight inference failed: {}", e))?;
+    Ok(())
 }
 
 fn normalize_language_for_engine(language: &str) -> String {
@@ -203,7 +245,10 @@ impl EngineProvider for TranscribeRsProvider {
         };
 
         let loaded = match asset.metadata.engine_type {
-            EngineType::Whisper => LoadedEngine::Whisper(WhisperEngine::load(model_path)?),
+            EngineType::Whisper => LoadedEngine::Whisper(WhisperEngine::load_with_params(
+                model_path,
+                whisper_load_params_from_globals(),
+            )?),
             EngineType::Parakeet => {
                 LoadedEngine::Parakeet(ParakeetModel::load(model_path, &Quantization::Int8)?)
             }
@@ -397,6 +442,9 @@ mod tests {
     use crate::managers::model::{EngineType, ModelInfo};
     use crate::providers::{ModelAsset, SpeechTaskKind, TranslationPairSupport};
     use std::path::PathBuf;
+    use std::sync::Mutex;
+
+    static ACCELERATOR_TEST_LOCK: Mutex<()> = Mutex::new(());
 
     fn asset(engine_type: EngineType, supports_translation: bool) -> ModelAsset {
         ModelAsset::from_model_info(
@@ -442,6 +490,45 @@ mod tests {
             capabilities.translation_pairs,
             TranslationPairSupport::EnglishOnly
         );
+    }
+
+    #[test]
+    fn whisper_load_params_disable_flash_attention_and_pin_auto_gpu_to_zero() {
+        use ::transcribe_rs::accel::{
+            set_whisper_accelerator, set_whisper_gpu_device, WhisperAccelerator, GPU_DEVICE_AUTO,
+        };
+
+        let _guard = ACCELERATOR_TEST_LOCK.lock().unwrap();
+        set_whisper_accelerator(WhisperAccelerator::Auto);
+        set_whisper_gpu_device(GPU_DEVICE_AUTO);
+
+        let params = whisper_load_params_from_globals();
+
+        assert!(params.use_gpu);
+        assert!(!params.flash_attn);
+        assert_eq!(params.gpu_device, 0);
+    }
+
+    #[test]
+    fn whisper_load_params_honor_cpu_and_explicit_gpu_device() {
+        use ::transcribe_rs::accel::{
+            set_whisper_accelerator, set_whisper_gpu_device, WhisperAccelerator,
+        };
+
+        let _guard = ACCELERATOR_TEST_LOCK.lock().unwrap();
+        set_whisper_accelerator(WhisperAccelerator::Gpu);
+        set_whisper_gpu_device(1);
+        let gpu_params = whisper_load_params_from_globals();
+        assert!(gpu_params.use_gpu);
+        assert!(!gpu_params.flash_attn);
+        assert_eq!(gpu_params.gpu_device, 1);
+
+        set_whisper_accelerator(WhisperAccelerator::CpuOnly);
+        set_whisper_gpu_device(1);
+        let cpu_params = whisper_load_params_from_globals();
+        assert!(!cpu_params.use_gpu);
+        assert!(!cpu_params.flash_attn);
+        assert_eq!(cpu_params.gpu_device, 0);
     }
 
     #[test]

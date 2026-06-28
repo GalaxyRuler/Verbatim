@@ -948,6 +948,7 @@
     "recordingFailed": "録音の開始に失敗しました: {{error}}",
     "modelLoadFailed": "モデルの読み込みに失敗しました: {{model}}",
     "modelLoadFailedUnknown": "不明なモデル",
+    "gpuUnavailableUsingCpu": "GPU transcription unavailable on this hardware - using CPU.",
     "pasteFailedTitle": "テキストの貼り付けに失敗しました",
     "pasteFailed": "アクティブなアプリケーションにテキストを貼り付けられませんでした。",
     "pasteFailedCopiedHint": "The text was copied to your clipboard so you can paste it manually.",

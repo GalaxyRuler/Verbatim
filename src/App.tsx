@@ -412,6 +412,11 @@ function DesktopApp() {
             description: event.payload.error,
           },
         );
+      } else if (
+        event.payload.event_type === "loading_completed" &&
+        event.payload.fallback === "cpu_after_gpu_preflight_failed"
+      ) {
+        toast.warning(t("errors.gpuUnavailableUsingCpu"));
       }
     });
     return () => {

@@ -948,6 +948,7 @@
     "recordingFailed": "Стартирането на записа не бе успешно: {{error}}",
     "modelLoadFailed": "Зареждането на модела не бе успешно: {{model}}",
     "modelLoadFailedUnknown": "неизвестен модел",
+    "gpuUnavailableUsingCpu": "GPU transcription unavailable on this hardware - using CPU.",
     "pasteFailedTitle": "Неуспешно поставяне на текст",
     "pasteFailed": "Текстът не можа да бъде поставен в активното приложение.",
     "pasteFailedCopiedHint": "The text was copied to your clipboard so you can paste it manually.",
