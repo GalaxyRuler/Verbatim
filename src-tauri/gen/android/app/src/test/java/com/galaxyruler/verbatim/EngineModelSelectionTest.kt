@@ -72,4 +72,62 @@ class EngineModelSelectionTest {
     assertTrue(EngineModelSelectionStore.isEngineModelInstalled(context, requiredFiles))
     appDataRoot.deleteRecursively()
   }
+
+  @Test
+  fun llmModelPathUsesDedicatedDownloaderRootAndPreservesAbsoluteSelections() {
+    val context = mockk<Context>()
+    val prefs = mockk<SharedPreferences>()
+    val editor = mockk<SharedPreferences.Editor>()
+    val appDataRoot = File("build/test-data/verbatim-llm-app-data").absoluteFile
+    val appInfo = ApplicationInfo().apply {
+      dataDir = appDataRoot.absolutePath
+    }
+    var storedModelId: String? = null
+
+    every { context.getSharedPreferences("verbatim_android", Context.MODE_PRIVATE) } returns prefs
+    every { context.applicationInfo } returns appInfo
+    every { prefs.getString("native_llm_model_id", "default") } answers {
+      storedModelId ?: "default"
+    }
+    every { prefs.edit() } returns editor
+    every { editor.putString("native_llm_model_id", any()) } answers {
+      storedModelId = secondArg()
+      editor
+    }
+    every { editor.apply() } just Runs
+
+    assertEquals(
+      "g4-qwen2_5-0_5b-litert-q8",
+      AndroidLlmModelSelectionStore.setLlmModelId(context, " g4-qwen2_5-0_5b-litert-q8 "),
+    )
+    assertEquals("g4-qwen2_5-0_5b-litert-q8", AndroidLlmModelSelectionStore.llmModelId(context))
+    assertEquals(
+      File(
+        appDataRoot,
+        "models/android-llm-postproc/g4-qwen2_5-0_5b-litert-q8",
+      ).absolutePath,
+      AndroidLlmModelSelectionStore.llmModelDir(context),
+    )
+
+    val requiredFiles = arrayOf("qwen2.5-0.5b-instruct-q8.task")
+    val packDir = File(appDataRoot, "models/android-llm-postproc/g4-qwen2_5-0_5b-litert-q8")
+    assertEquals(
+      File(packDir, "qwen2.5-0.5b-instruct-q8.task").absolutePath,
+      AndroidLlmModelSelectionStore.llmModelPath(context, requiredFiles),
+    )
+    assertFalse(AndroidLlmModelSelectionStore.isLlmModelInstalled(context, requiredFiles))
+    File(packDir, requiredFiles[0]).also { file ->
+      file.parentFile?.mkdirs()
+      file.writeText("fixture")
+    }
+    assertTrue(AndroidLlmModelSelectionStore.isLlmModelInstalled(context, requiredFiles))
+
+    val absolutePackDir = File(appDataRoot, "custom-llm")
+    assertEquals(
+      absolutePackDir.absolutePath,
+      AndroidLlmModelSelectionStore.setLlmModelId(context, " ${absolutePackDir.absolutePath} "),
+    )
+    assertEquals(absolutePackDir.absolutePath, AndroidLlmModelSelectionStore.llmModelDir(context))
+    appDataRoot.deleteRecursively()
+  }
 }

@@ -1111,7 +1111,7 @@
       "storage": "{{count}} MB used",
       "downloaded": "Downloaded",
       "available": "Available",
-      "empty": "No Android ASR model packs are available.",
+      "empty": "No Android model packs are available.",
       "error": "Model action failed: {{error}}",
       "missingFiles": "{{count}} required files missing",
       "status": {
@@ -1127,7 +1127,11 @@
         "cancel": "Cancel",
         "select": "Select",
         "delete": "Delete"
-      }
+      },
+      "asrDownloaded": "Downloaded speech models",
+      "asrAvailable": "Available speech models",
+      "cleanupDownloaded": "Downloaded cleanup models",
+      "cleanupAvailable": "Available cleanup models"
     },
     "settings": {
       "general": "General",
@@ -1156,6 +1160,17 @@
         "marimba": "Marimba",
         "pop": "Pop",
         "custom": "Custom"
+      },
+      "llmCleanup": {
+        "title": "On-device cleanup (beta)",
+        "enabled": "Local cleanup before insertion",
+        "disabled": "Raw dictation path",
+        "reasons": {
+          "supported": "Ready on this high-end device.",
+          "requiresArm64": "Requires an arm64 Android device.",
+          "requires8GbRam": "Requires at least {{minRamGb}} GB RAM.",
+          "requiresHighEndSoc": "Requires a high-end mobile processor."
+        }
       }
     }
   },

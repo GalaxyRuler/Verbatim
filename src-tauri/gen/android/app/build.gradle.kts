@@ -102,6 +102,9 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.7.1")
     implementation("androidx.activity:activity-ktx:1.10.1")
     implementation("com.google.android.material:material:1.12.0")
+    runtimeOnly("com.google.ai.edge.litertlm:litertlm-android:0.13.1") {
+        exclude(group = "org.jetbrains.kotlin")
+    }
     testImplementation("junit:junit:4.13.2")
     // Phase 0 / Task 0.1 (v2): JUnit4 already present; add only MockK + Robolectric.
     testImplementation("io.mockk:mockk:1.13.13")

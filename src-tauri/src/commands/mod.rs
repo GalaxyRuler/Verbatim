@@ -1,4 +1,5 @@
 pub mod adaptive;
+pub mod android_llm;
 pub mod asr;
 pub mod audio;
 pub mod dictionary;

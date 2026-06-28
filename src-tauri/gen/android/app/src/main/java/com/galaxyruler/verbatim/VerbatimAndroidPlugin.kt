@@ -57,6 +57,16 @@ class SetEngineModelIdArgs {
   var modelId: String = ""
 }
 
+@InvokeArg
+class SetLlmPostProcessingArgs {
+  var enabled: Boolean = false
+}
+
+@InvokeArg
+class SetLlmModelIdArgs {
+  var modelId: String = ""
+}
+
 /**
  * The real Tauri plugin for Verbatim's Android native surface. It lives in the APP module
  * (com.galaxyruler.verbatim) — not the plugin's android library — so it can reach the app's
@@ -163,6 +173,34 @@ class VerbatimAndroidPlugin(private val activity: Activity) : Plugin(activity) {
   }
 
   @Command
+  fun llmPostProcessingSupport(invoke: Invoke) {
+    invoke.resolve(llmSupportSnapshot())
+  }
+
+  @Command
+  fun llmPostProcessingEnabled(invoke: Invoke) {
+    val ret = JSObject()
+    ret.put("value", FloatingBubbleService.isLlmPostProcessingEnabled(activity))
+    invoke.resolve(ret)
+  }
+
+  @Command
+  fun setLlmPostProcessingEnabled(invoke: Invoke) {
+    val args = invoke.parseArgs(SetLlmPostProcessingArgs::class.java)
+    val ret = JSObject()
+    ret.put("value", FloatingBubbleService.setLlmPostProcessingEnabled(activity, args.enabled))
+    invoke.resolve(ret)
+  }
+
+  @Command
+  fun setLlmModelId(invoke: Invoke) {
+    val args = invoke.parseArgs(SetLlmModelIdArgs::class.java)
+    val ret = JSObject()
+    ret.put("value", FloatingBubbleService.setLlmModelId(activity, args.modelId))
+    invoke.resolve(ret)
+  }
+
+  @Command
   fun startBubble(invoke: Invoke) {
     activity.runOnUiThread {
       if (Settings.canDrawOverlays(activity)) {
@@ -262,6 +300,28 @@ class VerbatimAndroidPlugin(private val activity: Activity) : Plugin(activity) {
       )
       .put("onDeviceSpeechLanguageAvailable", AndroidSpeechSupport.isLanguageAvailable(activity))
       .put("onDeviceSpeechModelStatus", AndroidSpeechSupport.currentStatus(activity))
+      .apply {
+        val llm = FloatingBubbleService.llmPostProcessingSupport(activity)
+        put("llmPostProcessingSupported", llm.supported)
+        put("llmPostProcessingReason", llm.reason)
+        put("llmTotalRamMb", llm.totalRamMb)
+        put("llmAvailableRamMb", llm.availableRamMb)
+        put("llmMinRamMb", llm.minRamMb)
+        put("llmHardware", llm.hardware)
+        put("llmSocModel", llm.socModel)
+      }
+
+  private fun llmSupportSnapshot(): JSObject {
+    val llm = FloatingBubbleService.llmPostProcessingSupport(activity)
+    return JSObject()
+      .put("supported", llm.supported)
+      .put("reason", llm.reason)
+      .put("totalRamMb", llm.totalRamMb)
+      .put("availableRamMb", llm.availableRamMb)
+      .put("minRamMb", llm.minRamMb)
+      .put("hardware", llm.hardware)
+      .put("socModel", llm.socModel)
+  }
 
   private fun hasMicrophonePermission(): Boolean =
     ContextCompat.checkSelfPermission(activity, Manifest.permission.RECORD_AUDIO) ==
