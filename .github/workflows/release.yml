@@ -112,6 +112,8 @@ jobs:
   publish-tauri:
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     needs: create-release
     strategy:
       fail-fast: false
