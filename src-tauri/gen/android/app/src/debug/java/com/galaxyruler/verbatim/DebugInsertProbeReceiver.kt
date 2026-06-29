@@ -9,7 +9,16 @@ class DebugInsertProbeReceiver : BroadcastReceiver() {
     when (intent?.action) {
       ACTION_DEBUG_INSERT_PROBE -> FloatingBubbleService.startDebugInsertionProbe(context)
       ACTION_DEBUG_ENGINE_WAV_SMOKE ->
-        FloatingBubbleService.startDebugEngineWavSmoke(context, intent.getStringExtra(EXTRA_DEBUG_WAV_PATH))
+        FloatingBubbleService.startDebugEngineWavSmoke(
+          context,
+          intent.getStringExtra(EXTRA_DEBUG_WAV_PATH),
+        )
+      ACTION_DEBUG_LLM_CLEANUP_SMOKE ->
+        FloatingBubbleService.startDebugLlmCleanupSmoke(
+          context,
+          intent.getStringExtra(EXTRA_DEBUG_RAW_TEXT),
+          intent.getStringExtra(EXTRA_DEBUG_MODEL_PATH),
+        )
     }
   }
 
@@ -18,6 +27,10 @@ class DebugInsertProbeReceiver : BroadcastReceiver() {
       "com.galaxyruler.verbatim.action.DEBUG_INSERT_PROBE"
     private const val ACTION_DEBUG_ENGINE_WAV_SMOKE =
       "com.galaxyruler.verbatim.action.DEBUG_ENGINE_WAV_SMOKE"
+    private const val ACTION_DEBUG_LLM_CLEANUP_SMOKE =
+      "com.galaxyruler.verbatim.action.DEBUG_LLM_CLEANUP_SMOKE"
     private const val EXTRA_DEBUG_WAV_PATH = "wav_path"
+    private const val EXTRA_DEBUG_RAW_TEXT = "raw_text"
+    private const val EXTRA_DEBUG_MODEL_PATH = "model_path"
   }
 }
