@@ -1333,8 +1333,33 @@ fn run_inner(cli_args: CliArgs) {
     let invoke_handler = specta_builder.invoke_handler();
 
     #[allow(unused_mut)]
-    let mut builder = tauri::Builder::default()
-        .device_event_filter(tauri::DeviceEventFilter::Always)
+    let mut builder =
+        tauri::Builder::default().device_event_filter(tauri::DeviceEventFilter::Always);
+
+    // Register the single-instance plugin FIRST — before every other plugin.
+    // tauri-plugin-single-instance requires this so that when a second copy of the
+    // app is launched (e.g. `verbatim --toggle-transcription`) it forwards its CLI
+    // args to the already-running primary and exits immediately. If other plugins
+    // (notably the file-logging target, which opens a rotating log file already held
+    // by the primary) initialize in the second process before single-instance runs,
+    // the second process can stall instead of cleanly forwarding-and-exiting.
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            log::info!("single-instance: secondary invocation forwarded args: {args:?}");
+            if args.iter().any(|a| a == "--toggle-transcription") {
+                signal_handle::send_transcription_input(app, "transcribe", "CLI");
+            } else if args.iter().any(|a| a == "--toggle-post-process") {
+                signal_handle::send_transcription_input(app, "transcribe_with_post_process", "CLI");
+            } else if args.iter().any(|a| a == "--cancel") {
+                crate::utils::cancel_current_operation(app);
+            } else {
+                show_main_window(app);
+            }
+        }));
+    }
+
+    builder = builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(
             LogBuilder::new()
@@ -1370,21 +1395,6 @@ fn run_inner(cli_args: CliArgs) {
     #[cfg(target_os = "macos")]
     {
         builder = builder.plugin(tauri_nspanel::init());
-    }
-
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
-    {
-        builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
-            if args.iter().any(|a| a == "--toggle-transcription") {
-                signal_handle::send_transcription_input(app, "transcribe", "CLI");
-            } else if args.iter().any(|a| a == "--toggle-post-process") {
-                signal_handle::send_transcription_input(app, "transcribe_with_post_process", "CLI");
-            } else if args.iter().any(|a| a == "--cancel") {
-                crate::utils::cancel_current_operation(app);
-            } else {
-                show_main_window(app);
-            }
-        }));
     }
 
     builder = builder
