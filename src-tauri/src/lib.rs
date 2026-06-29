@@ -1359,38 +1359,36 @@ fn run_inner(cli_args: CliArgs) {
         }));
     }
 
-    builder = builder
-        .plugin(tauri_plugin_dialog::init())
-        .plugin(
-            LogBuilder::new()
-                .level(log::LevelFilter::Trace) // Set to most verbose level globally
-                .max_file_size(500_000)
-                .rotation_strategy(RotationStrategy::KeepOne)
-                .clear_targets()
-                .targets([
-                    // Console output respects RUST_LOG environment variable
-                    Target::new(TargetKind::Stdout).filter({
-                        let console_filter = console_filter.clone();
-                        move |metadata| console_filter.enabled(metadata)
-                    }),
-                    // File logs respect the user's settings (stored in FILE_LOG_LEVEL atomic)
-                    Target::new(if let Some(data_dir) = portable::data_dir() {
-                        TargetKind::Folder {
-                            path: data_dir.join("logs"),
-                            file_name: Some("verbatim".into()),
-                        }
-                    } else {
-                        TargetKind::LogDir {
-                            file_name: Some("verbatim".into()),
-                        }
-                    })
-                    .filter(|metadata| {
-                        let file_level = FILE_LOG_LEVEL.load(Ordering::Relaxed);
-                        metadata.level() <= level_filter_from_u8(file_level)
-                    }),
-                ])
-                .build(),
-        );
+    builder = builder.plugin(tauri_plugin_dialog::init()).plugin(
+        LogBuilder::new()
+            .level(log::LevelFilter::Trace) // Set to most verbose level globally
+            .max_file_size(500_000)
+            .rotation_strategy(RotationStrategy::KeepOne)
+            .clear_targets()
+            .targets([
+                // Console output respects RUST_LOG environment variable
+                Target::new(TargetKind::Stdout).filter({
+                    let console_filter = console_filter.clone();
+                    move |metadata| console_filter.enabled(metadata)
+                }),
+                // File logs respect the user's settings (stored in FILE_LOG_LEVEL atomic)
+                Target::new(if let Some(data_dir) = portable::data_dir() {
+                    TargetKind::Folder {
+                        path: data_dir.join("logs"),
+                        file_name: Some("verbatim".into()),
+                    }
+                } else {
+                    TargetKind::LogDir {
+                        file_name: Some("verbatim".into()),
+                    }
+                })
+                .filter(|metadata| {
+                    let file_level = FILE_LOG_LEVEL.load(Ordering::Relaxed);
+                    metadata.level() <= level_filter_from_u8(file_level)
+                }),
+            ])
+            .build(),
+    );
 
     #[cfg(target_os = "macos")]
     {
