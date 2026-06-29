@@ -69,6 +69,14 @@ impl<R: Runtime> VerbatimAndroid<R> {
     Ok(())
   }
 
+  pub fn set_engine_model_id(&self, model_id: String) -> crate::Result<serde_json::Value> {
+    Ok(serde_json::json!({ "value": model_id }))
+  }
+
+  pub fn set_llm_model_id(&self, model_id: String) -> crate::Result<serde_json::Value> {
+    Ok(serde_json::json!({ "value": model_id }))
+  }
+
   pub fn open_external_url(&self, _url: String) -> crate::Result<serde_json::Value> {
     Ok(serde_json::json!({ "value": false }))
   }

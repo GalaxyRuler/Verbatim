@@ -49,6 +49,8 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
       commands::open_overlay_settings,
       commands::open_accessibility_settings,
       commands::request_speech_model_download,
+      commands::set_engine_model_id,
+      commands::set_llm_model_id,
       commands::open_external_url
     ])
     .setup(|app, api| {

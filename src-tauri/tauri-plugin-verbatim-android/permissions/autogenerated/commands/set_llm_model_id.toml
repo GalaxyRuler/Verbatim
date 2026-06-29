@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-set-llm-model-id"
+description = "Enables the set_llm_model_id command without any pre-configured scope."
+commands.allow = ["set_llm_model_id"]
+
+[[permission]]
+identifier = "deny-set-llm-model-id"
+description = "Denies the set_llm_model_id command without any pre-configured scope."
+commands.deny = ["set_llm_model_id"]
