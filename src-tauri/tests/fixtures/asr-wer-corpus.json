@@ -1,0 +1,31 @@
+{
+  "name": "sherpa-onnx-whisper-tiny-en-wer-smoke",
+  "description": "Small 16 kHz mono WER smoke corpus for the Android ASR harness. The upstream test_wavs/8k.wav fixture is intentionally omitted because this harness and model pack expect 16 kHz audio.",
+  "source": {
+    "repository": "csukuangfj/sherpa-onnx-whisper-tiny.en",
+    "commit": "d026532c022fa99fd789d6b32446a1df7b6bfc43",
+    "transcriptUrl": "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-tiny.en/raw/d026532c022fa99fd789d6b32446a1df7b6bfc43/test_wavs/trans.txt"
+  },
+  "entries": [
+    {
+      "id": "sherpa-whisper-tiny-en-0",
+      "wav": "0.wav",
+      "reference": "AFTER EARLY NIGHTFALL THE YELLOW LAMPS WOULD LIGHT UP HERE AND THERE THE SQUALID QUARTER OF THE BROTHELS",
+      "sourceUrl": "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-tiny.en/resolve/d026532c022fa99fd789d6b32446a1df7b6bfc43/test_wavs/0.wav",
+      "sha256": "6bc58a4efdf20daac252b6b1502632601a71efe0308f6757dc1eda34891a7e4f",
+      "sizeBytes": 212044,
+      "sampleRateHz": 16000,
+      "channels": 1
+    },
+    {
+      "id": "sherpa-whisper-tiny-en-1",
+      "wav": "1.wav",
+      "reference": "GOD AS A DIRECT CONSEQUENCE OF THE SIN WHICH MAN THUS PUNISHED HAD GIVEN HER A LOVELY CHILD WHOSE PLACE WAS ON THAT SAME DISHONOURED BOSOM TO CONNECT HER PARENT FOR EVER WITH THE RACE AND DESCENT OF MORTALS AND TO BE FINALLY A BLESSED SOUL IN HEAVEN",
+      "sourceUrl": "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-tiny.en/resolve/d026532c022fa99fd789d6b32446a1df7b6bfc43/test_wavs/1.wav",
+      "sha256": "5143a6ba93c4b274e2c4ac22deb75c2c48936c853f0519add1de828b6c79cc5a",
+      "sizeBytes": 534924,
+      "sampleRateHz": 16000,
+      "channels": 1
+    }
+  ]
+}

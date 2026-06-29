@@ -5,6 +5,7 @@ pub mod models;
 pub mod offline;
 pub mod streaming;
 pub mod vad;
+pub mod wer;
 
 use std::path::{Path, PathBuf};
 
