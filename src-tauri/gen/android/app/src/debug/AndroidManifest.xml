@@ -7,6 +7,7 @@
             <intent-filter>
                 <action android:name="com.galaxyruler.verbatim.action.DEBUG_INSERT_PROBE" />
                 <action android:name="com.galaxyruler.verbatim.action.DEBUG_ENGINE_WAV_SMOKE" />
+                <action android:name="com.galaxyruler.verbatim.action.DEBUG_LLM_CLEANUP_SMOKE" />
             </intent-filter>
         </receiver>
     </application>

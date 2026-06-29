@@ -115,3 +115,19 @@ Still requires the branch APK with the LLM model installed to complete the end-t
 - Toggle cleanup on.
 - Run a debug cleanup prompt and record peak RSS/logcat timing.
 - Dictate with cleanup on and off to confirm cleaned insertion versus raw insertion.
+
+## Debug cleanup smoke runner
+
+Debug APKs register `DebugInsertProbeReceiver`, which can trigger the cleanup smoke without hand-patching the service. Release builds do not include this receiver.
+
+```sh
+adb broadcast -a com.galaxyruler.verbatim.action.DEBUG_LLM_CLEANUP_SMOKE \
+  -n com.galaxyruler.verbatim/.DebugInsertProbeReceiver \
+  --es raw_text "hello comma this is a test" --es model_path <app-readable .task path>
+```
+
+Gotchas:
+
+- The app UID cannot read model files passed directly from `/data/local/tmp`. Copy the `.task` file into the app data directory with `run-as` first, then pass that app-readable path as `model_path`.
+- The first cold load of the 546 MB Qwen `.task` model takes time; wait for the debug log before treating the smoke as stuck.
+- The success/diagnostic log line is `FloatingBubble: debug LLM cleanup smoke rawLen=.. cleanedLen=..`. `cleanedLen=0` means the cleanup output was validation-rejected or the fallback path returned no cleaned text.
