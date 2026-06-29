@@ -1,1 +1,23 @@
 [build]
+
+# Build ggml / whisper.cpp (via whisper-rs-sys) with a PORTABLE CPU baseline
+# instead of `-march=native`.
+#
+# ggml defaults to GGML_NATIVE=ON, which compiles with the BUILD host's full
+# instruction set. On an AVX-512-capable build host (e.g. AMD Zen 5) that bakes
+# AVX-512 instructions into the binary. Those faulted with STATUS_ILLEGAL_INSTRUCTION
+# (0xc000001d) on every target CPU without AVX-512 — i.e. all recent Intel consumer
+# chips (11th-gen and newer, the entire Core Ultra / Meteor Lake line). Verified on
+# an Intel Core Ultra 9 185H: the faulting instruction disassembled to `vmovups zmm0`.
+#
+# whisper-rs-sys forwards any GGML_*/WHISPER_*/CMAKE_* env var to its cmake build, so
+# setting GGML_NATIVE=OFF here switches ggml to AVX/AVX2/FMA/F16C (portable, ~Haswell+
+# / all modern x86) with AVX-512 disabled. `force = true` guarantees it regardless of
+# the host environment. Ignored on non-x86 targets (macOS ARM uses Metal/NEON).
+[env]
+GGML_NATIVE = { value = "OFF", force = true }
+GGML_AVX = { value = "ON", force = true }
+GGML_AVX2 = { value = "ON", force = true }
+GGML_FMA = { value = "ON", force = true }
+GGML_F16C = { value = "ON", force = true }
+GGML_AVX512 = { value = "OFF", force = true }
