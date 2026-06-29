@@ -286,13 +286,8 @@ impl AndroidAsrModelManager {
         ensure_pack_layout(&pack, &staging_dir)?;
         replace_pack_dir(&root, &pack.id, &staging_dir)?;
         let _ = fs::remove_dir_all(download_dir);
-        let auto_selected = self.select_installed_pack_if_active_slot_empty(&root, &pack.id)?;
-
         cleanup.disarmed = true;
-        self.cancel_flags
-            .lock()
-            .map_err(|_| anyhow::anyhow!("Android ASR download lock is poisoned"))?
-            .remove(&pack.id);
+        let auto_selected = self.auto_select_after_download_completion(&root, &pack.id)?;
         if let Some(state) = auto_selected {
             sync_native_engine_model_id(app, &state.installed_dir)?;
         }
@@ -336,6 +331,19 @@ impl AndroidAsrModelManager {
             is_active: true,
             ..state
         })
+    }
+
+    fn auto_select_after_download_completion(
+        &self,
+        root: &Path,
+        model_id: &str,
+    ) -> Result<Option<AndroidAsrModelPackState>> {
+        self.cancel_flags
+            .lock()
+            .map_err(|_| anyhow::anyhow!("Android ASR download lock is poisoned"))?
+            .remove(model_id);
+
+        self.select_installed_pack_if_active_slot_empty(root, model_id)
     }
 
     fn select_installed_pack_if_active_slot_empty(
@@ -874,6 +882,30 @@ mod tests {
 
         assert!(state.is_active);
         assert_eq!(state.installed_dir, pack_dir.to_string_lossy().into_owned());
+        assert_eq!(
+            active_model_id_for_dir(temp.path()).unwrap().as_deref(),
+            Some("g3-zipformer-whisper-tiny-en")
+        );
+    }
+
+    #[test]
+    fn download_completion_clears_registered_flag_before_auto_selecting() {
+        let temp = tempfile::tempdir().unwrap();
+        let pack_dir = write_complete_pack(temp.path());
+        let manager = AndroidAsrModelManager::default();
+        manager.cancel_flags.lock().unwrap().insert(
+            "g3-zipformer-whisper-tiny-en".to_string(),
+            Arc::new(AtomicBool::new(false)),
+        );
+
+        let state = manager
+            .auto_select_after_download_completion(temp.path(), "g3-zipformer-whisper-tiny-en")
+            .unwrap()
+            .expect("download completion should select the freshly installed pack");
+
+        assert!(state.is_active);
+        assert_eq!(state.installed_dir, pack_dir.to_string_lossy().into_owned());
+        assert!(!manager.is_downloading("g3-zipformer-whisper-tiny-en"));
         assert_eq!(
             active_model_id_for_dir(temp.path()).unwrap().as_deref(),
             Some("g3-zipformer-whisper-tiny-en")

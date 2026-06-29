@@ -98,6 +98,11 @@ import {
   type AndroidLlmModelPackState,
   type AndroidLlmSupportSnapshot,
 } from "./bridge";
+import {
+  applyModelProgress,
+  clearModelProgress,
+  clearProgressEntry,
+} from "./modelProgress";
 import "./AndroidApp.css";
 
 type AndroidTab = "home" | "history" | "models" | "settings";
@@ -1685,19 +1690,24 @@ function ModelsTab() {
   const [busyIds, setBusyIds] = useState<Record<string, true>>({});
   const [error, setError] = useState<string | null>(null);
 
-  const refreshPacks = useCallback(async () => {
-    try {
-      const [nextAsr, nextLlm] = await Promise.all([
-        listAndroidAsrModelPacks(),
-        listAndroidLlmModelPacks(),
-      ]);
-      setAsrPacks(nextAsr);
-      setLlmPacks(nextLlm);
-      setError(null);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
-    }
-  }, []);
+  const refreshPacks = useCallback(
+    async (options?: { clearError?: boolean }) => {
+      try {
+        const [nextAsr, nextLlm] = await Promise.all([
+          listAndroidAsrModelPacks(),
+          listAndroidLlmModelPacks(),
+        ]);
+        setAsrPacks(nextAsr);
+        setLlmPacks(nextLlm);
+        if (options?.clearError !== false) {
+          setError(null);
+        }
+      } catch (caught) {
+        setError(caught instanceof Error ? caught.message : String(caught));
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     void refreshPacks();
@@ -1758,7 +1768,13 @@ function ModelsTab() {
         await action();
         await refreshPacks();
       } catch (caught) {
-        setError(caught instanceof Error ? caught.message : String(caught));
+        const message =
+          caught instanceof Error ? caught.message : String(caught);
+        setProgressById((current) => clearProgressEntry(current, modelId));
+        setAsrPacks((current) => clearModelProgress(current, modelId));
+        setLlmPacks((current) => clearModelProgress(current, modelId));
+        await refreshPacks({ clearError: false });
+        setError(message);
       } finally {
         setBusyIds((current) => {
           const next = { ...current };
@@ -1918,25 +1934,6 @@ function ModelsTab() {
         </section>
       )}
     </>
-  );
-}
-
-function applyModelProgress<T extends AndroidModelPackState>(
-  packs: T[],
-  progress: AndroidModelDownloadProgress,
-): T[] {
-  return packs.map((pack) =>
-    pack.id === progress.modelId
-      ? {
-          ...pack,
-          isDownloading:
-            progress.phase === "downloading" ||
-            progress.phase === "verifying" ||
-            progress.phase === "installing",
-          downloadPhase: progress.phase,
-          downloadProgress: progress.percentage,
-        }
-      : pack,
   );
 }
 
