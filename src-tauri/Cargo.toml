@@ -139,6 +139,7 @@ tauri-runtime-wry = { git = "https://github.com/GalaxyRuler/tauri.git", rev = "a
 tauri-utils = { git = "https://github.com/GalaxyRuler/tauri.git", rev = "ad9ba9448b82b1a1628333ae06459e4def470db3" }
 
 [dev-dependencies]
+tauri = { version = "2.10.2", features = ["test"] }
 tempfile = "3"
 
 [profile.release]

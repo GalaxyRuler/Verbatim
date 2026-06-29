@@ -13,7 +13,7 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Runtime};
 
 const MODELS_SUBDIR: &str = "models/android-asr";
 const ACTIVE_MODEL_FILE: &str = "active-model.txt";
@@ -159,7 +159,10 @@ pub fn builtin_model_packs() -> Vec<AndroidAsrModelPack> {
 }
 
 impl AndroidAsrModelManager {
-    pub fn list_for_app(&self, app: &AppHandle) -> Result<Vec<AndroidAsrModelPackState>> {
+    pub fn list_for_app<R: Runtime>(
+        &self,
+        app: &AppHandle<R>,
+    ) -> Result<Vec<AndroidAsrModelPackState>> {
         let root = models_root_for_app(app)?;
         self.list_for_dir(&root)
     }
@@ -172,9 +175,9 @@ impl AndroidAsrModelManager {
             .collect()
     }
 
-    pub fn pack_state_for_app(
+    pub fn pack_state_for_app<R: Runtime>(
         &self,
-        app: &AppHandle,
+        app: &AppHandle<R>,
         model_id: &str,
     ) -> Result<AndroidAsrModelPackState> {
         let root = models_root_for_app(app)?;
@@ -217,7 +220,11 @@ impl AndroidAsrModelManager {
         })
     }
 
-    pub async fn download_pack(&self, app: &AppHandle, model_id: &str) -> Result<()> {
+    pub async fn download_pack<R: Runtime>(
+        &self,
+        app: &AppHandle<R>,
+        model_id: &str,
+    ) -> Result<()> {
         let pack = pack_by_id(model_id)?;
         let root = models_root_for_app(app)?;
         fs::create_dir_all(&root)?;
@@ -226,6 +233,9 @@ impl AndroidAsrModelManager {
             .pack_state_for_dir(&root, active_model_id_for_dir(&root)?.as_deref(), &pack.id)?
             .is_installed
         {
+            if let Some(state) = self.select_installed_pack_if_active_slot_empty(&root, &pack.id)? {
+                sync_native_engine_model_id(app, &state.installed_dir)?;
+            }
             emit_model_changed(app, &pack.id);
             return Ok(());
         }
@@ -276,12 +286,16 @@ impl AndroidAsrModelManager {
         ensure_pack_layout(&pack, &staging_dir)?;
         replace_pack_dir(&root, &pack.id, &staging_dir)?;
         let _ = fs::remove_dir_all(download_dir);
+        let auto_selected = self.select_installed_pack_if_active_slot_empty(&root, &pack.id)?;
 
         cleanup.disarmed = true;
         self.cancel_flags
             .lock()
             .map_err(|_| anyhow::anyhow!("Android ASR download lock is poisoned"))?
             .remove(&pack.id);
+        if let Some(state) = auto_selected {
+            sync_native_engine_model_id(app, &state.installed_dir)?;
+        }
         emit_model_changed(app, &pack.id);
 
         Ok(())
@@ -303,7 +317,11 @@ impl AndroidAsrModelManager {
         Ok(())
     }
 
-    pub fn select_pack(&self, app: &AppHandle, model_id: &str) -> Result<AndroidAsrModelPackState> {
+    pub fn select_pack<R: Runtime>(
+        &self,
+        app: &AppHandle<R>,
+        model_id: &str,
+    ) -> Result<AndroidAsrModelPackState> {
         let root = models_root_for_app(app)?;
         let state = self.pack_state_for_dir(&root, Some(model_id), model_id)?;
         if !state.is_selectable {
@@ -320,7 +338,31 @@ impl AndroidAsrModelManager {
         })
     }
 
-    pub fn delete_pack(&self, app: &AppHandle, model_id: &str) -> Result<()> {
+    fn select_installed_pack_if_active_slot_empty(
+        &self,
+        root: &Path,
+        model_id: &str,
+    ) -> Result<Option<AndroidAsrModelPackState>> {
+        if active_model_id_for_dir(root)?.is_some() {
+            return Ok(None);
+        }
+
+        let state = self.pack_state_for_dir(root, Some(model_id), model_id)?;
+        if !state.is_selectable {
+            return Err(anyhow::anyhow!(
+                "Android ASR model pack {} is not installed",
+                model_id
+            ));
+        }
+
+        write_active_model_id(root, model_id)?;
+        Ok(Some(AndroidAsrModelPackState {
+            is_active: true,
+            ..state
+        }))
+    }
+
+    pub fn delete_pack<R: Runtime>(&self, app: &AppHandle<R>, model_id: &str) -> Result<()> {
         let pack = pack_by_id(model_id)?;
         if let Ok(flags) = self.cancel_flags.lock() {
             if let Some(flag) = flags.get(&pack.id) {
@@ -358,8 +400,8 @@ impl AndroidAsrModelManager {
     }
 }
 
-async fn download_component(
-    app: &AppHandle,
+async fn download_component<R: Runtime>(
+    app: &AppHandle<R>,
     model_id: &str,
     file: &AndroidAsrModelFile,
     download_dir: &Path,
@@ -503,8 +545,8 @@ async fn download_component(
     Ok(())
 }
 
-fn emit_progress(
-    app: &AppHandle,
+fn emit_progress<R: Runtime>(
+    app: &AppHandle<R>,
     model_id: &str,
     phase: &str,
     file: Option<String>,
@@ -532,8 +574,31 @@ fn emit_progress(
     );
 }
 
-fn emit_model_changed(app: &AppHandle, model_id: &str) {
+fn emit_model_changed<R: Runtime>(app: &AppHandle<R>, model_id: &str) {
     let _ = app.emit("android-asr-model-changed", model_id);
+}
+
+#[cfg(target_os = "android")]
+fn sync_native_engine_model_id<R: Runtime>(app: &AppHandle<R>, installed_dir: &str) -> Result<()> {
+    use tauri_plugin_verbatim_android::VerbatimAndroidExt;
+
+    app.verbatim_android()
+        .set_engine_model_id(installed_dir.to_string())
+        .map(|_| ())
+        .map_err(|error| {
+            anyhow::anyhow!(
+                "Failed to sync Android ASR native engine model selection: {}",
+                error
+            )
+        })
+}
+
+#[cfg(not(target_os = "android"))]
+fn sync_native_engine_model_id<R: Runtime>(
+    _app: &AppHandle<R>,
+    _installed_dir: &str,
+) -> Result<()> {
+    Ok(())
 }
 
 fn pack_by_id(model_id: &str) -> Result<AndroidAsrModelPack> {
@@ -543,13 +608,16 @@ fn pack_by_id(model_id: &str) -> Result<AndroidAsrModelPack> {
         .ok_or_else(|| anyhow::anyhow!("Android ASR model pack not found: {}", model_id))
 }
 
-fn models_root_for_app(app: &AppHandle) -> Result<PathBuf> {
+fn models_root_for_app<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf> {
     Ok(crate::portable::app_data_dir(app)
         .map_err(|err| anyhow::anyhow!("Failed to get app data dir: {}", err))?
         .join(MODELS_SUBDIR))
 }
 
-pub(crate) fn installed_pack_dir_for_app(app: &AppHandle, model_id: &str) -> Result<PathBuf> {
+pub(crate) fn installed_pack_dir_for_app<R: Runtime>(
+    app: &AppHandle<R>,
+    model_id: &str,
+) -> Result<PathBuf> {
     Ok(installed_pack_dir_for_root(
         &models_root_for_app(app)?,
         model_id,
@@ -720,6 +788,7 @@ pub fn compute_sha256(path: &Path) -> Result<String> {
 mod tests {
     use super::*;
     use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn manifest_contains_one_extensible_pack_with_expected_layout() {
@@ -774,12 +843,7 @@ mod tests {
     #[test]
     fn installed_pack_state_accepts_complete_required_layout() {
         let temp = tempfile::tempdir().unwrap();
-        let pack_dir = temp.path().join("g3-zipformer-whisper-tiny-en");
-        for file in &builtin_model_packs()[0].files {
-            let target = pack_dir.join(&file.target_path);
-            fs::create_dir_all(target.parent().unwrap()).unwrap();
-            fs::write(target, b"fixture").unwrap();
-        }
+        let pack_dir = write_complete_pack(temp.path());
 
         let manager = AndroidAsrModelManager::default();
         let state = manager
@@ -795,6 +859,84 @@ mod tests {
         assert!(state.is_active);
         assert_eq!(state.installed_dir, pack_dir.to_string_lossy().into_owned());
         assert!(state.missing_files.is_empty());
+    }
+
+    #[test]
+    fn download_completion_auto_selects_installed_pack_when_active_slot_is_empty() {
+        let temp = tempfile::tempdir().unwrap();
+        let pack_dir = write_complete_pack(temp.path());
+        let manager = AndroidAsrModelManager::default();
+
+        let state = manager
+            .select_installed_pack_if_active_slot_empty(temp.path(), "g3-zipformer-whisper-tiny-en")
+            .unwrap()
+            .expect("empty active slot should select the freshly installed pack");
+
+        assert!(state.is_active);
+        assert_eq!(state.installed_dir, pack_dir.to_string_lossy().into_owned());
+        assert_eq!(
+            active_model_id_for_dir(temp.path()).unwrap().as_deref(),
+            Some("g3-zipformer-whisper-tiny-en")
+        );
+    }
+
+    #[test]
+    fn download_completion_preserves_existing_active_pack() {
+        let temp = tempfile::tempdir().unwrap();
+        write_complete_pack(temp.path());
+        write_active_model_id(temp.path(), "already-active-pack").unwrap();
+        let manager = AndroidAsrModelManager::default();
+
+        let state = manager
+            .select_installed_pack_if_active_slot_empty(temp.path(), "g3-zipformer-whisper-tiny-en")
+            .unwrap();
+
+        assert!(state.is_none());
+        assert_eq!(
+            active_model_id_for_dir(temp.path()).unwrap().as_deref(),
+            Some("already-active-pack")
+        );
+    }
+
+    #[tokio::test]
+    async fn download_pack_with_empty_active_slot_auto_selects_installed_pack() {
+        let app = test_app("asr-empty-active");
+        let app_data_dir = crate::portable::app_data_dir(app.handle()).unwrap();
+        let _cleanup = AppDataCleanup(app_data_dir);
+        let root = models_root_for_app(app.handle()).unwrap();
+        write_complete_pack(&root);
+        let manager = AndroidAsrModelManager::default();
+
+        manager
+            .download_pack(app.handle(), "g3-zipformer-whisper-tiny-en")
+            .await
+            .unwrap();
+
+        assert_eq!(
+            active_model_id_for_dir(&root).unwrap().as_deref(),
+            Some("g3-zipformer-whisper-tiny-en")
+        );
+    }
+
+    #[tokio::test]
+    async fn download_pack_preserves_existing_active_pack() {
+        let app = test_app("asr-existing-active");
+        let app_data_dir = crate::portable::app_data_dir(app.handle()).unwrap();
+        let _cleanup = AppDataCleanup(app_data_dir);
+        let root = models_root_for_app(app.handle()).unwrap();
+        write_complete_pack(&root);
+        write_active_model_id(&root, "already-active-pack").unwrap();
+        let manager = AndroidAsrModelManager::default();
+
+        manager
+            .download_pack(app.handle(), "g3-zipformer-whisper-tiny-en")
+            .await
+            .unwrap();
+
+        assert_eq!(
+            active_model_id_for_dir(&root).unwrap().as_deref(),
+            Some("already-active-pack")
+        );
     }
 
     #[test]
@@ -819,5 +961,38 @@ mod tests {
             .expect_err("mismatch should reject the file");
 
         assert!(error.to_string().contains("verification failed"));
+    }
+
+    fn write_complete_pack(root: &Path) -> PathBuf {
+        let pack_dir = root.join("g3-zipformer-whisper-tiny-en");
+        for file in &builtin_model_packs()[0].files {
+            let target = pack_dir.join(&file.target_path);
+            fs::create_dir_all(target.parent().unwrap()).unwrap();
+            fs::write(target, b"fixture").unwrap();
+        }
+        pack_dir
+    }
+
+    fn test_app(name: &str) -> tauri::App<tauri::test::MockRuntime> {
+        let mut context = tauri::test::mock_context(tauri::test::noop_assets());
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        context.config_mut().identifier = format!(
+            "com.galaxyruler.verbatim.test.{}.{}.{}",
+            name,
+            std::process::id(),
+            unique
+        );
+        tauri::test::mock_builder().build(context).unwrap()
+    }
+
+    struct AppDataCleanup(PathBuf);
+
+    impl Drop for AppDataCleanup {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
     }
 }

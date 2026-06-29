@@ -88,6 +88,22 @@ pub(crate) async fn request_speech_model_download<R: Runtime>(app: AppHandle<R>)
 }
 
 #[command]
+pub(crate) async fn set_engine_model_id<R: Runtime>(
+    app: AppHandle<R>,
+    model_id: String,
+) -> Result<serde_json::Value> {
+    app.verbatim_android().set_engine_model_id(model_id)
+}
+
+#[command]
+pub(crate) async fn set_llm_model_id<R: Runtime>(
+    app: AppHandle<R>,
+    model_id: String,
+) -> Result<serde_json::Value> {
+    app.verbatim_android().set_llm_model_id(model_id)
+}
+
+#[command]
 pub(crate) async fn open_external_url<R: Runtime>(
     app: AppHandle<R>,
     url: String,

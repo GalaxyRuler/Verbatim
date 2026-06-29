@@ -788,8 +788,19 @@ function HomeTab({
   const { settings } = useSettings();
   const { models, currentModel } = useModelStore();
   const [lastEntry, setLastEntry] = useState<HistoryEntry | null>(null);
+  const [activeAsrPack, setActiveAsrPack] =
+    useState<AndroidAsrModelPackState | null>(null);
   const activeModel = models.find((model) => model.id === currentModel);
   const selectedLanguage = settings?.selected_language || t("common.default");
+
+  const loadActiveAsrPack = useCallback(async () => {
+    try {
+      const packs = await listAndroidAsrModelPacks();
+      setActiveAsrPack(packs.find((pack) => pack.isActive) ?? null);
+    } catch {
+      setActiveAsrPack(null);
+    }
+  }, []);
 
   const loadLastEntry = useCallback(async () => {
     const nativeEntries = await readAndroidNativeHistory();
@@ -809,6 +820,19 @@ function HomeTab({
     const interval = window.setInterval(() => void loadLastEntry(), 1500);
     return () => window.clearInterval(interval);
   }, [loadLastEntry]);
+
+  useEffect(() => {
+    void loadActiveAsrPack();
+    let unlistenAsrChanged: (() => void) | undefined;
+    void onAndroidAsrModelChanged(() => {
+      void loadActiveAsrPack();
+    }).then((unlisten) => {
+      unlistenAsrChanged = unlisten;
+    });
+    return () => {
+      unlistenAsrChanged?.();
+    };
+  }, [loadActiveAsrPack]);
 
   const bubbleReady =
     permissions.microphone &&
@@ -861,7 +885,11 @@ function HomeTab({
       <div className="android-chips">
         <button type="button" className="android-chip" onClick={goToModels}>
           <Cpu size={18} />
-          <span>{activeModel?.name ?? t("android.home.modelMissing")}</span>
+          <span>
+            {activeAsrPack?.displayName ??
+              activeModel?.name ??
+              t("android.home.modelMissing")}
+          </span>
         </button>
         <button type="button" className="android-chip">
           <SlidersHorizontal size={18} />
@@ -1744,8 +1772,22 @@ function ModelsTab() {
 
   const handleDownload = useCallback(
     (modelId: string) =>
-      runPackAction(modelId, () => downloadAndroidAsrModelPack(modelId)),
-    [runPackAction],
+      runPackAction(modelId, async () => {
+        const hadActivePack = asrPacks.some((pack) => pack.isActive);
+        await downloadAndroidAsrModelPack(modelId);
+
+        const nextPacks = await listAndroidAsrModelPacks();
+        const activePack = nextPacks.find((pack) => pack.isActive);
+        const downloadedPack = nextPacks.find((pack) => pack.id === modelId);
+        if (
+          !hadActivePack &&
+          (!activePack || activePack.id === modelId) &&
+          downloadedPack?.isSelectable
+        ) {
+          await selectAndroidAsrModelPack(modelId);
+        }
+      }),
+    [asrPacks, runPackAction],
   );
   const handleCancel = useCallback(
     (modelId: string) =>
@@ -1766,8 +1808,22 @@ function ModelsTab() {
   );
   const handleLlmDownload = useCallback(
     (modelId: string) =>
-      runPackAction(modelId, () => downloadAndroidLlmModelPack(modelId)),
-    [runPackAction],
+      runPackAction(modelId, async () => {
+        const hadActivePack = llmPacks.some((pack) => pack.isActive);
+        await downloadAndroidLlmModelPack(modelId);
+
+        const nextPacks = await listAndroidLlmModelPacks();
+        const activePack = nextPacks.find((pack) => pack.isActive);
+        const downloadedPack = nextPacks.find((pack) => pack.id === modelId);
+        if (
+          !hadActivePack &&
+          (!activePack || activePack.id === modelId) &&
+          downloadedPack?.isSelectable
+        ) {
+          await selectAndroidLlmModelPack(modelId);
+        }
+      }),
+    [llmPacks, runPackAction],
   );
   const handleLlmCancel = useCallback(
     (modelId: string) =>

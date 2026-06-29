@@ -1726,10 +1726,10 @@ test.describe("Verbatim App", () => {
     ).toBeVisible();
   });
 
-  test("android Models tab downloads verifies selects and deletes ASR packs", async ({
+  test("android Models tab auto-selects a first downloaded ASR pack", async ({
     page,
   }) => {
-    await installTauriMocks(page, {}, [], "android");
+    await installTauriMocks(page, {}, [], "android", { currentModel: "" });
     await installAndroidBridgeMock(page, {
       microphone: true,
       overlay: true,
@@ -1754,10 +1754,16 @@ test.describe("Verbatim App", () => {
 
     await expect(packCard.getByText("Downloading 42%")).toBeVisible();
     await expect(packCard.getByText("Verifying")).toBeVisible();
-    await expect(packCard.getByText("Ready")).toBeVisible();
-
-    await packCard.getByRole("button", { name: "Select" }).click();
     await expect(packCard.getByText("Active")).toBeVisible();
+    await expect(packCard.getByRole("button", { name: "Select" })).toHaveCount(
+      0,
+    );
+
+    await page.getByRole("button", { name: "Home" }).click();
+    await expect(page.getByText("English On-device Starter")).toBeVisible();
+    await expect(page.getByText("No model selected")).toHaveCount(0);
+
+    await page.getByRole("button", { name: "Models" }).click();
 
     await packCard.getByRole("button", { name: "Delete" }).click();
     await expect(packCard.getByText("Available")).toBeVisible();
@@ -1794,6 +1800,128 @@ test.describe("Verbatim App", () => {
       )
       .toContain(
         "setEngineModelId:/data/user/0/com.galaxyruler.verbatim/models/android-asr/g3-zipformer-whisper-tiny-en",
+      );
+  });
+
+  test("android Models tab keeps an existing active ASR pack when downloading another", async ({
+    page,
+  }) => {
+    await installTauriMocks(page, {}, [], "android", {
+      currentModel: "",
+      androidAsrPacks: [
+        {
+          id: "g3-zipformer-whisper-tiny-en",
+          displayName: "English On-device Starter",
+          description: "Streaming Zipformer + Whisper tiny.en + Silero VAD",
+          sizeMb: 141,
+          installedDir:
+            "/data/user/0/com.galaxyruler.verbatim/models/android-asr/g3-zipformer-whisper-tiny-en",
+          isInstalled: true,
+          isDownloading: false,
+          isActive: true,
+          isSelectable: true,
+          downloadPhase: "ready",
+          downloadProgress: 100,
+          missingFiles: [],
+        },
+        {
+          id: "g3-alternate-pack",
+          displayName: "English Alternate Pack",
+          description: "Alternate Android ASR fixture",
+          sizeMb: 200,
+          installedDir:
+            "/data/user/0/com.galaxyruler.verbatim/models/android-asr/g3-alternate-pack",
+          isInstalled: false,
+          isDownloading: false,
+          isActive: false,
+          isSelectable: false,
+          downloadPhase: "available",
+          downloadProgress: 0,
+          missingFiles: ["streaming/encoder.onnx"],
+        },
+      ],
+    });
+    await installAndroidBridgeMock(page, {
+      microphone: true,
+      overlay: true,
+      accessibility: true,
+      bubbleRunning: true,
+      speechRecognizerAvailable: true,
+      onDeviceSpeechRecognizerAvailable: true,
+      onDeviceSpeechLanguageAvailable: true,
+    });
+
+    await page.goto("/");
+    await page.getByRole("button", { name: "Models" }).click();
+
+    const activePackCard = page
+      .getByRole("article")
+      .filter({ hasText: "English On-device Starter" });
+    const alternatePackCard = page
+      .getByRole("article")
+      .filter({ hasText: "English Alternate Pack" });
+
+    await expect(activePackCard.getByText("Active")).toBeVisible();
+    await alternatePackCard.getByRole("button", { name: "Download" }).click();
+    await expect(alternatePackCard.getByText("Ready")).toBeVisible();
+    await expect(alternatePackCard.getByText("Active")).toHaveCount(0);
+    await expect(activePackCard.getByText("Active")).toBeVisible();
+
+    const bridgeCalls = await page.evaluate(() => {
+      const win = window as typeof window & {
+        __VERBATIM_ANDROID_BRIDGE_CALLS__?: string[];
+      };
+      return win.__VERBATIM_ANDROID_BRIDGE_CALLS__ ?? [];
+    });
+    expect(bridgeCalls).not.toContain(
+      "setEngineModelId:/data/user/0/com.galaxyruler.verbatim/models/android-asr/g3-alternate-pack",
+    );
+  });
+
+  test("android Models tab auto-selects a first downloaded cleanup pack", async ({
+    page,
+  }) => {
+    await installTauriMocks(page, {}, [], "android");
+    await installAndroidBridgeMock(page, {
+      microphone: true,
+      overlay: true,
+      accessibility: true,
+      bubbleRunning: true,
+      speechRecognizerAvailable: true,
+      onDeviceSpeechRecognizerAvailable: true,
+      onDeviceSpeechLanguageAvailable: true,
+      llmPostProcessingSupported: true,
+    });
+
+    await page.goto("/");
+    await page.getByRole("button", { name: "Models" }).click();
+
+    const cleanupCard = page
+      .getByRole("article")
+      .filter({ hasText: "Qwen2.5 cleanup 0.5B" });
+    await expect(cleanupCard.getByText("Available")).toBeVisible();
+    await cleanupCard.getByRole("button", { name: "Download" }).click();
+
+    await expect(cleanupCard.getByText("Downloading 42%")).toBeVisible();
+    await expect(cleanupCard.getByText("Verifying")).toBeVisible();
+    await expect(cleanupCard.getByText("Active")).toBeVisible();
+    await expect(
+      cleanupCard.getByRole("button", { name: "Select" }),
+    ).toHaveCount(0);
+
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            (
+              window as typeof window & {
+                __VERBATIM_ANDROID_BRIDGE_CALLS__?: string[];
+              }
+            ).__VERBATIM_ANDROID_BRIDGE_CALLS__ ?? [],
+        ),
+      )
+      .toContain(
+        "setLlmModelId:/data/user/0/com.galaxyruler.verbatim/models/android-llm-postproc/g4-qwen2_5-0_5b-litert-q8",
       );
   });
 

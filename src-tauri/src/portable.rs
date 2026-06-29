@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 use std::sync::OnceLock;
-use tauri::Manager;
+use tauri::{Manager, Runtime};
 
 /// Portable mode support for Verbatim.
 ///
@@ -58,7 +58,7 @@ pub fn data_dir() -> Option<&'static PathBuf> {
 }
 
 /// Portable-aware replacement for `app.path().app_data_dir()`.
-pub fn app_data_dir(app: &tauri::AppHandle) -> Result<PathBuf, tauri::Error> {
+pub fn app_data_dir<R: Runtime>(app: &tauri::AppHandle<R>) -> Result<PathBuf, tauri::Error> {
     if let Some(dir) = data_dir() {
         Ok(dir.clone())
     } else {
@@ -67,7 +67,7 @@ pub fn app_data_dir(app: &tauri::AppHandle) -> Result<PathBuf, tauri::Error> {
 }
 
 /// Portable-aware replacement for `app.path().app_log_dir()`.
-pub fn app_log_dir(app: &tauri::AppHandle) -> Result<PathBuf, tauri::Error> {
+pub fn app_log_dir<R: Runtime>(app: &tauri::AppHandle<R>) -> Result<PathBuf, tauri::Error> {
     if let Some(dir) = data_dir() {
         Ok(dir.join("logs"))
     } else {
@@ -77,7 +77,10 @@ pub fn app_log_dir(app: &tauri::AppHandle) -> Result<PathBuf, tauri::Error> {
 
 /// Resolve a relative path against the app data directory (portable-aware).
 /// Replaces `app.path().resolve(path, BaseDirectory::AppData)`.
-pub fn resolve_app_data(app: &tauri::AppHandle, relative: &str) -> Result<PathBuf, tauri::Error> {
+pub fn resolve_app_data<R: Runtime>(
+    app: &tauri::AppHandle<R>,
+    relative: &str,
+) -> Result<PathBuf, tauri::Error> {
     Ok(app_data_dir(app)?.join(relative))
 }
 

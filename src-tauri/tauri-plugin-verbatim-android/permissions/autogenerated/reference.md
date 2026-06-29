@@ -16,6 +16,7 @@ Default permissions for the plugin
 - `allow-engine-dictation-enabled`
 - `allow-set-engine-dictation-enabled`
 - `allow-set-engine-model-id`
+- `allow-set-llm-model-id`
 - `allow-start-bubble`
 - `allow-stop-bubble`
 - `allow-request-microphone`
@@ -445,6 +446,32 @@ Enables the set_engine_model_id command without any pre-configured scope.
 <td>
 
 Denies the set_engine_model_id command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`verbatim-android:allow-set-llm-model-id`
+
+</td>
+<td>
+
+Enables the set_llm_model_id command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`verbatim-android:deny-set-llm-model-id`
+
+</td>
+<td>
+
+Denies the set_llm_model_id command without any pre-configured scope.
 
 </td>
 </tr>

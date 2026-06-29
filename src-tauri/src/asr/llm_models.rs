@@ -13,7 +13,7 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Runtime};
 
 const MODELS_SUBDIR: &str = "models/android-llm-postproc";
 const ACTIVE_MODEL_FILE: &str = "active-model.txt";
@@ -124,7 +124,10 @@ pub fn builtin_model_packs() -> Vec<AndroidLlmModelPack> {
 }
 
 impl AndroidLlmModelManager {
-    pub fn list_for_app(&self, app: &AppHandle) -> Result<Vec<AndroidLlmModelPackState>> {
+    pub fn list_for_app<R: Runtime>(
+        &self,
+        app: &AppHandle<R>,
+    ) -> Result<Vec<AndroidLlmModelPackState>> {
         let root = models_root_for_app(app)?;
         self.list_for_dir(&root)
     }
@@ -137,9 +140,9 @@ impl AndroidLlmModelManager {
             .collect()
     }
 
-    pub fn pack_state_for_app(
+    pub fn pack_state_for_app<R: Runtime>(
         &self,
-        app: &AppHandle,
+        app: &AppHandle<R>,
         model_id: &str,
     ) -> Result<AndroidLlmModelPackState> {
         let root = models_root_for_app(app)?;
@@ -187,7 +190,11 @@ impl AndroidLlmModelManager {
         })
     }
 
-    pub async fn download_pack(&self, app: &AppHandle, model_id: &str) -> Result<()> {
+    pub async fn download_pack<R: Runtime>(
+        &self,
+        app: &AppHandle<R>,
+        model_id: &str,
+    ) -> Result<()> {
         let pack = pack_by_id(model_id)?;
         let root = models_root_for_app(app)?;
         fs::create_dir_all(&root)?;
@@ -196,6 +203,9 @@ impl AndroidLlmModelManager {
             .pack_state_for_dir(&root, active_model_id_for_dir(&root)?.as_deref(), &pack.id)?
             .is_installed
         {
+            if let Some(state) = self.select_installed_pack_if_active_slot_empty(&root, &pack.id)? {
+                sync_native_llm_model_id(app, &state.installed_dir)?;
+            }
             emit_model_changed(app, &pack.id);
             return Ok(());
         }
@@ -246,12 +256,16 @@ impl AndroidLlmModelManager {
         ensure_pack_layout(&pack, &staging_dir)?;
         replace_pack_dir(&root, &pack.id, &staging_dir)?;
         let _ = fs::remove_dir_all(download_dir);
+        let auto_selected = self.select_installed_pack_if_active_slot_empty(&root, &pack.id)?;
 
         cleanup.disarmed = true;
         self.cancel_flags
             .lock()
             .map_err(|_| anyhow::anyhow!("Android LLM download lock is poisoned"))?
             .remove(&pack.id);
+        if let Some(state) = auto_selected {
+            sync_native_llm_model_id(app, &state.installed_dir)?;
+        }
         emit_model_changed(app, &pack.id);
 
         Ok(())
@@ -273,7 +287,11 @@ impl AndroidLlmModelManager {
         Ok(())
     }
 
-    pub fn select_pack(&self, app: &AppHandle, model_id: &str) -> Result<AndroidLlmModelPackState> {
+    pub fn select_pack<R: Runtime>(
+        &self,
+        app: &AppHandle<R>,
+        model_id: &str,
+    ) -> Result<AndroidLlmModelPackState> {
         let root = models_root_for_app(app)?;
         let state = self.pack_state_for_dir(&root, Some(model_id), model_id)?;
         if !state.is_selectable {
@@ -290,7 +308,31 @@ impl AndroidLlmModelManager {
         })
     }
 
-    pub fn delete_pack(&self, app: &AppHandle, model_id: &str) -> Result<()> {
+    fn select_installed_pack_if_active_slot_empty(
+        &self,
+        root: &Path,
+        model_id: &str,
+    ) -> Result<Option<AndroidLlmModelPackState>> {
+        if active_model_id_for_dir(root)?.is_some() {
+            return Ok(None);
+        }
+
+        let state = self.pack_state_for_dir(root, Some(model_id), model_id)?;
+        if !state.is_selectable {
+            return Err(anyhow::anyhow!(
+                "Android LLM model pack {} is not installed",
+                model_id
+            ));
+        }
+
+        write_active_model_id(root, model_id)?;
+        Ok(Some(AndroidLlmModelPackState {
+            is_active: true,
+            ..state
+        }))
+    }
+
+    pub fn delete_pack<R: Runtime>(&self, app: &AppHandle<R>, model_id: &str) -> Result<()> {
         let pack = pack_by_id(model_id)?;
         if let Ok(flags) = self.cancel_flags.lock() {
             if let Some(flag) = flags.get(&pack.id) {
@@ -328,8 +370,8 @@ impl AndroidLlmModelManager {
     }
 }
 
-async fn download_component(
-    app: &AppHandle,
+async fn download_component<R: Runtime>(
+    app: &AppHandle<R>,
     model_id: &str,
     file: &AndroidLlmModelFile,
     download_dir: &Path,
@@ -473,8 +515,8 @@ async fn download_component(
     Ok(())
 }
 
-fn emit_progress(
-    app: &AppHandle,
+fn emit_progress<R: Runtime>(
+    app: &AppHandle<R>,
     model_id: &str,
     phase: &str,
     file: Option<String>,
@@ -502,8 +544,28 @@ fn emit_progress(
     );
 }
 
-fn emit_model_changed(app: &AppHandle, model_id: &str) {
+fn emit_model_changed<R: Runtime>(app: &AppHandle<R>, model_id: &str) {
     let _ = app.emit("android-llm-model-changed", model_id);
+}
+
+#[cfg(target_os = "android")]
+fn sync_native_llm_model_id<R: Runtime>(app: &AppHandle<R>, installed_dir: &str) -> Result<()> {
+    use tauri_plugin_verbatim_android::VerbatimAndroidExt;
+
+    app.verbatim_android()
+        .set_llm_model_id(installed_dir.to_string())
+        .map(|_| ())
+        .map_err(|error| {
+            anyhow::anyhow!(
+                "Failed to sync Android LLM native model selection: {}",
+                error
+            )
+        })
+}
+
+#[cfg(not(target_os = "android"))]
+fn sync_native_llm_model_id<R: Runtime>(_app: &AppHandle<R>, _installed_dir: &str) -> Result<()> {
+    Ok(())
 }
 
 fn pack_by_id(model_id: &str) -> Result<AndroidLlmModelPack> {
@@ -513,7 +575,7 @@ fn pack_by_id(model_id: &str) -> Result<AndroidLlmModelPack> {
         .ok_or_else(|| anyhow::anyhow!("Android LLM model pack not found: {}", model_id))
 }
 
-fn models_root_for_app(app: &AppHandle) -> Result<PathBuf> {
+fn models_root_for_app<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf> {
     Ok(crate::portable::app_data_dir(app)
         .map_err(|err| anyhow::anyhow!("Failed to get app data dir: {}", err))?
         .join(MODELS_SUBDIR))
@@ -691,6 +753,7 @@ pub fn compute_sha256(path: &Path) -> Result<String> {
 mod tests {
     use super::*;
     use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn manifest_contains_sha_pinned_litert_pack() {
@@ -732,10 +795,7 @@ mod tests {
     #[test]
     fn installed_pack_state_accepts_complete_litert_layout() {
         let temp = tempfile::tempdir().unwrap();
-        let pack_dir = temp.path().join(default_model_pack_id());
-        fs::create_dir_all(&pack_dir).unwrap();
-        let task_path = pack_dir.join("qwen2.5-0.5b-instruct-q8.task");
-        fs::write(&task_path, b"fixture").unwrap();
+        let (pack_dir, task_path) = write_complete_pack(temp.path());
 
         let manager = AndroidLlmModelManager::default();
         let state = manager
@@ -752,6 +812,85 @@ mod tests {
         assert_eq!(state.installed_dir, pack_dir.to_string_lossy().into_owned());
         assert_eq!(state.model_path, task_path.to_string_lossy().into_owned());
         assert!(state.missing_files.is_empty());
+    }
+
+    #[test]
+    fn download_completion_auto_selects_installed_pack_when_active_slot_is_empty() {
+        let temp = tempfile::tempdir().unwrap();
+        let (pack_dir, task_path) = write_complete_pack(temp.path());
+        let manager = AndroidLlmModelManager::default();
+
+        let state = manager
+            .select_installed_pack_if_active_slot_empty(temp.path(), default_model_pack_id())
+            .unwrap()
+            .expect("empty active slot should select the freshly installed pack");
+
+        assert!(state.is_active);
+        assert_eq!(state.installed_dir, pack_dir.to_string_lossy().into_owned());
+        assert_eq!(state.model_path, task_path.to_string_lossy().into_owned());
+        assert_eq!(
+            active_model_id_for_dir(temp.path()).unwrap().as_deref(),
+            Some(default_model_pack_id())
+        );
+    }
+
+    #[test]
+    fn download_completion_preserves_existing_active_pack() {
+        let temp = tempfile::tempdir().unwrap();
+        write_complete_pack(temp.path());
+        write_active_model_id(temp.path(), "already-active-pack").unwrap();
+        let manager = AndroidLlmModelManager::default();
+
+        let state = manager
+            .select_installed_pack_if_active_slot_empty(temp.path(), default_model_pack_id())
+            .unwrap();
+
+        assert!(state.is_none());
+        assert_eq!(
+            active_model_id_for_dir(temp.path()).unwrap().as_deref(),
+            Some("already-active-pack")
+        );
+    }
+
+    #[tokio::test]
+    async fn download_pack_with_empty_active_slot_auto_selects_installed_pack() {
+        let app = test_app("llm-empty-active");
+        let app_data_dir = crate::portable::app_data_dir(app.handle()).unwrap();
+        let _cleanup = AppDataCleanup(app_data_dir);
+        let root = models_root_for_app(app.handle()).unwrap();
+        write_complete_pack(&root);
+        let manager = AndroidLlmModelManager::default();
+
+        manager
+            .download_pack(app.handle(), default_model_pack_id())
+            .await
+            .unwrap();
+
+        assert_eq!(
+            active_model_id_for_dir(&root).unwrap().as_deref(),
+            Some(default_model_pack_id())
+        );
+    }
+
+    #[tokio::test]
+    async fn download_pack_preserves_existing_active_pack() {
+        let app = test_app("llm-existing-active");
+        let app_data_dir = crate::portable::app_data_dir(app.handle()).unwrap();
+        let _cleanup = AppDataCleanup(app_data_dir);
+        let root = models_root_for_app(app.handle()).unwrap();
+        write_complete_pack(&root);
+        write_active_model_id(&root, "already-active-pack").unwrap();
+        let manager = AndroidLlmModelManager::default();
+
+        manager
+            .download_pack(app.handle(), default_model_pack_id())
+            .await
+            .unwrap();
+
+        assert_eq!(
+            active_model_id_for_dir(&root).unwrap().as_deref(),
+            Some("already-active-pack")
+        );
     }
 
     #[test]
@@ -777,5 +916,36 @@ mod tests {
 
         assert!(error.to_string().contains("verification failed"));
         assert!(!file.exists());
+    }
+
+    fn write_complete_pack(root: &Path) -> (PathBuf, PathBuf) {
+        let pack_dir = root.join(default_model_pack_id());
+        fs::create_dir_all(&pack_dir).unwrap();
+        let task_path = pack_dir.join("qwen2.5-0.5b-instruct-q8.task");
+        fs::write(&task_path, b"fixture").unwrap();
+        (pack_dir, task_path)
+    }
+
+    fn test_app(name: &str) -> tauri::App<tauri::test::MockRuntime> {
+        let mut context = tauri::test::mock_context(tauri::test::noop_assets());
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        context.config_mut().identifier = format!(
+            "com.galaxyruler.verbatim.test.{}.{}.{}",
+            name,
+            std::process::id(),
+            unique
+        );
+        tauri::test::mock_builder().build(context).unwrap()
+    }
+
+    struct AppDataCleanup(PathBuf);
+
+    impl Drop for AppDataCleanup {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
     }
 }

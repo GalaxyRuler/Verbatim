@@ -128,6 +128,20 @@ impl<R: Runtime> VerbatimAndroid<R> {
       .map_err(Into::into)
   }
 
+  pub fn set_engine_model_id(&self, model_id: String) -> crate::Result<serde_json::Value> {
+    self
+      .0
+      .run_mobile_plugin("setEngineModelId", serde_json::json!({ "modelId": model_id }))
+      .map_err(Into::into)
+  }
+
+  pub fn set_llm_model_id(&self, model_id: String) -> crate::Result<serde_json::Value> {
+    self
+      .0
+      .run_mobile_plugin("setLlmModelId", serde_json::json!({ "modelId": model_id }))
+      .map_err(Into::into)
+  }
+
   pub fn open_external_url(&self, url: String) -> crate::Result<serde_json::Value> {
     self
       .0
