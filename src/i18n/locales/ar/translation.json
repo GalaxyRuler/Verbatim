@@ -948,6 +948,7 @@
     "recordingFailed": "فشل في بدء التسجيل: {{error}}",
     "modelLoadFailed": "فشل في تحميل النموذج: {{model}}",
     "modelLoadFailedUnknown": "نموذج غير معروف",
+    "gpuUnavailableUsingCpu": "النسخ باستخدام GPU غير متاح على هذا الجهاز - يتم استخدام CPU.",
     "pasteFailedTitle": "فشل لصق النص",
     "pasteFailed": "تعذر لصق النص في التطبيق النشط.",
     "pasteFailedCopiedHint": "تم نسخ النص إلى الحافظة حتى تتمكن من لصقه يدويًا.",

@@ -1739,6 +1739,30 @@ mod tests {
     }
 
     #[test]
+    fn model_settings_round_trip_preserves_cpu_accelerator_and_startup_sensitive_fields() {
+        let mut settings = get_default_settings();
+        settings.push_to_talk = false;
+        settings.selected_microphone = Some("Studio Microphone".to_string());
+
+        mutate_settings_domain(&mut settings, SettingsWriteDomain::Models, |settings| {
+            settings.whisper_accelerator = WhisperAcceleratorSetting::Cpu;
+            settings.whisper_gpu_device = 0;
+        })
+        .expect("model mutation should be accepted");
+
+        let reparsed: AppSettings =
+            serde_json::from_value(serde_json::to_value(settings).unwrap()).unwrap();
+
+        assert_eq!(reparsed.whisper_accelerator, WhisperAcceleratorSetting::Cpu);
+        assert_eq!(reparsed.whisper_gpu_device, 0);
+        assert!(!reparsed.push_to_talk);
+        assert_eq!(
+            reparsed.selected_microphone,
+            Some("Studio Microphone".to_string())
+        );
+    }
+
+    #[test]
     fn transform_shortcut_defaults_are_visible_but_unbound() {
         let settings = get_default_settings();
         for id in [

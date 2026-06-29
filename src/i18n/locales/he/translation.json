@@ -948,6 +948,7 @@
     "recordingFailed": "הפעלת ההקלטה נכשלה: {{error}}",
     "modelLoadFailed": "טעינת המודל נכשלה: {{model}}",
     "modelLoadFailedUnknown": "מודל לא ידוע",
+    "gpuUnavailableUsingCpu": "תמלול באמצעות GPU אינו זמין בחומרה זו - משתמש ב-CPU.",
     "pasteFailedTitle": "ההדבקה נכשלה",
     "pasteFailed": "לא ניתן היה להדביק את הטקסט ביישום הפעיל.",
     "pasteFailedCopiedHint": "הטקסט הועתק ללוח כדי שתוכל להדביק אותו ידנית.",

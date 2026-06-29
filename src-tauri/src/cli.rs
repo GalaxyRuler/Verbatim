@@ -1,4 +1,5 @@
 use clap::Parser;
+use std::path::PathBuf;
 
 #[derive(Parser, Debug, Clone, Default)]
 #[command(name = "verbatim", about = "Verbatim - Speech to Text")]
@@ -26,4 +27,12 @@ pub struct CliArgs {
     /// Enable debug mode with verbose logging
     #[arg(long)]
     pub debug: bool,
+
+    /// Internal: load and run a tiny Whisper GPU inference, then exit.
+    #[arg(long, hide = true, value_name = "MODEL_PATH")]
+    pub whisper_gpu_preflight: Option<PathBuf>,
+
+    /// Internal: GPU device used with --whisper-gpu-preflight.
+    #[arg(long, hide = true, default_value_t = 0)]
+    pub whisper_gpu_preflight_device: i32,
 }

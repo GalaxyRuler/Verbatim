@@ -1,7 +1,10 @@
 use crate::audio_toolkit::{apply_dictionary_entries, filter_transcription_output};
 use crate::managers::audio::AudioRecordingManager;
 use crate::managers::model::{EngineType, ModelManager};
-use crate::providers::{CancellationToken, EngineProvider, TranscribeRsProvider};
+use crate::providers::{
+    resolve_whisper_gpu_device, CancellationToken, EngineProvider, ModelLocator,
+    TranscribeRsProvider,
+};
 use crate::settings::{
     get_settings, AppSettings, ModelUnloadTimeout, OrtAcceleratorSetting, WhisperAcceleratorSetting,
 };
@@ -9,11 +12,15 @@ use anyhow::Result;
 use log::{debug, error, info, warn};
 use serde::Serialize;
 use specta::Type;
+use std::collections::HashSet;
+use std::io::Read;
 use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::path::Path;
+use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock};
 use std::thread;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 use tauri::{AppHandle, Emitter, Manager};
 
 #[derive(Clone, Debug, Serialize)]
@@ -170,6 +177,164 @@ fn apply_cpu_accelerator_fallback(engine_type: EngineType) {
         | EngineType::Cohere => {
             accel::set_ort_accelerator(accel::OrtAccelerator::CpuOnly);
         }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum GpuPreflightOutcome {
+    Passed,
+    Failed(String),
+    Skipped(&'static str),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct GpuPreflightFallbackDecision {
+    persist_cpu: bool,
+    fallback_code: &'static str,
+}
+
+fn should_run_whisper_gpu_preflight(settings: &AppSettings, engine_type: EngineType) -> bool {
+    matches!(engine_type, EngineType::Whisper)
+        && settings.whisper_accelerator != WhisperAcceleratorSetting::Cpu
+}
+
+fn gpu_preflight_cpu_fallback_decision(
+    settings: &AppSettings,
+    engine_type: EngineType,
+    outcome: &GpuPreflightOutcome,
+) -> Option<GpuPreflightFallbackDecision> {
+    if !should_run_whisper_gpu_preflight(settings, engine_type) {
+        return None;
+    }
+
+    match outcome {
+        GpuPreflightOutcome::Failed(_) => Some(GpuPreflightFallbackDecision {
+            persist_cpu: true,
+            fallback_code: "cpu_after_gpu_preflight_failed",
+        }),
+        GpuPreflightOutcome::Passed | GpuPreflightOutcome::Skipped(_) => None,
+    }
+}
+
+static WHISPER_GPU_PREFLIGHT_OK: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+
+fn whisper_gpu_preflight_ok_cache() -> &'static Mutex<HashSet<String>> {
+    WHISPER_GPU_PREFLIGHT_OK.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+fn whisper_gpu_preflight_cache_key(model_path: &Path, gpu_device: i32) -> String {
+    let model_key = model_path
+        .canonicalize()
+        .unwrap_or_else(|_| model_path.to_path_buf())
+        .display()
+        .to_string();
+    format!("{model_key}|gpu_device={gpu_device}|flash_attn=false")
+}
+
+fn join_preflight_stderr(stderr_reader: Option<thread::JoinHandle<String>>) -> String {
+    stderr_reader
+        .and_then(|reader| reader.join().ok())
+        .unwrap_or_default()
+}
+
+fn run_whisper_gpu_preflight_child(
+    model_path: &Path,
+    gpu_device: i32,
+    timeout: Duration,
+) -> GpuPreflightOutcome {
+    let exe_path = match std::env::current_exe() {
+        Ok(path) => path,
+        Err(error) => {
+            return GpuPreflightOutcome::Failed(format!("resolve current executable: {error}"));
+        }
+    };
+
+    let mut child = match Command::new(exe_path)
+        .arg("--whisper-gpu-preflight")
+        .arg(model_path)
+        .arg("--whisper-gpu-preflight-device")
+        .arg(gpu_device.to_string())
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(error) => {
+            return GpuPreflightOutcome::Failed(format!("spawn GPU preflight process: {error}"));
+        }
+    };
+
+    let mut stderr_reader = child.stderr.take().map(|mut pipe| {
+        thread::spawn(move || {
+            let mut stderr = String::new();
+            let _ = pipe.read_to_string(&mut stderr);
+            stderr
+        })
+    });
+
+    let started = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let _ = child.wait();
+                let stderr = join_preflight_stderr(stderr_reader.take());
+                if status.success() {
+                    return GpuPreflightOutcome::Passed;
+                }
+                let stderr = stderr.trim();
+                let detail = if stderr.is_empty() {
+                    status.to_string()
+                } else {
+                    format!("{status}: {stderr}")
+                };
+                return GpuPreflightOutcome::Failed(detail);
+            }
+            Ok(None) if started.elapsed() >= timeout => {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = join_preflight_stderr(stderr_reader.take());
+                return GpuPreflightOutcome::Failed(format!(
+                    "GPU preflight timed out after {}s",
+                    timeout.as_secs()
+                ));
+            }
+            Ok(None) => thread::sleep(Duration::from_millis(50)),
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = join_preflight_stderr(stderr_reader.take());
+                return GpuPreflightOutcome::Failed(format!("poll GPU preflight process: {error}"));
+            }
+        }
+    }
+}
+
+fn run_cached_whisper_gpu_preflight(model_path: &Path, gpu_device: i32) -> GpuPreflightOutcome {
+    let cache_key = whisper_gpu_preflight_cache_key(model_path, gpu_device);
+    {
+        let cache = whisper_gpu_preflight_ok_cache().lock().unwrap();
+        if cache.contains(&cache_key) {
+            return GpuPreflightOutcome::Passed;
+        }
+    }
+
+    let outcome = run_whisper_gpu_preflight_child(model_path, gpu_device, Duration::from_secs(30));
+    if outcome == GpuPreflightOutcome::Passed {
+        whisper_gpu_preflight_ok_cache()
+            .lock()
+            .unwrap()
+            .insert(cache_key);
+    }
+    outcome
+}
+
+fn whisper_preflight_model_path(asset: &crate::providers::ModelAsset) -> Option<&Path> {
+    match &asset.locator {
+        ModelLocator::File(path) => Some(path.as_path()),
+        ModelLocator::Directory(_)
+        | ModelLocator::ManagedServer { .. }
+        | ModelLocator::ExternalHttp { .. } => None,
     }
 }
 
@@ -509,10 +674,51 @@ impl TranscriptionManager {
             };
 
         let model_asset = self.model_manager.get_model_asset(model_id)?;
-        let settings = get_settings(&self.app_handle);
+        let mut settings = get_settings(&self.app_handle);
+        let mut preflight_fallback = None;
+        if should_run_whisper_gpu_preflight(&settings, model_info.engine_type.clone()) {
+            let preflight_outcome =
+                if let Some(model_path) = whisper_preflight_model_path(&model_asset) {
+                    let gpu_device = resolve_whisper_gpu_device(true, settings.whisper_gpu_device);
+                    run_cached_whisper_gpu_preflight(model_path, gpu_device)
+                } else {
+                    GpuPreflightOutcome::Skipped("whisper model is not a local file")
+                };
+
+            if let Some(decision) = gpu_preflight_cpu_fallback_decision(
+                &settings,
+                model_info.engine_type.clone(),
+                &preflight_outcome,
+            ) {
+                warn!(
+                    "Whisper GPU preflight failed for {}; falling back to CPU: {:?}",
+                    model_id, preflight_outcome
+                );
+                if decision.persist_cpu {
+                    crate::settings::write_settings_domain(
+                        &self.app_handle,
+                        crate::settings::SettingsWriteDomain::Models,
+                        |settings| {
+                            settings.whisper_accelerator = WhisperAcceleratorSetting::Cpu;
+                            settings.whisper_gpu_device = transcribe_rs::accel::GPU_DEVICE_AUTO;
+                        },
+                    )
+                    .map_err(|err| anyhow::anyhow!(err))?;
+                    settings.whisper_accelerator = WhisperAcceleratorSetting::Cpu;
+                    settings.whisper_gpu_device = transcribe_rs::accel::GPU_DEVICE_AUTO;
+                }
+                apply_cpu_accelerator_fallback(model_info.engine_type.clone());
+                preflight_fallback = Some(decision.fallback_code.to_string());
+            } else if let GpuPreflightOutcome::Skipped(reason) = preflight_outcome {
+                debug!(
+                    "Skipping Whisper GPU preflight for {}: {}",
+                    model_id, reason
+                );
+            }
+        }
         apply_accelerator_settings(&self.app_handle);
         let mut provider = TranscribeRsProvider::new();
-        let fallback = match provider.load(&model_asset) {
+        let load_fallback = match provider.load(&model_asset) {
             Ok(()) => None,
             Err(initial_error)
                 if should_retry_model_load_on_cpu(
@@ -562,6 +768,7 @@ impl TranscriptionManager {
                 return Err(anyhow::anyhow!(error_msg));
             }
         };
+        let fallback = preflight_fallback.or(load_fallback);
 
         // Update the current provider and model ID
         {
@@ -1056,6 +1263,52 @@ mod tests {
             EngineType::Whisper,
             &anyhow::anyhow!("model file is unreadable")
         ));
+    }
+
+    #[test]
+    fn gpu_preflight_failure_switches_non_cpu_whisper_to_cpu_fallback() {
+        let mut settings = crate::settings::get_default_settings();
+        settings.whisper_accelerator = WhisperAcceleratorSetting::Auto;
+        settings.whisper_gpu_device = transcribe_rs::accel::GPU_DEVICE_AUTO;
+
+        let decision = gpu_preflight_cpu_fallback_decision(
+            &settings,
+            EngineType::Whisper,
+            &GpuPreflightOutcome::Failed("process exited with 0xc000001d".to_string()),
+        );
+
+        assert_eq!(
+            decision,
+            Some(GpuPreflightFallbackDecision {
+                persist_cpu: true,
+                fallback_code: "cpu_after_gpu_preflight_failed",
+            })
+        );
+    }
+
+    #[test]
+    fn gpu_preflight_failure_does_not_override_explicit_cpu_or_non_whisper_models() {
+        let mut settings = crate::settings::get_default_settings();
+        settings.whisper_accelerator = WhisperAcceleratorSetting::Cpu;
+
+        assert_eq!(
+            gpu_preflight_cpu_fallback_decision(
+                &settings,
+                EngineType::Whisper,
+                &GpuPreflightOutcome::Failed("crashed".to_string()),
+            ),
+            None
+        );
+
+        settings.whisper_accelerator = WhisperAcceleratorSetting::Auto;
+        assert_eq!(
+            gpu_preflight_cpu_fallback_decision(
+                &settings,
+                EngineType::Parakeet,
+                &GpuPreflightOutcome::Failed("crashed".to_string()),
+            ),
+            None
+        );
     }
 
     #[test]
