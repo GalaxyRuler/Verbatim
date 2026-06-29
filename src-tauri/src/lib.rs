@@ -1333,48 +1333,20 @@ fn run_inner(cli_args: CliArgs) {
     let invoke_handler = specta_builder.invoke_handler();
 
     #[allow(unused_mut)]
-    let mut builder = tauri::Builder::default()
-        .device_event_filter(tauri::DeviceEventFilter::Always)
-        .plugin(tauri_plugin_dialog::init())
-        .plugin(
-            LogBuilder::new()
-                .level(log::LevelFilter::Trace) // Set to most verbose level globally
-                .max_file_size(500_000)
-                .rotation_strategy(RotationStrategy::KeepOne)
-                .clear_targets()
-                .targets([
-                    // Console output respects RUST_LOG environment variable
-                    Target::new(TargetKind::Stdout).filter({
-                        let console_filter = console_filter.clone();
-                        move |metadata| console_filter.enabled(metadata)
-                    }),
-                    // File logs respect the user's settings (stored in FILE_LOG_LEVEL atomic)
-                    Target::new(if let Some(data_dir) = portable::data_dir() {
-                        TargetKind::Folder {
-                            path: data_dir.join("logs"),
-                            file_name: Some("verbatim".into()),
-                        }
-                    } else {
-                        TargetKind::LogDir {
-                            file_name: Some("verbatim".into()),
-                        }
-                    })
-                    .filter(|metadata| {
-                        let file_level = FILE_LOG_LEVEL.load(Ordering::Relaxed);
-                        metadata.level() <= level_filter_from_u8(file_level)
-                    }),
-                ])
-                .build(),
-        );
+    let mut builder =
+        tauri::Builder::default().device_event_filter(tauri::DeviceEventFilter::Always);
 
-    #[cfg(target_os = "macos")]
-    {
-        builder = builder.plugin(tauri_nspanel::init());
-    }
-
+    // Register the single-instance plugin FIRST — before every other plugin.
+    // tauri-plugin-single-instance requires this so that when a second copy of the
+    // app is launched (e.g. `verbatim --toggle-transcription`) it forwards its CLI
+    // args to the already-running primary and exits immediately. If other plugins
+    // (notably the file-logging target, which opens a rotating log file already held
+    // by the primary) initialize in the second process before single-instance runs,
+    // the second process can stall instead of cleanly forwarding-and-exiting.
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            log::info!("single-instance: secondary invocation forwarded args: {args:?}");
             if args.iter().any(|a| a == "--toggle-transcription") {
                 signal_handle::send_transcription_input(app, "transcribe", "CLI");
             } else if args.iter().any(|a| a == "--toggle-post-process") {
@@ -1385,6 +1357,42 @@ fn run_inner(cli_args: CliArgs) {
                 show_main_window(app);
             }
         }));
+    }
+
+    builder = builder.plugin(tauri_plugin_dialog::init()).plugin(
+        LogBuilder::new()
+            .level(log::LevelFilter::Trace) // Set to most verbose level globally
+            .max_file_size(500_000)
+            .rotation_strategy(RotationStrategy::KeepOne)
+            .clear_targets()
+            .targets([
+                // Console output respects RUST_LOG environment variable
+                Target::new(TargetKind::Stdout).filter({
+                    let console_filter = console_filter.clone();
+                    move |metadata| console_filter.enabled(metadata)
+                }),
+                // File logs respect the user's settings (stored in FILE_LOG_LEVEL atomic)
+                Target::new(if let Some(data_dir) = portable::data_dir() {
+                    TargetKind::Folder {
+                        path: data_dir.join("logs"),
+                        file_name: Some("verbatim".into()),
+                    }
+                } else {
+                    TargetKind::LogDir {
+                        file_name: Some("verbatim".into()),
+                    }
+                })
+                .filter(|metadata| {
+                    let file_level = FILE_LOG_LEVEL.load(Ordering::Relaxed);
+                    metadata.level() <= level_filter_from_u8(file_level)
+                }),
+            ])
+            .build(),
+    );
+
+    #[cfg(target_os = "macos")]
+    {
+        builder = builder.plugin(tauri_nspanel::init());
     }
 
     builder = builder
