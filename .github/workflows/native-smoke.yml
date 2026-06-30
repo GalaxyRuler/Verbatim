@@ -72,11 +72,12 @@ jobs:
 
     env:
       CARGO_TERM_COLOR: always
+      # Match release builds: portable AVX2 baseline for x86_64 (GGML_NATIVE off, AVX-512 off).
       GGML_NATIVE: ${{ matrix.target != 'aarch64-apple-darwin' && 'OFF' || '' }}
-      GGML_AVX: ${{ matrix.target != 'aarch64-apple-darwin' && 'OFF' || '' }}
-      GGML_AVX2: ${{ matrix.target != 'aarch64-apple-darwin' && 'OFF' || '' }}
-      GGML_FMA: ${{ matrix.target != 'aarch64-apple-darwin' && 'OFF' || '' }}
-      GGML_F16C: ${{ matrix.target != 'aarch64-apple-darwin' && 'OFF' || '' }}
+      GGML_AVX: ${{ matrix.target != 'aarch64-apple-darwin' && 'ON' || '' }}
+      GGML_AVX2: ${{ matrix.target != 'aarch64-apple-darwin' && 'ON' || '' }}
+      GGML_FMA: ${{ matrix.target != 'aarch64-apple-darwin' && 'ON' || '' }}
+      GGML_F16C: ${{ matrix.target != 'aarch64-apple-darwin' && 'ON' || '' }}
 
     steps:
       - name: Enable long paths (Windows)
@@ -97,6 +98,8 @@ jobs:
 
       - uses: swatinem/rust-cache@v2
         with:
+          # Bumped to invalidate stale AVX-512 ggml caches so GGML_NATIVE=OFF (#41) applies.
+          prefix-key: "v1-ggml-portable"
           workspaces: "./src-tauri -> target"
           key: native-smoke-${{ matrix.runner }}-${{ matrix.target }}
 
