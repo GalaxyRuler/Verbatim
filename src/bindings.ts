@@ -607,6 +607,54 @@ async asrDeleteModelPack(modelId: string) : Promise<Result<null, string>> {
     else return { status: "error", error: e  as any };
 }
 },
+async llmListModelPacks() : Promise<Result<AndroidLlmModelPackState[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("llm_list_model_packs") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async llmGetModelPackState(modelId: string) : Promise<Result<AndroidLlmModelPackState, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("llm_get_model_pack_state", { modelId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async llmDownloadModelPack(modelId: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("llm_download_model_pack", { modelId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async llmCancelModelDownload(modelId: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("llm_cancel_model_download", { modelId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async llmSelectModelPack(modelId: string) : Promise<Result<AndroidLlmModelPackState, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("llm_select_model_pack", { modelId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async llmDeleteModelPack(modelId: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("llm_delete_model_pack", { modelId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async cancelOperation() : Promise<void> {
     await TAURI_INVOKE("cancel_operation");
 },
@@ -1312,7 +1360,9 @@ historyUpdatePayload: "history-update-payload"
 /** user-defined types **/
 
 export type AdaptiveProfile = { id: string; name: string; enabled: boolean; cleanup: CleanupPolicy; rewrite: RewritePolicy; validation: ValidationPolicy; routing: RoutingPolicy }
-export type AndroidAsrModelPackState = { id: string; displayName: string; description: string; language: string; sizeMb: number; installedDir: string; isInstalled: boolean; isDownloading: boolean; isActive: boolean; isSelectable: boolean; downloadPhase: string; downloadProgress: number; missingFiles: string[] }
+export type AndroidAsrEngineKind = "zipformerWhisper" | "senseVoice"
+export type AndroidAsrModelPackState = { id: string; displayName: string; description: string; language: string; sizeMb: number; engineKind: AndroidAsrEngineKind; installedDir: string; isInstalled: boolean; isDownloading: boolean; isActive: boolean; isSelectable: boolean; downloadPhase: string; downloadProgress: number; missingFiles: string[] }
+export type AndroidLlmModelPackState = { id: string; displayName: string; description: string; runtime: string; license: string; quantization: string; sizeMb: number; minRamMb: number; installedDir: string; modelPath: string; isInstalled: boolean; isDownloading: boolean; isActive: boolean; isSelectable: boolean; downloadPhase: string; downloadProgress: number; missingFiles: string[] }
 export type AppSettings = { bindings: Partial<{ [key in string]: ShortcutBinding }>; push_to_talk: boolean; audio_feedback: boolean; audio_feedback_volume?: number; sound_theme?: SoundTheme; start_hidden?: boolean; autostart_enabled?: boolean; update_checks_enabled?: boolean; selected_model?: string; always_on_microphone?: boolean; selected_microphone?: string | null; clamshell_microphone?: string | null; selected_output_device?: string | null; translate_to_english?: boolean; translation_enabled?: boolean; translation_request?: TranslationRequestSettings | null; translation_provider_id?: string | null; translation_model_id?: string | null; selected_language?: string; dictation_language_mode?: DictationLanguageMode; overlay_position?: OverlayPosition; docked_pill_enabled?: boolean; warn_on_elevated_target?: boolean; debug_mode?: boolean; log_level?: LogLevel; custom_words?: string[]; dictionary_entries?: DictionaryEntry[]; dictionary_auto_learn_suppressed?: string[]; auto_add_dictionary_words?: boolean; snippets?: SnippetEntry[]; model_unload_timeout?: ModelUnloadTimeout; word_correction_threshold?: number; history_enabled?: boolean; recordings_enabled?: boolean; history_limit?: number; recording_retention_period?: RecordingRetentionPeriod; paste_method?: PasteMethod; clipboard_handling?: ClipboardHandling; auto_submit?: boolean; auto_submit_key?: AutoSubmitKey; post_process_enabled?: boolean; formatting_level?: FormattingLevel; post_process_provider_id?: string; post_process_providers?: PostProcessProvider[]; post_process_api_keys?: SecretMap; post_process_models?: Partial<{ [key in string]: string }>; post_process_prompts?: LLMPrompt[]; post_process_selected_prompt_id?: string | null; local_llm?: LocalLlmSettings; mute_while_recording?: boolean; append_trailing_space?: boolean; app_language?: string; experimental_enabled?: boolean; lazy_stream_close?: boolean; keyboard_implementation?: KeyboardImplementation; show_tray_icon?: boolean; paste_delay_ms?: number; typing_tool?: TypingTool; external_script_path: string | null; custom_filler_words?: string[] | null; adaptive_profiles_enabled?: boolean; context_awareness_enabled?: boolean; context_nearby_text_enabled?: boolean; adaptive_language_shortlist?: string[]; adaptive_default_profile_id?: string; adaptive_profiles?: AdaptiveProfile[]; adaptive_correction_memory_enabled?: boolean; adaptive_private_app_patterns?: string[]; whisper_accelerator?: WhisperAcceleratorSetting; ort_accelerator?: OrtAcceleratorSetting; whisper_gpu_device?: number; extra_recording_buffer_ms?: number }
 export type AudioDevice = { index: string; name: string; is_default: boolean }
 export type AutoSubmitKey = "enter" | "ctrl_enter" | "cmd_enter"

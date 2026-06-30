@@ -1144,6 +1144,10 @@
           "displayName": "English — higher accuracy",
           "description": "Streaming Zipformer 20M, Whisper base.en int8, and Silero VAD."
         },
+        "sensevoice-multilingual-zh-en-ja-ko-yue": {
+          "displayName": "SenseVoice multilingual",
+          "description": "Offline Chinese, English, Japanese, Korean, and Cantonese. Final text only; no live partials."
+        },
         "g4-qwen2_5-0_5b-litert-q8": {
           "displayName": "Qwen2.5 cleanup 0.5B",
           "description": "LiteRT-LM Qwen2.5 0.5B Instruct q8 for punctuation and grammar cleanup."
