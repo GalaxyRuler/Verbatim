@@ -50,6 +50,46 @@ class EngineModelSelectionTest {
   }
 
   @Test
+  fun engineModelInstallationAcceptsCanaryLayoutWithoutStreamingFiles() {
+    val fixture = EngineSelectionFixture("canary")
+    try {
+      val packDir = File(
+        fixture.appDataRoot,
+        "models/android-asr/canary-180m-flash-en-es-de-fr",
+      )
+      fixture.setEngineModelId("canary-180m-flash-en-es-de-fr")
+
+      assertFalse(
+        EngineModelSelectionStore.isEngineModelInstalled(
+          fixture.context,
+          EngineModelSelectionStore.requiredFilesForPack(fixture.context),
+        ),
+      )
+
+      arrayOf(
+        "canary/encoder.onnx",
+        "canary/decoder.onnx",
+        "canary/tokens.txt",
+        "silero_vad_v4.onnx",
+      ).forEach {
+        File(packDir, it).also { file ->
+          file.parentFile?.mkdirs()
+          file.writeText("fixture")
+        }
+      }
+
+      assertTrue(
+        EngineModelSelectionStore.isEngineModelInstalled(
+          fixture.context,
+          EngineModelSelectionStore.requiredFilesForPack(fixture.context),
+        ),
+      )
+    } finally {
+      fixture.cleanup()
+    }
+  }
+
+  @Test
   fun engineModelPathUsesDownloaderRootAndPreservesAbsoluteSelections() {
     val context = mockk<Context>()
     val prefs = mockk<SharedPreferences>()

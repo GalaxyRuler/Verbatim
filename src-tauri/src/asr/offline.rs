@@ -19,6 +19,17 @@ mod platform {
             Self::from_config(sense_voice_config(paths))
         }
 
+        pub fn new_canary(paths: &AsrModelPaths) -> anyhow::Result<Self> {
+            Self::from_config(canary_config(paths))
+        }
+
+        pub fn new_canary_for_language(
+            paths: &AsrModelPaths,
+            language: &str,
+        ) -> anyhow::Result<Self> {
+            Self::from_config(canary_config_for_language(paths, language))
+        }
+
         fn from_config(config: sherpa_onnx::OfflineRecognizerConfig) -> anyhow::Result<Self> {
             let inner = sherpa_onnx::OfflineRecognizer::create(&config).ok_or_else(|| {
                 anyhow::anyhow!("failed to create offline sherpa-onnx recognizer")
@@ -72,6 +83,46 @@ mod platform {
         config
     }
 
+    fn canary_config(paths: &AsrModelPaths) -> sherpa_onnx::OfflineRecognizerConfig {
+        canary_config_for_language(paths, "en")
+    }
+
+    fn canary_config_for_language(
+        paths: &AsrModelPaths,
+        language: &str,
+    ) -> sherpa_onnx::OfflineRecognizerConfig {
+        let mut config = sherpa_onnx::OfflineRecognizerConfig::default();
+        let source_language = normalize_canary_language(language);
+        config.model_config.canary = sherpa_onnx::OfflineCanaryModelConfig {
+            encoder: Some(path_to_string(&paths.canary_encoder)),
+            decoder: Some(path_to_string(&paths.canary_decoder)),
+            src_lang: Some(source_language.to_string()),
+            tgt_lang: Some(source_language.to_string()),
+            use_pnc: true,
+        };
+        config.model_config.tokens = Some(path_to_string(&paths.canary_tokens));
+        config.model_config.provider = Some("cpu".to_string());
+        config.model_config.num_threads = 2;
+        config.decoding_method = Some("greedy_search".to_string());
+        config
+    }
+
+    fn normalize_canary_language(language: &str) -> &'static str {
+        let normalized = language
+            .trim()
+            .split(['-', '_'])
+            .next()
+            .unwrap_or("en")
+            .to_ascii_lowercase();
+        match normalized.as_str() {
+            "en" => "en",
+            "es" => "es",
+            "de" => "de",
+            "fr" => "fr",
+            _ => "en",
+        }
+    }
+
     fn path_to_string(path: &std::path::Path) -> String {
         path.to_string_lossy().into_owned()
     }
@@ -81,6 +132,21 @@ mod platform {
         paths: &AsrModelPaths,
     ) -> sherpa_onnx::OfflineRecognizerConfig {
         sense_voice_config(paths)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn canary_config_for_test(
+        paths: &AsrModelPaths,
+    ) -> sherpa_onnx::OfflineRecognizerConfig {
+        canary_config(paths)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn canary_config_for_language_for_test(
+        paths: &AsrModelPaths,
+        language: &str,
+    ) -> sherpa_onnx::OfflineRecognizerConfig {
+        canary_config_for_language(paths, language)
     }
 }
 
@@ -94,6 +160,17 @@ impl OfflineRecognizer {
     }
 
     pub fn new_sense_voice(_paths: &AsrModelPaths) -> anyhow::Result<Self> {
+        anyhow::bail!("offline sherpa-onnx recognizer is only available in Android ASR builds")
+    }
+
+    pub fn new_canary(_paths: &AsrModelPaths) -> anyhow::Result<Self> {
+        anyhow::bail!("offline sherpa-onnx recognizer is only available in Android ASR builds")
+    }
+
+    pub fn new_canary_for_language(
+        _paths: &AsrModelPaths,
+        _language: &str,
+    ) -> anyhow::Result<Self> {
         anyhow::bail!("offline sherpa-onnx recognizer is only available in Android ASR builds")
     }
 
@@ -132,6 +209,38 @@ mod tests {
             Some("/models/sensevoice/sense_voice/tokens.txt")
         );
         assert_eq!(config.model_config.provider.as_deref(), Some("cpu"));
+    }
+
+    #[test]
+    fn canary_config_uses_transcribe_mode_pnc_tokens_and_cpu() {
+        let paths = AsrModelPaths::for_dir(std::path::Path::new("/models/canary"));
+        let config = platform::canary_config_for_test(&paths);
+
+        assert_eq!(
+            config.model_config.canary.encoder.as_deref(),
+            Some("/models/canary/canary/encoder.onnx")
+        );
+        assert_eq!(
+            config.model_config.canary.decoder.as_deref(),
+            Some("/models/canary/canary/decoder.onnx")
+        );
+        assert_eq!(config.model_config.canary.src_lang.as_deref(), Some("en"));
+        assert_eq!(config.model_config.canary.tgt_lang.as_deref(), Some("en"));
+        assert!(config.model_config.canary.use_pnc);
+        assert_eq!(
+            config.model_config.tokens.as_deref(),
+            Some("/models/canary/canary/tokens.txt")
+        );
+        assert_eq!(config.model_config.provider.as_deref(), Some("cpu"));
+    }
+
+    #[test]
+    fn canary_config_for_language_keeps_transcription_target_on_source_language() {
+        let paths = AsrModelPaths::for_dir(std::path::Path::new("/models/canary"));
+        let config = platform::canary_config_for_language_for_test(&paths, "de-DE");
+
+        assert_eq!(config.model_config.canary.src_lang.as_deref(), Some("de"));
+        assert_eq!(config.model_config.canary.tgt_lang.as_deref(), Some("de"));
     }
 
     #[test]

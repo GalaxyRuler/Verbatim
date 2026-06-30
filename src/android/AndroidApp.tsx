@@ -1873,9 +1873,10 @@ function ModelsTab() {
     (total, model) => total + (model.isInstalled ? model.sizeMb : 0),
     0,
   );
-  const llmBlockedReason = useCallback(
+  const modelBlockedReason = useCallback(
     (pack: AndroidModelPackState) => {
       if (!("minRamMb" in pack)) return null;
+      if (pack.minRamMb <= 0) return null;
       const minRamGb = Math.ceil(pack.minRamMb / 1024);
       // Android reports usable MiB, which is lower than the marketed decimal GB tier.
       const deviceRamGb = Math.ceil(llmSupport.totalRamMb / 1000);
@@ -1918,6 +1919,7 @@ function ModelsTab() {
         onDownload={handleDownload}
         onCancel={handleCancel}
         onDelete={handleDelete}
+        getBlockedReason={modelBlockedReason}
       />
       <ModelSection
         title={t("android.models.asrAvailable")}
@@ -1928,13 +1930,14 @@ function ModelsTab() {
         onDownload={handleDownload}
         onCancel={handleCancel}
         onDelete={handleDelete}
+        getBlockedReason={modelBlockedReason}
       />
       <ModelSection
         title={t("android.models.cleanupDownloaded")}
         packs={installedLlm}
         progressById={progressById}
         busyIds={busyIds}
-        getBlockedReason={llmBlockedReason}
+        getBlockedReason={modelBlockedReason}
         onSelect={handleLlmSelect}
         onDownload={handleLlmDownload}
         onCancel={handleLlmCancel}
@@ -1945,7 +1948,7 @@ function ModelsTab() {
         packs={availableLlm}
         progressById={progressById}
         busyIds={busyIds}
-        getBlockedReason={llmBlockedReason}
+        getBlockedReason={modelBlockedReason}
         onSelect={handleLlmSelect}
         onDownload={handleLlmDownload}
         onCancel={handleLlmCancel}

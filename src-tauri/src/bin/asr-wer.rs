@@ -43,6 +43,10 @@ mod android {
                 .context("failed to initialize offline Whisper recognizer")?,
             AsrEngineKind::SenseVoice => OfflineRecognizer::new_sense_voice(&paths)
                 .context("failed to initialize offline SenseVoice recognizer")?,
+            AsrEngineKind::Canary => {
+                OfflineRecognizer::new_canary_for_language(&paths, &args.language)
+                    .context("failed to initialize offline Canary recognizer")?
+            }
         };
 
         let manifest_dir = args
@@ -72,6 +76,7 @@ mod android {
                     })?)
                 }
                 AsrEngineKind::SenseVoice => None,
+                AsrEngineKind::Canary => None,
             };
 
             let offline_started = Instant::now();
@@ -332,6 +337,7 @@ mod android {
         match engine_kind {
             AsrEngineKind::ZipformerWhisper => "zipformerWhisper",
             AsrEngineKind::SenseVoice => "senseVoice",
+            AsrEngineKind::Canary => "canary",
         }
     }
 
