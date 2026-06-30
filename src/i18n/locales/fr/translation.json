@@ -1121,7 +1121,8 @@
         "verifying": "Verifying",
         "installing": "Installing",
         "ready": "Ready",
-        "active": "Active"
+        "active": "Active",
+        "unsupported": "Unavailable"
       },
       "actions": {
         "download": "Download",
@@ -1132,7 +1133,26 @@
       "asrDownloaded": "Downloaded speech models",
       "asrAvailable": "Available speech models",
       "cleanupDownloaded": "Downloaded cleanup models",
-      "cleanupAvailable": "Available cleanup models"
+      "cleanupAvailable": "Available cleanup models",
+      "requiresRam": "Requires at least {{minRamGb}} GB RAM; this device reports {{totalRamGb}} GB.",
+      "packs": {
+        "g3-zipformer-whisper-tiny-en": {
+          "displayName": "English On-device Starter",
+          "description": "Streaming Zipformer 20M, Whisper tiny.en int8, and Silero VAD."
+        },
+        "g3-zipformer-whisper-base-en": {
+          "displayName": "English — higher accuracy",
+          "description": "Streaming Zipformer 20M, Whisper base.en int8, and Silero VAD."
+        },
+        "g4-qwen2_5-0_5b-litert-q8": {
+          "displayName": "Qwen2.5 cleanup 0.5B",
+          "description": "LiteRT-LM Qwen2.5 0.5B Instruct q8 for punctuation and grammar cleanup."
+        },
+        "g4-qwen2_5-1_5b-litert-q8": {
+          "displayName": "Qwen2.5 cleanup 1.5B",
+          "description": "LiteRT-LM Qwen2.5 1.5B Instruct q8 for higher-quality cleanup."
+        }
+      }
     },
     "settings": {
       "general": "General",

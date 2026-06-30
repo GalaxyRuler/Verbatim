@@ -510,6 +510,10 @@
   box-shadow: inset 0 0 0 1px var(--android-primary);
 }
 
+.android-model-card-disabled {
+  opacity: 0.72;
+}
+
 .android-badge {
   background: var(--android-primary-container);
   border-radius: 999px;

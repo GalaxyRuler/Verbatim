@@ -109,7 +109,10 @@ class EngineModelSelectionTest {
       AndroidLlmModelSelectionStore.llmModelDir(context),
     )
 
-    val requiredFiles = arrayOf("qwen2.5-0.5b-instruct-q8.task")
+    val requiredFiles = arrayOf(
+      "qwen2.5-0.5b-instruct-q8.task",
+      "qwen2.5-1.5b-instruct-q8.task",
+    )
     val packDir = File(appDataRoot, "models/android-llm-postproc/g4-qwen2_5-0_5b-litert-q8")
     assertEquals(
       File(packDir, "qwen2.5-0.5b-instruct-q8.task").absolutePath,
@@ -121,6 +124,22 @@ class EngineModelSelectionTest {
       file.writeText("fixture")
     }
     assertTrue(AndroidLlmModelSelectionStore.isLlmModelInstalled(context, requiredFiles))
+
+    val largerPackDir = File(appDataRoot, "models/android-llm-postproc/g4-qwen2_5-1_5b-litert-q8")
+    assertEquals(
+      largerPackDir.absolutePath,
+      AndroidLlmModelSelectionStore.setLlmModelId(context, " ${largerPackDir.absolutePath} "),
+    )
+    assertFalse(AndroidLlmModelSelectionStore.isLlmModelInstalled(context, requiredFiles))
+    File(largerPackDir, requiredFiles[1]).also { file ->
+      file.parentFile?.mkdirs()
+      file.writeText("fixture")
+    }
+    assertTrue(AndroidLlmModelSelectionStore.isLlmModelInstalled(context, requiredFiles))
+    assertEquals(
+      File(largerPackDir, "qwen2.5-1.5b-instruct-q8.task").absolutePath,
+      AndroidLlmModelSelectionStore.llmModelPath(context, requiredFiles),
+    )
 
     val absolutePackDir = File(appDataRoot, "custom-llm")
     assertEquals(

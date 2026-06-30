@@ -20,15 +20,15 @@ object AndroidLlmModelSelectionStore {
 
   fun llmModelPath(context: Context, requiredFiles: Array<String>): String {
     val modelDir = File(llmModelDir(context))
-    val primary = requiredFiles.firstOrNull() ?: return modelDir.absolutePath
-    return File(modelDir, primary).absolutePath
+    return firstExistingModelFile(modelDir, requiredFiles)?.absolutePath
+      ?: firstTaskFile(modelDir)?.absolutePath
+      ?: requiredFiles.firstOrNull()?.let { File(modelDir, it).absolutePath }
+      ?: modelDir.absolutePath
   }
 
   fun isLlmModelInstalled(context: Context, requiredFiles: Array<String>): Boolean {
     val modelDir = File(llmModelDir(context))
-    return requiredFiles.all { relativePath ->
-      File(modelDir, relativePath).isFile
-    }
+    return firstExistingModelFile(modelDir, requiredFiles) != null || firstTaskFile(modelDir) != null
   }
 
   fun setLlmModelId(context: Context, modelId: String): String {
@@ -50,4 +50,15 @@ object AndroidLlmModelSelectionStore {
 
     return File(File(context.applicationInfo.dataDir), "$MODELS_SUBDIR/$normalized")
   }
+
+  private fun firstExistingModelFile(modelDir: File, requiredFiles: Array<String>): File? =
+    requiredFiles
+      .map { relativePath -> File(modelDir, relativePath) }
+      .firstOrNull { file -> file.isFile }
+
+  private fun firstTaskFile(modelDir: File): File? =
+    modelDir
+      .listFiles { file -> file.isFile && file.name.endsWith(".task") }
+      ?.sortedBy { file -> file.name }
+      ?.firstOrNull()
 }

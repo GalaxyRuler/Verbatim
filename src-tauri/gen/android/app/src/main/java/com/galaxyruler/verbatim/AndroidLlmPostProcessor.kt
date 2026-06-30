@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import java.io.File
 import java.lang.reflect.InvocationTargetException
+import java.util.concurrent.CancellationException
 import java.util.Locale
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -22,6 +23,9 @@ object AndroidLlmPostProcessor {
   private val engineLock = Any()
   private var engine: Any? = null
   private var engineModelPath: String? = null
+  private var warmupInFlightPath: String? = null
+  private var engineEpoch: Long = 0
+  private var runtime: AndroidLlmEngineRuntime = LiteRtLmRuntime
 
   fun cleanUpOrNull(
     context: Context,
@@ -34,8 +38,13 @@ object AndroidLlmPostProcessor {
       return null
     }
 
+    if (!isEngineWarm(modelPath)) {
+      warmUp(context, modelPath)
+      return null
+    }
+
     val future = executor.submit<String?> {
-      generateCleanup(context, modelPath, input)
+      generateCleanup(modelPath, input)
     }
 
     return try {
@@ -54,48 +63,115 @@ object AndroidLlmPostProcessor {
     }
   }
 
-  fun resetEngine() {
+  fun warmUp(context: Context, modelPath: String): Boolean {
+    val normalizedModelPath = modelPath.trim()
+    if (normalizedModelPath.isBlank()) {
+      return false
+    }
+
+    val appContext = context.applicationContext ?: context
     synchronized(engineLock) {
-      try {
-        engine?.let { LiteRtLmRuntime.close(it) }
-      } catch (_: Exception) {
+      if (isEngineWarmLocked(normalizedModelPath) || warmupInFlightPath == normalizedModelPath) {
+        return false
       }
+      warmupInFlightPath = normalizedModelPath
+    }
+
+    executor.execute {
+      try {
+        ensureEngine(appContext, normalizedModelPath)
+        logDebug("LLM cleanup warm-up complete")
+      } catch (error: Exception) {
+        logDebug("LLM cleanup warm-up failed: ${error.javaClass.simpleName}")
+      } finally {
+        synchronized(engineLock) {
+          if (warmupInFlightPath == normalizedModelPath) {
+            warmupInFlightPath = null
+          }
+        }
+      }
+    }
+    return true
+  }
+
+  fun resetEngine() {
+    val previous: Any?
+    synchronized(engineLock) {
+      previous = engine
       engine = null
       engineModelPath = null
+      warmupInFlightPath = null
+      engineEpoch += 1
+    }
+    try {
+      previous?.let { runtime.close(it) }
+    } catch (_: Exception) {
     }
   }
 
-  private fun generateCleanup(context: Context, modelPath: String, rawText: String): String? {
-    val engine = ensureEngine(context, modelPath)
-    return LiteRtLmRuntime.generateContent(engine, buildCleanupPrompt(rawText))
+  private fun generateCleanup(modelPath: String, rawText: String): String? {
+    val engine = warmEngine(modelPath) ?: return null
+    return runtime.generateContent(engine, buildCleanupPrompt(rawText))
   }
 
-  private fun ensureEngine(context: Context, modelPath: String): Any =
+  private fun ensureEngine(context: Context, modelPath: String): Any {
+    val previous: Any?
+    val startEpoch: Long
     synchronized(engineLock) {
-      val existing = engine
-      if (
-        existing != null &&
-        engineModelPath == modelPath &&
-        LiteRtLmRuntime.isInitialized(existing)
-      ) {
-        return@synchronized existing
-      }
-
-      try {
-        existing?.let { LiteRtLmRuntime.close(it) }
-      } catch (_: Exception) {
-      }
-
-      val cacheDir = File(context.cacheDir, "litert-lm").apply { mkdirs() }
-      val next = LiteRtLmRuntime.createEngine(
-        modelPath = modelPath,
-        maxOutputTokens = MAX_OUTPUT_TOKENS,
-        cacheDir = cacheDir,
-      )
-      engine = next
-      engineModelPath = modelPath
-      next
+      warmEngineLocked(modelPath)?.let { return it }
+      previous = engine
+      engine = null
+      engineModelPath = null
+      startEpoch = engineEpoch
     }
+
+    try {
+      previous?.let { runtime.close(it) }
+    } catch (_: Exception) {
+    }
+
+    val cacheDir = File(context.cacheDir, "litert-lm").apply { mkdirs() }
+    val next = runtime.createEngine(
+      modelPath = modelPath,
+      maxOutputTokens = MAX_OUTPUT_TOKENS,
+      cacheDir = cacheDir,
+    )
+
+    synchronized(engineLock) {
+      if (engineEpoch == startEpoch) {
+        engine = next
+        engineModelPath = modelPath
+        return next
+      }
+    }
+
+    try {
+      runtime.close(next)
+    } catch (_: Exception) {
+    }
+    throw CancellationException("LLM engine warm-up was reset")
+  }
+
+  private fun isEngineWarm(modelPath: String): Boolean =
+    synchronized(engineLock) { isEngineWarmLocked(modelPath) }
+
+  private fun isEngineWarmLocked(modelPath: String): Boolean =
+    warmEngineLocked(modelPath) != null
+
+  private fun warmEngine(modelPath: String): Any? =
+    synchronized(engineLock) { warmEngineLocked(modelPath) }
+
+  private fun warmEngineLocked(modelPath: String): Any? {
+    val existing = engine ?: return null
+    if (engineModelPath != modelPath) {
+      return null
+    }
+    return try {
+      if (runtime.isInitialized(existing)) existing else null
+    } catch (_: Exception) {
+      null
+    }
+  }
 
   fun buildCleanupPrompt(rawText: String): String =
     listOf(
@@ -251,7 +327,19 @@ object AndroidLlmPostProcessor {
     }
   }
 
-  private object LiteRtLmRuntime {
+  internal fun useRuntimeForTesting(testRuntime: AndroidLlmEngineRuntime): AutoCloseable {
+    resetEngine()
+    val previous = runtime
+    runtime = testRuntime
+    return AutoCloseable {
+      resetEngine()
+      runtime = previous
+    }
+  }
+
+  internal fun isWarmForTesting(modelPath: String): Boolean = isEngineWarm(modelPath)
+
+  private object LiteRtLmRuntime : AndroidLlmEngineRuntime {
     private const val PACKAGE = "com.google.ai.edge.litertlm"
     private val engineClass by lazy { Class.forName("$PACKAGE.Engine") }
     private val engineConfigClass by lazy { Class.forName("$PACKAGE.EngineConfig") }
@@ -262,7 +350,7 @@ object AndroidLlmPostProcessor {
     private val loraConfigClass by lazy { Class.forName("$PACKAGE.LoraConfig") }
     private val inputTextClass by lazy { Class.forName("$PACKAGE.InputData\$Text") }
 
-    fun createEngine(modelPath: String, maxOutputTokens: Int, cacheDir: File): Any {
+    override fun createEngine(modelPath: String, maxOutputTokens: Int, cacheDir: File): Any {
       val backend = cpuBackendClass
         .getConstructor(Integer::class.java)
         .newInstance(Integer.valueOf(4))
@@ -290,7 +378,7 @@ object AndroidLlmPostProcessor {
       return engine
     }
 
-    fun generateContent(engine: Any, prompt: String): String? {
+    override fun generateContent(engine: Any, prompt: String): String? {
       val sampler = samplerConfigClass
         .getConstructor(
           Int::class.javaPrimitiveType,
@@ -317,10 +405,10 @@ object AndroidLlmPostProcessor {
       }
     }
 
-    fun isInitialized(engine: Any): Boolean =
+    override fun isInitialized(engine: Any): Boolean =
       engineClass.getMethod("isInitialized").invoke(engine) as? Boolean ?: false
 
-    fun close(engine: Any) {
+    override fun close(engine: Any) {
       try {
         (engine as? AutoCloseable)?.close()
       } catch (_: InvocationTargetException) {
@@ -335,4 +423,11 @@ object AndroidLlmPostProcessor {
     CYRILLIC,
     CJK,
   }
+}
+
+internal interface AndroidLlmEngineRuntime {
+  fun createEngine(modelPath: String, maxOutputTokens: Int, cacheDir: File): Any
+  fun generateContent(engine: Any, prompt: String): String?
+  fun isInitialized(engine: Any): Boolean
+  fun close(engine: Any)
 }
