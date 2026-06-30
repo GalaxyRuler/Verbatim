@@ -1,0 +1,44 @@
+{
+  "name": "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-smoke",
+  "source": {
+    "repository": "csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17",
+    "commit": "2365baeacb507f821a0c8120fcee3d484dba7a07"
+  },
+  "entries": [
+    {
+      "id": "sensevoice-zh",
+      "language": "zh",
+      "wav": "zh.wav",
+      "sourceUrl": "https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/resolve/2365baeacb507f821a0c8120fcee3d484dba7a07/test_wavs/zh.wav",
+      "sizeBytes": 178988
+    },
+    {
+      "id": "sensevoice-en",
+      "language": "en",
+      "wav": "en.wav",
+      "sourceUrl": "https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/resolve/2365baeacb507f821a0c8120fcee3d484dba7a07/test_wavs/en.wav",
+      "sizeBytes": 228908
+    },
+    {
+      "id": "sensevoice-ja",
+      "language": "ja",
+      "wav": "ja.wav",
+      "sourceUrl": "https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/resolve/2365baeacb507f821a0c8120fcee3d484dba7a07/test_wavs/ja.wav",
+      "sizeBytes": 230444
+    },
+    {
+      "id": "sensevoice-ko",
+      "language": "ko",
+      "wav": "ko.wav",
+      "sourceUrl": "https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/resolve/2365baeacb507f821a0c8120fcee3d484dba7a07/test_wavs/ko.wav",
+      "sizeBytes": 147500
+    },
+    {
+      "id": "sensevoice-yue",
+      "language": "yue",
+      "wav": "yue.wav",
+      "sourceUrl": "https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/resolve/2365baeacb507f821a0c8120fcee3d484dba7a07/test_wavs/yue.wav",
+      "sizeBytes": 164780
+    }
+  ]
+}
