@@ -1393,7 +1393,10 @@ class FloatingBubbleService : Service() {
       "whisper/tokens.txt",
       "silero_vad_v4.onnx",
     )
-    private val REQUIRED_LLM_MODEL_FILES = arrayOf("qwen2.5-0.5b-instruct-q8.task")
+    private val REQUIRED_LLM_MODEL_FILES = arrayOf(
+      "qwen2.5-0.5b-instruct-q8.task",
+      "qwen2.5-1.5b-instruct-q8.task",
+    )
     private const val ASR_LOG_TAG = "VerbatimASR"
     private const val BUBBLE_LOG_TAG = "FloatingBubble"
     private const val BUBBLE_X_KEY = "bubble_x"
@@ -1549,14 +1552,22 @@ class FloatingBubbleService : Service() {
         .edit()
         .putBoolean(LLM_POST_PROCESSING_ENABLED_KEY, next)
         .apply()
+      AndroidLlmWarmupCoordinator.onPostProcessingEnabledChanged(
+        context,
+        next,
+        REQUIRED_LLM_MODEL_FILES,
+      )
       return next
     }
 
     fun llmModelId(context: Context): String =
       AndroidLlmModelSelectionStore.llmModelId(context)
 
-    fun setLlmModelId(context: Context, modelId: String): String =
-      AndroidLlmModelSelectionStore.setLlmModelId(context, modelId)
+    fun setLlmModelId(context: Context, modelId: String): String {
+      val selected = AndroidLlmModelSelectionStore.setLlmModelId(context, modelId)
+      AndroidLlmWarmupCoordinator.onModelSelected(context, REQUIRED_LLM_MODEL_FILES)
+      return selected
+    }
 
     fun bubbleCornerSnapshot(context: Context): String {
       val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
