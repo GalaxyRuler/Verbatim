@@ -1,12 +1,13 @@
 use anyhow::{anyhow, Result};
 use chrono::{DateTime, Local, Utc};
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use rusqlite::{params, Connection, OptionalExtension};
 use rusqlite_migration::{Migrations, M};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::AppHandle;
 use tauri_specta::Event;
 
@@ -175,13 +176,27 @@ impl HistoryManager {
     }
 
     fn init_database(&self) -> Result<()> {
-        info!("Initializing database at {:?}", self.db_path);
+        Self::migrate_database(&self.db_path)?;
+        Ok(())
+    }
 
-        let mut conn = Connection::open(&self.db_path)?;
+    /// Open the history database at `db_path` and bring it to the latest schema.
+    ///
+    /// If the database is *newer* than this build supports — its `user_version`
+    /// exceeds the number of migrations this binary ships — `rusqlite_migration`
+    /// returns `DatabaseTooFarAhead` and startup aborts with no window. That happens
+    /// when an older app launches against data written by a newer install sharing the
+    /// same identifier (e.g. a side-by-side Store/MSIX build, a partial update, or a
+    /// downgrade). To stay launchable, move the too-new database aside as a backup and
+    /// recreate a fresh one instead of failing hard.
+    fn migrate_database(db_path: &Path) -> Result<Connection> {
+        info!("Initializing database at {:?}", db_path);
+
+        let mut conn = Connection::open(db_path)?;
 
         // Handle migration from tauri-plugin-sql to rusqlite_migration
         // tauri-plugin-sql used _sqlx_migrations table, rusqlite_migration uses user_version pragma
-        self.migrate_from_tauri_plugin_sql(&conn)?;
+        Self::migrate_from_tauri_plugin_sql(&conn)?;
 
         // Create migrations object and run to latest version
         let migrations = Migrations::new(MIGRATIONS.to_vec());
@@ -191,9 +206,26 @@ impl HistoryManager {
         migrations.validate().expect("Invalid migrations");
 
         // Get current version before migration
-        let version_before: i32 =
+        let mut version_before: i32 =
             conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
         debug!("Database version before migration: {}", version_before);
+
+        // If the on-disk schema is ahead of what this build knows how to migrate, the
+        // database was written by a newer version. Preserve it as a backup and start
+        // fresh so startup can proceed instead of failing hard with no UI.
+        let latest_supported = MIGRATIONS.len() as i32;
+        if version_before > latest_supported {
+            warn!(
+                "Database schema v{} is newer than this build supports (v{}); backing up and recreating",
+                version_before, latest_supported
+            );
+            drop(conn);
+            let backup = Self::back_up_superseded_database(db_path, version_before)?;
+            warn!("Preserved newer database as {:?}", backup);
+            conn = Connection::open(db_path)?;
+            Self::migrate_from_tauri_plugin_sql(&conn)?;
+            version_before = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
+        }
 
         // Apply any pending migrations
         migrations.to_latest(&mut conn)?;
@@ -210,14 +242,44 @@ impl HistoryManager {
             debug!("Database already at latest version {}", version_after);
         }
 
-        Ok(())
+        Ok(conn)
+    }
+
+    /// Move a database that is newer than this build — plus its `-wal`/`-shm`
+    /// sidecars — out of the way so a fresh database can be created in its place.
+    /// Returns the path the main database file was moved to.
+    fn back_up_superseded_database(db_path: &Path, schema_version: i32) -> Result<PathBuf> {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let file_name = db_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or_else(|| anyhow!("database path has no file name: {:?}", db_path))?;
+        let backup = db_path.with_file_name(format!(
+            "{}.superseded-v{}-{}.bak",
+            file_name, schema_version, stamp
+        ));
+        fs::rename(db_path, &backup)?;
+
+        // Move the WAL/SHM sidecars alongside so a fresh open does not replay them.
+        for suffix in ["-wal", "-shm"] {
+            let sidecar = db_path.with_file_name(format!("{}{}", file_name, suffix));
+            if sidecar.exists() {
+                let dst = PathBuf::from(format!("{}{}", backup.display(), suffix));
+                let _ = fs::rename(&sidecar, &dst);
+            }
+        }
+
+        Ok(backup)
     }
 
     /// Migrate from tauri-plugin-sql's migration tracking to rusqlite_migration's.
     /// tauri-plugin-sql used a _sqlx_migrations table, while rusqlite_migration uses
     /// SQLite's user_version pragma. This function checks if the old system was in use
     /// and sets the user_version accordingly so migrations don't re-run.
-    fn migrate_from_tauri_plugin_sql(&self, conn: &Connection) -> Result<()> {
+    fn migrate_from_tauri_plugin_sql(conn: &Connection) -> Result<()> {
         // Check if the old _sqlx_migrations table exists
         let has_sqlx_migrations: bool = conn
             .query_row(
@@ -993,6 +1055,77 @@ impl HistoryManager {
 mod tests {
     use super::*;
     use rusqlite::{params, Connection};
+
+    #[test]
+    fn migrate_database_recovers_from_a_newer_schema() {
+        // A database written by a NEWER app version: its user_version is beyond the
+        // migrations this build ships. The old code propagated rusqlite_migration's
+        // DatabaseTooFarAhead, so the app failed to launch (no window, no error).
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db_path = dir.path().join("history.db");
+        {
+            let conn = Connection::open(&db_path).expect("open seed db");
+            conn.execute("CREATE TABLE future_only (id INTEGER)", [])
+                .expect("create future table");
+            conn.pragma_update(None, "user_version", 9999)
+                .expect("set future user_version");
+        }
+
+        // Recovery, not failure.
+        let conn = HistoryManager::migrate_database(&db_path)
+            .expect("migrate_database must recover from a too-new schema, not fail");
+
+        // Fresh database brought up to this build's latest schema.
+        let version: i32 = conn
+            .pragma_query_value(None, "user_version", |r| r.get(0))
+            .expect("read user_version");
+        assert_eq!(
+            version,
+            MIGRATIONS.len() as i32,
+            "recreated database should be at the latest supported schema"
+        );
+
+        // The too-new database was preserved exactly once as a backup.
+        let backups = std::fs::read_dir(dir.path())
+            .expect("read temp dir")
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                e.file_name()
+                    .to_string_lossy()
+                    .contains(".superseded-v9999-")
+            })
+            .count();
+        assert_eq!(backups, 1, "expected exactly one superseded backup");
+
+        // The recreated database does not carry the old schema forward.
+        let has_future: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name='future_only'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("query sqlite_master");
+        assert!(!has_future, "recreated database should start clean");
+    }
+
+    #[test]
+    fn migrate_database_does_not_disturb_a_current_schema() {
+        // A normal database at this build's schema opens and stays put (no backup).
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db_path = dir.path().join("history.db");
+        drop(HistoryManager::migrate_database(&db_path).expect("first migrate creates db"));
+        let conn = HistoryManager::migrate_database(&db_path).expect("second migrate is a no-op");
+        let version: i32 = conn
+            .pragma_query_value(None, "user_version", |r| r.get(0))
+            .expect("read user_version");
+        assert_eq!(version, MIGRATIONS.len() as i32);
+        let backups = std::fs::read_dir(dir.path())
+            .expect("read temp dir")
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().contains(".superseded-"))
+            .count();
+        assert_eq!(backups, 0, "an in-range database must not be backed up");
+    }
 
     fn setup_conn() -> Connection {
         let conn = Connection::open_in_memory().expect("open in-memory db");
