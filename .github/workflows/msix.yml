@@ -76,15 +76,16 @@ jobs:
         shell: pwsh
         run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/stage-windows-vc-runtime.ps1 -Arch x64
 
-      # Disable SIMD above SSE4.2 for broad CPU compatibility (matches release builds).
+      # Portable AVX2 baseline for x86_64 (matches release builds): no -march=native,
+      # AVX-512 off so the binary doesn't SIGILL on CPUs without it. Drops pre-AVX2 CPUs.
       - name: Build Verbatim (no installer bundle)
         shell: pwsh
         env:
           GGML_NATIVE: "OFF"
-          GGML_AVX: "OFF"
-          GGML_AVX2: "OFF"
-          GGML_FMA: "OFF"
-          GGML_F16C: "OFF"
+          GGML_AVX: "ON"
+          GGML_AVX2: "ON"
+          GGML_FMA: "ON"
+          GGML_F16C: "ON"
         run: bun run tauri build --no-bundle
 
       - name: Locate build output
