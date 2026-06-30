@@ -72,6 +72,10 @@ impl AsrCommandSessionMode {
                 emits_partials: false,
                 emits_final: true,
             },
+            AsrEngineKind::Moonshine => AsrCommandEventShape {
+                emits_partials: false,
+                emits_final: true,
+            },
         }
     }
 }
@@ -125,6 +129,10 @@ impl AsrCommandSession {
             }
             AsrEngineKind::Canary => {
                 let offline = OfflineRecognizer::new_canary_for_language(&paths, lang)?;
+                Self::new_final_only_offline(paths, offline)
+            }
+            AsrEngineKind::Moonshine => {
+                let offline = OfflineRecognizer::new_moonshine(&paths)?;
                 Self::new_final_only_offline(paths, offline)
             }
         }
@@ -379,6 +387,13 @@ mod tests {
         );
         assert_eq!(
             super::AsrCommandSessionMode::event_shape_for_engine(AsrEngineKind::Canary),
+            super::AsrCommandEventShape {
+                emits_partials: false,
+                emits_final: true,
+            }
+        );
+        assert_eq!(
+            super::AsrCommandSessionMode::event_shape_for_engine(AsrEngineKind::Moonshine),
             super::AsrCommandEventShape {
                 emits_partials: false,
                 emits_final: true,

@@ -30,6 +30,10 @@ mod platform {
             Self::from_config(canary_config_for_language(paths, language))
         }
 
+        pub fn new_moonshine(paths: &AsrModelPaths) -> anyhow::Result<Self> {
+            Self::from_config(moonshine_config(paths))
+        }
+
         fn from_config(config: sherpa_onnx::OfflineRecognizerConfig) -> anyhow::Result<Self> {
             let inner = sherpa_onnx::OfflineRecognizer::create(&config).ok_or_else(|| {
                 anyhow::anyhow!("failed to create offline sherpa-onnx recognizer")
@@ -107,6 +111,22 @@ mod platform {
         config
     }
 
+    fn moonshine_config(paths: &AsrModelPaths) -> sherpa_onnx::OfflineRecognizerConfig {
+        let mut config = sherpa_onnx::OfflineRecognizerConfig::default();
+        config.model_config.moonshine = sherpa_onnx::OfflineMoonshineModelConfig {
+            preprocessor: Some(path_to_string(&paths.moonshine_preprocessor)),
+            encoder: Some(path_to_string(&paths.moonshine_encoder)),
+            uncached_decoder: Some(path_to_string(&paths.moonshine_uncached_decoder)),
+            cached_decoder: Some(path_to_string(&paths.moonshine_cached_decoder)),
+            ..Default::default()
+        };
+        config.model_config.tokens = Some(path_to_string(&paths.moonshine_tokens));
+        config.model_config.provider = Some("cpu".to_string());
+        config.model_config.num_threads = 2;
+        config.decoding_method = Some("greedy_search".to_string());
+        config
+    }
+
     fn normalize_canary_language(language: &str) -> &'static str {
         let normalized = language
             .trim()
@@ -148,6 +168,13 @@ mod platform {
     ) -> sherpa_onnx::OfflineRecognizerConfig {
         canary_config_for_language(paths, language)
     }
+
+    #[cfg(test)]
+    pub(crate) fn moonshine_config_for_test(
+        paths: &AsrModelPaths,
+    ) -> sherpa_onnx::OfflineRecognizerConfig {
+        moonshine_config(paths)
+    }
 }
 
 #[cfg(not(all(feature = "android-asr", any(target_os = "android", target_os = "ios"))))]
@@ -171,6 +198,10 @@ impl OfflineRecognizer {
         _paths: &AsrModelPaths,
         _language: &str,
     ) -> anyhow::Result<Self> {
+        anyhow::bail!("offline sherpa-onnx recognizer is only available in Android ASR builds")
+    }
+
+    pub fn new_moonshine(_paths: &AsrModelPaths) -> anyhow::Result<Self> {
         anyhow::bail!("offline sherpa-onnx recognizer is only available in Android ASR builds")
     }
 
@@ -241,6 +272,34 @@ mod tests {
 
         assert_eq!(config.model_config.canary.src_lang.as_deref(), Some("de"));
         assert_eq!(config.model_config.canary.tgt_lang.as_deref(), Some("de"));
+    }
+
+    #[test]
+    fn moonshine_config_uses_v1_decoders_tokens_and_cpu() {
+        let paths = AsrModelPaths::for_dir(std::path::Path::new("/models/moonshine"));
+        let config = platform::moonshine_config_for_test(&paths);
+
+        assert_eq!(
+            config.model_config.moonshine.preprocessor.as_deref(),
+            Some("/models/moonshine/moonshine/preprocess.onnx")
+        );
+        assert_eq!(
+            config.model_config.moonshine.encoder.as_deref(),
+            Some("/models/moonshine/moonshine/encode.int8.onnx")
+        );
+        assert_eq!(
+            config.model_config.moonshine.uncached_decoder.as_deref(),
+            Some("/models/moonshine/moonshine/uncached_decode.int8.onnx")
+        );
+        assert_eq!(
+            config.model_config.moonshine.cached_decoder.as_deref(),
+            Some("/models/moonshine/moonshine/cached_decode.int8.onnx")
+        );
+        assert_eq!(
+            config.model_config.tokens.as_deref(),
+            Some("/models/moonshine/moonshine/tokens.txt")
+        );
+        assert_eq!(config.model_config.provider.as_deref(), Some("cpu"));
     }
 
     #[test]

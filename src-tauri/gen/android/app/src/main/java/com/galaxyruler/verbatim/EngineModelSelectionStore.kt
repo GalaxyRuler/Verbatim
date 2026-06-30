@@ -10,6 +10,7 @@ object EngineModelSelectionStore {
   private const val MODELS_SUBDIR = "models/android-asr"
   private const val SENSEVOICE_PACK_ID = "sensevoice-multilingual-zh-en-ja-ko-yue"
   private const val CANARY_PACK_ID = "canary-180m-flash-en-es-de-fr"
+  private const val MOONSHINE_PACK_ID = "moonshine-tiny-en-int8"
   private val ZIPFORMER_WHISPER_REQUIRED_FILES = arrayOf(
     "streaming/encoder.onnx",
     "streaming/decoder.onnx",
@@ -29,6 +30,14 @@ object EngineModelSelectionStore {
     "canary/encoder.onnx",
     "canary/decoder.onnx",
     "canary/tokens.txt",
+    "silero_vad_v4.onnx",
+  )
+  private val MOONSHINE_REQUIRED_FILES = arrayOf(
+    "moonshine/preprocess.onnx",
+    "moonshine/encode.int8.onnx",
+    "moonshine/uncached_decode.int8.onnx",
+    "moonshine/cached_decode.int8.onnx",
+    "moonshine/tokens.txt",
     "silero_vad_v4.onnx",
   )
 
@@ -55,6 +64,8 @@ object EngineModelSelectionStore {
       SENSEVOICE_REQUIRED_FILES.copyOf()
     } else if (modelId == CANARY_PACK_ID || selectedPackName == CANARY_PACK_ID) {
       CANARY_REQUIRED_FILES.copyOf()
+    } else if (modelId == MOONSHINE_PACK_ID || selectedPackName == MOONSHINE_PACK_ID) {
+      MOONSHINE_REQUIRED_FILES.copyOf()
     } else {
       ZIPFORMER_WHISPER_REQUIRED_FILES.copyOf()
     }

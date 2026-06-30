@@ -90,6 +90,48 @@ class EngineModelSelectionTest {
   }
 
   @Test
+  fun engineModelInstallationAcceptsMoonshineLayoutWithoutStreamingFiles() {
+    val fixture = EngineSelectionFixture("moonshine")
+    try {
+      val packDir = File(
+        fixture.appDataRoot,
+        "models/android-asr/moonshine-tiny-en-int8",
+      )
+      fixture.setEngineModelId("moonshine-tiny-en-int8")
+
+      assertFalse(
+        EngineModelSelectionStore.isEngineModelInstalled(
+          fixture.context,
+          EngineModelSelectionStore.requiredFilesForPack(fixture.context),
+        ),
+      )
+
+      arrayOf(
+        "moonshine/preprocess.onnx",
+        "moonshine/encode.int8.onnx",
+        "moonshine/uncached_decode.int8.onnx",
+        "moonshine/cached_decode.int8.onnx",
+        "moonshine/tokens.txt",
+        "silero_vad_v4.onnx",
+      ).forEach {
+        File(packDir, it).also { file ->
+          file.parentFile?.mkdirs()
+          file.writeText("fixture")
+        }
+      }
+
+      assertTrue(
+        EngineModelSelectionStore.isEngineModelInstalled(
+          fixture.context,
+          EngineModelSelectionStore.requiredFilesForPack(fixture.context),
+        ),
+      )
+    } finally {
+      fixture.cleanup()
+    }
+  }
+
+  @Test
   fun engineModelPathUsesDownloaderRootAndPreservesAbsoluteSelections() {
     val context = mockk<Context>()
     val prefs = mockk<SharedPreferences>()

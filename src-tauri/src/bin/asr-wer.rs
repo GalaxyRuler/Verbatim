@@ -47,6 +47,8 @@ mod android {
                 OfflineRecognizer::new_canary_for_language(&paths, &args.language)
                     .context("failed to initialize offline Canary recognizer")?
             }
+            AsrEngineKind::Moonshine => OfflineRecognizer::new_moonshine(&paths)
+                .context("failed to initialize offline Moonshine recognizer")?,
         };
 
         let manifest_dir = args
@@ -77,6 +79,7 @@ mod android {
                 }
                 AsrEngineKind::SenseVoice => None,
                 AsrEngineKind::Canary => None,
+                AsrEngineKind::Moonshine => None,
             };
 
             let offline_started = Instant::now();
@@ -338,6 +341,7 @@ mod android {
             AsrEngineKind::ZipformerWhisper => "zipformerWhisper",
             AsrEngineKind::SenseVoice => "senseVoice",
             AsrEngineKind::Canary => "canary",
+            AsrEngineKind::Moonshine => "moonshine",
         }
     }
 
