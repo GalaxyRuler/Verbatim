@@ -9,6 +9,7 @@ const val TASK_GROUP = "rust"
 
 open class Config {
     lateinit var rootDirRel: String
+    var features: String? = null
 }
 
 open class RustPlugin : Plugin<Project> {
@@ -70,6 +71,7 @@ open class RustPlugin : Plugin<Project> {
                         group = TASK_GROUP
                         description = "Build dynamic library in $profile mode for $targetArch"
                         rootDirRel = config.rootDirRel
+                        features = config.features
                         target = targetName
                         release = profile == "release"
                     }

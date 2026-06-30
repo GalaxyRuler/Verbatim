@@ -13,6 +13,8 @@ class DebugInsertProbeReceiver : BroadcastReceiver() {
           context,
           intent.getStringExtra(EXTRA_DEBUG_WAV_PATH),
           intent.getStringExtra(EXTRA_DEBUG_LANGUAGE),
+          intent.getStringExtra(EXTRA_DEBUG_MODEL_ID),
+          intent.getStringExtra(EXTRA_DEBUG_MODEL_DIR),
         )
       ACTION_DEBUG_LLM_CLEANUP_SMOKE ->
         FloatingBubbleService.startDebugLlmCleanupSmoke(
@@ -32,6 +34,8 @@ class DebugInsertProbeReceiver : BroadcastReceiver() {
       "com.galaxyruler.verbatim.action.DEBUG_LLM_CLEANUP_SMOKE"
     private const val EXTRA_DEBUG_WAV_PATH = "wav_path"
     private const val EXTRA_DEBUG_LANGUAGE = "lang"
+    private const val EXTRA_DEBUG_MODEL_ID = "model_id"
+    private const val EXTRA_DEBUG_MODEL_DIR = "model_dir"
     private const val EXTRA_DEBUG_RAW_TEXT = "raw_text"
     private const val EXTRA_DEBUG_MODEL_PATH = "model_path"
   }

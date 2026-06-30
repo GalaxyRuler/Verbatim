@@ -34,6 +34,10 @@ mod platform {
             Self::from_config(moonshine_config(paths))
         }
 
+        pub fn new_parakeet(paths: &AsrModelPaths) -> anyhow::Result<Self> {
+            Self::from_config(parakeet_config(paths))
+        }
+
         fn from_config(config: sherpa_onnx::OfflineRecognizerConfig) -> anyhow::Result<Self> {
             let inner = sherpa_onnx::OfflineRecognizer::create(&config).ok_or_else(|| {
                 anyhow::anyhow!("failed to create offline sherpa-onnx recognizer")
@@ -127,6 +131,21 @@ mod platform {
         config
     }
 
+    fn parakeet_config(paths: &AsrModelPaths) -> sherpa_onnx::OfflineRecognizerConfig {
+        let mut config = sherpa_onnx::OfflineRecognizerConfig::default();
+        config.model_config.transducer = sherpa_onnx::OfflineTransducerModelConfig {
+            encoder: Some(path_to_string(&paths.parakeet_encoder)),
+            decoder: Some(path_to_string(&paths.parakeet_decoder)),
+            joiner: Some(path_to_string(&paths.parakeet_joiner)),
+        };
+        config.model_config.tokens = Some(path_to_string(&paths.parakeet_tokens));
+        config.model_config.model_type = Some("nemo_transducer".to_string());
+        config.model_config.provider = Some("cpu".to_string());
+        config.model_config.num_threads = 2;
+        config.decoding_method = Some("greedy_search".to_string());
+        config
+    }
+
     fn normalize_canary_language(language: &str) -> &'static str {
         let normalized = language
             .trim()
@@ -175,6 +194,13 @@ mod platform {
     ) -> sherpa_onnx::OfflineRecognizerConfig {
         moonshine_config(paths)
     }
+
+    #[cfg(test)]
+    pub(crate) fn parakeet_config_for_test(
+        paths: &AsrModelPaths,
+    ) -> sherpa_onnx::OfflineRecognizerConfig {
+        parakeet_config(paths)
+    }
 }
 
 #[cfg(not(all(feature = "android-asr", any(target_os = "android", target_os = "ios"))))]
@@ -202,6 +228,10 @@ impl OfflineRecognizer {
     }
 
     pub fn new_moonshine(_paths: &AsrModelPaths) -> anyhow::Result<Self> {
+        anyhow::bail!("offline sherpa-onnx recognizer is only available in Android ASR builds")
+    }
+
+    pub fn new_parakeet(_paths: &AsrModelPaths) -> anyhow::Result<Self> {
         anyhow::bail!("offline sherpa-onnx recognizer is only available in Android ASR builds")
     }
 
@@ -298,6 +328,34 @@ mod tests {
         assert_eq!(
             config.model_config.tokens.as_deref(),
             Some("/models/moonshine/moonshine/tokens.txt")
+        );
+        assert_eq!(config.model_config.provider.as_deref(), Some("cpu"));
+    }
+
+    #[test]
+    fn parakeet_config_uses_nemo_transducer_files_tokens_and_cpu() {
+        let paths = AsrModelPaths::for_dir(std::path::Path::new("/models/parakeet"));
+        let config = platform::parakeet_config_for_test(&paths);
+
+        assert_eq!(
+            config.model_config.transducer.encoder.as_deref(),
+            Some("/models/parakeet/parakeet/encoder.int8.onnx")
+        );
+        assert_eq!(
+            config.model_config.transducer.decoder.as_deref(),
+            Some("/models/parakeet/parakeet/decoder.int8.onnx")
+        );
+        assert_eq!(
+            config.model_config.transducer.joiner.as_deref(),
+            Some("/models/parakeet/parakeet/joiner.int8.onnx")
+        );
+        assert_eq!(
+            config.model_config.tokens.as_deref(),
+            Some("/models/parakeet/parakeet/tokens.txt")
+        );
+        assert_eq!(
+            config.model_config.model_type.as_deref(),
+            Some("nemo_transducer")
         );
         assert_eq!(config.model_config.provider.as_deref(), Some("cpu"));
     }

@@ -11,6 +11,7 @@ object EngineModelSelectionStore {
   private const val SENSEVOICE_PACK_ID = "sensevoice-multilingual-zh-en-ja-ko-yue"
   private const val CANARY_PACK_ID = "canary-180m-flash-en-es-de-fr"
   private const val MOONSHINE_PACK_ID = "moonshine-tiny-en-int8"
+  private const val PARAKEET_PACK_ID = "parakeet-tdt-0_6b-v2-int8"
   private val ZIPFORMER_WHISPER_REQUIRED_FILES = arrayOf(
     "streaming/encoder.onnx",
     "streaming/decoder.onnx",
@@ -40,6 +41,13 @@ object EngineModelSelectionStore {
     "moonshine/tokens.txt",
     "silero_vad_v4.onnx",
   )
+  private val PARAKEET_REQUIRED_FILES = arrayOf(
+    "parakeet/encoder.int8.onnx",
+    "parakeet/decoder.int8.onnx",
+    "parakeet/joiner.int8.onnx",
+    "parakeet/tokens.txt",
+    "silero_vad_v4.onnx",
+  )
 
   fun engineModelId(context: Context): String =
     context
@@ -66,6 +74,8 @@ object EngineModelSelectionStore {
       CANARY_REQUIRED_FILES.copyOf()
     } else if (modelId == MOONSHINE_PACK_ID || selectedPackName == MOONSHINE_PACK_ID) {
       MOONSHINE_REQUIRED_FILES.copyOf()
+    } else if (modelId == PARAKEET_PACK_ID || selectedPackName == PARAKEET_PACK_ID) {
+      PARAKEET_REQUIRED_FILES.copyOf()
     } else {
       ZIPFORMER_WHISPER_REQUIRED_FILES.copyOf()
     }
