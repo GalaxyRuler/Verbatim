@@ -9,6 +9,7 @@ object EngineModelSelectionStore {
   private const val DEFAULT_ENGINE_MODEL_ID = "default"
   private const val MODELS_SUBDIR = "models/android-asr"
   private const val SENSEVOICE_PACK_ID = "sensevoice-multilingual-zh-en-ja-ko-yue"
+  private const val CANARY_PACK_ID = "canary-180m-flash-en-es-de-fr"
   private val ZIPFORMER_WHISPER_REQUIRED_FILES = arrayOf(
     "streaming/encoder.onnx",
     "streaming/decoder.onnx",
@@ -22,6 +23,12 @@ object EngineModelSelectionStore {
   private val SENSEVOICE_REQUIRED_FILES = arrayOf(
     "sense_voice/model.onnx",
     "sense_voice/tokens.txt",
+    "silero_vad_v4.onnx",
+  )
+  private val CANARY_REQUIRED_FILES = arrayOf(
+    "canary/encoder.onnx",
+    "canary/decoder.onnx",
+    "canary/tokens.txt",
     "silero_vad_v4.onnx",
   )
 
@@ -46,6 +53,8 @@ object EngineModelSelectionStore {
     val selectedPackName = File(modelId).name
     return if (modelId == SENSEVOICE_PACK_ID || selectedPackName == SENSEVOICE_PACK_ID) {
       SENSEVOICE_REQUIRED_FILES.copyOf()
+    } else if (modelId == CANARY_PACK_ID || selectedPackName == CANARY_PACK_ID) {
+      CANARY_REQUIRED_FILES.copyOf()
     } else {
       ZIPFORMER_WHISPER_REQUIRED_FILES.copyOf()
     }

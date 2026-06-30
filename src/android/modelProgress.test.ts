@@ -13,6 +13,7 @@ const pack = (
   description: "Test ASR pack",
   language: "en",
   sizeMb: 1,
+  minRamMb: 0,
   installedDir: "",
   isInstalled: false,
   isDownloading: true,

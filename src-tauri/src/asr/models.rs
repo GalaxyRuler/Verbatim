@@ -21,6 +21,9 @@ const DOWNLOADS_DIR: &str = ".downloads";
 const INSTALLING_DIR: &str = ".installing";
 const REPLACING_DIR: &str = ".replacing";
 const DEFAULT_PACK_ID: &str = "g3-zipformer-whisper-tiny-en";
+const CANARY_PACK_ID: &str = "canary-180m-flash-en-es-de-fr";
+const CANARY_MIN_RAM_MB: u64 = 6144;
+const CANARY_REVISION: &str = "9077164e0d3dd1d5353743e89ceaa1d3a770838c";
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -36,6 +39,7 @@ pub struct AndroidAsrModelFile {
 pub enum AndroidAsrEngineKind {
     ZipformerWhisper,
     SenseVoice,
+    Canary,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -46,6 +50,7 @@ pub struct AndroidAsrModelPack {
     pub description: String,
     pub language: String,
     pub size_mb: u64,
+    pub min_ram_mb: u64,
     pub engine_kind: AndroidAsrEngineKind,
     pub files: Vec<AndroidAsrModelFile>,
 }
@@ -58,6 +63,7 @@ pub struct AndroidAsrModelPackState {
     pub description: String,
     pub language: String,
     pub size_mb: u64,
+    pub min_ram_mb: u64,
     pub engine_kind: AndroidAsrEngineKind,
     pub installed_dir: String,
     pub is_installed: bool,
@@ -116,6 +122,7 @@ pub fn builtin_model_packs() -> Vec<AndroidAsrModelPack> {
                 .to_string(),
             language: "en".to_string(),
             size_mb: 141,
+            min_ram_mb: 0,
             engine_kind: AndroidAsrEngineKind::ZipformerWhisper,
             files: model_files_with_whisper(whisper_tiny_files()),
         },
@@ -126,6 +133,7 @@ pub fn builtin_model_packs() -> Vec<AndroidAsrModelPack> {
                 .to_string(),
             language: "en".to_string(),
             size_mb: 167,
+            min_ram_mb: 0,
             engine_kind: AndroidAsrEngineKind::ZipformerWhisper,
             files: model_files_with_whisper(whisper_base_files()),
         },
@@ -135,8 +143,19 @@ pub fn builtin_model_packs() -> Vec<AndroidAsrModelPack> {
             description: "Offline SenseVoice for Chinese, English, Japanese, Korean, and Cantonese. Final text only; no live partials.".to_string(),
             language: "auto".to_string(),
             size_mb: 229,
+            min_ram_mb: 0,
             engine_kind: AndroidAsrEngineKind::SenseVoice,
             files: model_files_with_sense_voice(),
+        },
+        AndroidAsrModelPack {
+            id: CANARY_PACK_ID.to_string(),
+            display_name: "Canary 180M Flash".to_string(),
+            description: "Offline Canary for English, Spanish, German, and French. Final text only; no live partials.".to_string(),
+            language: "en-es-de-fr".to_string(),
+            size_mb: 207,
+            min_ram_mb: CANARY_MIN_RAM_MB,
+            engine_kind: AndroidAsrEngineKind::Canary,
+            files: model_files_with_canary(),
         },
     ]
 }
@@ -161,6 +180,39 @@ fn model_files_with_sense_voice() -> Vec<AndroidAsrModelFile> {
             url: "https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/resolve/2365baeacb507f821a0c8120fcee3d484dba7a07/tokens.txt".to_string(),
             sha256: "f449eb28dc567533d7fa59be34e2abca8784f771850c78a47fb731a31429a1dc".to_string(),
             size_bytes: 315_894,
+        },
+        silero_vad_file(),
+    ]
+}
+
+fn model_files_with_canary() -> Vec<AndroidAsrModelFile> {
+    vec![
+        AndroidAsrModelFile {
+            target_path: "canary/encoder.onnx".to_string(),
+            url: format!(
+                "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-canary-180m-flash-en-es-de-fr-int8/resolve/{CANARY_REVISION}/encoder.int8.onnx"
+            ),
+            sha256: "7a75b4e2a5857a6dcc0819503bbe3fad66943db4a3ccf21d3f27c633667d303f"
+                .to_string(),
+            size_bytes: 132_678_643,
+        },
+        AndroidAsrModelFile {
+            target_path: "canary/decoder.onnx".to_string(),
+            url: format!(
+                "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-canary-180m-flash-en-es-de-fr-int8/resolve/{CANARY_REVISION}/decoder.int8.onnx"
+            ),
+            sha256: "e41a2ab9c0c2fe81a1e8ade5a45fb02a74bc4db7d1f91b89a54a25e2cf79cba2"
+                .to_string(),
+            size_bytes: 74_437_848,
+        },
+        AndroidAsrModelFile {
+            target_path: "canary/tokens.txt".to_string(),
+            url: format!(
+                "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-canary-180m-flash-en-es-de-fr-int8/resolve/{CANARY_REVISION}/tokens.txt"
+            ),
+            sha256: "2dae6fc7815f9640645e0c765522b278ee0cef49b482d91f6913e334628d3e77"
+                .to_string(),
+            size_bytes: 53_555,
         },
         silero_vad_file(),
     ]
@@ -285,11 +337,23 @@ impl AndroidAsrModelManager {
         active_model_id: Option<&str>,
         model_id: &str,
     ) -> Result<AndroidAsrModelPackState> {
+        self.pack_state_for_dir_with_ram(root, active_model_id, model_id, device_total_ram_mb())
+    }
+
+    fn pack_state_for_dir_with_ram(
+        &self,
+        root: &Path,
+        active_model_id: Option<&str>,
+        model_id: &str,
+        total_ram_mb: Option<u64>,
+    ) -> Result<AndroidAsrModelPackState> {
         let pack = pack_by_id(model_id)?;
         let pack_dir = installed_pack_dir_for_root(root, &pack.id);
         let missing_files = missing_files(&pack, &pack_dir)?;
         let is_downloading = self.is_downloading(&pack.id);
         let is_installed = missing_files.is_empty();
+        let has_enough_ram = ram_gate_satisfied(pack.min_ram_mb, total_ram_mb);
+        let is_selectable = is_installed && !is_downloading && has_enough_ram;
 
         Ok(AndroidAsrModelPackState {
             id: pack.id,
@@ -297,12 +361,13 @@ impl AndroidAsrModelManager {
             description: pack.description,
             language: pack.language,
             size_mb: pack.size_mb,
+            min_ram_mb: pack.min_ram_mb,
             engine_kind: pack.engine_kind,
             installed_dir: pack_dir.to_string_lossy().into_owned(),
             is_installed,
             is_downloading,
-            is_active: active_model_id == Some(model_id) && is_installed,
-            is_selectable: is_installed && !is_downloading,
+            is_active: active_model_id == Some(model_id) && is_selectable,
+            is_selectable,
             download_phase: if is_downloading {
                 "downloading".to_string()
             } else if is_installed {
@@ -321,6 +386,7 @@ impl AndroidAsrModelManager {
         model_id: &str,
     ) -> Result<()> {
         let pack = pack_by_id(model_id)?;
+        ensure_pack_ram_gate(&pack, device_total_ram_mb())?;
         let root = models_root_for_app(app)?;
         fs::create_dir_all(&root)?;
 
@@ -413,8 +479,10 @@ impl AndroidAsrModelManager {
         model_id: &str,
     ) -> Result<AndroidAsrModelPackState> {
         let root = models_root_for_app(app)?;
+        let pack = pack_by_id(model_id)?;
         let state = self.pack_state_for_dir(&root, Some(model_id), model_id)?;
         if !state.is_selectable {
+            ensure_pack_ram_gate(&pack, device_total_ram_mb())?;
             return Err(anyhow::anyhow!(
                 "Android ASR model pack {} is not installed",
                 model_id
@@ -711,6 +779,49 @@ fn pack_by_id(model_id: &str) -> Result<AndroidAsrModelPack> {
         .ok_or_else(|| anyhow::anyhow!("Android ASR model pack not found: {}", model_id))
 }
 
+fn ensure_pack_ram_gate(pack: &AndroidAsrModelPack, total_ram_mb: Option<u64>) -> Result<()> {
+    if ram_gate_satisfied(pack.min_ram_mb, total_ram_mb) {
+        return Ok(());
+    }
+
+    let reported_ram = total_ram_mb.unwrap_or_default();
+    Err(anyhow::anyhow!(
+        "Android ASR model pack {} requires at least {} MB RAM; this device reports {} MB",
+        pack.id,
+        pack.min_ram_mb,
+        reported_ram
+    ))
+}
+
+fn ram_gate_satisfied(min_ram_mb: u64, total_ram_mb: Option<u64>) -> bool {
+    min_ram_mb == 0
+        || total_ram_mb
+            .map(|total| total >= min_ram_mb)
+            .unwrap_or(true)
+}
+
+#[cfg(target_os = "android")]
+fn device_total_ram_mb() -> Option<u64> {
+    parse_meminfo_total_ram_mb(&fs::read_to_string("/proc/meminfo").ok()?)
+}
+
+#[cfg(target_os = "android")]
+fn parse_meminfo_total_ram_mb(contents: &str) -> Option<u64> {
+    let line = contents
+        .lines()
+        .find(|line| line.trim_start().starts_with("MemTotal:"))?;
+    let kb = line
+        .split_whitespace()
+        .nth(1)
+        .and_then(|value| value.parse::<u64>().ok())?;
+    Some(kb / 1024)
+}
+
+#[cfg(not(target_os = "android"))]
+fn device_total_ram_mb() -> Option<u64> {
+    None
+}
+
 fn models_root_for_app<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf> {
     Ok(crate::portable::app_data_dir(app)
         .map_err(|err| anyhow::anyhow!("Failed to get app data dir: {}", err))?
@@ -897,10 +1008,11 @@ mod tests {
     fn manifest_contains_one_extensible_pack_with_expected_layout() {
         let packs = builtin_model_packs();
 
-        assert_eq!(packs.len(), 3);
+        assert_eq!(packs.len(), 4);
         assert_eq!(packs[0].id, "g3-zipformer-whisper-tiny-en");
         assert_eq!(packs[1].id, "g3-zipformer-whisper-base-en");
         assert_eq!(packs[2].id, "sensevoice-multilingual-zh-en-ja-ko-yue");
+        assert_eq!(packs[3].id, "canary-180m-flash-en-es-de-fr");
 
         for pack in &packs {
             match pack.engine_kind {
@@ -911,6 +1023,12 @@ mod tests {
                 AndroidAsrEngineKind::SenseVoice => {
                     assert_eq!(pack.files.len(), 3);
                     assert_eq!(component_targets(pack), sense_voice_targets());
+                }
+                AndroidAsrEngineKind::Canary => {
+                    assert_eq!(pack.files.len(), 4);
+                    assert_eq!(component_targets(pack), canary_targets());
+                    assert_eq!(pack.min_ram_mb, 6144);
+                    assert_eq!(pack.size_mb, 207);
                 }
             }
             assert!(pack.files.iter().all(|file| is_sha256_hex(&file.sha256)));
@@ -977,6 +1095,10 @@ mod tests {
             .iter()
             .find(|pack| pack.id == "sensevoice-multilingual-zh-en-ja-ko-yue")
             .unwrap();
+        let canary = packs
+            .iter()
+            .find(|pack| pack.id == "canary-180m-flash-en-es-de-fr")
+            .unwrap();
 
         assert_eq!(starter.engine_kind, AndroidAsrEngineKind::ZipformerWhisper);
         assert_eq!(component_targets(starter), zipformer_whisper_targets());
@@ -988,6 +1110,45 @@ mod tests {
                 "sense_voice/tokens.txt",
                 "silero_vad_v4.onnx"
             ]
+        );
+        assert_eq!(canary.engine_kind, AndroidAsrEngineKind::Canary);
+        assert_eq!(component_targets(canary), canary_targets());
+    }
+
+    #[test]
+    fn canary_pack_is_not_selectable_below_ram_gate() {
+        let temp = tempfile::tempdir().unwrap();
+        let pack_dir = write_complete_named_pack(temp.path(), "canary-180m-flash-en-es-de-fr");
+        let manager = AndroidAsrModelManager::default();
+
+        let too_small = manager
+            .pack_state_for_dir_with_ram(
+                temp.path(),
+                Some("canary-180m-flash-en-es-de-fr"),
+                "canary-180m-flash-en-es-de-fr",
+                Some(4096),
+            )
+            .unwrap();
+
+        assert!(too_small.is_installed);
+        assert!(!too_small.is_selectable);
+        assert!(!too_small.is_active);
+        assert_eq!(too_small.min_ram_mb, 6144);
+
+        let enough_ram = manager
+            .pack_state_for_dir_with_ram(
+                temp.path(),
+                Some("canary-180m-flash-en-es-de-fr"),
+                "canary-180m-flash-en-es-de-fr",
+                Some(6144),
+            )
+            .unwrap();
+
+        assert!(enough_ram.is_selectable);
+        assert!(enough_ram.is_active);
+        assert_eq!(
+            enough_ram.installed_dir,
+            pack_dir.to_string_lossy().into_owned()
         );
     }
 
@@ -1159,8 +1320,16 @@ mod tests {
     }
 
     fn write_complete_pack(root: &Path) -> PathBuf {
-        let pack_dir = root.join("g3-zipformer-whisper-tiny-en");
-        for file in &builtin_model_packs()[0].files {
+        write_complete_named_pack(root, "g3-zipformer-whisper-tiny-en")
+    }
+
+    fn write_complete_named_pack(root: &Path, model_id: &str) -> PathBuf {
+        let pack = builtin_model_packs()
+            .into_iter()
+            .find(|pack| pack.id == model_id)
+            .unwrap();
+        let pack_dir = root.join(model_id);
+        for file in &pack.files {
             let target = pack_dir.join(&file.target_path);
             fs::create_dir_all(target.parent().unwrap()).unwrap();
             fs::write(target, b"fixture").unwrap();
@@ -1218,6 +1387,18 @@ mod tests {
         [
             "sense_voice/model.onnx",
             "sense_voice/tokens.txt",
+            "silero_vad_v4.onnx",
+        ]
+        .into_iter()
+        .map(String::from)
+        .collect()
+    }
+
+    fn canary_targets() -> Vec<String> {
+        [
+            "canary/encoder.onnx",
+            "canary/decoder.onnx",
+            "canary/tokens.txt",
             "silero_vad_v4.onnx",
         ]
         .into_iter()

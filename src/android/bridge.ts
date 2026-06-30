@@ -37,6 +37,7 @@ type AndroidModelPackStateBase = {
 
 export type AndroidAsrModelPackState = AndroidModelPackStateBase & {
   language: string;
+  minRamMb: number;
 };
 
 export type AndroidLlmModelPackState = AndroidModelPackStateBase & {
