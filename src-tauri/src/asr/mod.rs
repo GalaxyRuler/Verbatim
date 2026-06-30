@@ -17,6 +17,8 @@ pub struct AsrModelPaths {
     pub whisper_encoder: PathBuf,
     pub whisper_decoder: PathBuf,
     pub whisper_tokens: PathBuf,
+    pub sense_voice_model: PathBuf,
+    pub sense_voice_tokens: PathBuf,
     pub vad: PathBuf,
 }
 
@@ -32,6 +34,8 @@ impl AsrModelPaths {
             whisper_encoder: join("whisper/encoder.onnx"),
             whisper_decoder: join("whisper/decoder.onnx"),
             whisper_tokens: join("whisper/tokens.txt"),
+            sense_voice_model: join("sense_voice/model.onnx"),
+            sense_voice_tokens: join("sense_voice/tokens.txt"),
             vad: join("silero_vad_v4.onnx"),
         }
     }
@@ -47,5 +51,7 @@ mod tests {
         assert!(p.whisper_encoder.ends_with("encoder.onnx"));
         assert!(p.streaming_joiner.ends_with("joiner.onnx"));
         assert!(p.vad.ends_with("silero_vad_v4.onnx"));
+        assert!(p.sense_voice_model.ends_with("sense_voice/model.onnx"));
+        assert!(p.sense_voice_tokens.ends_with("sense_voice/tokens.txt"));
     }
 }
