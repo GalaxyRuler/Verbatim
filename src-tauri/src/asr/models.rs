@@ -24,6 +24,9 @@ const DEFAULT_PACK_ID: &str = "g3-zipformer-whisper-tiny-en";
 const CANARY_PACK_ID: &str = "canary-180m-flash-en-es-de-fr";
 const CANARY_MIN_RAM_MB: u64 = 6144;
 const CANARY_REVISION: &str = "9077164e0d3dd1d5353743e89ceaa1d3a770838c";
+const MOONSHINE_PACK_ID: &str = "moonshine-tiny-en-int8";
+const MOONSHINE_MIN_RAM_MB: u64 = 4096;
+const MOONSHINE_REVISION: &str = "bf2b762c076d8ea61e2af0b3851c9564fb77552e";
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -40,6 +43,7 @@ pub enum AndroidAsrEngineKind {
     ZipformerWhisper,
     SenseVoice,
     Canary,
+    Moonshine,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -157,6 +161,16 @@ pub fn builtin_model_packs() -> Vec<AndroidAsrModelPack> {
             engine_kind: AndroidAsrEngineKind::Canary,
             files: model_files_with_canary(),
         },
+        AndroidAsrModelPack {
+            id: MOONSHINE_PACK_ID.to_string(),
+            display_name: "Moonshine Tiny EN".to_string(),
+            description: "Offline Moonshine Tiny English int8. Final text only; no live partials.".to_string(),
+            language: "en".to_string(),
+            size_mb: 119,
+            min_ram_mb: MOONSHINE_MIN_RAM_MB,
+            engine_kind: AndroidAsrEngineKind::Moonshine,
+            files: model_files_with_moonshine(),
+        },
     ]
 }
 
@@ -213,6 +227,57 @@ fn model_files_with_canary() -> Vec<AndroidAsrModelFile> {
             sha256: "2dae6fc7815f9640645e0c765522b278ee0cef49b482d91f6913e334628d3e77"
                 .to_string(),
             size_bytes: 53_555,
+        },
+        silero_vad_file(),
+    ]
+}
+
+fn model_files_with_moonshine() -> Vec<AndroidAsrModelFile> {
+    vec![
+        AndroidAsrModelFile {
+            target_path: "moonshine/preprocess.onnx".to_string(),
+            url: format!(
+                "https://huggingface.co/csukuangfj/sherpa-onnx-moonshine-tiny-en-int8/resolve/{MOONSHINE_REVISION}/preprocess.onnx"
+            ),
+            sha256: "f33addce61a143460fe753b5ee5b7db255e5140b5b779c065b94f6c83ff0bf4e"
+                .to_string(),
+            size_bytes: 6_800_738,
+        },
+        AndroidAsrModelFile {
+            target_path: "moonshine/encode.int8.onnx".to_string(),
+            url: format!(
+                "https://huggingface.co/csukuangfj/sherpa-onnx-moonshine-tiny-en-int8/resolve/{MOONSHINE_REVISION}/encode.int8.onnx"
+            ),
+            sha256: "8774dfba578de027ec6595c2c654a0836434489bc963a0db124a7f181f571acb"
+                .to_string(),
+            size_bytes: 18_249_187,
+        },
+        AndroidAsrModelFile {
+            target_path: "moonshine/uncached_decode.int8.onnx".to_string(),
+            url: format!(
+                "https://huggingface.co/csukuangfj/sherpa-onnx-moonshine-tiny-en-int8/resolve/{MOONSHINE_REVISION}/uncached_decode.int8.onnx"
+            ),
+            sha256: "216737000dd5881a17aa043f6bbd286add33e4c3b0ae257153e2ec15438bdc41"
+                .to_string(),
+            size_bytes: 53_216_096,
+        },
+        AndroidAsrModelFile {
+            target_path: "moonshine/cached_decode.int8.onnx".to_string(),
+            url: format!(
+                "https://huggingface.co/csukuangfj/sherpa-onnx-moonshine-tiny-en-int8/resolve/{MOONSHINE_REVISION}/cached_decode.int8.onnx"
+            ),
+            sha256: "2aff28bba6a03d8dcf5c9feac45462629bae37317442299f28115ad09da773f6"
+                .to_string(),
+            size_bytes: 45_264_830,
+        },
+        AndroidAsrModelFile {
+            target_path: "moonshine/tokens.txt".to_string(),
+            url: format!(
+                "https://huggingface.co/csukuangfj/sherpa-onnx-moonshine-tiny-en-int8/resolve/{MOONSHINE_REVISION}/tokens.txt"
+            ),
+            sha256: "1165c2aeb9f72f457a83be2d459a09054f27490acd9b41bd43794dfd25e296ea"
+                .to_string(),
+            size_bytes: 436_688,
         },
         silero_vad_file(),
     ]
@@ -1008,11 +1073,12 @@ mod tests {
     fn manifest_contains_one_extensible_pack_with_expected_layout() {
         let packs = builtin_model_packs();
 
-        assert_eq!(packs.len(), 4);
+        assert_eq!(packs.len(), 5);
         assert_eq!(packs[0].id, "g3-zipformer-whisper-tiny-en");
         assert_eq!(packs[1].id, "g3-zipformer-whisper-base-en");
         assert_eq!(packs[2].id, "sensevoice-multilingual-zh-en-ja-ko-yue");
         assert_eq!(packs[3].id, "canary-180m-flash-en-es-de-fr");
+        assert_eq!(packs[4].id, "moonshine-tiny-en-int8");
 
         for pack in &packs {
             match pack.engine_kind {
@@ -1029,6 +1095,17 @@ mod tests {
                     assert_eq!(component_targets(pack), canary_targets());
                     assert_eq!(pack.min_ram_mb, 6144);
                     assert_eq!(pack.size_mb, 207);
+                }
+                AndroidAsrEngineKind::Moonshine => {
+                    assert_eq!(pack.files.len(), 6);
+                    assert_eq!(component_targets(pack), moonshine_targets());
+                    assert_eq!(pack.min_ram_mb, 4096);
+                    assert_eq!(pack.size_mb, 119);
+                    assert!(pack
+                        .files
+                        .iter()
+                        .filter(|file| file.target_path.starts_with("moonshine/"))
+                        .all(|file| file.url.contains("csukuangfj/sherpa-onnx-moonshine-tiny-en-int8/resolve/bf2b762c076d8ea61e2af0b3851c9564fb77552e")));
                 }
             }
             assert!(pack.files.iter().all(|file| is_sha256_hex(&file.sha256)));
@@ -1099,6 +1176,10 @@ mod tests {
             .iter()
             .find(|pack| pack.id == "canary-180m-flash-en-es-de-fr")
             .unwrap();
+        let moonshine = packs
+            .iter()
+            .find(|pack| pack.id == "moonshine-tiny-en-int8")
+            .unwrap();
 
         assert_eq!(starter.engine_kind, AndroidAsrEngineKind::ZipformerWhisper);
         assert_eq!(component_targets(starter), zipformer_whisper_targets());
@@ -1113,6 +1194,8 @@ mod tests {
         );
         assert_eq!(canary.engine_kind, AndroidAsrEngineKind::Canary);
         assert_eq!(component_targets(canary), canary_targets());
+        assert_eq!(moonshine.engine_kind, AndroidAsrEngineKind::Moonshine);
+        assert_eq!(component_targets(moonshine), moonshine_targets());
     }
 
     #[test]
@@ -1141,6 +1224,43 @@ mod tests {
                 Some("canary-180m-flash-en-es-de-fr"),
                 "canary-180m-flash-en-es-de-fr",
                 Some(6144),
+            )
+            .unwrap();
+
+        assert!(enough_ram.is_selectable);
+        assert!(enough_ram.is_active);
+        assert_eq!(
+            enough_ram.installed_dir,
+            pack_dir.to_string_lossy().into_owned()
+        );
+    }
+
+    #[test]
+    fn moonshine_pack_is_not_selectable_below_ram_gate() {
+        let temp = tempfile::tempdir().unwrap();
+        let pack_dir = write_complete_named_pack(temp.path(), "moonshine-tiny-en-int8");
+        let manager = AndroidAsrModelManager::default();
+
+        let too_small = manager
+            .pack_state_for_dir_with_ram(
+                temp.path(),
+                Some("moonshine-tiny-en-int8"),
+                "moonshine-tiny-en-int8",
+                Some(2048),
+            )
+            .unwrap();
+
+        assert!(too_small.is_installed);
+        assert!(!too_small.is_selectable);
+        assert!(!too_small.is_active);
+        assert_eq!(too_small.min_ram_mb, 4096);
+
+        let enough_ram = manager
+            .pack_state_for_dir_with_ram(
+                temp.path(),
+                Some("moonshine-tiny-en-int8"),
+                "moonshine-tiny-en-int8",
+                Some(4096),
             )
             .unwrap();
 
@@ -1399,6 +1519,20 @@ mod tests {
             "canary/encoder.onnx",
             "canary/decoder.onnx",
             "canary/tokens.txt",
+            "silero_vad_v4.onnx",
+        ]
+        .into_iter()
+        .map(String::from)
+        .collect()
+    }
+
+    fn moonshine_targets() -> Vec<String> {
+        [
+            "moonshine/preprocess.onnx",
+            "moonshine/encode.int8.onnx",
+            "moonshine/uncached_decode.int8.onnx",
+            "moonshine/cached_decode.int8.onnx",
+            "moonshine/tokens.txt",
             "silero_vad_v4.onnx",
         ]
         .into_iter()

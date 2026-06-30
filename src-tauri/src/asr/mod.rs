@@ -14,6 +14,7 @@ pub enum AsrEngineKind {
     ZipformerWhisper,
     SenseVoice,
     Canary,
+    Moonshine,
 }
 
 pub struct AsrModelPaths {
@@ -29,6 +30,11 @@ pub struct AsrModelPaths {
     pub canary_encoder: PathBuf,
     pub canary_decoder: PathBuf,
     pub canary_tokens: PathBuf,
+    pub moonshine_preprocessor: PathBuf,
+    pub moonshine_encoder: PathBuf,
+    pub moonshine_uncached_decoder: PathBuf,
+    pub moonshine_cached_decoder: PathBuf,
+    pub moonshine_tokens: PathBuf,
     pub vad: PathBuf,
 }
 
@@ -49,6 +55,11 @@ impl AsrModelPaths {
             canary_encoder: join("canary/encoder.onnx"),
             canary_decoder: join("canary/decoder.onnx"),
             canary_tokens: join("canary/tokens.txt"),
+            moonshine_preprocessor: join("moonshine/preprocess.onnx"),
+            moonshine_encoder: join("moonshine/encode.int8.onnx"),
+            moonshine_uncached_decoder: join("moonshine/uncached_decode.int8.onnx"),
+            moonshine_cached_decoder: join("moonshine/cached_decode.int8.onnx"),
+            moonshine_tokens: join("moonshine/tokens.txt"),
             vad: join("silero_vad_v4.onnx"),
         }
     }
@@ -59,11 +70,18 @@ impl AsrModelPaths {
         let has_canary_tier = self.canary_encoder.is_file()
             && self.canary_decoder.is_file()
             && self.canary_tokens.is_file();
+        let has_moonshine_tier = self.moonshine_preprocessor.is_file()
+            && self.moonshine_encoder.is_file()
+            && self.moonshine_uncached_decoder.is_file()
+            && self.moonshine_cached_decoder.is_file()
+            && self.moonshine_tokens.is_file();
 
         if has_sense_voice_tier {
             AsrEngineKind::SenseVoice
         } else if has_canary_tier {
             AsrEngineKind::Canary
+        } else if has_moonshine_tier {
+            AsrEngineKind::Moonshine
         } else {
             AsrEngineKind::ZipformerWhisper
         }
@@ -85,6 +103,17 @@ mod tests {
         assert!(p.canary_encoder.ends_with("canary/encoder.onnx"));
         assert!(p.canary_decoder.ends_with("canary/decoder.onnx"));
         assert!(p.canary_tokens.ends_with("canary/tokens.txt"));
+        assert!(p
+            .moonshine_preprocessor
+            .ends_with("moonshine/preprocess.onnx"));
+        assert!(p.moonshine_encoder.ends_with("moonshine/encode.int8.onnx"));
+        assert!(p
+            .moonshine_uncached_decoder
+            .ends_with("moonshine/uncached_decode.int8.onnx"));
+        assert!(p
+            .moonshine_cached_decoder
+            .ends_with("moonshine/cached_decode.int8.onnx"));
+        assert!(p.moonshine_tokens.ends_with("moonshine/tokens.txt"));
     }
 
     #[test]
@@ -124,6 +153,20 @@ mod tests {
 
         let paths = AsrModelPaths::for_dir(temp.path());
         assert_eq!(paths.engine_kind(), AsrEngineKind::Canary);
+    }
+
+    #[test]
+    fn session_kind_uses_moonshine_when_moonshine_layout_exists() {
+        let temp = tempfile::tempdir().unwrap();
+        write_file(temp.path().join("moonshine/preprocess.onnx"));
+        write_file(temp.path().join("moonshine/encode.int8.onnx"));
+        write_file(temp.path().join("moonshine/uncached_decode.int8.onnx"));
+        write_file(temp.path().join("moonshine/cached_decode.int8.onnx"));
+        write_file(temp.path().join("moonshine/tokens.txt"));
+        write_file(temp.path().join("silero_vad_v4.onnx"));
+
+        let paths = AsrModelPaths::for_dir(temp.path());
+        assert_eq!(paths.engine_kind(), AsrEngineKind::Moonshine);
     }
 
     fn write_file(path: std::path::PathBuf) {
