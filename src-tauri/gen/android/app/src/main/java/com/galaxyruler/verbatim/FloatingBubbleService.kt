@@ -85,7 +85,10 @@ class FloatingBubbleService : Service() {
     if (BuildConfig.DEBUG && intent?.action == ACTION_DEBUG_ENGINE_WAV_SMOKE) {
       inputTargetActive = true
       updateBubbleVisibility()
-      startDebugEngineWavSmoke(intent.getStringExtra(EXTRA_DEBUG_WAV_PATH))
+      startDebugEngineWavSmoke(
+        intent.getStringExtra(EXTRA_DEBUG_WAV_PATH),
+        intent.getStringExtra(EXTRA_DEBUG_LANGUAGE),
+      )
       return START_STICKY
     }
     if (BuildConfig.DEBUG && intent?.action == ACTION_DEBUG_LLM_CLEANUP_SMOKE) {
@@ -639,7 +642,7 @@ class FloatingBubbleService : Service() {
       }
     }
 
-  private fun startDebugEngineWavSmoke(wavPath: String?) {
+  private fun startDebugEngineWavSmoke(wavPath: String?, languageOverride: String? = null) {
     if (wavPath.isNullOrBlank()) {
       logAsr("debug WAV smoke missing wav path")
       return
@@ -652,7 +655,8 @@ class FloatingBubbleService : Service() {
     livePartialText = null
     val listener = createEngineListener()
     val modelDir = engineModelDir()
-    val lang = Locale.getDefault().language.ifBlank { "en" }
+    val lang = languageOverride?.trim()?.takeIf { it.isNotBlank() }
+      ?: Locale.getDefault().language.ifBlank { "en" }
     logAsr("nativeAsrStart called lang=$lang modelDir=$modelDir debugWav=$wavPath")
     if (!nativeAsrStart(modelDir, lang, listener)) {
       logAsr("nativeAsrStart returned false")
@@ -1415,6 +1419,7 @@ class FloatingBubbleService : Service() {
     private const val ACTION_DEBUG_LLM_CLEANUP_SMOKE =
       "com.galaxyruler.verbatim.action.DEBUG_LLM_CLEANUP_SMOKE"
     private const val EXTRA_DEBUG_WAV_PATH = "wav_path"
+    private const val EXTRA_DEBUG_LANGUAGE = "lang"
     private const val EXTRA_DEBUG_RAW_TEXT = "raw_text"
     private const val EXTRA_DEBUG_MODEL_PATH = "model_path"
     private const val ACTION_INPUT_TARGET_ACTIVE =
@@ -1609,7 +1614,11 @@ class FloatingBubbleService : Service() {
       }
     }
 
-    fun startDebugEngineWavSmoke(context: Context, wavPath: String?) {
+    fun startDebugEngineWavSmoke(
+      context: Context,
+      wavPath: String?,
+      languageOverride: String? = null,
+    ) {
       if (!BuildConfig.DEBUG) {
         return
       }
@@ -1618,6 +1627,9 @@ class FloatingBubbleService : Service() {
         context.startService(Intent(context, FloatingBubbleService::class.java).apply {
           action = ACTION_DEBUG_ENGINE_WAV_SMOKE
           putExtra(EXTRA_DEBUG_WAV_PATH, wavPath)
+          if (!languageOverride.isNullOrBlank()) {
+            putExtra(EXTRA_DEBUG_LANGUAGE, languageOverride)
+          }
         })
       } catch (_: IllegalStateException) {
         // Debug-only adb hook; production builds do not register its receiver.

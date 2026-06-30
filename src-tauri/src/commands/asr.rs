@@ -124,7 +124,7 @@ impl AsrCommandSession {
                 Self::new_final_only_offline(paths, offline)
             }
             AsrEngineKind::Canary => {
-                let offline = OfflineRecognizer::new_canary(&paths)?;
+                let offline = OfflineRecognizer::new_canary_for_language(&paths, lang)?;
                 Self::new_final_only_offline(paths, offline)
             }
         }

@@ -43,8 +43,10 @@ mod android {
                 .context("failed to initialize offline Whisper recognizer")?,
             AsrEngineKind::SenseVoice => OfflineRecognizer::new_sense_voice(&paths)
                 .context("failed to initialize offline SenseVoice recognizer")?,
-            AsrEngineKind::Canary => OfflineRecognizer::new_canary(&paths)
-                .context("failed to initialize offline Canary recognizer")?,
+            AsrEngineKind::Canary => {
+                OfflineRecognizer::new_canary_for_language(&paths, &args.language)
+                    .context("failed to initialize offline Canary recognizer")?
+            }
         };
 
         let manifest_dir = args
