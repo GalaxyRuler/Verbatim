@@ -12,6 +12,28 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/). Version
 
 ---
 
+## [0.10.0] — 2026-06-30
+
+### Added
+
+- **Android on-device speech recognition.** A new on-device ASR engine (sherpa-onnx streaming with a Whisper final pass) drives floating-bubble dictation, replacing the dependency on the OS speech recognizer.
+- **Android model packs.** A real Models tab to download, verify, install, and select on-device ASR packs (including Whisper base.en and tier-A packs).
+- **Optional on-device LLM cleanup (Android).** Tidy dictated text locally with a small on-device model (LiteRT-LM Qwen2.5), off by default.
+- **Localized elevated-window notice.** The "dictation blocked by an elevated window" notification is now localized across supported languages, with a Settings toggle to control it.
+
+### Fixed
+
+- **Transcription no longer crashes on CPUs without AVX-512.** The bundled Whisper/ggml is now built with a portable AVX2 baseline instead of `-march=native`, fixing an illegal-instruction crash (`0xc000001d`) on recent Intel consumer CPUs (for example Core Ultra / Meteor Lake) that affected dictation in CPU mode.
+- **Whisper Vulkan GPU loading** is guarded against a startup crash and falls back to CPU when GPU inference is unavailable.
+- **CLI/global dictation toggle** reliably forwards to the already-running app instead of intermittently starting a second instance (the single-instance plugin is now registered first).
+- **Settings** no longer double-subscribe to model-state updates.
+
+### Security
+
+- Updated `anyhow` to 1.0.103 (RUSTSEC-2026-0190).
+
+---
+
 ## [0.9.0] — 2026-06-19
 
 ### Added
