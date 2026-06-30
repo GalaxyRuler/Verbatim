@@ -15,6 +15,41 @@ import org.junit.Test
 
 class EngineModelSelectionTest {
   @Test
+  fun engineModelInstallationAcceptsSenseVoiceLayoutWithoutStreamingFiles() {
+    val fixture = EngineSelectionFixture("sensevoice")
+    try {
+      val packDir = File(
+        fixture.appDataRoot,
+        "models/android-asr/sensevoice-multilingual-zh-en-ja-ko-yue",
+      )
+      fixture.setEngineModelId("sensevoice-multilingual-zh-en-ja-ko-yue")
+
+      assertFalse(
+        EngineModelSelectionStore.isEngineModelInstalled(
+          fixture.context,
+          EngineModelSelectionStore.requiredFilesForPack(fixture.context),
+        ),
+      )
+
+      arrayOf("sense_voice/model.onnx", "sense_voice/tokens.txt", "silero_vad_v4.onnx").forEach {
+        File(packDir, it).also { file ->
+          file.parentFile?.mkdirs()
+          file.writeText("fixture")
+        }
+      }
+
+      assertTrue(
+        EngineModelSelectionStore.isEngineModelInstalled(
+          fixture.context,
+          EngineModelSelectionStore.requiredFilesForPack(fixture.context),
+        ),
+      )
+    } finally {
+      fixture.cleanup()
+    }
+  }
+
+  @Test
   fun engineModelPathUsesDownloaderRootAndPreservesAbsoluteSelections() {
     val context = mockk<Context>()
     val prefs = mockk<SharedPreferences>()
@@ -148,5 +183,38 @@ class EngineModelSelectionTest {
     )
     assertEquals(absolutePackDir.absolutePath, AndroidLlmModelSelectionStore.llmModelDir(context))
     appDataRoot.deleteRecursively()
+  }
+
+  private class EngineSelectionFixture(name: String) {
+    val context = mockk<Context>()
+    val appDataRoot = File("build/test-data/verbatim-$name-app-data").absoluteFile
+    private val prefs = mockk<SharedPreferences>()
+    private val editor = mockk<SharedPreferences.Editor>()
+    private var storedModelId: String? = null
+
+    init {
+      val appInfo = ApplicationInfo().apply {
+        dataDir = appDataRoot.absolutePath
+      }
+
+      every { context.getSharedPreferences("verbatim_android", Context.MODE_PRIVATE) } returns prefs
+      every { context.applicationInfo } returns appInfo
+      every { prefs.getString("native_engine_model_id", "default") } answers {
+        storedModelId ?: "default"
+      }
+      every { prefs.edit() } returns editor
+      every { editor.putString("native_engine_model_id", any()) } answers {
+        storedModelId = secondArg()
+        editor
+      }
+      every { editor.apply() } just Runs
+    }
+
+    fun setEngineModelId(modelId: String): String =
+      EngineModelSelectionStore.setEngineModelId(context, modelId)
+
+    fun cleanup() {
+      appDataRoot.deleteRecursively()
+    }
   }
 }

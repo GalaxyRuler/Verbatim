@@ -674,6 +674,8 @@ class FloatingBubbleService : Service() {
   private fun stopEngineDictation() {
     stopEngineCapture()
     livePartialText = null
+    bubbleState = BubbleState.TRANSCRIBING
+    bubbleView?.let { renderBubble(it) }
     logAsr("nativeAsrStop called")
     if (!nativeAsrStop()) {
       logAsr("nativeAsrStop returned false")
@@ -797,7 +799,10 @@ class FloatingBubbleService : Service() {
   }
 
   private fun isEngineModelInstalled(): Boolean =
-    EngineModelSelectionStore.isEngineModelInstalled(this, REQUIRED_ENGINE_MODEL_FILES)
+    EngineModelSelectionStore.isEngineModelInstalled(
+      this,
+      EngineModelSelectionStore.requiredFilesForPack(this),
+    )
 
   private fun isLlmPostProcessingEnabled(): Boolean =
     FloatingBubbleService.isLlmPostProcessingEnabled(this)
@@ -1383,16 +1388,6 @@ class FloatingBubbleService : Service() {
     private const val TEXT_FORMATTER_KEY = "native_text_formatter_snapshot"
     private const val ENGINE_DICTATION_ENABLED_KEY = "native_engine_dictation_enabled"
     private const val LLM_POST_PROCESSING_ENABLED_KEY = "native_llm_post_processing_enabled"
-    private val REQUIRED_ENGINE_MODEL_FILES = arrayOf(
-      "streaming/encoder.onnx",
-      "streaming/decoder.onnx",
-      "streaming/joiner.onnx",
-      "streaming/tokens.txt",
-      "whisper/encoder.onnx",
-      "whisper/decoder.onnx",
-      "whisper/tokens.txt",
-      "silero_vad_v4.onnx",
-    )
     private val REQUIRED_LLM_MODEL_FILES = arrayOf(
       "qwen2.5-0.5b-instruct-q8.task",
       "qwen2.5-1.5b-instruct-q8.task",
