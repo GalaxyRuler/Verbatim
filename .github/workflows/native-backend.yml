@@ -63,6 +63,8 @@ jobs:
 
       - uses: swatinem/rust-cache@v2
         with:
+          # Bumped to invalidate stale AVX-512 ggml caches so GGML_NATIVE=OFF (#41) applies.
+          prefix-key: "v1-ggml-portable"
           workspaces: "./src-tauri -> target"
           key: native-backend-${{ matrix.runner }}-${{ matrix.target }}
 

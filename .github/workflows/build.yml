@@ -211,6 +211,11 @@ jobs:
       - name: Rust cache
         uses: swatinem/rust-cache@v2
         with:
+          # Bumped to invalidate caches that may hold a stale AVX-512 ggml build.
+          # cargo's fingerprint ignores the [env] table in .cargo/config.toml, so a
+          # prefix-key bump forces a fresh whisper-rs-sys compile that actually
+          # applies GGML_NATIVE=OFF (#41) instead of reusing a -march=native artifact.
+          prefix-key: "v1-ggml-portable"
           workspaces: "./src-tauri -> target"
           key: ${{ inputs.platform }}-${{ inputs.target }}
 
