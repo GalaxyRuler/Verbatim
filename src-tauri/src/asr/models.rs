@@ -31,6 +31,13 @@ pub struct AndroidAsrModelFile {
     pub size_bytes: u64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum AndroidAsrEngineKind {
+    ZipformerWhisper,
+    SenseVoice,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AndroidAsrModelPack {
@@ -39,6 +46,7 @@ pub struct AndroidAsrModelPack {
     pub description: String,
     pub language: String,
     pub size_mb: u64,
+    pub engine_kind: AndroidAsrEngineKind,
     pub files: Vec<AndroidAsrModelFile>,
 }
 
@@ -50,6 +58,7 @@ pub struct AndroidAsrModelPackState {
     pub description: String,
     pub language: String,
     pub size_mb: u64,
+    pub engine_kind: AndroidAsrEngineKind,
     pub installed_dir: String,
     pub is_installed: bool,
     pub is_downloading: bool,
@@ -107,6 +116,7 @@ pub fn builtin_model_packs() -> Vec<AndroidAsrModelPack> {
                 .to_string(),
             language: "en".to_string(),
             size_mb: 141,
+            engine_kind: AndroidAsrEngineKind::ZipformerWhisper,
             files: model_files_with_whisper(whisper_tiny_files()),
         },
         AndroidAsrModelPack {
@@ -116,7 +126,17 @@ pub fn builtin_model_packs() -> Vec<AndroidAsrModelPack> {
                 .to_string(),
             language: "en".to_string(),
             size_mb: 167,
+            engine_kind: AndroidAsrEngineKind::ZipformerWhisper,
             files: model_files_with_whisper(whisper_base_files()),
+        },
+        AndroidAsrModelPack {
+            id: "sensevoice-multilingual-zh-en-ja-ko-yue".to_string(),
+            display_name: "SenseVoice multilingual".to_string(),
+            description: "Offline SenseVoice for Chinese, English, Japanese, Korean, and Cantonese. Final text only; no live partials.".to_string(),
+            language: "auto".to_string(),
+            size_mb: 229,
+            engine_kind: AndroidAsrEngineKind::SenseVoice,
+            files: model_files_with_sense_voice(),
         },
     ]
 }
@@ -126,6 +146,24 @@ fn model_files_with_whisper(whisper_files: Vec<AndroidAsrModelFile>) -> Vec<Andr
     files.extend(whisper_files);
     files.push(silero_vad_file());
     files
+}
+
+fn model_files_with_sense_voice() -> Vec<AndroidAsrModelFile> {
+    vec![
+        AndroidAsrModelFile {
+            target_path: "sense_voice/model.onnx".to_string(),
+            url: "https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/resolve/2365baeacb507f821a0c8120fcee3d484dba7a07/model.int8.onnx".to_string(),
+            sha256: "c71f0ce00bec95b07744e116345e33d8cbbe08cef896382cf907bf4b51a2cd51".to_string(),
+            size_bytes: 239_233_841,
+        },
+        AndroidAsrModelFile {
+            target_path: "sense_voice/tokens.txt".to_string(),
+            url: "https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/resolve/2365baeacb507f821a0c8120fcee3d484dba7a07/tokens.txt".to_string(),
+            sha256: "f449eb28dc567533d7fa59be34e2abca8784f771850c78a47fb731a31429a1dc".to_string(),
+            size_bytes: 315_894,
+        },
+        silero_vad_file(),
+    ]
 }
 
 fn streaming_zipformer_files() -> Vec<AndroidAsrModelFile> {
@@ -259,6 +297,7 @@ impl AndroidAsrModelManager {
             description: pack.description,
             language: pack.language,
             size_mb: pack.size_mb,
+            engine_kind: pack.engine_kind,
             installed_dir: pack_dir.to_string_lossy().into_owned(),
             is_installed,
             is_downloading,
@@ -858,13 +897,22 @@ mod tests {
     fn manifest_contains_one_extensible_pack_with_expected_layout() {
         let packs = builtin_model_packs();
 
-        assert_eq!(packs.len(), 2);
+        assert_eq!(packs.len(), 3);
         assert_eq!(packs[0].id, "g3-zipformer-whisper-tiny-en");
         assert_eq!(packs[1].id, "g3-zipformer-whisper-base-en");
+        assert_eq!(packs[2].id, "sensevoice-multilingual-zh-en-ja-ko-yue");
 
         for pack in &packs {
-            assert_eq!(pack.files.len(), 8);
-            assert_eq!(component_targets(pack), asr_model_path_targets());
+            match pack.engine_kind {
+                AndroidAsrEngineKind::ZipformerWhisper => {
+                    assert_eq!(pack.files.len(), 8);
+                    assert_eq!(component_targets(pack), zipformer_whisper_targets());
+                }
+                AndroidAsrEngineKind::SenseVoice => {
+                    assert_eq!(pack.files.len(), 3);
+                    assert_eq!(component_targets(pack), sense_voice_targets());
+                }
+            }
             assert!(pack.files.iter().all(|file| is_sha256_hex(&file.sha256)));
             assert!(pack
                 .files
@@ -916,6 +964,31 @@ mod tests {
             .all(|file| file
                 .url
                 .contains("csukuangfj/sherpa-onnx-whisper-base.en/resolve/59eea950fc76df2453efb57e6c0fd334548e8ffe")));
+    }
+
+    #[test]
+    fn manifest_supports_zipformer_whisper_and_sensevoice_layouts() {
+        let packs = builtin_model_packs();
+        let starter = packs
+            .iter()
+            .find(|pack| pack.id == "g3-zipformer-whisper-tiny-en")
+            .unwrap();
+        let sensevoice = packs
+            .iter()
+            .find(|pack| pack.id == "sensevoice-multilingual-zh-en-ja-ko-yue")
+            .unwrap();
+
+        assert_eq!(starter.engine_kind, AndroidAsrEngineKind::ZipformerWhisper);
+        assert_eq!(component_targets(starter), zipformer_whisper_targets());
+        assert_eq!(sensevoice.engine_kind, AndroidAsrEngineKind::SenseVoice);
+        assert_eq!(
+            component_targets(sensevoice),
+            vec![
+                "sense_voice/model.onnx",
+                "sense_voice/tokens.txt",
+                "silero_vad_v4.onnx"
+            ]
+        );
     }
 
     #[test]
@@ -1125,26 +1198,30 @@ mod tests {
             .collect()
     }
 
-    fn asr_model_path_targets() -> Vec<String> {
-        let root = Path::new("model-root");
-        let paths = crate::asr::AsrModelPaths::for_dir(root);
+    fn zipformer_whisper_targets() -> Vec<String> {
         [
-            paths.streaming_encoder,
-            paths.streaming_decoder,
-            paths.streaming_joiner,
-            paths.streaming_tokens,
-            paths.whisper_encoder,
-            paths.whisper_decoder,
-            paths.whisper_tokens,
-            paths.vad,
+            "streaming/encoder.onnx",
+            "streaming/decoder.onnx",
+            "streaming/joiner.onnx",
+            "streaming/tokens.txt",
+            "whisper/encoder.onnx",
+            "whisper/decoder.onnx",
+            "whisper/tokens.txt",
+            "silero_vad_v4.onnx",
         ]
         .into_iter()
-        .map(|path| {
-            path.strip_prefix(root)
-                .unwrap()
-                .to_string_lossy()
-                .replace('\\', "/")
-        })
+        .map(String::from)
+        .collect()
+    }
+
+    fn sense_voice_targets() -> Vec<String> {
+        [
+            "sense_voice/model.onnx",
+            "sense_voice/tokens.txt",
+            "silero_vad_v4.onnx",
+        ]
+        .into_iter()
+        .map(String::from)
         .collect()
     }
 
