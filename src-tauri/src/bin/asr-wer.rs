@@ -24,7 +24,7 @@ mod android {
     use std::time::{Duration, Instant};
     use verbatim_app_lib::asr::offline::OfflineRecognizer;
     use verbatim_app_lib::asr::streaming::StreamingRecognizer;
-    use verbatim_app_lib::asr::AsrModelPaths;
+    use verbatim_app_lib::asr::{AsrEngineKind, AsrModelPaths};
 
     const DEFAULT_LANGUAGE: &str = "en";
     const DEFAULT_CHUNK_MS: u64 = 100;
@@ -37,8 +37,13 @@ mod android {
         }
 
         let paths = AsrModelPaths::for_dir(&args.model_dir);
-        let mut offline = OfflineRecognizer::new(&paths, &args.language)
-            .context("failed to initialize offline Whisper recognizer")?;
+        let engine_kind = paths.engine_kind();
+        let mut offline = match engine_kind {
+            AsrEngineKind::ZipformerWhisper => OfflineRecognizer::new(&paths, &args.language)
+                .context("failed to initialize offline Whisper recognizer")?,
+            AsrEngineKind::SenseVoice => OfflineRecognizer::new_sense_voice(&paths)
+                .context("failed to initialize offline SenseVoice recognizer")?,
+        };
 
         let manifest_dir = args
             .manifest
@@ -58,11 +63,16 @@ mod android {
                 );
             }
 
-            let streaming_result =
-                run_streaming(&paths, wave.sample_rate, &wave.samples, args.chunk_ms);
-            let streaming = streaming_result.with_context(|| {
-                format!("streaming recognizer failed for {}", wav_path.display())
-            })?;
+            let streaming = match engine_kind {
+                AsrEngineKind::ZipformerWhisper => {
+                    let streaming_result =
+                        run_streaming(&paths, wave.sample_rate, &wave.samples, args.chunk_ms);
+                    Some(streaming_result.with_context(|| {
+                        format!("streaming recognizer failed for {}", wav_path.display())
+                    })?)
+                }
+                AsrEngineKind::SenseVoice => None,
+            };
 
             let offline_started = Instant::now();
             let offline_hypothesis = offline
@@ -70,21 +80,33 @@ mod android {
                 .with_context(|| format!("offline recognizer failed for {}", wav_path.display()))?;
             let offline_latency_ms = elapsed_ms(offline_started.elapsed());
 
-            let streaming_wer = word_error_rate(&entry.reference, &streaming.hypothesis);
+            let streaming_hypothesis = streaming.as_ref().map(|value| value.hypothesis.clone());
+            let first_partial = streaming
+                .as_ref()
+                .and_then(|value| value.first_partial.clone());
+            let streaming_first_partial_latency_ms = streaming
+                .as_ref()
+                .and_then(|value| value.first_partial_latency_ms);
+            let streaming_total_latency_ms = streaming.as_ref().map(|value| value.total_latency_ms);
+            let streaming_wer = streaming_hypothesis
+                .as_deref()
+                .map(|hypothesis| word_error_rate(&entry.reference, hypothesis));
             let offline_wer = word_error_rate(&entry.reference, &offline_hypothesis);
-            let total_latency_ms = streaming.total_latency_ms + offline_latency_ms;
+            let total_latency_ms =
+                streaming_total_latency_ms.unwrap_or_default() + offline_latency_ms;
             let audio_duration_ms =
                 (wave.samples.len() as f64 / f64::from(wave.sample_rate)) * 1000.0;
 
             file_reports.push(FileReport {
+                engine_kind: engine_kind_name(engine_kind).to_string(),
                 id: entry.id.unwrap_or_else(|| entry.wav.clone()),
                 wav: wav_path.to_string_lossy().into_owned(),
                 reference: entry.reference,
-                streaming_hypothesis: streaming.hypothesis,
+                streaming_hypothesis,
                 offline_hypothesis,
-                first_partial: streaming.first_partial,
-                streaming_first_partial_latency_ms: streaming.first_partial_latency_ms,
-                streaming_total_latency_ms: streaming.total_latency_ms,
+                first_partial,
+                streaming_first_partial_latency_ms,
+                streaming_total_latency_ms,
                 offline_latency_ms,
                 total_latency_ms,
                 audio_duration_ms,
@@ -97,6 +119,7 @@ mod android {
 
         let aggregate = AggregateReport::from_files(&file_reports);
         let report = AsrWerReport {
+            engine_kind: engine_kind_name(engine_kind).to_string(),
             model_dir: args.model_dir.to_string_lossy().into_owned(),
             manifest: args.manifest.to_string_lossy().into_owned(),
             language: args.language,
@@ -305,9 +328,17 @@ mod android {
         duration.as_secs_f64() * 1000.0
     }
 
+    fn engine_kind_name(engine_kind: AsrEngineKind) -> &'static str {
+        match engine_kind {
+            AsrEngineKind::ZipformerWhisper => "zipformerWhisper",
+            AsrEngineKind::SenseVoice => "senseVoice",
+        }
+    }
+
     #[derive(Debug, Serialize)]
     #[serde(rename_all = "camelCase")]
     struct AsrWerReport {
+        engine_kind: String,
         model_dir: String,
         manifest: String,
         language: String,
@@ -319,20 +350,21 @@ mod android {
     #[derive(Debug, Serialize)]
     #[serde(rename_all = "camelCase")]
     struct FileReport {
+        engine_kind: String,
         id: String,
         wav: String,
         reference: String,
-        streaming_hypothesis: String,
+        streaming_hypothesis: Option<String>,
         offline_hypothesis: String,
         first_partial: Option<String>,
         streaming_first_partial_latency_ms: Option<f64>,
-        streaming_total_latency_ms: f64,
+        streaming_total_latency_ms: Option<f64>,
         offline_latency_ms: f64,
         total_latency_ms: f64,
         audio_duration_ms: f64,
         sample_rate: i32,
         sample_count: usize,
-        streaming_wer: WordErrorRate,
+        streaming_wer: Option<WordErrorRate>,
         offline_wer: WordErrorRate,
     }
 
@@ -340,10 +372,10 @@ mod android {
     #[serde(rename_all = "camelCase")]
     struct AggregateReport {
         file_count: usize,
-        streaming_wer: WordErrorRate,
+        streaming_wer: Option<WordErrorRate>,
         offline_wer: WordErrorRate,
         avg_streaming_first_partial_latency_ms: Option<f64>,
-        avg_streaming_total_latency_ms: f64,
+        avg_streaming_total_latency_ms: Option<f64>,
         avg_offline_latency_ms: f64,
         avg_total_latency_ms: f64,
     }
@@ -352,7 +384,7 @@ mod android {
         fn from_files(files: &[FileReport]) -> Self {
             let streaming_wers = files
                 .iter()
-                .map(|file| file.streaming_wer.clone())
+                .filter_map(|file| file.streaming_wer.clone())
                 .collect::<Vec<_>>();
             let offline_wers = files
                 .iter()
@@ -365,10 +397,11 @@ mod android {
 
             Self {
                 file_count: files.len(),
-                streaming_wer: aggregate_word_error_rates(&streaming_wers),
+                streaming_wer: (!streaming_wers.is_empty())
+                    .then(|| aggregate_word_error_rates(&streaming_wers)),
                 offline_wer: aggregate_word_error_rates(&offline_wers),
                 avg_streaming_first_partial_latency_ms: average(&first_partials),
-                avg_streaming_total_latency_ms: average_by(files, |file| {
+                avg_streaming_total_latency_ms: average_optional_by(files, |file| {
                     file.streaming_total_latency_ms
                 }),
                 avg_offline_latency_ms: average_by(files, |file| file.offline_latency_ms),
@@ -389,9 +422,18 @@ mod android {
         files.iter().map(read).sum::<f64>() / files.len() as f64
     }
 
+    fn average_optional_by(
+        files: &[FileReport],
+        read: impl Fn(&FileReport) -> Option<f64>,
+    ) -> Option<f64> {
+        let values = files.iter().filter_map(read).collect::<Vec<_>>();
+        average(&values)
+    }
+
     fn human_summary(report: &AsrWerReport) -> String {
         let mut summary = String::new();
         summary.push_str("asr-wer summary\n");
+        summary.push_str(&format!("engineKind: {}\n", report.engine_kind));
         summary.push_str(&format!("files: {}\n", report.aggregate.file_count));
         summary.push_str(&format!(
             "offline WER: {:.2}% ({} errors / {} reference words)\n",
@@ -399,12 +441,16 @@ mod android {
             report.aggregate.offline_wer.errors,
             report.aggregate.offline_wer.reference_words
         ));
-        summary.push_str(&format!(
-            "streaming WER: {:.2}% ({} errors / {} reference words)\n",
-            report.aggregate.streaming_wer.wer * 100.0,
-            report.aggregate.streaming_wer.errors,
-            report.aggregate.streaming_wer.reference_words
-        ));
+        if let Some(streaming_wer) = &report.aggregate.streaming_wer {
+            summary.push_str(&format!(
+                "streaming WER: {:.2}% ({} errors / {} reference words)\n",
+                streaming_wer.wer * 100.0,
+                streaming_wer.errors,
+                streaming_wer.reference_words
+            ));
+        } else {
+            summary.push_str("streaming WER: n/a\n");
+        }
         if let Some(first_partial_ms) = report.aggregate.avg_streaming_first_partial_latency_ms {
             summary.push_str(&format!("avg first partial: {:.1} ms\n", first_partial_ms));
         } else {
@@ -416,17 +462,28 @@ mod android {
         ));
 
         for file in &report.files {
-            summary.push_str(&format!(
-                "\n{}: offline {:.2}% streaming {:.2}% first_partial {} total {:.1} ms\n",
-                file.id,
-                file.offline_wer.wer * 100.0,
-                file.streaming_wer.wer * 100.0,
-                format_optional_ms(file.streaming_first_partial_latency_ms),
-                file.total_latency_ms
-            ));
+            if let Some(streaming_wer) = &file.streaming_wer {
+                summary.push_str(&format!(
+                    "\n{}: offline {:.2}% streaming {:.2}% first_partial {} total {:.1} ms\n",
+                    file.id,
+                    file.offline_wer.wer * 100.0,
+                    streaming_wer.wer * 100.0,
+                    format_optional_ms(file.streaming_first_partial_latency_ms),
+                    file.total_latency_ms
+                ));
+            } else {
+                summary.push_str(&format!(
+                    "\n{}: offline {:.2}% streaming n/a first_partial none total {:.1} ms\n",
+                    file.id,
+                    file.offline_wer.wer * 100.0,
+                    file.total_latency_ms
+                ));
+            }
             summary.push_str(&format!("  ref: {}\n", file.reference));
             summary.push_str(&format!("  off: {}\n", file.offline_hypothesis.trim()));
-            summary.push_str(&format!("  str: {}\n", file.streaming_hypothesis.trim()));
+            if let Some(streaming_hypothesis) = &file.streaming_hypothesis {
+                summary.push_str(&format!("  str: {}\n", streaming_hypothesis.trim()));
+            }
         }
 
         summary

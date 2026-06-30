@@ -5,7 +5,8 @@ use crate::asr::models::{
 };
 use crate::asr::offline::OfflineRecognizer;
 use crate::asr::streaming::StreamingRecognizer;
-use crate::asr::AsrModelPaths;
+use crate::asr::vad::SileroVadSegmenter;
+use crate::asr::{AsrEngineKind, AsrModelPaths};
 use once_cell::sync::Lazy;
 use serde::Serialize;
 use specta::Type;
@@ -31,10 +32,44 @@ pub enum AsrCommandEvent {
 }
 
 pub struct AsrCommandSession {
-    streaming: StreamingRecognizer,
-    offline: OfflineRecognizer,
+    mode: AsrCommandSessionMode,
     buffered_samples: Vec<f32>,
-    last_partial: String,
+    vad: Option<SileroVadSegmenter>,
+}
+
+enum AsrCommandSessionMode {
+    ZipformerWhisper {
+        streaming: StreamingRecognizer,
+        offline: OfflineRecognizer,
+        last_partial: String,
+    },
+    SenseVoice {
+        offline: OfflineRecognizer,
+        finalized_segments: Vec<String>,
+    },
+}
+
+#[cfg(test)]
+#[derive(Debug, PartialEq, Eq)]
+struct AsrCommandEventShape {
+    emits_partials: bool,
+    emits_final: bool,
+}
+
+#[cfg(test)]
+impl AsrCommandSessionMode {
+    fn event_shape_for_engine(engine_kind: AsrEngineKind) -> AsrCommandEventShape {
+        match engine_kind {
+            AsrEngineKind::ZipformerWhisper => AsrCommandEventShape {
+                emits_partials: true,
+                emits_final: true,
+            },
+            AsrEngineKind::SenseVoice => AsrCommandEventShape {
+                emits_partials: false,
+                emits_final: true,
+            },
+        }
+    }
 }
 
 pub fn global_start(paths: AsrModelPaths, lang: &str) -> anyhow::Result<()> {
@@ -70,38 +105,97 @@ pub fn global_stop() -> anyhow::Result<Vec<AsrCommandEvent>> {
 
 impl AsrCommandSession {
     pub fn start(paths: AsrModelPaths, lang: &str) -> anyhow::Result<Self> {
-        Ok(Self {
-            streaming: StreamingRecognizer::new(&paths)?,
-            offline: OfflineRecognizer::new(&paths, lang)?,
-            buffered_samples: Vec::new(),
-            last_partial: String::new(),
-        })
+        match paths.engine_kind() {
+            AsrEngineKind::ZipformerWhisper => Ok(Self {
+                mode: AsrCommandSessionMode::ZipformerWhisper {
+                    streaming: StreamingRecognizer::new(&paths)?,
+                    offline: OfflineRecognizer::new(&paths, lang)?,
+                    last_partial: String::new(),
+                },
+                buffered_samples: Vec::new(),
+                vad: None,
+            }),
+            AsrEngineKind::SenseVoice => Ok(Self {
+                mode: AsrCommandSessionMode::SenseVoice {
+                    offline: OfflineRecognizer::new_sense_voice(&paths)?,
+                    finalized_segments: Vec::new(),
+                },
+                buffered_samples: Vec::new(),
+                vad: Some(SileroVadSegmenter::new(&paths, SAMPLE_RATE)?),
+            }),
+        }
     }
 
     pub fn feed_pcm(&mut self, frames: &[f32]) -> anyhow::Result<Vec<AsrCommandEvent>> {
         self.buffered_samples.extend_from_slice(frames);
-        if !self.streaming.accept_waveform(SAMPLE_RATE, frames)? {
-            return Ok(Vec::new());
-        }
+        match &mut self.mode {
+            AsrCommandSessionMode::ZipformerWhisper {
+                streaming,
+                last_partial,
+                ..
+            } => {
+                if !streaming.accept_waveform(SAMPLE_RATE, frames)? {
+                    return Ok(Vec::new());
+                }
 
-        let text = self.streaming.partial_text()?;
-        if text.trim().is_empty() || text == self.last_partial {
-            return Ok(Vec::new());
-        }
+                let text = streaming.partial_text()?;
+                if text.trim().is_empty() || text == *last_partial {
+                    return Ok(Vec::new());
+                }
 
-        self.last_partial.clone_from(&text);
-        Ok(vec![AsrCommandEvent::Partial { text }])
+                last_partial.clone_from(&text);
+                Ok(vec![AsrCommandEvent::Partial { text }])
+            }
+            AsrCommandSessionMode::SenseVoice {
+                offline,
+                finalized_segments,
+            } => {
+                if let Some(vad) = &mut self.vad {
+                    for segment in vad.accept_waveform(frames) {
+                        let text = offline.transcribe(SAMPLE_RATE, &segment.samples)?;
+                        if !text.trim().is_empty() {
+                            finalized_segments.push(text);
+                        }
+                    }
+                }
+                Ok(Vec::new())
+            }
+        }
     }
 
     pub fn stop(&mut self) -> anyhow::Result<Vec<AsrCommandEvent>> {
-        let mut text = self
-            .offline
-            .transcribe(SAMPLE_RATE, &self.buffered_samples)?;
-        if text.trim().is_empty() {
-            text = self.streaming.finish()?;
-        }
+        match &mut self.mode {
+            AsrCommandSessionMode::ZipformerWhisper {
+                streaming, offline, ..
+            } => {
+                let mut text = offline.transcribe(SAMPLE_RATE, &self.buffered_samples)?;
+                if text.trim().is_empty() {
+                    text = streaming.finish()?;
+                }
 
-        Ok(vec![AsrCommandEvent::Final { text }])
+                Ok(vec![AsrCommandEvent::Final { text }])
+            }
+            AsrCommandSessionMode::SenseVoice {
+                offline,
+                finalized_segments,
+            } => {
+                if let Some(vad) = &mut self.vad {
+                    for segment in vad.flush() {
+                        let text = offline.transcribe(SAMPLE_RATE, &segment.samples)?;
+                        if !text.trim().is_empty() {
+                            finalized_segments.push(text);
+                        }
+                    }
+                }
+
+                let mut text = finalized_segments.join(" ").trim().to_string();
+                if text.is_empty() {
+                    text = offline.transcribe(SAMPLE_RATE, &self.buffered_samples)?;
+                }
+
+                Ok(vec![AsrCommandEvent::Final { text }])
+            }
+        }
     }
 }
 
@@ -239,11 +333,31 @@ fn resolve_model_dir(app: &AppHandle, model_id: &str) -> Result<PathBuf, String>
 
 #[cfg(test)]
 mod tests {
+    use crate::asr::AsrEngineKind;
+
     #[test]
     fn asr_permission_ids_are_kebab_case() {
         assert_eq!(
             super::permission_ids(),
             ["allow-asr-start", "allow-asr-feed-pcm", "allow-asr-stop"]
+        );
+    }
+
+    #[test]
+    fn asr_command_event_shape_matches_engine_kind() {
+        assert_eq!(
+            super::AsrCommandSessionMode::event_shape_for_engine(AsrEngineKind::ZipformerWhisper),
+            super::AsrCommandEventShape {
+                emits_partials: true,
+                emits_final: true,
+            }
+        );
+        assert_eq!(
+            super::AsrCommandSessionMode::event_shape_for_engine(AsrEngineKind::SenseVoice),
+            super::AsrCommandEventShape {
+                emits_partials: false,
+                emits_final: true,
+            }
         );
     }
 }
