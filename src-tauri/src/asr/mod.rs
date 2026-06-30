@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 pub enum AsrEngineKind {
     ZipformerWhisper,
     SenseVoice,
+    Canary,
 }
 
 pub struct AsrModelPaths {
@@ -25,6 +26,9 @@ pub struct AsrModelPaths {
     pub whisper_tokens: PathBuf,
     pub sense_voice_model: PathBuf,
     pub sense_voice_tokens: PathBuf,
+    pub canary_encoder: PathBuf,
+    pub canary_decoder: PathBuf,
+    pub canary_tokens: PathBuf,
     pub vad: PathBuf,
 }
 
@@ -42,20 +46,24 @@ impl AsrModelPaths {
             whisper_tokens: join("whisper/tokens.txt"),
             sense_voice_model: join("sense_voice/model.onnx"),
             sense_voice_tokens: join("sense_voice/tokens.txt"),
+            canary_encoder: join("canary/encoder.onnx"),
+            canary_decoder: join("canary/decoder.onnx"),
+            canary_tokens: join("canary/tokens.txt"),
             vad: join("silero_vad_v4.onnx"),
         }
     }
 
     pub fn engine_kind(&self) -> AsrEngineKind {
-        let has_streaming_tier = self.streaming_encoder.is_file()
-            && self.streaming_decoder.is_file()
-            && self.streaming_joiner.is_file()
-            && self.streaming_tokens.is_file();
         let has_sense_voice_tier =
             self.sense_voice_model.is_file() && self.sense_voice_tokens.is_file();
+        let has_canary_tier = self.canary_encoder.is_file()
+            && self.canary_decoder.is_file()
+            && self.canary_tokens.is_file();
 
-        if has_sense_voice_tier && !has_streaming_tier {
+        if has_sense_voice_tier {
             AsrEngineKind::SenseVoice
+        } else if has_canary_tier {
+            AsrEngineKind::Canary
         } else {
             AsrEngineKind::ZipformerWhisper
         }
@@ -74,6 +82,9 @@ mod tests {
         assert!(p.vad.ends_with("silero_vad_v4.onnx"));
         assert!(p.sense_voice_model.ends_with("sense_voice/model.onnx"));
         assert!(p.sense_voice_tokens.ends_with("sense_voice/tokens.txt"));
+        assert!(p.canary_encoder.ends_with("canary/encoder.onnx"));
+        assert!(p.canary_decoder.ends_with("canary/decoder.onnx"));
+        assert!(p.canary_tokens.ends_with("canary/tokens.txt"));
     }
 
     #[test]
@@ -101,6 +112,18 @@ mod tests {
 
         let paths = AsrModelPaths::for_dir(temp.path());
         assert_eq!(paths.engine_kind(), AsrEngineKind::SenseVoice);
+    }
+
+    #[test]
+    fn session_kind_uses_canary_when_canary_layout_exists() {
+        let temp = tempfile::tempdir().unwrap();
+        write_file(temp.path().join("canary/encoder.onnx"));
+        write_file(temp.path().join("canary/decoder.onnx"));
+        write_file(temp.path().join("canary/tokens.txt"));
+        write_file(temp.path().join("silero_vad_v4.onnx"));
+
+        let paths = AsrModelPaths::for_dir(temp.path());
+        assert_eq!(paths.engine_kind(), AsrEngineKind::Canary);
     }
 
     fn write_file(path: std::path::PathBuf) {

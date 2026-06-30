@@ -43,7 +43,7 @@ enum AsrCommandSessionMode {
         offline: OfflineRecognizer,
         last_partial: String,
     },
-    SenseVoice {
+    FinalOnlyOffline {
         offline: OfflineRecognizer,
         finalized_segments: Vec<String>,
     },
@@ -65,6 +65,10 @@ impl AsrCommandSessionMode {
                 emits_final: true,
             },
             AsrEngineKind::SenseVoice => AsrCommandEventShape {
+                emits_partials: false,
+                emits_final: true,
+            },
+            AsrEngineKind::Canary => AsrCommandEventShape {
                 emits_partials: false,
                 emits_final: true,
             },
@@ -115,15 +119,29 @@ impl AsrCommandSession {
                 buffered_samples: Vec::new(),
                 vad: None,
             }),
-            AsrEngineKind::SenseVoice => Ok(Self {
-                mode: AsrCommandSessionMode::SenseVoice {
-                    offline: OfflineRecognizer::new_sense_voice(&paths)?,
-                    finalized_segments: Vec::new(),
-                },
-                buffered_samples: Vec::new(),
-                vad: Some(SileroVadSegmenter::new(&paths, SAMPLE_RATE)?),
-            }),
+            AsrEngineKind::SenseVoice => {
+                let offline = OfflineRecognizer::new_sense_voice(&paths)?;
+                Self::new_final_only_offline(paths, offline)
+            }
+            AsrEngineKind::Canary => {
+                let offline = OfflineRecognizer::new_canary(&paths)?;
+                Self::new_final_only_offline(paths, offline)
+            }
         }
+    }
+
+    fn new_final_only_offline(
+        paths: AsrModelPaths,
+        offline: OfflineRecognizer,
+    ) -> anyhow::Result<Self> {
+        Ok(Self {
+            mode: AsrCommandSessionMode::FinalOnlyOffline {
+                offline,
+                finalized_segments: Vec::new(),
+            },
+            buffered_samples: Vec::new(),
+            vad: Some(SileroVadSegmenter::new(&paths, SAMPLE_RATE)?),
+        })
     }
 
     pub fn feed_pcm(&mut self, frames: &[f32]) -> anyhow::Result<Vec<AsrCommandEvent>> {
@@ -146,7 +164,7 @@ impl AsrCommandSession {
                 last_partial.clone_from(&text);
                 Ok(vec![AsrCommandEvent::Partial { text }])
             }
-            AsrCommandSessionMode::SenseVoice {
+            AsrCommandSessionMode::FinalOnlyOffline {
                 offline,
                 finalized_segments,
             } => {
@@ -175,7 +193,7 @@ impl AsrCommandSession {
 
                 Ok(vec![AsrCommandEvent::Final { text }])
             }
-            AsrCommandSessionMode::SenseVoice {
+            AsrCommandSessionMode::FinalOnlyOffline {
                 offline,
                 finalized_segments,
             } => {
@@ -354,6 +372,13 @@ mod tests {
         );
         assert_eq!(
             super::AsrCommandSessionMode::event_shape_for_engine(AsrEngineKind::SenseVoice),
+            super::AsrCommandEventShape {
+                emits_partials: false,
+                emits_final: true,
+            }
+        );
+        assert_eq!(
+            super::AsrCommandSessionMode::event_shape_for_engine(AsrEngineKind::Canary),
             super::AsrCommandEventShape {
                 emits_partials: false,
                 emits_final: true,
