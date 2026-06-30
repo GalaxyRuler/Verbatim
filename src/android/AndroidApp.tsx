@@ -1689,6 +1689,9 @@ function ModelsTab() {
   >({});
   const [busyIds, setBusyIds] = useState<Record<string, true>>({});
   const [error, setError] = useState<string | null>(null);
+  const [llmSupport, setLlmSupport] = useState<AndroidLlmSupportSnapshot>(
+    defaultLlmSupportSnapshot,
+  );
 
   const refreshPacks = useCallback(
     async (options?: { clearError?: boolean }) => {
@@ -1711,6 +1714,9 @@ function ModelsTab() {
 
   useEffect(() => {
     void refreshPacks();
+    void llmPostProcessingSupport()
+      .then(setLlmSupport)
+      .catch(() => setLlmSupport(defaultLlmSupportSnapshot));
     let unlistenAsrProgress: (() => void) | undefined;
     let unlistenAsrChanged: (() => void) | undefined;
     let unlistenLlmProgress: (() => void) | undefined;
@@ -1867,6 +1873,23 @@ function ModelsTab() {
     (total, model) => total + (model.isInstalled ? model.sizeMb : 0),
     0,
   );
+  const llmBlockedReason = useCallback(
+    (pack: AndroidModelPackState) => {
+      if (!("minRamMb" in pack)) return null;
+      const minRamGb = Math.ceil(pack.minRamMb / 1024);
+      // Android reports usable MiB, which is lower than the marketed decimal GB tier.
+      const deviceRamGb = Math.ceil(llmSupport.totalRamMb / 1000);
+      if (llmSupport.totalRamMb <= 0 || deviceRamGb >= minRamGb) {
+        return null;
+      }
+
+      return t("android.models.requiresRam", {
+        minRamGb,
+        totalRamGb: deviceRamGb,
+      });
+    },
+    [llmSupport.totalRamMb, t],
+  );
 
   return (
     <>
@@ -1911,6 +1934,7 @@ function ModelsTab() {
         packs={installedLlm}
         progressById={progressById}
         busyIds={busyIds}
+        getBlockedReason={llmBlockedReason}
         onSelect={handleLlmSelect}
         onDownload={handleLlmDownload}
         onCancel={handleLlmCancel}
@@ -1921,6 +1945,7 @@ function ModelsTab() {
         packs={availableLlm}
         progressById={progressById}
         busyIds={busyIds}
+        getBlockedReason={llmBlockedReason}
         onSelect={handleLlmSelect}
         onDownload={handleLlmDownload}
         onCancel={handleLlmCancel}
@@ -1946,6 +1971,7 @@ function ModelSection({
   onDownload,
   onCancel,
   onDelete,
+  getBlockedReason,
 }: {
   title: string;
   packs: AndroidModelPackState[];
@@ -1955,6 +1981,7 @@ function ModelSection({
   onDownload: (modelId: string) => void;
   onCancel: (modelId: string) => void;
   onDelete: (modelId: string) => void;
+  getBlockedReason?: (pack: AndroidModelPackState) => string | null;
 }) {
   const { t } = useTranslation();
 
@@ -1962,9 +1989,10 @@ function ModelSection({
     return null;
   }
 
-  const statusLabel = (pack: AndroidModelPackState) => {
+  const statusLabel = (pack: AndroidModelPackState, blocked: boolean) => {
     const progress = pack.isDownloading ? progressById[pack.id] : undefined;
     const phase = progress?.phase ?? pack.downloadPhase;
+    if (blocked) return t("android.models.status.unsupported");
     if (pack.isActive) return t("android.models.status.active");
     if (phase === "downloading") {
       const percentage = Math.round(
@@ -1986,6 +2014,8 @@ function ModelSection({
       <div className="android-list">
         {packs.map((pack) => {
           const busy = pack.id in busyIds;
+          const blockedReason = getBlockedReason?.(pack) ?? null;
+          const blocked = blockedReason !== null;
           const downloading =
             pack.isDownloading ||
             progressById[pack.id]?.phase === "downloading" ||
@@ -1996,15 +2026,28 @@ function ModelSection({
               key={pack.id}
               className={`android-model-card ${
                 pack.isActive ? "android-active-model" : ""
-              }`}
+              } ${blocked ? "android-model-card-disabled" : ""}`}
             >
               <div className="android-model-row">
                 <div>
-                  <h3>{pack.displayName}</h3>
-                  <p className="android-muted">{pack.description}</p>
+                  <h3>
+                    {t(`android.models.packs.${pack.id}.displayName`, {
+                      defaultValue: pack.displayName,
+                    })}
+                  </h3>
+                  <p className="android-muted">
+                    {t(`android.models.packs.${pack.id}.description`, {
+                      defaultValue: pack.description,
+                    })}
+                  </p>
                 </div>
-                <span className="android-badge">{statusLabel(pack)}</span>
+                <span className="android-badge">
+                  {statusLabel(pack, blocked)}
+                </span>
               </div>
+              {blockedReason && (
+                <p className="android-muted">{blockedReason}</p>
+              )}
               {pack.missingFiles.length > 0 && !downloading && (
                 <p className="android-muted">
                   {t("android.models.missingFiles", {
@@ -2029,7 +2072,7 @@ function ModelSection({
                       <button
                         type="button"
                         className="android-action android-primary-action"
-                        disabled={busy || !pack.isSelectable}
+                        disabled={busy || blocked || !pack.isSelectable}
                         onClick={() => onSelect(pack.id)}
                       >
                         <Check size={17} />
@@ -2050,7 +2093,7 @@ function ModelSection({
                   <button
                     type="button"
                     className="android-action android-primary-action"
-                    disabled={busy}
+                    disabled={busy || blocked}
                     onClick={() => onDownload(pack.id)}
                   >
                     <Download size={17} />

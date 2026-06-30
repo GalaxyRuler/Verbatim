@@ -104,23 +104,42 @@ pub fn default_model_pack_id() -> &'static str {
 }
 
 pub fn builtin_model_packs() -> Vec<AndroidLlmModelPack> {
-    vec![AndroidLlmModelPack {
-        id: DEFAULT_PACK_ID.to_string(),
-        display_name: "Qwen2.5 cleanup 0.5B".to_string(),
-        description: "LiteRT-LM Qwen2.5 0.5B Instruct q8 for punctuation and grammar cleanup."
-            .to_string(),
-        runtime: "LiteRT-LM 0.13.1".to_string(),
-        license: "Apache-2.0".to_string(),
-        quantization: "q8 ekv1280".to_string(),
-        size_mb: 522,
-        min_ram_mb: 8192,
-        files: vec![AndroidLlmModelFile {
-            target_path: "qwen2.5-0.5b-instruct-q8.task".to_string(),
-            url: "https://huggingface.co/litert-community/Qwen2.5-0.5B-Instruct/resolve/6c237a59eedeb06a821b21f0a59b03d346ac8bc3/Qwen2.5-0.5B-Instruct_multi-prefill-seq_q8_ekv1280.task".to_string(),
-            sha256: "e608953f169aeb1bd7b9155fec2559825e08453fc209b84eda3a781ed0452fd2".to_string(),
-            size_bytes: 546_660_344,
-        }],
-    }]
+    vec![
+        AndroidLlmModelPack {
+            id: DEFAULT_PACK_ID.to_string(),
+            display_name: "Qwen2.5 cleanup 0.5B".to_string(),
+            description: "LiteRT-LM Qwen2.5 0.5B Instruct q8 for punctuation and grammar cleanup."
+                .to_string(),
+            runtime: "LiteRT-LM 0.13.1".to_string(),
+            license: "Apache-2.0".to_string(),
+            quantization: "q8 ekv1280".to_string(),
+            size_mb: 522,
+            min_ram_mb: 8192,
+            files: vec![AndroidLlmModelFile {
+                target_path: "qwen2.5-0.5b-instruct-q8.task".to_string(),
+                url: "https://huggingface.co/litert-community/Qwen2.5-0.5B-Instruct/resolve/6c237a59eedeb06a821b21f0a59b03d346ac8bc3/Qwen2.5-0.5B-Instruct_multi-prefill-seq_q8_ekv1280.task".to_string(),
+                sha256: "e608953f169aeb1bd7b9155fec2559825e08453fc209b84eda3a781ed0452fd2".to_string(),
+                size_bytes: 546_660_344,
+            }],
+        },
+        AndroidLlmModelPack {
+            id: "g4-qwen2_5-1_5b-litert-q8".to_string(),
+            display_name: "Qwen2.5 cleanup 1.5B".to_string(),
+            description: "LiteRT-LM Qwen2.5 1.5B Instruct q8 for higher-quality cleanup."
+                .to_string(),
+            runtime: "LiteRT-LM 0.13.1".to_string(),
+            license: "Apache-2.0".to_string(),
+            quantization: "q8 ekv1280".to_string(),
+            size_mb: 1524,
+            min_ram_mb: 12288,
+            files: vec![AndroidLlmModelFile {
+                target_path: "qwen2.5-1.5b-instruct-q8.task".to_string(),
+                url: "https://huggingface.co/litert-community/Qwen2.5-1.5B-Instruct/resolve/19edb84c69a0212f29a6ef17ba0d6f278b6a1614/Qwen2.5-1.5B-Instruct_multi-prefill-seq_q8_ekv1280.task".to_string(),
+                sha256: "8d867a7c93a6acf2892f08e0174e2f6f351ad256b7e3cfb6d6cd9c89794b42e0".to_string(),
+                size_bytes: 1_597_913_616,
+            }],
+        },
+    ]
 }
 
 impl AndroidLlmModelManager {
@@ -767,16 +786,20 @@ mod tests {
     fn manifest_contains_sha_pinned_litert_pack() {
         let packs = builtin_model_packs();
 
-        assert_eq!(packs.len(), 1);
-        let pack = &packs[0];
-        assert_eq!(pack.id, default_model_pack_id());
-        assert_eq!(pack.runtime, "LiteRT-LM 0.13.1");
-        assert_eq!(pack.license, "Apache-2.0");
-        assert_eq!(pack.min_ram_mb, 8192);
-        assert_eq!(pack.files.len(), 1);
-        assert_eq!(pack.files[0].target_path, "qwen2.5-0.5b-instruct-q8.task");
-        assert_eq!(pack.files[0].sha256.len(), 64);
-        assert!(pack.files[0].url.contains("litert-community/Qwen2.5"));
+        assert_eq!(packs.len(), 2);
+
+        let starter = &packs[0];
+        assert_eq!(starter.id, default_model_pack_id());
+        assert_eq!(starter.min_ram_mb, 8192);
+        assert_litert_pack_shape(starter, "qwen2.5-0.5b-instruct-q8.task");
+
+        let higher_capacity = &packs[1];
+        assert_eq!(higher_capacity.id, "g4-qwen2_5-1_5b-litert-q8");
+        assert_eq!(higher_capacity.min_ram_mb, 12288);
+        assert_litert_pack_shape(higher_capacity, "qwen2.5-1.5b-instruct-q8.task");
+        assert!(higher_capacity.files[0]
+            .url
+            .contains("litert-community/Qwen2.5-1.5B-Instruct/resolve/19edb84c69a0212f29a6ef17ba0d6f278b6a1614"));
     }
 
     #[test]
@@ -957,6 +980,22 @@ mod tests {
         let task_path = pack_dir.join("qwen2.5-0.5b-instruct-q8.task");
         fs::write(&task_path, b"fixture").unwrap();
         (pack_dir, task_path)
+    }
+
+    fn assert_litert_pack_shape(pack: &AndroidLlmModelPack, target_path: &str) {
+        assert_eq!(pack.runtime, "LiteRT-LM 0.13.1");
+        assert_eq!(pack.license, "Apache-2.0");
+        assert_eq!(pack.quantization, "q8 ekv1280");
+        assert_eq!(pack.files.len(), 1);
+        assert_eq!(pack.files[0].target_path, target_path);
+        assert!(is_sha256_hex(&pack.files[0].sha256));
+        assert!(pack.files[0].url.contains("litert-community/Qwen2.5"));
+        assert!(pack.files[0].url.contains("/resolve/"));
+        assert!(!pack.files[0].url.contains("/main/"));
+    }
+
+    fn is_sha256_hex(value: &str) -> bool {
+        value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
     }
 
     fn test_app(name: &str) -> tauri::App<tauri::test::MockRuntime> {

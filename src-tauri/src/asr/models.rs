@@ -99,63 +99,119 @@ pub fn default_model_pack_id() -> &'static str {
 pub fn builtin_model_packs() -> Vec<AndroidAsrModelPack> {
     // Use per-file upstream URLs instead of the .tar.bz2 release archives so Android can stream,
     // resume, hash-check, and stage each component without adding a bzip2 extraction dependency.
-    vec![AndroidAsrModelPack {
-        id: DEFAULT_PACK_ID.to_string(),
-        display_name: "English On-device Starter".to_string(),
-        description: "Streaming Zipformer 20M, Whisper tiny.en int8, and Silero VAD.".to_string(),
-        language: "en".to_string(),
-        size_mb: 141,
-        files: vec![
-            AndroidAsrModelFile {
-                target_path: "streaming/encoder.onnx".to_string(),
-                url: "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-20M-2023-02-17/resolve/d42f2d9f7ca24806fb667456a18a9f1b60f70d16/encoder-epoch-99-avg-1.int8.onnx".to_string(),
-                sha256: "3810755ce7c3ab26b42a8bcf39d191308fa27fb0f53358823ba46141d03b7eb3".to_string(),
-                size_bytes: 42_845_182,
-            },
-            AndroidAsrModelFile {
-                target_path: "streaming/decoder.onnx".to_string(),
-                url: "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-20M-2023-02-17/resolve/d42f2d9f7ca24806fb667456a18a9f1b60f70d16/decoder-epoch-99-avg-1.onnx".to_string(),
-                sha256: "45a7f940ecfb53d89fa270ad11b88b961e53a317203eb24b1c8e95ed208b0f30".to_string(),
-                size_bytes: 2_092_272,
-            },
-            AndroidAsrModelFile {
-                target_path: "streaming/joiner.onnx".to_string(),
-                url: "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-20M-2023-02-17/resolve/d42f2d9f7ca24806fb667456a18a9f1b60f70d16/joiner-epoch-99-avg-1.int8.onnx".to_string(),
-                sha256: "e085d73b593cf9b0707f370dbd656d58327d3fe36d80d849202ef81df02cb01e".to_string(),
-                size_bytes: 259_572,
-            },
-            AndroidAsrModelFile {
-                target_path: "streaming/tokens.txt".to_string(),
-                url: "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-20M-2023-02-17/resolve/d42f2d9f7ca24806fb667456a18a9f1b60f70d16/tokens.txt".to_string(),
-                sha256: "49e3c2646595fd907228b3c6787069658f67b17377c60aeb8619c4551b2316fb".to_string(),
-                size_bytes: 5_048,
-            },
-            AndroidAsrModelFile {
-                target_path: "whisper/encoder.onnx".to_string(),
-                url: "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-tiny.en/resolve/d026532c022fa99fd789d6b32446a1df7b6bfc43/tiny.en-encoder.int8.onnx".to_string(),
-                sha256: "0ce578b827c94a961aacb8fa14b02f096504b337e5c94be37c36238cbe3e8bc6".to_string(),
-                size_bytes: 12_937_772,
-            },
-            AndroidAsrModelFile {
-                target_path: "whisper/decoder.onnx".to_string(),
-                url: "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-tiny.en/resolve/d026532c022fa99fd789d6b32446a1df7b6bfc43/tiny.en-decoder.int8.onnx".to_string(),
-                sha256: "06c0e6ff6348d427e51839219d1c886c18cfdf411e629e33f5e1679bff9c1527".to_string(),
-                size_bytes: 89_853_865,
-            },
-            AndroidAsrModelFile {
-                target_path: "whisper/tokens.txt".to_string(),
-                url: "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-tiny.en/resolve/d026532c022fa99fd789d6b32446a1df7b6bfc43/tiny.en-tokens.txt".to_string(),
-                sha256: "306cd27f03c1a714eca7108e03d66b7dc042abe8c258b44c199a7ed9838dd930".to_string(),
-                size_bytes: 835_554,
-            },
-            AndroidAsrModelFile {
-                target_path: "silero_vad_v4.onnx".to_string(),
-                url: "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad_v4.onnx".to_string(),
-                sha256: "a35ebf52fd3ce5f1469b2a36158dba761bc47b973ea3382b3186ca15b1f5af28".to_string(),
-                size_bytes: 1_807_522,
-            },
-        ],
-    }]
+    vec![
+        AndroidAsrModelPack {
+            id: DEFAULT_PACK_ID.to_string(),
+            display_name: "English On-device Starter".to_string(),
+            description: "Streaming Zipformer 20M, Whisper tiny.en int8, and Silero VAD."
+                .to_string(),
+            language: "en".to_string(),
+            size_mb: 141,
+            files: model_files_with_whisper(whisper_tiny_files()),
+        },
+        AndroidAsrModelPack {
+            id: "g3-zipformer-whisper-base-en".to_string(),
+            display_name: "English - higher accuracy".to_string(),
+            description: "Streaming Zipformer 20M, Whisper base.en int8, and Silero VAD."
+                .to_string(),
+            language: "en".to_string(),
+            size_mb: 167,
+            files: model_files_with_whisper(whisper_base_files()),
+        },
+    ]
+}
+
+fn model_files_with_whisper(whisper_files: Vec<AndroidAsrModelFile>) -> Vec<AndroidAsrModelFile> {
+    let mut files = streaming_zipformer_files();
+    files.extend(whisper_files);
+    files.push(silero_vad_file());
+    files
+}
+
+fn streaming_zipformer_files() -> Vec<AndroidAsrModelFile> {
+    vec![
+        AndroidAsrModelFile {
+            target_path: "streaming/encoder.onnx".to_string(),
+            url: "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-20M-2023-02-17/resolve/d42f2d9f7ca24806fb667456a18a9f1b60f70d16/encoder-epoch-99-avg-1.int8.onnx".to_string(),
+            sha256: "3810755ce7c3ab26b42a8bcf39d191308fa27fb0f53358823ba46141d03b7eb3".to_string(),
+            size_bytes: 42_845_182,
+        },
+        AndroidAsrModelFile {
+            target_path: "streaming/decoder.onnx".to_string(),
+            url: "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-20M-2023-02-17/resolve/d42f2d9f7ca24806fb667456a18a9f1b60f70d16/decoder-epoch-99-avg-1.onnx".to_string(),
+            sha256: "45a7f940ecfb53d89fa270ad11b88b961e53a317203eb24b1c8e95ed208b0f30".to_string(),
+            size_bytes: 2_092_272,
+        },
+        AndroidAsrModelFile {
+            target_path: "streaming/joiner.onnx".to_string(),
+            url: "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-20M-2023-02-17/resolve/d42f2d9f7ca24806fb667456a18a9f1b60f70d16/joiner-epoch-99-avg-1.int8.onnx".to_string(),
+            sha256: "e085d73b593cf9b0707f370dbd656d58327d3fe36d80d849202ef81df02cb01e".to_string(),
+            size_bytes: 259_572,
+        },
+        AndroidAsrModelFile {
+            target_path: "streaming/tokens.txt".to_string(),
+            url: "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-20M-2023-02-17/resolve/d42f2d9f7ca24806fb667456a18a9f1b60f70d16/tokens.txt".to_string(),
+            sha256: "49e3c2646595fd907228b3c6787069658f67b17377c60aeb8619c4551b2316fb".to_string(),
+            size_bytes: 5_048,
+        },
+    ]
+}
+
+fn whisper_tiny_files() -> Vec<AndroidAsrModelFile> {
+    vec![
+        AndroidAsrModelFile {
+            target_path: "whisper/encoder.onnx".to_string(),
+            url: "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-tiny.en/resolve/d026532c022fa99fd789d6b32446a1df7b6bfc43/tiny.en-encoder.int8.onnx".to_string(),
+            sha256: "0ce578b827c94a961aacb8fa14b02f096504b337e5c94be37c36238cbe3e8bc6".to_string(),
+            size_bytes: 12_937_772,
+        },
+        AndroidAsrModelFile {
+            target_path: "whisper/decoder.onnx".to_string(),
+            url: "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-tiny.en/resolve/d026532c022fa99fd789d6b32446a1df7b6bfc43/tiny.en-decoder.int8.onnx".to_string(),
+            sha256: "06c0e6ff6348d427e51839219d1c886c18cfdf411e629e33f5e1679bff9c1527".to_string(),
+            size_bytes: 89_853_865,
+        },
+        AndroidAsrModelFile {
+            target_path: "whisper/tokens.txt".to_string(),
+            url: "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-tiny.en/resolve/d026532c022fa99fd789d6b32446a1df7b6bfc43/tiny.en-tokens.txt".to_string(),
+            sha256: "306cd27f03c1a714eca7108e03d66b7dc042abe8c258b44c199a7ed9838dd930".to_string(),
+            size_bytes: 835_554,
+        },
+    ]
+}
+
+fn whisper_base_files() -> Vec<AndroidAsrModelFile> {
+    vec![
+        AndroidAsrModelFile {
+            target_path: "whisper/encoder.onnx".to_string(),
+            url: "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-base.en/resolve/59eea950fc76df2453efb57e6c0fd334548e8ffe/base.en-encoder.int8.onnx".to_string(),
+            sha256: "ef6b936f4c9b1d90a3b68634b60c4ed8576b26172b33c2535ec0e933c9edb823".to_string(),
+            size_bytes: 29_120_534,
+        },
+        AndroidAsrModelFile {
+            target_path: "whisper/decoder.onnx".to_string(),
+            url: "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-base.en/resolve/59eea950fc76df2453efb57e6c0fd334548e8ffe/base.en-decoder.int8.onnx".to_string(),
+            sha256: "f7162ad6db2dbef16cfaeaa7f945b9d7dd9c1b8d472f6aca82f2273d185e4d41".to_string(),
+            size_bytes: 130_669_978,
+        },
+        AndroidAsrModelFile {
+            target_path: "whisper/tokens.txt".to_string(),
+            url: "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-base.en/resolve/59eea950fc76df2453efb57e6c0fd334548e8ffe/base.en-tokens.txt".to_string(),
+            sha256: "306cd27f03c1a714eca7108e03d66b7dc042abe8c258b44c199a7ed9838dd930".to_string(),
+            size_bytes: 835_554,
+        },
+    ]
+}
+
+fn silero_vad_file() -> AndroidAsrModelFile {
+    AndroidAsrModelFile {
+        target_path: "silero_vad_v4.onnx".to_string(),
+        url:
+            "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad_v4.onnx"
+                .to_string(),
+        sha256: "a35ebf52fd3ce5f1469b2a36158dba761bc47b973ea3382b3186ca15b1f5af28".to_string(),
+        size_bytes: 1_807_522,
+    }
 }
 
 impl AndroidAsrModelManager {
@@ -802,30 +858,64 @@ mod tests {
     fn manifest_contains_one_extensible_pack_with_expected_layout() {
         let packs = builtin_model_packs();
 
-        assert_eq!(packs.len(), 1);
-        let pack = &packs[0];
-        assert_eq!(pack.id, "g3-zipformer-whisper-tiny-en");
-        assert_eq!(pack.files.len(), 8);
+        assert_eq!(packs.len(), 2);
+        assert_eq!(packs[0].id, "g3-zipformer-whisper-tiny-en");
+        assert_eq!(packs[1].id, "g3-zipformer-whisper-base-en");
 
-        let targets = pack
+        for pack in &packs {
+            assert_eq!(pack.files.len(), 8);
+            assert_eq!(component_targets(pack), asr_model_path_targets());
+            assert!(pack.files.iter().all(|file| is_sha256_hex(&file.sha256)));
+            assert!(pack
+                .files
+                .iter()
+                .filter(|file| file.url.contains("huggingface.co"))
+                .all(|file| file.url.contains("/resolve/") && !file.url.contains("/main/")));
+        }
+    }
+
+    #[test]
+    fn higher_accuracy_pack_reuses_streaming_and_vad_files_with_base_whisper() {
+        let packs = builtin_model_packs();
+        let starter = packs
+            .iter()
+            .find(|pack| pack.id == "g3-zipformer-whisper-tiny-en")
+            .unwrap();
+        let higher_accuracy = packs
+            .iter()
+            .find(|pack| pack.id == "g3-zipformer-whisper-base-en")
+            .unwrap();
+
+        for target_path in [
+            "streaming/encoder.onnx",
+            "streaming/decoder.onnx",
+            "streaming/joiner.onnx",
+            "streaming/tokens.txt",
+            "silero_vad_v4.onnx",
+        ] {
+            let starter_file = starter
+                .files
+                .iter()
+                .find(|file| file.target_path == target_path)
+                .unwrap();
+            let higher_accuracy_file = higher_accuracy
+                .files
+                .iter()
+                .find(|file| file.target_path == target_path)
+                .unwrap();
+
+            assert_eq!(higher_accuracy_file.url, starter_file.url);
+            assert_eq!(higher_accuracy_file.sha256, starter_file.sha256);
+            assert_eq!(higher_accuracy_file.size_bytes, starter_file.size_bytes);
+        }
+
+        assert!(higher_accuracy
             .files
             .iter()
-            .map(|file| file.target_path.as_str())
-            .collect::<Vec<_>>();
-        assert_eq!(
-            targets,
-            vec![
-                "streaming/encoder.onnx",
-                "streaming/decoder.onnx",
-                "streaming/joiner.onnx",
-                "streaming/tokens.txt",
-                "whisper/encoder.onnx",
-                "whisper/decoder.onnx",
-                "whisper/tokens.txt",
-                "silero_vad_v4.onnx",
-            ]
-        );
-        assert!(pack.files.iter().all(|file| file.sha256.len() == 64));
+            .filter(|file| file.target_path.starts_with("whisper/"))
+            .all(|file| file
+                .url
+                .contains("csukuangfj/sherpa-onnx-whisper-base.en/resolve/59eea950fc76df2453efb57e6c0fd334548e8ffe")));
     }
 
     #[test]
@@ -1026,5 +1116,39 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+
+    fn component_targets(pack: &AndroidAsrModelPack) -> Vec<String> {
+        pack.files
+            .iter()
+            .map(|file| file.target_path.clone())
+            .collect()
+    }
+
+    fn asr_model_path_targets() -> Vec<String> {
+        let root = Path::new("model-root");
+        let paths = crate::asr::AsrModelPaths::for_dir(root);
+        [
+            paths.streaming_encoder,
+            paths.streaming_decoder,
+            paths.streaming_joiner,
+            paths.streaming_tokens,
+            paths.whisper_encoder,
+            paths.whisper_decoder,
+            paths.whisper_tokens,
+            paths.vad,
+        ]
+        .into_iter()
+        .map(|path| {
+            path.strip_prefix(root)
+                .unwrap()
+                .to_string_lossy()
+                .replace('\\', "/")
+        })
+        .collect()
+    }
+
+    fn is_sha256_hex(value: &str) -> bool {
+        value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
     }
 }
