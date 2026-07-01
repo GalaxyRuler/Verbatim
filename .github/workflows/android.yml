@@ -84,7 +84,49 @@ jobs:
         env:
           ANDROID_NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/${{ env.NDK_VERSION }}
           ANDROID_NDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}/ndk/${{ env.NDK_VERSION }}
-        run: bun run tauri android build --debug --target x86_64 --apk --features android-asr
+          ANDROID_E2E_FEATURES: android-asr android-e2e-bundled-frontend
+          TAURI_CONFIG: '{"build":{"devUrl":null}}'
+        run: |
+          bun run tauri android build --debug --target x86_64 --apk --features "$ANDROID_E2E_FEATURES" \
+            --config "$TAURI_CONFIG"
+      - name: Stage bundled frontend assets in debug APK
+        working-directory: src-tauri/gen/android
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/${{ env.NDK_VERSION }}
+          ANDROID_NDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}/ndk/${{ env.NDK_VERSION }}
+          ANDROID_E2E_FEATURES: android-asr android-e2e-bundled-frontend
+          CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER: ${{ env.ANDROID_SDK_ROOT }}/ndk/${{ env.NDK_VERSION }}/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android26-clang
+        shell: bash
+        run: |
+          set -euo pipefail
+          assets_dir="app/src/main/assets"
+          gradle_file="app/build.gradle.kts"
+
+          test -f "../../../dist/index.html" || {
+            echo "::error::frontend build missing dist/index.html"
+            exit 1
+          }
+
+          # Tauri CLI regenerates this Gradle field with only android-asr for
+          # the final Rust task; patch the CI copy so the packaged library uses
+          # tauri/custom-protocol and loads the bundled assets directly.
+          grep -Fq 'features = "android-asr"' "$gradle_file" || {
+            echo "::error::expected generated Android Rust feature list not found in $gradle_file"
+            exit 1
+          }
+          perl -0pi -e 's/features = "android-asr"/features = "$ENV{ANDROID_E2E_FEATURES}"/' "$gradle_file"
+          grep -Fq "features = \"$ANDROID_E2E_FEATURES\"" "$gradle_file" || {
+            echo "::error::failed to enable bundled-frontend Rust feature for Android e2e debug APK"
+            exit 1
+          }
+
+          mkdir -p "$assets_dir"
+          cp -R ../../../dist/. "$assets_dir/"
+
+          bash ./gradlew :app:assembleUniversalDebug \
+            -PtargetList=x86_64 \
+            -ParchList=x86_64 \
+            -PabiList=x86_64
       # Run here, not as a standalone job: the build above generates gen/android's
       # tauri.settings.gradle (machine-specific, not committed), which gradle needs.
       - name: Kotlin unit tests
@@ -103,6 +145,27 @@ jobs:
           test -f "$apk" || apk="$(find "$base" -name 'app-*-debug.apk' | head -1)"
           test -f "$apk" || { echo "::error::debug APK not found under $base"; exit 1; }
           echo "path=$apk" >> "$GITHUB_OUTPUT"
+      - name: Guard bundled frontend APK config
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk="${{ steps.apk.outputs.path }}"
+          conf="$RUNNER_TEMP/tauri-conf.json"
+
+          unzip -p "$apk" assets/tauri.conf.json > "$conf" || {
+            echo "::error::debug APK missing embedded assets/tauri.conf.json"
+            exit 1
+          }
+
+          if grep -q "localhost:1420" "$conf"; then
+            echo "::error::debug APK embedded assets/tauri.conf.json still references localhost:1420; CI e2e must load bundled frontend assets"
+            exit 1
+          fi
+
+          unzip -l "$apk" | grep -q 'assets/index.html' || {
+            echo "::error::debug APK missing bundled frontend assets/index.html"
+            exit 1
+          }
       - name: Guard 16 KB Android .so alignment
         env:
           ANDROID_NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/${{ env.NDK_VERSION }}
