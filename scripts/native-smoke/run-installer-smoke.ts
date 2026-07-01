@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import {
+  copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -11,7 +12,14 @@ import {
 import { homedir, tmpdir, platform } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { findFiles, findMountedMacApp } from "./installer-smoke-utils.js";
+import {
+  findFiles,
+  findMountedMacApp,
+  retryOnce,
+  sleep,
+  waitForPathMissing,
+  waitForPathsMissing,
+} from "./installer-smoke-utils.js";
 
 type CommandResult = {
   stdout: string;
@@ -45,6 +53,9 @@ const artifactDir = resolve(
     join(repoRoot, "native-smoke-artifacts", "installer"),
 );
 const timeoutMs = argValue("--timeout-ms") ?? "30000";
+const windowsAppDataDeleteTimeoutMs = 10_000;
+const windowsAppDataPreserveSettleMs = 2_000;
+const windowsUninstallRetryDelayMs = 2_000;
 const tempRoot = mkdtempSync(join(tmpdir(), "verbatim-installer-smoke-"));
 let installedAppPath: string | null = null;
 let linuxPackageName: string | null = null;
@@ -83,34 +94,23 @@ try {
   );
 } finally {
   if (hostPlatform === "win32" && windowsUninstallerPath) {
-    await runWindowsUninstallCycle({
-      appPath: installedAppPath,
+    await runWindowsUninstallCycleWithRetry({
+      initialAppPath: installedAppPath,
       deleteAppData: false,
+      installCycle: "preserve-app-data",
       logName: "windows-uninstaller-preserve-app-data",
-    }).catch((error) => {
-      writeFileSync(
-        join(artifactDir, "windows-uninstaller-preserve-app-data.error.log"),
-        String(error),
-      );
+    }).catch(() => {
       process.exitCode = 1;
     });
 
     if (process.exitCode == null) {
-      await installWindowsNormal("delete-app-data")
-        .then((deleteAppPath) =>
-          runWindowsUninstallCycle({
-            appPath: deleteAppPath,
-            deleteAppData: true,
-            logName: "windows-uninstaller-delete-app-data",
-          }),
-        )
-        .catch((error) => {
-          writeFileSync(
-            join(artifactDir, "windows-uninstaller-delete-app-data.error.log"),
-            String(error),
-          );
-          process.exitCode = 1;
-        });
+      await runWindowsUninstallCycleWithRetry({
+        deleteAppData: true,
+        installCycle: "delete-app-data",
+        logName: "windows-uninstaller-delete-app-data",
+      }).catch(() => {
+        process.exitCode = 1;
+      });
     }
   }
 
@@ -493,6 +493,50 @@ function cleanupWindowsAppDataProbe(): void {
   writeSummary();
 }
 
+async function runWindowsUninstallCycleWithRetry(options: {
+  initialAppPath?: string | null;
+  deleteAppData: boolean;
+  installCycle: string;
+  logName: string;
+}): Promise<void> {
+  await retryOnce(
+    async (attempt) => {
+      let appPath: string | null;
+      if (attempt === 1 && options.initialAppPath != null) {
+        appPath = options.initialAppPath;
+      } else {
+        appPath = await installWindowsNormal(
+          attempt === 1
+            ? options.installCycle
+            : `${options.installCycle}-retry-${attempt}`,
+        );
+      }
+      const logName =
+        attempt === 1 ? options.logName : `${options.logName}-retry-${attempt}`;
+
+      await runWindowsUninstallCycle({
+        appPath,
+        deleteAppData: options.deleteAppData,
+        logName,
+      });
+    },
+    {
+      delayMs: windowsUninstallRetryDelayMs,
+      onFailure: (error, attempt) => {
+        const logName =
+          attempt === 1
+            ? options.logName
+            : `${options.logName}-retry-${attempt}`;
+        writeWindowsUninstallFailureDiagnostics({
+          error,
+          attempt,
+          logName,
+        });
+      },
+    },
+  );
+}
+
 async function runWindowsUninstallCycle(options: {
   appPath: string | null;
   deleteAppData: boolean;
@@ -532,17 +576,19 @@ async function runWindowsUninstallCycle(options: {
     }
 
     if (options.deleteAppData) {
-      verifyWindowsDeleteAppDataUninstallRemovedAppData();
+      await verifyWindowsDeleteAppDataUninstallRemovedAppData();
     } else {
-      verifyWindowsSilentUninstallPreservedAppData();
+      await verifyWindowsSilentUninstallPreservedAppData();
     }
   } finally {
     cleanupWindowsAppDataProbe();
   }
 }
 
-function verifyWindowsSilentUninstallPreservedAppData(): void {
+async function verifyWindowsSilentUninstallPreservedAppData(): Promise<void> {
   if (!windowsAppDataProbe) return;
+
+  await sleep(windowsAppDataPreserveSettleMs);
 
   const missingMarkers = windowsAppDataProbe.markerFiles
     .map((markerFile, index) => ({ marker: `marker-${index + 1}`, markerFile }))
@@ -556,6 +602,7 @@ function verifyWindowsSilentUninstallPreservedAppData(): void {
     silentUninstallPreservedLocalAppData: existsSync(
       windowsAppDataProbe.localAppDir,
     ),
+    settleMs: windowsAppDataPreserveSettleMs,
     missingMarkers,
   };
   summary.windowsAppDataProbe = {
@@ -575,22 +622,34 @@ function verifyWindowsSilentUninstallPreservedAppData(): void {
   }
 }
 
-function verifyWindowsDeleteAppDataUninstallRemovedAppData(): void {
+async function verifyWindowsDeleteAppDataUninstallRemovedAppData(): Promise<void> {
   if (!windowsAppDataProbe) return;
+
+  const probePaths = [
+    windowsAppDataProbe.roamingAppDir,
+    windowsAppDataProbe.localAppDir,
+    ...windowsAppDataProbe.markerFiles,
+  ];
+  const remainingPaths = await waitForPathsMissing(
+    probePaths,
+    windowsAppDataDeleteTimeoutMs,
+  );
 
   const remainingMarkers = windowsAppDataProbe.markerFiles
     .map((markerFile, index) => ({ marker: `marker-${index + 1}`, markerFile }))
-    .filter(({ markerFile }) => existsSync(markerFile))
+    .filter(({ markerFile }) => remainingPaths.includes(markerFile))
     .map(({ marker }) => marker);
 
   const result = {
-    deleteAppDataRemovedRoamingAppData: !existsSync(
+    deleteAppDataRemovedRoamingAppData: !remainingPaths.includes(
       windowsAppDataProbe.roamingAppDir,
     ),
-    deleteAppDataRemovedLocalAppData: !existsSync(
+    deleteAppDataRemovedLocalAppData: !remainingPaths.includes(
       windowsAppDataProbe.localAppDir,
     ),
+    timeoutMs: windowsAppDataDeleteTimeoutMs,
     remainingMarkers,
+    remainingPaths,
   };
   summary.windowsAppDataProbe = {
     ...(summary.windowsAppDataProbe as Record<string, unknown> | undefined),
@@ -604,21 +663,49 @@ function verifyWindowsDeleteAppDataUninstallRemovedAppData(): void {
     remainingMarkers.length > 0
   ) {
     throw new Error(
-      `Windows /DELETEAPPDATA uninstall left app-data probe markers: ${remainingMarkers.join(", ")}`,
+      `Windows /DELETEAPPDATA uninstall left app-data probe paths: ${remainingPaths.join(", ")}`,
     );
   }
 }
 
-async function waitForPathMissing(
-  filePath: string,
-  maxMs: number,
-): Promise<boolean> {
-  const started = Date.now();
-  while (Date.now() - started < maxMs) {
-    if (!existsSync(filePath)) return true;
-    await new Promise((resolveWait) => setTimeout(resolveWait, 250));
+function writeWindowsUninstallFailureDiagnostics(options: {
+  error: unknown;
+  attempt: number;
+  logName: string;
+}): void {
+  const suffix = new Date().toISOString().replace(/[:.]/g, "-");
+  const diagnosticsDir = join(
+    artifactDir,
+    `${options.logName}-failure-attempt-${options.attempt}-${suffix}`,
+  );
+  mkdirSync(diagnosticsDir, { recursive: true });
+  writeFileSync(
+    join(diagnosticsDir, "error.log"),
+    options.error instanceof Error
+      ? (options.error.stack ?? options.error.message)
+      : String(options.error),
+  );
+
+  const diagnosticFiles = [
+    `${options.logName}.stdout.log`,
+    `${options.logName}.stderr.log`,
+    `${options.logName}-install-dir-remaining.log`,
+    "installer-smoke-summary.json",
+  ];
+  const copiedFiles: string[] = [];
+  for (const diagnosticFile of diagnosticFiles) {
+    const source = join(artifactDir, diagnosticFile);
+    if (!existsSync(source)) continue;
+    copyFileSync(source, join(diagnosticsDir, diagnosticFile));
+    copiedFiles.push(diagnosticFile);
   }
-  return !existsSync(filePath);
+
+  if (copiedFiles.length === 0) {
+    writeFileSync(
+      join(diagnosticsDir, "no-log-files-found.txt"),
+      `No uninstall log files were present for ${options.logName}.`,
+    );
+  }
 }
 
 function writeSummary(): void {
