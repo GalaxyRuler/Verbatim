@@ -15,7 +15,9 @@
   },
   "bundle": {
     "android": {
-      "minSdkVersion": 26
+      "minSdkVersion": 26,
+      "versionCode": 11000,
+      "autoIncrementVersionCode": false
     }
   }
 }
