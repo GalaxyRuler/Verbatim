@@ -12,6 +12,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/). Version
 
 ---
 
+## [0.11.0] — 2026-07-01
+
+### Added
+
+- More Android on-device ASR engine packs, selectable in the Models tab: SenseVoice (multilingual zh/en/ja/ko/yue), Canary (en/es/de/fr), Moonshine (fast English), Parakeet TDT 0.6B v2 (max-accuracy English). New engine-kind architecture supporting offline-only, VAD-segmented, final-only sessions.
+
+### Fixed
+
+- History database now recovers instead of failing to launch when it encounters a database written by a newer app version.
+
+### Internal (CI)
+
+- Android e2e now serves the bundled frontend (no localhost dev-URL race); Windows installer-smoke is robust to NSIS async uninstall timing.
+
+---
+
 ## [0.10.0] — 2026-06-30
 
 ### Added
@@ -197,7 +213,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/). Version
 
 This project is a fork of [Handy](https://github.com/cjpais/Handy) by [CJ Pais](https://github.com/cjpais). For the complete upstream changelog see the [upstream releases page](https://github.com/cjpais/Handy/releases).
 
-[Unreleased]: https://github.com/GalaxyRuler/Verbatim/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/GalaxyRuler/Verbatim/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/GalaxyRuler/Verbatim/compare/v0.10.0...v0.11.0
+[0.10.0]: https://github.com/GalaxyRuler/Verbatim/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/GalaxyRuler/Verbatim/compare/v0.8.8...v0.9.0
 [0.8.8]: https://github.com/GalaxyRuler/Verbatim/compare/v0.8.7...v0.8.8
 [0.8.7]: https://github.com/GalaxyRuler/Verbatim/compare/v0.8.6...v0.8.7
