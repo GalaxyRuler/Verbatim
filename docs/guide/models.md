@@ -20,6 +20,8 @@ The exact models and sizes available depend on your version — see the model pi
 
 If transcription feels slow, switch to a smaller model. If accuracy matters more than speed, switch to a larger one.
 
+On Android, larger on-device ASR packs may be hidden behind RAM gates to prevent unstable inference. Parakeet TDT 0.6B v2 requires at least 12 GB RAM because the 652 MB encoder can use more than 2 GB during inference.
+
 ## Downloading and storage
 
 Models are downloaded once and cached on disk, so you don't re-download them. After a model is cached, Verbatim works fully offline.

@@ -88,6 +88,8 @@ class FloatingBubbleService : Service() {
       startDebugEngineWavSmoke(
         intent.getStringExtra(EXTRA_DEBUG_WAV_PATH),
         intent.getStringExtra(EXTRA_DEBUG_LANGUAGE),
+        intent.getStringExtra(EXTRA_DEBUG_MODEL_ID),
+        intent.getStringExtra(EXTRA_DEBUG_MODEL_DIR),
       )
       return START_STICKY
     }
@@ -607,7 +609,7 @@ class FloatingBubbleService : Service() {
     }
   }
 
-  private fun createEngineListener(): AsrEngineListener =
+  private fun createEngineListener(logFinalText: Boolean = false): AsrEngineListener =
     object : AsrEngineListener {
       override fun onAsrPartial(text: String) {
         logAsr("onPartial callback len=${text.length}")
@@ -622,6 +624,10 @@ class FloatingBubbleService : Service() {
 
       override fun onAsrFinal(text: String) {
         logAsr("onFinal callback len=${text.length}")
+        if (logFinalText) {
+          val finalText = text.replace(Regex("\\s+"), " ").trim().take(512)
+          logAsr("onFinal callback text=$finalText")
+        }
         mainHandler.post {
           stopMicrophoneForeground()
           engineRecording.set(false)
@@ -642,7 +648,12 @@ class FloatingBubbleService : Service() {
       }
     }
 
-  private fun startDebugEngineWavSmoke(wavPath: String?, languageOverride: String? = null) {
+  private fun startDebugEngineWavSmoke(
+    wavPath: String?,
+    languageOverride: String? = null,
+    modelIdOverride: String? = null,
+    modelDirOverride: String? = null,
+  ) {
     if (wavPath.isNullOrBlank()) {
       logAsr("debug WAV smoke missing wav path")
       return
@@ -653,8 +664,8 @@ class FloatingBubbleService : Service() {
     }
 
     livePartialText = null
-    val listener = createEngineListener()
-    val modelDir = engineModelDir()
+    val listener = createEngineListener(logFinalText = true)
+    val modelDir = debugEngineModelDir(modelIdOverride, modelDirOverride)
     val lang = languageOverride?.trim()?.takeIf { it.isNotBlank() }
       ?: Locale.getDefault().language.ifBlank { "en" }
     logAsr("nativeAsrStart called lang=$lang modelDir=$modelDir debugWav=$wavPath")
@@ -800,6 +811,15 @@ class FloatingBubbleService : Service() {
 
   private fun engineModelDir(): String {
     return EngineModelSelectionStore.engineModelDir(this)
+  }
+
+  private fun debugEngineModelDir(modelIdOverride: String?, modelDirOverride: String?): String {
+    modelDirOverride?.trim()?.takeIf { it.isNotBlank() }?.let { return it }
+    modelIdOverride?.trim()?.takeIf { it.isNotBlank() }?.let { modelId ->
+      val selectedPackName = File(modelId).name
+      return File(applicationInfo.dataDir, "models/android-asr/$selectedPackName").absolutePath
+    }
+    return engineModelDir()
   }
 
   private fun isEngineModelInstalled(): Boolean =
@@ -1420,6 +1440,8 @@ class FloatingBubbleService : Service() {
       "com.galaxyruler.verbatim.action.DEBUG_LLM_CLEANUP_SMOKE"
     private const val EXTRA_DEBUG_WAV_PATH = "wav_path"
     private const val EXTRA_DEBUG_LANGUAGE = "lang"
+    private const val EXTRA_DEBUG_MODEL_ID = "model_id"
+    private const val EXTRA_DEBUG_MODEL_DIR = "model_dir"
     private const val EXTRA_DEBUG_RAW_TEXT = "raw_text"
     private const val EXTRA_DEBUG_MODEL_PATH = "model_path"
     private const val ACTION_INPUT_TARGET_ACTIVE =
@@ -1618,6 +1640,8 @@ class FloatingBubbleService : Service() {
       context: Context,
       wavPath: String?,
       languageOverride: String? = null,
+      modelIdOverride: String? = null,
+      modelDirOverride: String? = null,
     ) {
       if (!BuildConfig.DEBUG) {
         return
@@ -1629,6 +1653,12 @@ class FloatingBubbleService : Service() {
           putExtra(EXTRA_DEBUG_WAV_PATH, wavPath)
           if (!languageOverride.isNullOrBlank()) {
             putExtra(EXTRA_DEBUG_LANGUAGE, languageOverride)
+          }
+          if (!modelIdOverride.isNullOrBlank()) {
+            putExtra(EXTRA_DEBUG_MODEL_ID, modelIdOverride)
+          }
+          if (!modelDirOverride.isNullOrBlank()) {
+            putExtra(EXTRA_DEBUG_MODEL_DIR, modelDirOverride)
           }
         })
       } catch (_: IllegalStateException) {

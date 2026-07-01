@@ -27,6 +27,9 @@ const CANARY_REVISION: &str = "9077164e0d3dd1d5353743e89ceaa1d3a770838c";
 const MOONSHINE_PACK_ID: &str = "moonshine-tiny-en-int8";
 const MOONSHINE_MIN_RAM_MB: u64 = 4096;
 const MOONSHINE_REVISION: &str = "bf2b762c076d8ea61e2af0b3851c9564fb77552e";
+const PARAKEET_PACK_ID: &str = "parakeet-tdt-0_6b-v2-int8";
+const PARAKEET_MIN_RAM_MB: u64 = 12_288;
+const PARAKEET_REVISION: &str = "1ab9323565ddb038682214b292f588070a538ce2";
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -44,6 +47,7 @@ pub enum AndroidAsrEngineKind {
     SenseVoice,
     Canary,
     Moonshine,
+    Parakeet,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -171,6 +175,16 @@ pub fn builtin_model_packs() -> Vec<AndroidAsrModelPack> {
             engine_kind: AndroidAsrEngineKind::Moonshine,
             files: model_files_with_moonshine(),
         },
+        AndroidAsrModelPack {
+            id: PARAKEET_PACK_ID.to_string(),
+            display_name: "Parakeet TDT 0.6B v2".to_string(),
+            description: "Offline Parakeet TDT 0.6B v2 English int8. Final text only; no live partials.".to_string(),
+            language: "en".to_string(),
+            size_mb: 663,
+            min_ram_mb: PARAKEET_MIN_RAM_MB,
+            engine_kind: AndroidAsrEngineKind::Parakeet,
+            files: model_files_with_parakeet(),
+        },
     ]
 }
 
@@ -278,6 +292,48 @@ fn model_files_with_moonshine() -> Vec<AndroidAsrModelFile> {
             sha256: "1165c2aeb9f72f457a83be2d459a09054f27490acd9b41bd43794dfd25e296ea"
                 .to_string(),
             size_bytes: 436_688,
+        },
+        silero_vad_file(),
+    ]
+}
+
+fn model_files_with_parakeet() -> Vec<AndroidAsrModelFile> {
+    vec![
+        AndroidAsrModelFile {
+            target_path: "parakeet/encoder.int8.onnx".to_string(),
+            url: format!(
+                "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8/resolve/{PARAKEET_REVISION}/encoder.int8.onnx"
+            ),
+            sha256: "a32b12d17bbbc309d0686fbbcc2987b5e9b8333a7da83fa6b089f0a2acd651ab"
+                .to_string(),
+            size_bytes: 652_184_296,
+        },
+        AndroidAsrModelFile {
+            target_path: "parakeet/decoder.int8.onnx".to_string(),
+            url: format!(
+                "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8/resolve/{PARAKEET_REVISION}/decoder.int8.onnx"
+            ),
+            sha256: "b6bb64963457237b900e496ee9994b59294526439fbcc1fecf705b31a15c6b4e"
+                .to_string(),
+            size_bytes: 7_257_753,
+        },
+        AndroidAsrModelFile {
+            target_path: "parakeet/joiner.int8.onnx".to_string(),
+            url: format!(
+                "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8/resolve/{PARAKEET_REVISION}/joiner.int8.onnx"
+            ),
+            sha256: "7946164367946e7f9f29a122407c3252b680dbae9a51343eb2488d057c3c43d2"
+                .to_string(),
+            size_bytes: 1_739_080,
+        },
+        AndroidAsrModelFile {
+            target_path: "parakeet/tokens.txt".to_string(),
+            url: format!(
+                "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8/resolve/{PARAKEET_REVISION}/tokens.txt"
+            ),
+            sha256: "ec182b70dd42113aff6c5372c75cac58c952443eb22322f57bbd7f53977d497d"
+                .to_string(),
+            size_bytes: 9_384,
         },
         silero_vad_file(),
     ]
@@ -1073,12 +1129,13 @@ mod tests {
     fn manifest_contains_one_extensible_pack_with_expected_layout() {
         let packs = builtin_model_packs();
 
-        assert_eq!(packs.len(), 5);
+        assert_eq!(packs.len(), 6);
         assert_eq!(packs[0].id, "g3-zipformer-whisper-tiny-en");
         assert_eq!(packs[1].id, "g3-zipformer-whisper-base-en");
         assert_eq!(packs[2].id, "sensevoice-multilingual-zh-en-ja-ko-yue");
         assert_eq!(packs[3].id, "canary-180m-flash-en-es-de-fr");
         assert_eq!(packs[4].id, "moonshine-tiny-en-int8");
+        assert_eq!(packs[5].id, "parakeet-tdt-0_6b-v2-int8");
 
         for pack in &packs {
             match pack.engine_kind {
@@ -1106,6 +1163,12 @@ mod tests {
                         .iter()
                         .filter(|file| file.target_path.starts_with("moonshine/"))
                         .all(|file| file.url.contains("csukuangfj/sherpa-onnx-moonshine-tiny-en-int8/resolve/bf2b762c076d8ea61e2af0b3851c9564fb77552e")));
+                }
+                AndroidAsrEngineKind::Parakeet => {
+                    assert_eq!(pack.files.len(), 5);
+                    assert_eq!(component_targets(pack), parakeet_targets());
+                    assert_eq!(pack.min_ram_mb, 12_288);
+                    assert_eq!(pack.size_mb, 663);
                 }
             }
             assert!(pack.files.iter().all(|file| is_sha256_hex(&file.sha256)));
@@ -1180,6 +1243,10 @@ mod tests {
             .iter()
             .find(|pack| pack.id == "moonshine-tiny-en-int8")
             .unwrap();
+        let parakeet = packs
+            .iter()
+            .find(|pack| pack.id == "parakeet-tdt-0_6b-v2-int8")
+            .unwrap();
 
         assert_eq!(starter.engine_kind, AndroidAsrEngineKind::ZipformerWhisper);
         assert_eq!(component_targets(starter), zipformer_whisper_targets());
@@ -1196,6 +1263,56 @@ mod tests {
         assert_eq!(component_targets(canary), canary_targets());
         assert_eq!(moonshine.engine_kind, AndroidAsrEngineKind::Moonshine);
         assert_eq!(component_targets(moonshine), moonshine_targets());
+        assert_eq!(parakeet.engine_kind, AndroidAsrEngineKind::Parakeet);
+        assert_eq!(component_targets(parakeet), parakeet_targets());
+    }
+
+    #[test]
+    fn parakeet_pack_is_pinned_final_only_and_high_ram() {
+        let packs = builtin_model_packs();
+        let parakeet = packs
+            .iter()
+            .find(|pack| pack.id == "parakeet-tdt-0_6b-v2-int8")
+            .expect("Parakeet pack should be listed");
+
+        assert_eq!(format!("{:?}", parakeet.engine_kind), "Parakeet");
+        assert_eq!(parakeet.language, "en");
+        assert_eq!(parakeet.min_ram_mb, 12_288);
+        assert_eq!(parakeet.size_mb, 663);
+        assert_eq!(component_targets(parakeet), parakeet_targets());
+        assert!(parakeet
+            .description
+            .contains("Final text only; no live partials."));
+        assert!(parakeet
+            .files
+            .iter()
+            .filter(|file| file.target_path.starts_with("parakeet/"))
+            .all(|file| file.url.contains("csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8/resolve/1ab9323565ddb038682214b292f588070a538ce2")));
+
+        assert_component(
+            parakeet,
+            "parakeet/encoder.int8.onnx",
+            652_184_296,
+            "a32b12d17bbbc309d0686fbbcc2987b5e9b8333a7da83fa6b089f0a2acd651ab",
+        );
+        assert_component(
+            parakeet,
+            "parakeet/decoder.int8.onnx",
+            7_257_753,
+            "b6bb64963457237b900e496ee9994b59294526439fbcc1fecf705b31a15c6b4e",
+        );
+        assert_component(
+            parakeet,
+            "parakeet/joiner.int8.onnx",
+            1_739_080,
+            "7946164367946e7f9f29a122407c3252b680dbae9a51343eb2488d057c3c43d2",
+        );
+        assert_component(
+            parakeet,
+            "parakeet/tokens.txt",
+            9_384,
+            "ec182b70dd42113aff6c5372c75cac58c952443eb22322f57bbd7f53977d497d",
+        );
     }
 
     #[test]
@@ -1538,6 +1655,35 @@ mod tests {
         .into_iter()
         .map(String::from)
         .collect()
+    }
+
+    fn parakeet_targets() -> Vec<String> {
+        [
+            "parakeet/encoder.int8.onnx",
+            "parakeet/decoder.int8.onnx",
+            "parakeet/joiner.int8.onnx",
+            "parakeet/tokens.txt",
+            "silero_vad_v4.onnx",
+        ]
+        .into_iter()
+        .map(String::from)
+        .collect()
+    }
+
+    fn assert_component(
+        pack: &AndroidAsrModelPack,
+        target_path: &str,
+        size_bytes: u64,
+        sha256: &str,
+    ) {
+        let file = pack
+            .files
+            .iter()
+            .find(|file| file.target_path == target_path)
+            .expect("expected component in pack");
+
+        assert_eq!(file.size_bytes, size_bytes);
+        assert_eq!(file.sha256, sha256);
     }
 
     fn is_sha256_hex(value: &str) -> bool {

@@ -132,6 +132,47 @@ class EngineModelSelectionTest {
   }
 
   @Test
+  fun engineModelInstallationAcceptsParakeetLayoutWithoutStreamingFiles() {
+    val fixture = EngineSelectionFixture("parakeet")
+    try {
+      val packDir = File(
+        fixture.appDataRoot,
+        "models/android-asr/parakeet-tdt-0_6b-v2-int8",
+      )
+      fixture.setEngineModelId("parakeet-tdt-0_6b-v2-int8")
+
+      assertFalse(
+        EngineModelSelectionStore.isEngineModelInstalled(
+          fixture.context,
+          EngineModelSelectionStore.requiredFilesForPack(fixture.context),
+        ),
+      )
+
+      arrayOf(
+        "parakeet/encoder.int8.onnx",
+        "parakeet/decoder.int8.onnx",
+        "parakeet/joiner.int8.onnx",
+        "parakeet/tokens.txt",
+        "silero_vad_v4.onnx",
+      ).forEach {
+        File(packDir, it).also { file ->
+          file.parentFile?.mkdirs()
+          file.writeText("fixture")
+        }
+      }
+
+      assertTrue(
+        EngineModelSelectionStore.isEngineModelInstalled(
+          fixture.context,
+          EngineModelSelectionStore.requiredFilesForPack(fixture.context),
+        ),
+      )
+    } finally {
+      fixture.cleanup()
+    }
+  }
+
+  @Test
   fun engineModelPathUsesDownloaderRootAndPreservesAbsoluteSelections() {
     val context = mockk<Context>()
     val prefs = mockk<SharedPreferences>()

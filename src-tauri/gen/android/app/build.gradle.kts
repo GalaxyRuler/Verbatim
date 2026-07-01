@@ -95,6 +95,7 @@ tasks.matching { it.name == "preBuild" }.configureEach {
 
 rust {
     rootDirRel = "../../../"
+    features = "android-asr"
 }
 
 dependencies {

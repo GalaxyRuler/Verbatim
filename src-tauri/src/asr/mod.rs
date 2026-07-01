@@ -15,6 +15,7 @@ pub enum AsrEngineKind {
     SenseVoice,
     Canary,
     Moonshine,
+    Parakeet,
 }
 
 pub struct AsrModelPaths {
@@ -35,6 +36,10 @@ pub struct AsrModelPaths {
     pub moonshine_uncached_decoder: PathBuf,
     pub moonshine_cached_decoder: PathBuf,
     pub moonshine_tokens: PathBuf,
+    pub parakeet_encoder: PathBuf,
+    pub parakeet_decoder: PathBuf,
+    pub parakeet_joiner: PathBuf,
+    pub parakeet_tokens: PathBuf,
     pub vad: PathBuf,
 }
 
@@ -60,6 +65,10 @@ impl AsrModelPaths {
             moonshine_uncached_decoder: join("moonshine/uncached_decode.int8.onnx"),
             moonshine_cached_decoder: join("moonshine/cached_decode.int8.onnx"),
             moonshine_tokens: join("moonshine/tokens.txt"),
+            parakeet_encoder: join("parakeet/encoder.int8.onnx"),
+            parakeet_decoder: join("parakeet/decoder.int8.onnx"),
+            parakeet_joiner: join("parakeet/joiner.int8.onnx"),
+            parakeet_tokens: join("parakeet/tokens.txt"),
             vad: join("silero_vad_v4.onnx"),
         }
     }
@@ -75,6 +84,10 @@ impl AsrModelPaths {
             && self.moonshine_uncached_decoder.is_file()
             && self.moonshine_cached_decoder.is_file()
             && self.moonshine_tokens.is_file();
+        let has_parakeet_tier = self.parakeet_encoder.is_file()
+            && self.parakeet_decoder.is_file()
+            && self.parakeet_joiner.is_file()
+            && self.parakeet_tokens.is_file();
 
         if has_sense_voice_tier {
             AsrEngineKind::SenseVoice
@@ -82,6 +95,8 @@ impl AsrModelPaths {
             AsrEngineKind::Canary
         } else if has_moonshine_tier {
             AsrEngineKind::Moonshine
+        } else if has_parakeet_tier {
+            AsrEngineKind::Parakeet
         } else {
             AsrEngineKind::ZipformerWhisper
         }
@@ -114,6 +129,10 @@ mod tests {
             .moonshine_cached_decoder
             .ends_with("moonshine/cached_decode.int8.onnx"));
         assert!(p.moonshine_tokens.ends_with("moonshine/tokens.txt"));
+        assert!(p.parakeet_encoder.ends_with("parakeet/encoder.int8.onnx"));
+        assert!(p.parakeet_decoder.ends_with("parakeet/decoder.int8.onnx"));
+        assert!(p.parakeet_joiner.ends_with("parakeet/joiner.int8.onnx"));
+        assert!(p.parakeet_tokens.ends_with("parakeet/tokens.txt"));
     }
 
     #[test]
@@ -167,6 +186,19 @@ mod tests {
 
         let paths = AsrModelPaths::for_dir(temp.path());
         assert_eq!(paths.engine_kind(), AsrEngineKind::Moonshine);
+    }
+
+    #[test]
+    fn session_kind_uses_parakeet_when_parakeet_layout_exists() {
+        let temp = tempfile::tempdir().unwrap();
+        write_file(temp.path().join("parakeet/encoder.int8.onnx"));
+        write_file(temp.path().join("parakeet/decoder.int8.onnx"));
+        write_file(temp.path().join("parakeet/joiner.int8.onnx"));
+        write_file(temp.path().join("parakeet/tokens.txt"));
+        write_file(temp.path().join("silero_vad_v4.onnx"));
+
+        let paths = AsrModelPaths::for_dir(temp.path());
+        assert_eq!(paths.engine_kind(), AsrEngineKind::Parakeet);
     }
 
     fn write_file(path: std::path::PathBuf) {
