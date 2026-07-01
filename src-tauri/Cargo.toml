@@ -12,6 +12,7 @@ default-run = "verbatim"
 # Android uses the no-engine stubs until mobile ASR is implemented.
 default = []
 android-asr = ["dep:sherpa-onnx"]
+android-e2e-bundled-frontend = ["tauri/custom-protocol"]
 silero-vad-engine = ["dep:vad-rs"]
 transcribe-rs-engine = ["dep:transcribe-rs"]
 
