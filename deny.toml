@@ -26,6 +26,8 @@ ignore = [
   { id = "RUSTSEC-2025-0100", reason = "Transitive through Tauri urlpattern/unic crates; remove when upstream Tauri dependency graph no longer requires rust-unic." },
   { id = "RUSTSEC-2025-0057", reason = "Transitive through Tauri/GTK stack; remove when upstream dependency graph no longer requires fxhash." },
   { id = "RUSTSEC-2025-0141", reason = "Transitive through model/runtime dependencies; remove when upstream dependency graph no longer requires bincode 1.x." },
+  { id = "RUSTSEC-2026-0194", reason = "Transitive quick-xml < 0.41 via tauri->plist and notify-rust->tauri-winrt-notification; both parse app-generated XML (macOS plists, Windows toast payloads), not untrusted input. No compatible upstream release reaches quick-xml >= 0.41 yet (plist 1.9.0 caps at 0.39); remove when tauri/plist and tauri-winrt-notification move to quick-xml >= 0.41." },
+  { id = "RUSTSEC-2026-0195", reason = "Transitive quick-xml < 0.41 via tauri->plist and notify-rust->tauri-winrt-notification; both parse app-generated XML (macOS plists, Windows toast payloads), not untrusted input. No compatible upstream release reaches quick-xml >= 0.41 yet (plist 1.9.0 caps at 0.39); remove when tauri/plist and tauri-winrt-notification move to quick-xml >= 0.41." },
 ]
 
 [licenses]
