@@ -381,10 +381,14 @@ async function runSingleInstancePhase(): Promise<void> {
   expectCleanExit(secondaryLogPrefix, secondary);
   assertNoSmokeStatus(secondaryLogPrefix);
 
+  // The primary self-exits VERBATIM_SMOKE_EXIT_AFTER_MS (4500ms) after setup
+  // completes, but setup itself can take >5s on loaded CI Windows runners
+  // (Defender scanning a freshly written exe, cold model-fixture load), which
+  // made a 10s wall flake. 30s still fails fast on a genuine hang.
   const primaryResult = await runSpawnedProcess(
     primary,
     primaryLogPrefix,
-    10000,
+    30000,
   );
   expectCleanExit(primaryLogPrefix, primaryResult);
   assertSmokeStatus(primaryLogPrefix, {

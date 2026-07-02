@@ -231,6 +231,9 @@ const tabs: Array<{ id: AndroidTab; labelKey: string; icon: typeof Home }> = [
 const ANDROID_EXCLUDED_POST_PROCESS_PROVIDERS = new Set(["apple_intelligence"]);
 const VERBATIM_SOURCE_URL = "https://github.com/GalaxyRuler/Verbatim";
 const HANDY_SOURCE_URL = "https://github.com/cjpais/Handy";
+// Must stay in the native external-URL allowlists
+// (MainActivity.allowedExternalUrls / VerbatimAndroidPlugin.ALLOWED_EXTERNAL_URLS).
+const VERBATIM_PRIVACY_URL = "https://verbatim.alkulaib.io/privacy";
 const androidBubbleCorners: AndroidBubbleCorner[] = [
   "top-left",
   "top-right",
@@ -659,6 +662,8 @@ function AndroidOnboarding({
   refreshPermissions: () => void;
 }) {
   const { t } = useTranslation();
+  const [showAccessibilityDisclosure, setShowAccessibilityDisclosure] =
+    useState(false);
   const speechPackCalloutKey = (() => {
     switch (permissions.onDeviceSpeechModelStatus) {
       case "ready":
@@ -697,7 +702,7 @@ function AndroidOnboarding({
       title: t("android.onboarding.accessibility.title"),
       description: t("android.onboarding.accessibility.description"),
       action: t("android.onboarding.accessibility.action"),
-      onClick: () => void openAccessibilitySettings(),
+      onClick: () => setShowAccessibilityDisclosure(true),
       callout: t("android.onboarding.accessibility.callout"),
     },
     {
@@ -776,6 +781,47 @@ function AndroidOnboarding({
           )}
         </div>
       </div>
+
+      {showAccessibilityDisclosure && (
+        <AndroidSettingsSheet
+          title={t("android.onboarding.accessibility.disclosure.title")}
+          onClose={() => setShowAccessibilityDisclosure(false)}
+        >
+          <p className="android-muted">
+            {t("android.onboarding.accessibility.disclosure.body")}
+          </p>
+          <ul className="android-disclosure-list">
+            <li>
+              {t("android.onboarding.accessibility.disclosure.insertsText")}
+            </li>
+            <li>
+              {t("android.onboarding.accessibility.disclosure.fieldAccess")}
+            </li>
+            <li>
+              {t("android.onboarding.accessibility.disclosure.noCollection")}
+            </li>
+          </ul>
+          <button
+            type="button"
+            className="android-action android-sheet-action"
+            onClick={() => void openExternalUrl(VERBATIM_PRIVACY_URL)}
+          >
+            <ExternalLink size={16} />
+            {t("android.onboarding.accessibility.disclosure.privacyPolicy")}
+          </button>
+          <button
+            type="button"
+            className="android-action android-primary-action android-sheet-action"
+            onClick={() => {
+              setShowAccessibilityDisclosure(false);
+              void openAccessibilitySettings();
+              window.setTimeout(refreshPermissions, 600);
+            }}
+          >
+            {t("android.onboarding.accessibility.disclosure.agree")}
+          </button>
+        </AndroidSettingsSheet>
+      )}
     </section>
   );
 }

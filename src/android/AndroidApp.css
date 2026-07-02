@@ -747,6 +747,18 @@
   width: 100%;
 }
 
+.android-disclosure-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding-inline-start: 20px;
+}
+
+.android-disclosure-list li {
+  font-size: 14px;
+  line-height: 1.45;
+}
+
 .android-picker-list {
   display: grid;
   gap: 8px;

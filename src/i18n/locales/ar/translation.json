@@ -1058,7 +1058,16 @@
         "title": "Type into any app",
         "description": "Verbatim uses Android's accessibility API to insert text wherever your cursor is, like a keyboard.",
         "action": "Enable in Accessibility",
-        "callout": "Can insert your transcribed text. Does not log screen text or app content."
+        "callout": "Can insert your transcribed text. Does not log screen text or app content.",
+        "disclosure": {
+          "title": "كيف يستخدم فيربيتم إمكانية الوصول",
+          "body": "يستخدم فيربيتم خدمة إمكانية الوصول في أندرويد (AccessibilityService API) ليتمكن من الكتابة نيابةً عنك. قبل تفعيلها، إليك بالضبط ما تفعله:",
+          "insertsText": "يُدرج النص الذي تمليه في حقل النص الذي تكتب فيه، عند النقر على فقاعة فيربيتم العائمة.",
+          "fieldAccess": "يقرأ فقط موضع ومحتوى حقل النص النشط لكي يضع كلماتك عند المؤشر. ويتخطى حقول كلمات المرور والحقول الحساسة الأخرى.",
+          "noCollection": "لا يجمع محتوى شاشتك أو يخزنه أو يشاركه أبدًا. يُفرَّغ الكلام على هذا الجهاز ولا يُرسل أي شيء خارجه.",
+          "privacyPolicy": "اقرأ سياسة الخصوصية",
+          "agree": "أوافق وأتابع"
+        }
       },
       "speech": {
         "title": "Use on-device speech",

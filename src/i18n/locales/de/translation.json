@@ -1058,7 +1058,16 @@
         "title": "Type into any app",
         "description": "Verbatim uses Android's accessibility API to insert text wherever your cursor is, like a keyboard.",
         "action": "Enable in Accessibility",
-        "callout": "Can insert your transcribed text. Does not log screen text or app content."
+        "callout": "Can insert your transcribed text. Does not log screen text or app content.",
+        "disclosure": {
+          "title": "Wie Verbatim die Bedienungshilfen nutzt",
+          "body": "Verbatim nutzt den Bedienungshilfen-Dienst von Android (AccessibilityService API), um für dich tippen zu können. Bevor du ihn aktivierst, hier genau das, was er tut:",
+          "insertsText": "Fügt deinen diktierten Text in das Textfeld ein, in dem du gerade schreibst, wenn du auf die schwebende Verbatim-Blase tippst.",
+          "fieldAccess": "Liest nur Position und Inhalt des fokussierten Textfelds, um deine Wörter am Cursor einzufügen. Passwortfelder und andere sensible Felder werden übersprungen.",
+          "noCollection": "Sammelt, speichert oder teilt niemals deine Bildschirminhalte. Sprache wird auf diesem Gerät transkribiert und nichts verlässt es.",
+          "privacyPolicy": "Datenschutzerklärung lesen",
+          "agree": "Zustimmen und fortfahren"
+        }
       },
       "speech": {
         "title": "Use on-device speech",

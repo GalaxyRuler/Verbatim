@@ -224,6 +224,7 @@ class MainActivity : TauriActivity() {
       private val allowedExternalUrls = setOf(
         "https://github.com/GalaxyRuler/Verbatim",
         "https://github.com/cjpais/Handy",
+        "https://verbatim.alkulaib.io/privacy",
       )
     }
   }
