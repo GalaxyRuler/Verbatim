@@ -1,7 +1,7 @@
 <resources>
     <string name="app_name">Verbatim</string>
     <string name="main_activity_title">Verbatim</string>
-    <string name="verbatim_accessibility_description">Insert Verbatim transcriptions into the focused text field when you tap the floating Verbatim bubble.</string>
+    <string name="verbatim_accessibility_description">Verbatim uses this accessibility service to insert your dictated text into the focused text field when you tap the floating Verbatim bubble. Speech is transcribed on this device. Verbatim does not collect, store, or share your screen content.</string>
     <string name="bubble_idle">Start Verbatim dictation</string>
     <string name="bubble_recording">Recording</string>
     <string name="bubble_stop">Stop</string>

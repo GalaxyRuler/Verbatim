@@ -7,4 +7,5 @@
     android:canRequestFilterKeyEvents="false"
     android:canRetrieveWindowContent="true"
     android:description="@string/verbatim_accessibility_description"
+    android:isAccessibilityTool="true"
     android:notificationTimeout="100" />

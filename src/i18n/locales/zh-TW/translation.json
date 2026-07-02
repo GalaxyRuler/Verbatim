@@ -1058,7 +1058,16 @@
         "title": "Type into any app",
         "description": "Verbatim uses Android's accessibility API to insert text wherever your cursor is, like a keyboard.",
         "action": "Enable in Accessibility",
-        "callout": "Can insert your transcribed text. Does not log screen text or app content."
+        "callout": "Can insert your transcribed text. Does not log screen text or app content.",
+        "disclosure": {
+          "title": "Verbatim 如何使用無障礙功能",
+          "body": "Verbatim 使用 Android 的無障礙服務(AccessibilityService API)來替你輸入文字。在啟用之前,以下是它的確切行為:",
+          "insertsText": "當你點按懸浮的 Verbatim 泡泡時,將你口述的文字插入你正在輸入的文字欄位中。",
+          "fieldAccess": "僅讀取目前聚焦文字欄位的位置與內容,以便將文字放置在游標處。會略過密碼欄位與其他敏感欄位。",
+          "noCollection": "絕不收集、儲存或分享你的螢幕內容。語音在本裝置上轉寫,任何資料都不會離開裝置。",
+          "privacyPolicy": "閱讀隱私權政策",
+          "agree": "同意並繼續"
+        }
       },
       "speech": {
         "title": "Use on-device speech",

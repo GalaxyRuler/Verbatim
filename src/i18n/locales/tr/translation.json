@@ -1058,7 +1058,16 @@
         "title": "Type into any app",
         "description": "Verbatim uses Android's accessibility API to insert text wherever your cursor is, like a keyboard.",
         "action": "Enable in Accessibility",
-        "callout": "Can insert your transcribed text. Does not log screen text or app content."
+        "callout": "Can insert your transcribed text. Does not log screen text or app content.",
+        "disclosure": {
+          "title": "Verbatim erişilebilirliği nasıl kullanır",
+          "body": "Verbatim, sizin yerinize yazabilmek için Android'in erişilebilirlik hizmetini (AccessibilityService API) kullanır. Etkinleştirmeden önce, tam olarak ne yaptığı şu şekildedir:",
+          "insertsText": "Kayan Verbatim baloncuğuna dokunduğunuzda, dikte ettiğiniz metni yazmakta olduğunuz metin alanına ekler.",
+          "fieldAccess": "Sözcüklerinizi imlece yerleştirmek için yalnızca odaklanılan metin alanının konumunu ve içeriğini okur. Parola alanlarını ve diğer hassas alanları atlar.",
+          "noCollection": "Ekran içeriğinizi asla toplamaz, saklamaz veya paylaşmaz. Konuşma bu cihazda yazıya dökülür ve hiçbir şey cihazdan çıkmaz.",
+          "privacyPolicy": "Gizlilik politikasını okuyun",
+          "agree": "Kabul et ve devam et"
+        }
       },
       "speech": {
         "title": "Use on-device speech",
