@@ -359,6 +359,7 @@ class VerbatimAndroidPlugin(private val activity: Activity) : Plugin(activity) {
     private val ALLOWED_EXTERNAL_URLS = setOf(
       "https://github.com/GalaxyRuler/Verbatim",
       "https://github.com/cjpais/Handy",
+      "https://verbatim.alkulaib.io/privacy",
     )
 
     /** Set in load(); lets MainActivity (e.g. onRequestPermissionsResult) push a fresh snapshot. */

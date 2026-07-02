@@ -231,6 +231,9 @@ const tabs: Array<{ id: AndroidTab; labelKey: string; icon: typeof Home }> = [
 const ANDROID_EXCLUDED_POST_PROCESS_PROVIDERS = new Set(["apple_intelligence"]);
 const VERBATIM_SOURCE_URL = "https://github.com/GalaxyRuler/Verbatim";
 const HANDY_SOURCE_URL = "https://github.com/cjpais/Handy";
+// Must stay in the native external-URL allowlists
+// (MainActivity.allowedExternalUrls / VerbatimAndroidPlugin.ALLOWED_EXTERNAL_URLS).
+const VERBATIM_PRIVACY_URL = "https://verbatim.alkulaib.io/privacy";
 const androidBubbleCorners: AndroidBubbleCorner[] = [
   "top-left",
   "top-right",
@@ -801,9 +804,7 @@ function AndroidOnboarding({
           <button
             type="button"
             className="android-action android-sheet-action"
-            onClick={() =>
-              void openExternalUrl("https://verbatim.alkulaib.io/privacy")
-            }
+            onClick={() => void openExternalUrl(VERBATIM_PRIVACY_URL)}
           >
             <ExternalLink size={16} />
             {t("android.onboarding.accessibility.disclosure.privacyPolicy")}
