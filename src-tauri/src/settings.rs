@@ -171,6 +171,21 @@ pub struct DictionaryEntry {
     pub needs_review: bool,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Type)]
+pub struct LearnCandidate {
+    #[serde(default)]
+    pub replacement_of: Option<String>,
+    pub phrase: String,
+    #[serde(default)]
+    pub occurrences: u32,
+    #[serde(default)]
+    pub last_evidence_session: Option<String>,
+    #[serde(default)]
+    pub created_at_ms: u64,
+    #[serde(default)]
+    pub updated_at_ms: u64,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, Type)]
 pub struct LLMPrompt {
     pub id: String,
@@ -520,6 +535,10 @@ pub struct AppSettings {
     pub dictionary_entries: Vec<DictionaryEntry>,
     #[serde(default)]
     pub dictionary_auto_learn_suppressed: Vec<String>,
+    #[serde(default)]
+    pub dictionary_learn_candidates: Vec<LearnCandidate>,
+    #[serde(default)]
+    pub dictionary_schema_version: u32,
     #[serde(default = "default_auto_add_dictionary_words")]
     pub auto_add_dictionary_words: bool,
     #[serde(default)]
@@ -1254,6 +1273,8 @@ pub fn get_default_settings() -> AppSettings {
         custom_words: Vec::new(),
         dictionary_entries: Vec::new(),
         dictionary_auto_learn_suppressed: Vec::new(),
+        dictionary_learn_candidates: Vec::new(),
+        dictionary_schema_version: 0,
         auto_add_dictionary_words: default_auto_add_dictionary_words(),
         snippets: Vec::new(),
         model_unload_timeout: ModelUnloadTimeout::default(),
@@ -1837,6 +1858,29 @@ mod tests {
     fn default_settings_start_with_empty_dictionary_auto_learn_suppression() {
         let settings = get_default_settings();
         assert!(settings.dictionary_auto_learn_suppressed.is_empty());
+    }
+
+    #[test]
+    fn default_settings_have_empty_candidates_and_schema_zero() {
+        let settings = crate::settings::get_default_settings();
+        assert!(settings.dictionary_learn_candidates.is_empty());
+        assert_eq!(settings.dictionary_schema_version, 0);
+    }
+
+    #[test]
+    fn learn_candidate_round_trips() {
+        let c = crate::settings::LearnCandidate {
+            replacement_of: Some("robin".into()),
+            phrase: "Robyn".into(),
+            occurrences: 1,
+            last_evidence_session: Some("s1".into()),
+            created_at_ms: 1,
+            updated_at_ms: 1,
+        };
+        let json = serde_json::to_string(&c).unwrap();
+        let back: crate::settings::LearnCandidate = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.phrase, "Robyn");
+        assert_eq!(back.occurrences, 1);
     }
 
     #[test]
