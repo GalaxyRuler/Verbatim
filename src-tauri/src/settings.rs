@@ -1657,8 +1657,9 @@ pub fn mutate_settings_locked<T>(app: &AppHandle, f: impl FnOnce(&mut AppSetting
 }
 
 // NOTE: `write_settings` and `get_settings` are the lock-free primitives. All MUTATION
-// paths must go through `mutate_settings_locked`. A deny-list test guards this (added in a
-// later task).
+// paths must go through `mutate_settings_locked`. The deny-list test
+// `dictionary_mutation_paths_do_not_call_write_settings_directly` guards this for every
+// migrated file.
 pub fn write_settings(app: &AppHandle, mut settings: AppSettings) {
     let store = app
         .store(crate::portable::store_path(SETTINGS_STORE_PATH))
@@ -1784,11 +1785,24 @@ mod tests {
 
     #[test]
     fn dictionary_mutation_paths_do_not_call_write_settings_directly() {
-        // Guard: all dictionary mutation paths must go through `mutate_settings_locked`
-        // (the serialized read-modify-write). A direct `write_settings` call in these
-        // files would reintroduce the lost-update race this hardening effort removed.
+        // Guard: all settings mutation paths in these files must go through
+        // `mutate_settings_locked` (the serialized read-modify-write). A direct
+        // `write_settings` call in any of them would reintroduce the lost-update race
+        // this hardening effort removed — originally for the dictionary paths, then
+        // extended to the remaining unlocked writers (audio/adaptive/transcription/
+        // models/local_llm/snippets/model-manager).
         // CWD for unit tests is the manifest dir (src-tauri), so paths are relative to it.
-        for path in ["src/commands/dictionary.rs", "src/post_paste_learning.rs"] {
+        for path in [
+            "src/commands/dictionary.rs",
+            "src/post_paste_learning.rs",
+            "src/commands/audio.rs",
+            "src/commands/adaptive.rs",
+            "src/commands/transcription.rs",
+            "src/commands/models.rs",
+            "src/commands/local_llm.rs",
+            "src/commands/snippets.rs",
+            "src/managers/model.rs",
+        ] {
             let source = std::fs::read_to_string(path)
                 .unwrap_or_else(|error| panic!("failed to read {path}: {error}"));
             assert!(

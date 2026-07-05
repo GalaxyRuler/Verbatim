@@ -1,6 +1,6 @@
 use crate::local_llm::catalog::LocalLlmModelInfo;
 use crate::local_llm::download::LocalLlmManager;
-use crate::settings::{get_settings, write_settings};
+use crate::settings::{get_settings, mutate_settings_locked};
 use std::sync::Arc;
 use tauri::{AppHandle, State};
 
@@ -46,12 +46,12 @@ pub async fn delete_local_llm_model(
         .delete_model(&model_id)
         .map_err(|err| err.to_string())?;
 
-    let mut settings = get_settings(&app);
-    if settings.local_llm.selected_model_id == model_id {
-        settings.local_llm.selected_model_id.clear();
-        settings.local_llm.enabled = false;
-        write_settings(&app, settings);
-    }
+    mutate_settings_locked(&app, |settings| {
+        if settings.local_llm.selected_model_id == model_id {
+            settings.local_llm.selected_model_id.clear();
+            settings.local_llm.enabled = false;
+        }
+    });
 
     Ok(())
 }
@@ -74,9 +74,9 @@ pub async fn select_local_llm_model(
         return Err(format!("Local LLM model is not downloaded: {}", model_id));
     }
 
-    let mut settings = get_settings(&app);
-    settings.local_llm.selected_model_id = model_id;
-    write_settings(&app, settings);
+    mutate_settings_locked(&app, |settings| {
+        settings.local_llm.selected_model_id = model_id;
+    });
     Ok(())
 }
 
@@ -87,10 +87,8 @@ pub async fn set_local_llm_enabled(
     manager: State<'_, Arc<LocalLlmManager>>,
     enabled: bool,
 ) -> Result<(), String> {
-    let mut settings = get_settings(&app);
-
     if enabled {
-        let selected_model_id = settings.local_llm.selected_model_id.clone();
+        let selected_model_id = get_settings(&app).local_llm.selected_model_id;
         if selected_model_id.trim().is_empty() {
             return Err("Select a downloaded local LLM model first.".to_string());
         }
@@ -109,7 +107,8 @@ pub async fn set_local_llm_enabled(
         }
     }
 
-    settings.local_llm.enabled = enabled;
-    write_settings(&app, settings);
+    mutate_settings_locked(&app, |settings| {
+        settings.local_llm.enabled = enabled;
+    });
     Ok(())
 }
