@@ -10,7 +10,6 @@ const MAX_HYPHEN_PART_DISTANCE: usize = 2;
 /// NOTE: Does not NFC-normalize (the `unicode-normalization` crate is not a
 /// dependency of this crate). If it is added later, prefix with
 /// `raw.nfc().collect::<String>()` before the fold below.
-#[cfg_attr(not(test), allow(dead_code))]
 pub fn canonicalize(raw: &str) -> String {
     let mut out = String::new();
     let mut last_was_space = false;
@@ -720,8 +719,14 @@ mod tests {
             super::canonicalize("acme,'s corp")
         );
         assert_eq!(super::canonicalize("Robyn"), "robyn");
-        assert_eq!(super::canonicalize("Node.js"), super::canonicalize("node.js"));
-        assert_eq!(super::canonicalize("Wi\u{2013}Fi"), super::canonicalize("wi-fi"));
+        assert_eq!(
+            super::canonicalize("Node.js"),
+            super::canonicalize("node.js")
+        );
+        assert_eq!(
+            super::canonicalize("Wi\u{2013}Fi"),
+            super::canonicalize("wi-fi")
+        );
         assert_eq!(super::canonicalize("a   b\t c"), "a b c");
         assert_eq!(super::canonicalize(""), "");
     }

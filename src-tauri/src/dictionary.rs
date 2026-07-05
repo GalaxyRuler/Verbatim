@@ -1,5 +1,6 @@
+use crate::dictionary_learning::canonicalize;
 use crate::settings::{
-    AppSettings, DictionaryEntry, DictionaryEntryPriority, DictionaryEntrySource,
+    AppSettings, DictionaryEntry, DictionaryEntryPriority, DictionaryEntrySource, LearnCandidate,
 };
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -407,15 +408,156 @@ fn has_phrase(entries: &[DictionaryEntry], phrase: &str, except_id: Option<&str>
     })
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
+#[derive(Debug, PartialEq, Eq)]
+pub enum ObserveOutcome {
+    Learned,    // new candidate
+    Reinforced, // existing candidate, +1, not yet promoted (or blocked by conflict)
+    Promoted,   // reached threshold -> became an active entry
+    NoChange,   // suppressed / duplicate session / already active
+    #[cfg_attr(not(test), allow(dead_code))]
+    Routed, // produced-output feedback (implemented in a later task)
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub const PROMOTE_THRESHOLD: u32 = 2;
+
+/// Placeholder: detects edits of dictionary-produced output (reversals/refinements).
+/// Implemented in a later task; returning None means "not produced-output feedback".
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn produced_output_feedback(
+    _settings: &mut AppSettings,
+    _now_ms: u64,
+    _replacement_of: &Option<String>,
+    _corrected_phrase: &str,
+) -> Option<ObserveOutcome> {
+    None
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+fn candidate_pair(replacement_of: &Option<String>, phrase: &str) -> (Option<String>, String) {
+    (
+        replacement_of.as_deref().map(canonicalize),
+        canonicalize(phrase),
+    )
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+fn source_is_conflicted(
+    settings: &AppSettings,
+    canon_src: &Option<String>,
+    canon_phrase: &str,
+) -> bool {
+    let Some(src) = canon_src else { return false };
+    settings.dictionary_learn_candidates.iter().any(|c| {
+        c.replacement_of.as_deref().map(canonicalize).as_deref() == Some(src.as_str())
+            && canonicalize(&c.phrase) != canon_phrase
+    })
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn observe_correction(
+    settings: &mut AppSettings,
+    now_ms: u64,
+    session: &str,
+    dictated: &str,
+    corrected: Option<&str>,
+) -> ObserveOutcome {
+    let Some(phrase) = corrected.and_then(sanitize_dictionary_phrase) else {
+        return ObserveOutcome::NoChange;
+    };
+    let replacement_of = sanitize_dictionary_phrase(dictated);
+
+    if let Some(outcome) = produced_output_feedback(settings, now_ms, &replacement_of, &phrase) {
+        return outcome;
+    }
+
+    if auto_learn_phrase_is_suppressed(settings, &phrase) {
+        return ObserveOutcome::NoChange;
+    }
+    if has_phrase(&settings.dictionary_entries, &phrase, None) {
+        return ObserveOutcome::NoChange;
+    }
+
+    let (canon_src, canon_phrase) = candidate_pair(&replacement_of, &phrase);
+    if let Some(index) = settings.dictionary_learn_candidates.iter().position(|c| {
+        c.replacement_of.as_deref().map(canonicalize) == canon_src
+            && canonicalize(&c.phrase) == canon_phrase
+    }) {
+        {
+            let c = &mut settings.dictionary_learn_candidates[index];
+            if c.last_evidence_session.as_deref() == Some(session) {
+                return ObserveOutcome::NoChange;
+            }
+            c.occurrences += 1;
+            c.updated_at_ms = now_ms;
+            c.last_evidence_session = Some(session.to_string());
+        }
+        let promote = settings.dictionary_learn_candidates[index].occurrences >= PROMOTE_THRESHOLD
+            && !source_is_conflicted(settings, &canon_src, &canon_phrase);
+        if promote {
+            let candidate = settings.dictionary_learn_candidates.remove(index);
+            promote_candidate_to_entry(settings, now_ms, candidate, false);
+            return ObserveOutcome::Promoted;
+        }
+        return ObserveOutcome::Reinforced;
+    }
+
+    settings.dictionary_learn_candidates.push(LearnCandidate {
+        replacement_of,
+        phrase,
+        occurrences: 1,
+        last_evidence_session: Some(session.to_string()),
+        created_at_ms: now_ms,
+        updated_at_ms: now_ms,
+    });
+    ObserveOutcome::Learned
+}
+
+/// Convert a candidate into an active auto-learned entry. `user_confirmed` is true when
+/// promotion came from an explicit Approve (manual-tier trust); false for recurrence.
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn promote_candidate_to_entry(
+    settings: &mut AppSettings,
+    now_ms: u64,
+    candidate: LearnCandidate,
+    user_confirmed: bool,
+) {
+    let Some(phrase) = sanitize_dictionary_phrase(&candidate.phrase) else {
+        return;
+    };
+    if has_phrase(&settings.dictionary_entries, &phrase, None) {
+        return; // phrase already active; keep the existing entry's replacement_of
+    }
+    unsuppress_auto_learn_phrase(settings, &phrase);
+    settings.dictionary_entries.push(DictionaryEntry {
+        id: make_dictionary_entry_id(now_ms, &phrase),
+        phrase,
+        replacement_of: candidate
+            .replacement_of
+            .and_then(|r| sanitize_dictionary_phrase(&r)),
+        source: DictionaryEntrySource::AutoLearned,
+        priority: DictionaryEntryPriority::Normal,
+        created_at_ms: now_ms,
+        updated_at_ms: now_ms,
+        active: true,
+        user_confirmed,
+        needs_review: false,
+    });
+    sync_legacy_custom_words(settings);
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        delete_entries, dictionary_phrases, make_dictionary_entry_id, replace_dictionary_phrases,
-        sanitize_dictionary_phrase, sync_legacy_custom_words, update_entry,
-        upsert_auto_learn_entry, upsert_manual_entry,
+        delete_entries, dictionary_phrases, make_dictionary_entry_id, observe_correction,
+        promote_candidate_to_entry, replace_dictionary_phrases, sanitize_dictionary_phrase,
+        sync_legacy_custom_words, update_entry, upsert_auto_learn_entry, upsert_manual_entry,
+        ObserveOutcome,
     };
     use crate::settings::{
         get_default_settings, DictionaryEntry, DictionaryEntryPriority, DictionaryEntrySource,
+        LearnCandidate,
     };
 
     #[test]
@@ -780,6 +922,125 @@ mod tests {
         );
         assert_eq!(settings.dictionary_entries[1].phrase, "ChargeBee");
         assert_eq!(settings.custom_words, vec!["Robyn", "ChargeBee"]);
+    }
+
+    #[test]
+    fn first_correction_learns_provisional_candidate() {
+        let mut s = get_default_settings();
+        let out = observe_correction(&mut s, 10, "s1", "robin", Some("Robyn"));
+        assert_eq!(out, ObserveOutcome::Learned);
+        assert_eq!(s.dictionary_learn_candidates.len(), 1);
+        assert_eq!(s.dictionary_learn_candidates[0].phrase, "Robyn");
+        assert_eq!(s.dictionary_learn_candidates[0].occurrences, 1);
+        assert!(s.dictionary_entries.is_empty()); // inert, not applied
+    }
+
+    #[test]
+    fn same_pair_twice_across_sessions_promotes_to_entry() {
+        let mut s = get_default_settings();
+        assert_eq!(
+            observe_correction(&mut s, 10, "s1", "robin", Some("Robyn")),
+            ObserveOutcome::Learned
+        );
+        assert_eq!(
+            observe_correction(&mut s, 20, "s2", "robin", Some("Robyn")),
+            ObserveOutcome::Promoted
+        );
+        assert!(s.dictionary_learn_candidates.is_empty());
+        assert_eq!(s.dictionary_entries.len(), 1);
+        let e = &s.dictionary_entries[0];
+        assert_eq!(e.phrase, "Robyn");
+        assert_eq!(e.source, DictionaryEntrySource::AutoLearned);
+        assert!(e.active);
+        assert!(!e.user_confirmed);
+        assert_eq!(e.replacement_of, Some("robin".to_string()));
+        // legacy mirror updated on promotion
+        assert_eq!(s.custom_words, vec!["Robyn".to_string()]);
+    }
+
+    #[test]
+    fn same_session_does_not_double_count() {
+        let mut s = get_default_settings();
+        observe_correction(&mut s, 10, "s1", "robin", Some("Robyn"));
+        let out = observe_correction(&mut s, 11, "s1", "robin", Some("Robyn")); // same session
+        assert_eq!(out, ObserveOutcome::NoChange);
+        assert_eq!(s.dictionary_learn_candidates[0].occurrences, 1);
+    }
+
+    #[test]
+    fn conflicting_targets_for_same_source_block_promotion() {
+        let mut s = get_default_settings();
+        observe_correction(&mut s, 10, "s1", "jon", Some("John"));
+        observe_correction(&mut s, 20, "s2", "jon", Some("Jon")); // conflict on source "jon"
+        let out = observe_correction(&mut s, 30, "s3", "jon", Some("John"));
+        assert_eq!(out, ObserveOutcome::Reinforced); // occurrences reached 2 but conflicted -> no promotion
+        assert!(s.dictionary_entries.is_empty());
+    }
+
+    #[test]
+    fn suppressed_phrase_is_not_learned() {
+        let mut s = get_default_settings();
+        s.dictionary_auto_learn_suppressed.push("robyn".to_string());
+        let out = observe_correction(&mut s, 10, "s1", "robin", Some("Robyn"));
+        assert_eq!(out, ObserveOutcome::NoChange);
+        assert!(s.dictionary_learn_candidates.is_empty());
+    }
+
+    #[test]
+    fn existing_active_phrase_is_not_relearned() {
+        let mut s = get_default_settings();
+        s.dictionary_entries = vec![entry("dict_1_robyn", "Robyn")];
+        let out = observe_correction(&mut s, 10, "s1", "robin", Some("Robyn"));
+        assert_eq!(out, ObserveOutcome::NoChange);
+        assert!(s.dictionary_learn_candidates.is_empty());
+    }
+
+    #[test]
+    fn promotion_creates_auto_entry_and_merges_existing_phrase() {
+        let mut s = get_default_settings();
+        let cand = LearnCandidate {
+            replacement_of: Some("robin".into()),
+            phrase: "Robyn".into(),
+            occurrences: 2,
+            last_evidence_session: Some("s2".into()),
+            created_at_ms: 1,
+            updated_at_ms: 2,
+        };
+        promote_candidate_to_entry(&mut s, 42, cand, false);
+        assert_eq!(s.dictionary_entries.len(), 1);
+        let e = &s.dictionary_entries[0];
+        assert_eq!(e.phrase, "Robyn");
+        assert_eq!(e.replacement_of, Some("robin".into()));
+        assert!(!e.user_confirmed);
+
+        // Promoting a second candidate whose phrase already exists must not duplicate or clobber.
+        let dup = LearnCandidate {
+            replacement_of: Some("robbin".into()),
+            phrase: "robyn".into(),
+            occurrences: 2,
+            last_evidence_session: None,
+            created_at_ms: 3,
+            updated_at_ms: 3,
+        };
+        promote_candidate_to_entry(&mut s, 43, dup, true);
+        assert_eq!(s.dictionary_entries.len(), 1); // merged by phrase key
+        assert_eq!(s.dictionary_entries[0].replacement_of, Some("robin".into()));
+        // kept
+    }
+
+    #[test]
+    fn approve_promotion_sets_user_confirmed() {
+        let mut s = get_default_settings();
+        let cand = LearnCandidate {
+            replacement_of: Some("robin".into()),
+            phrase: "Robyn".into(),
+            occurrences: 1,
+            last_evidence_session: None,
+            created_at_ms: 1,
+            updated_at_ms: 1,
+        };
+        promote_candidate_to_entry(&mut s, 42, cand, true);
+        assert!(s.dictionary_entries[0].user_confirmed);
     }
 
     fn entry(id: &str, phrase: &str) -> DictionaryEntry {
