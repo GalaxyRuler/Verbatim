@@ -4,11 +4,13 @@ import {
   type DictionaryEntry,
   type DictionaryEntryInput,
   type DictionaryEntryUpdate,
+  type LearnCandidate,
 } from "@/bindings";
 
 type DictionaryState = {
   entries: DictionaryEntry[];
   recentlyLearnedEntries: DictionaryEntry[];
+  candidates: LearnCandidate[];
   isLoading: boolean;
   updatingIds: Set<string>;
   loadEntries: () => Promise<void>;
@@ -20,6 +22,13 @@ type DictionaryState = {
   deleteEntry: (id: string) => Promise<void>;
   undoEntries: (ids: string[]) => Promise<void>;
   setRecentlyLearnedEntries: (entries: DictionaryEntry[]) => void;
+  loadCandidates: () => Promise<void>;
+  approveCandidate: (
+    phrase: string,
+    replacementOf: string | null,
+  ) => Promise<void>;
+  rejectCandidate: (phrase: string) => Promise<void>;
+  setEntryActive: (id: string, active: boolean) => Promise<void>;
 };
 
 const sortEntries = (entries: DictionaryEntry[]) =>
@@ -31,6 +40,17 @@ const sortEntries = (entries: DictionaryEntry[]) =>
     }
 
     const updatedDiff = (right.updated_at_ms ?? 0) - (left.updated_at_ms ?? 0);
+    if (updatedDiff !== 0) {
+      return updatedDiff;
+    }
+
+    return left.phrase.localeCompare(right.phrase);
+  });
+
+const sortCandidates = (candidates: LearnCandidate[]) =>
+  [...candidates].sort((left, right) => {
+    const updatedDiff =
+      (right.updated_at_ms ?? 0) - (left.updated_at_ms ?? 0);
     if (updatedDiff !== 0) {
       return updatedDiff;
     }
@@ -51,6 +71,7 @@ const unwrapResult = <T>(
 export const useDictionaryStore = create<DictionaryState>()((set, get) => ({
   entries: [],
   recentlyLearnedEntries: [],
+  candidates: [],
   isLoading: false,
   updatingIds: new Set<string>(),
 
@@ -140,5 +161,53 @@ export const useDictionaryStore = create<DictionaryState>()((set, get) => ({
         ...entries,
       ]),
     }));
+  },
+
+  loadCandidates: async () => {
+    const candidates = unwrapResult(await commands.listLearnCandidates());
+    set({ candidates: sortCandidates(candidates) });
+  },
+
+  approveCandidate: async (phrase, replacementOf) => {
+    const entry = unwrapResult(
+      await commands.approveLearnCandidate(phrase, replacementOf),
+    );
+    if (entry) {
+      set((state) => ({
+        entries: sortEntries([
+          ...state.entries.filter((current) => current.id !== entry.id),
+          entry,
+        ]),
+      }));
+    }
+    await get().loadCandidates();
+  },
+
+  rejectCandidate: async (phrase) => {
+    unwrapResult(await commands.rejectLearnCandidate(phrase));
+    await get().loadCandidates();
+  },
+
+  setEntryActive: async (id, active) => {
+    set((state) => ({
+      updatingIds: new Set([...state.updatingIds, id]),
+    }));
+    try {
+      unwrapResult(await commands.setDictionaryEntryActive(id, active));
+      set((state) => ({
+        entries: state.entries.map((entry) =>
+          entry.id === id ? { ...entry, active, needs_review: false } : entry,
+        ),
+        recentlyLearnedEntries: state.recentlyLearnedEntries.map((entry) =>
+          entry.id === id ? { ...entry, active, needs_review: false } : entry,
+        ),
+      }));
+    } finally {
+      set((state) => {
+        const updatingIds = new Set(state.updatingIds);
+        updatingIds.delete(id);
+        return { updatingIds };
+      });
+    }
   },
 }));
