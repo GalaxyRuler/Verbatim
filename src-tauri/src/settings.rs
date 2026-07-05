@@ -1646,7 +1646,6 @@ pub fn apply_settings_mutation<T>(
 /// The ONLY public way to mutate persisted settings. Holds the write lock across the
 /// whole read-modify-write so concurrent mutations cannot lost-update each other.
 /// Do NOT `.await` or emit Tauri events inside `f`; emit after this returns.
-#[cfg_attr(not(test), allow(dead_code))]
 pub fn mutate_settings_locked<T>(app: &AppHandle, f: impl FnOnce(&mut AppSettings) -> T) -> T {
     let _guard = SETTINGS_WRITE_LOCK
         .lock()

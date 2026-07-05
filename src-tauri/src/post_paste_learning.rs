@@ -97,8 +97,19 @@ pub fn maybe_spawn_auto_add_watcher(
         return;
     }
 
+    // Stable per-paste session id for the state machine's per-session dedup. `target_id`
+    // can contain window titles, so only its length (a little entropy) is folded in here
+    // rather than the id itself, keeping window titles out of logs.
+    let session_id = format!(
+        "paste_{}_{}",
+        crate::dictionary::current_unix_ms(),
+        before_paste.target_id.len()
+    );
+
     std::thread::spawn(move || {
-        if let Err(error) = watch_for_post_paste_correction(app, inserted_text, before_paste) {
+        if let Err(error) =
+            watch_for_post_paste_correction(app, session_id, inserted_text, before_paste)
+        {
             debug!("Post-paste dictionary watcher skipped: {}", error);
         }
     });
@@ -120,6 +131,7 @@ pub fn capture_focused_text_selection_snapshot() -> Result<FocusedTextSelectionS
 
 fn watch_for_post_paste_correction(
     app: AppHandle,
+    session_id: String,
     inserted_text: String,
     before_paste: FocusedTextSnapshot,
 ) -> Result<(), String> {
@@ -167,6 +179,7 @@ fn watch_for_post_paste_correction(
             if stable_since.elapsed() >= POST_PASTE_STABLE_EDIT_DELAY {
                 learn_from_text_snapshots(
                     &app,
+                    &session_id,
                     &inserted_text,
                     &before_paste.text,
                     &after_paste.text,
@@ -180,6 +193,7 @@ fn watch_for_post_paste_correction(
     if let Some(candidate_text) = changed_text {
         learn_from_text_snapshots(
             &app,
+            &session_id,
             &inserted_text,
             &before_paste.text,
             &after_paste.text,
@@ -213,6 +227,7 @@ fn focused_text_snapshot_from_parts(
 
 fn learn_from_text_snapshots(
     app: &AppHandle,
+    session_id: &str,
     inserted_text: &str,
     before_paste_text: &str,
     after_paste_text: &str,
@@ -228,51 +243,71 @@ fn learn_from_text_snapshots(
         return Ok(());
     };
 
-    let mut settings = crate::settings::get_settings(app);
     let inserted_text = strip_paste_direction_marks(inserted_text);
     let corrected_text = strip_paste_direction_marks(&corrected_text);
-    let candidates = crate::dictionary_learning::infer_auto_learn_candidates(
-        &inserted_text,
-        &corrected_text,
-        &settings.custom_words,
-    );
 
-    if candidates.is_empty() {
-        return Ok(());
-    }
-
-    let mut learned_entries = Vec::new();
     let now_ms = crate::dictionary::current_unix_ms();
-    for candidate in candidates {
-        if let Some(entry) = crate::dictionary::upsert_auto_learn_entry(
-            &mut settings,
-            now_ms,
-            candidate.phrase,
-            candidate.replacement_of,
-        )? {
-            learned_entries.push(entry);
-        }
+    let (promoted_entries, learned_count, routed_count) =
+        crate::settings::mutate_settings_locked(app, |settings| {
+            let candidates = crate::dictionary_learning::infer_auto_learn_candidates(
+                &inserted_text,
+                &corrected_text,
+                &settings.custom_words,
+            );
+
+            let mut promoted = Vec::new();
+            let mut learned = 0usize;
+            let mut routed = 0usize;
+            for candidate in candidates {
+                let dictated = candidate.replacement_of.as_deref().unwrap_or("");
+                match crate::dictionary::observe_correction(
+                    settings,
+                    now_ms,
+                    session_id,
+                    dictated,
+                    Some(&candidate.phrase),
+                ) {
+                    crate::dictionary::ObserveOutcome::Promoted => {
+                        // Promotion pushes the new entry last onto `dictionary_entries`
+                        // (see `promote_candidate_to_entry`), so grabbing `.last()` here,
+                        // within the same closure iteration, is safe.
+                        if let Some(entry) = settings.dictionary_entries.last() {
+                            promoted.push(entry.clone());
+                        }
+                    }
+                    crate::dictionary::ObserveOutcome::Learned => learned += 1,
+                    crate::dictionary::ObserveOutcome::Routed => routed += 1,
+                    _ => {}
+                }
+            }
+            (promoted, learned, routed)
+        });
+
+    // Emit AFTER the lock is released.
+    if !promoted_entries.is_empty() {
+        let promoted_words = promoted_entries
+            .iter()
+            .map(|entry| entry.phrase.clone())
+            .collect::<Vec<_>>();
+        let _ = app.emit("dictionary-entries-learned", promoted_entries.clone());
+        let _ = app.emit("custom-words-learned", promoted_words);
+    }
+    if learned_count > 0 {
+        // New event for the (future) review-queue UI; payload is intentionally phrase-free
+        // (the store re-fetches candidates via command).
+        let _ = app.emit("dictionary-candidates-learned", learned_count);
     }
 
-    if learned_entries.is_empty() {
-        return Ok(());
-    }
-
-    crate::settings::write_settings(app, settings);
-    let learned_words = learned_entries
-        .iter()
-        .map(|entry| entry.phrase.clone())
-        .collect::<Vec<_>>();
-    let _ = app.emit("dictionary-entries-learned", learned_entries.clone());
-    let _ = app.emit("custom-words-learned", learned_words.clone());
-    info!("{}", auto_learn_log_message(learned_words.len()));
+    info!(
+        "{}",
+        auto_learn_outcome_log_message(promoted_entries.len(), learned_count, routed_count)
+    );
 
     Ok(())
 }
 
-fn auto_learn_log_message(count: usize) -> String {
-    let noun = if count == 1 { "entry" } else { "entries" };
-    format!("Auto-added {count} corrected dictionary {noun}")
+fn auto_learn_outcome_log_message(promoted: usize, learned: usize, routed: usize) -> String {
+    format!("Auto-learn pass: {promoted} promoted, {learned} new candidates, {routed} routed as feedback")
 }
 
 pub fn extract_corrected_inserted_text(
@@ -1082,9 +1117,9 @@ mod windows_focused_text {
 #[cfg(test)]
 mod tests {
     use super::{
-        auto_learn_log_message, extract_corrected_inserted_text, focused_text_snapshot_from_parts,
-        focused_text_within_cap, parse_selection_snapshot_output, FocusedTextSelection,
-        MAX_FOCUSED_TEXT_CHARS, POST_PASTE_LEARNING_WINDOW,
+        auto_learn_outcome_log_message, extract_corrected_inserted_text,
+        focused_text_snapshot_from_parts, focused_text_within_cap, parse_selection_snapshot_output,
+        FocusedTextSelection, MAX_FOCUSED_TEXT_CHARS, POST_PASTE_LEARNING_WINDOW,
     };
     use std::time::Duration;
 
@@ -1213,10 +1248,11 @@ mod tests {
     }
 
     #[test]
-    fn auto_learn_log_message_does_not_include_learned_phrase() {
-        let message = auto_learn_log_message(1);
+    fn auto_learn_outcome_log_message_is_phrase_free() {
+        let message = auto_learn_outcome_log_message(1, 2, 0);
 
-        assert!(message.contains("Auto-added 1"));
+        assert!(message.contains("1 promoted"));
+        assert!(message.contains("2 new candidates"));
         assert!(!message.contains("Robyn"));
     }
 

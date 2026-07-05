@@ -432,7 +432,6 @@ fn has_phrase(entries: &[DictionaryEntry], phrase: &str, except_id: Option<&str>
     })
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug, PartialEq, Eq)]
 pub enum ObserveOutcome {
     Learned,    // new candidate
@@ -442,7 +441,6 @@ pub enum ObserveOutcome {
     Routed,     // produced-output feedback: edit of dictionary-produced text
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 pub const PROMOTE_THRESHOLD: u32 = 2;
 
 /// If `replacement_of` (the post-apply dictated form) matches an ACTIVE entry's phrase, the
@@ -482,7 +480,6 @@ pub fn produced_output_feedback(
     Some(ObserveOutcome::Routed)
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 fn candidate_pair(replacement_of: &Option<String>, phrase: &str) -> (Option<String>, String) {
     (
         replacement_of.as_deref().map(canonicalize),
@@ -490,7 +487,6 @@ fn candidate_pair(replacement_of: &Option<String>, phrase: &str) -> (Option<Stri
     )
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 fn source_is_conflicted(
     settings: &AppSettings,
     canon_src: &Option<String>,
@@ -503,7 +499,6 @@ fn source_is_conflicted(
     })
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 pub fn observe_correction(
     settings: &mut AppSettings,
     now_ms: u64,
@@ -564,7 +559,6 @@ pub fn observe_correction(
 
 /// Convert a candidate into an active auto-learned entry. `user_confirmed` is true when
 /// promotion came from an explicit Approve (manual-tier trust); false for recurrence.
-#[cfg_attr(not(test), allow(dead_code))]
 pub fn promote_candidate_to_entry(
     settings: &mut AppSettings,
     now_ms: u64,
