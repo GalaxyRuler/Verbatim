@@ -224,6 +224,7 @@ const installTauriMocks = async (
     firstRun?: boolean;
     androidAsrPacks?: Array<Record<string, unknown>>;
     androidLlmPacks?: Array<Record<string, unknown>>;
+    learnCandidates?: Array<Record<string, unknown>>;
   } = {},
 ) => {
   const availableModels = mockOptions.availableModels ?? models;
@@ -290,6 +291,7 @@ const installTauriMocks = async (
       firstRun,
       androidAsrPacks,
       androidLlmPacks,
+      learnCandidates,
       localPostProcessingModels,
       initialHistoryEntries,
       osType,
@@ -351,6 +353,9 @@ const installTauriMocks = async (
       ];
       let historyRows = [
         ...((initialHistoryEntries as Array<Record<string, unknown>>) ?? []),
+      ];
+      let learnCandidateRows = [
+        ...((learnCandidates as Array<Record<string, unknown>>) ?? []),
       ];
       const availableMicrophones = [
         { index: "default", name: "Default", is_default: true },
@@ -621,6 +626,50 @@ const installTauriMocks = async (
               );
               syncDictionarySettings();
               return deleted;
+            }
+            case "set_dictionary_entry_active": {
+              const id = args?.id as string;
+              const active = Boolean(args?.active);
+              dictionaryEntries = dictionaryEntries.map((entry) =>
+                entry.id === id
+                  ? { ...entry, active, needs_review: false }
+                  : entry,
+              );
+              syncDictionarySettings();
+              return null;
+            }
+            case "list_learn_candidates":
+              return learnCandidateRows;
+            case "approve_learn_candidate": {
+              const phrase = args?.phrase as string;
+              const replacementOf = (args?.replacementOf ?? null) as
+                | string
+                | null;
+              learnCandidateRows = learnCandidateRows.filter(
+                (candidate) => candidate.phrase !== phrase,
+              );
+              const entry = {
+                id: `dict_test_${nextDictionaryId++}`,
+                phrase,
+                replacement_of: replacementOf,
+                source: "auto_learned",
+                priority: "normal",
+                created_at_ms: Date.now(),
+                updated_at_ms: Date.now(),
+                active: true,
+                user_confirmed: true,
+                needs_review: false,
+              };
+              dictionaryEntries = [...dictionaryEntries, entry];
+              syncDictionarySettings();
+              return entry;
+            }
+            case "reject_learn_candidate": {
+              const phrase = args?.phrase as string;
+              learnCandidateRows = learnCandidateRows.filter(
+                (candidate) => candidate.phrase !== phrase,
+              );
+              return null;
             }
             case "list_snippet_entries":
               return snippetEntries;
@@ -1324,6 +1373,7 @@ const installTauriMocks = async (
       firstRun,
       androidAsrPacks,
       androidLlmPacks,
+      learnCandidates: mockOptions.learnCandidates ?? [],
       localPostProcessingModels: localLlmModels,
       initialHistoryEntries: historyEntries,
       osType,
@@ -2938,13 +2988,73 @@ test.describe("Verbatim App", () => {
 
     const learnedStatus = page.getByTestId("dictionary-recently-learned");
     await expect(learnedStatus).toBeVisible();
-    await expect(learnedStatus).toContainText("Added to dictionary");
-    await expect(learnedStatus).toContainText("Added: Abdullah al Kulaib");
+    await expect(learnedStatus).toContainText("Dictionary updated");
+    await expect(learnedStatus).toContainText(
+      "Now correcting: Abdullah al Kulaib",
+    );
 
     await learnedStatus.getByRole("button", { name: "Undo" }).click();
     await expect(page.getByTestId("dictionary-entries-list")).not.toContainText(
       "Abdullah al Kulaib",
     );
+  });
+
+  test("pending review queue lists a learn candidate and approves it", async ({
+    page,
+  }) => {
+    await installTauriMocks(page, {}, [], "windows", {
+      learnCandidates: [
+        {
+          replacement_of: "robin",
+          phrase: "Robyn",
+          occurrences: 1,
+          last_evidence_session: null,
+          created_at_ms: 1,
+          updated_at_ms: 1,
+        },
+      ],
+    });
+    await page.goto("/");
+
+    await page.getByText("Dictionary").click();
+
+    const pendingSection = page.getByTestId("dictionary-pending-review");
+    await expect(pendingSection).toBeVisible();
+    await expect(pendingSection).toContainText("Robyn");
+    await expect(pendingSection).toContainText('from "robin"');
+
+    await pendingSection.getByRole("button", { name: "Approve" }).click();
+
+    const result = await page.evaluate(() => {
+      const win = window as typeof window & {
+        __VERBATIM_TEST_INVOKES__: Array<{
+          cmd: string;
+          args?: Record<string, unknown>;
+        }>;
+      };
+      return win.__VERBATIM_TEST_INVOKES__;
+    });
+    expect(
+      result.some((invoke) => invoke.cmd === "approve_learn_candidate"),
+    ).toBe(true);
+
+    await expect(pendingSection).toHaveCount(0);
+    await expect(page.getByTestId("dictionary-entries-list")).toContainText(
+      "Robyn",
+    );
+  });
+
+  test("pending review section is absent with no candidates", async ({
+    page,
+  }) => {
+    await installTauriMocks(page, {}, [], "windows", {
+      learnCandidates: [],
+    });
+    await page.goto("/");
+
+    await page.getByText("Dictionary").click();
+
+    await expect(page.getByTestId("dictionary-pending-review")).toHaveCount(0);
   });
 
   test("advanced settings no longer owns dictionary management", async ({
