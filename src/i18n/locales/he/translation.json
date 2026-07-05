@@ -829,13 +829,14 @@
       "counts": {
         "total": "{{count}} רשומות",
         "autoLearned": "{{count}} נלמדו אוטומטית",
-        "starred": "{{count}} מסומנות בכוכב"
+        "starred": "{{count}} מסומנות בכוכב",
+        "pending": "{{count}} ממתינות לבדיקה"
       },
       "empty": "אין עדיין רשומות במילון.",
       "noResults": "אין רשומות שתואמות לחיפוש שלך.",
       "recentlyLearned": {
-        "title": "נוסף למילון",
-        "description": "נוסף: {{phrases}}",
+        "title": "המילון עודכן",
+        "description": "מתקן כעת: {{phrases}}",
         "undo": "בטל"
       },
       "errors": {
@@ -843,7 +844,24 @@
         "add": "הוספת רשומת מילון נכשלה",
         "update": "עדכון רשומת מילון נכשל",
         "delete": "מחיקת רשומת מילון נכשלה",
-        "duplicate": "{{phrase}} כבר קיים במילון שלך"
+        "duplicate": "{{phrase}} כבר קיים במילון שלך",
+        "approve": "לא ניתן היה לאשר את הרשומה",
+        "reject": "לא ניתן היה לדחות את הרשומה"
+      },
+      "pending": {
+        "title": "ממתין לבדיקה",
+        "description": "תיקונים ש-Verbatim הבחין בהם. אשר כדי להוסיף אותם למילון שלך.",
+        "from": "מ-\"{{source}}\"",
+        "approve": "אישור",
+        "reject": "דחייה",
+        "occurrences": "×{{count}} פעמים"
+      },
+      "needsReview": {
+        "title": "דורש בדיקה",
+        "quarantined": "הושהה לאחר שביטלת אותו",
+        "flagged": "ערכת תיקון זה",
+        "keep": "שמור",
+        "delete": "מחק"
       }
     },
     "formattingLevel": {
