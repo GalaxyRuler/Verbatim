@@ -163,6 +163,12 @@ pub struct DictionaryEntry {
     pub created_at_ms: u64,
     #[serde(default)]
     pub updated_at_ms: u64,
+    #[serde(default = "default_true")]
+    pub active: bool,
+    #[serde(default)]
+    pub user_confirmed: bool,
+    #[serde(default)]
+    pub needs_review: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Type)]
@@ -641,6 +647,10 @@ fn default_translate_to_english() -> bool {
 
 fn default_start_hidden() -> bool {
     false
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn default_autostart_enabled() -> bool {
@@ -2347,5 +2357,15 @@ mod tests {
         let out = format!("{:?}", map);
         assert!(!out.contains("secret"));
         assert!(out.contains("[REDACTED]"));
+    }
+
+    #[test]
+    fn dictionary_entry_defaults_active_true_flags_false() {
+        // Legacy JSON without the new fields must deserialize as active + untouched flags.
+        let legacy = r#"{"id":"dict_1_robyn","phrase":"Robyn"}"#;
+        let entry: crate::settings::DictionaryEntry = serde_json::from_str(legacy).unwrap();
+        assert!(entry.active);
+        assert!(!entry.user_confirmed);
+        assert!(!entry.needs_review);
     }
 }

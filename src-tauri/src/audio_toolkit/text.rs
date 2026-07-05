@@ -544,6 +544,9 @@ mod tests {
             priority: DictionaryEntryPriority::Normal,
             created_at_ms: 1,
             updated_at_ms: 1,
+            active: true,
+            user_confirmed: false,
+            needs_review: false,
         }
     }
 

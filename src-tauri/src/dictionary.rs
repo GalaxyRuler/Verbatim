@@ -105,6 +105,9 @@ pub fn sync_legacy_custom_words_with_migration(
                 priority: DictionaryEntryPriority::Normal,
                 created_at_ms: 0,
                 updated_at_ms: 0,
+                active: true,
+                user_confirmed: false,
+                needs_review: false,
             });
         }
 
@@ -144,6 +147,9 @@ pub fn upsert_manual_entry(
         priority: DictionaryEntryPriority::Normal,
         created_at_ms: now_ms,
         updated_at_ms: now_ms,
+        active: true,
+        user_confirmed: false,
+        needs_review: false,
     };
 
     settings.dictionary_entries.push(entry.clone());
@@ -176,6 +182,9 @@ pub fn upsert_auto_learn_entry(
         priority: DictionaryEntryPriority::Normal,
         created_at_ms: now_ms,
         updated_at_ms: now_ms,
+        active: true,
+        user_confirmed: false,
+        needs_review: false,
     };
 
     settings.dictionary_entries.push(entry.clone());
@@ -296,6 +305,9 @@ pub fn replace_dictionary_phrases(
             priority: DictionaryEntryPriority::Normal,
             created_at_ms: now_ms,
             updated_at_ms: now_ms,
+            active: true,
+            user_confirmed: false,
+            needs_review: false,
         });
     }
 
@@ -779,6 +791,9 @@ mod tests {
             priority: DictionaryEntryPriority::Normal,
             created_at_ms: 1,
             updated_at_ms: 1,
+            active: true,
+            user_confirmed: false,
+            needs_review: false,
         }
     }
 }
