@@ -415,23 +415,47 @@ pub enum ObserveOutcome {
     Reinforced, // existing candidate, +1, not yet promoted (or blocked by conflict)
     Promoted,   // reached threshold -> became an active entry
     NoChange,   // suppressed / duplicate session / already active
-    #[cfg_attr(not(test), allow(dead_code))]
-    Routed, // produced-output feedback (implemented in a later task)
+    Routed,     // produced-output feedback: edit of dictionary-produced text
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
 pub const PROMOTE_THRESHOLD: u32 = 2;
 
-/// Placeholder: detects edits of dictionary-produced output (reversals/refinements).
-/// Implemented in a later task; returning None means "not produced-output feedback".
-#[cfg_attr(not(test), allow(dead_code))]
+/// If `replacement_of` (the post-apply dictated form) matches an ACTIVE entry's phrase, the
+/// user is editing text the dictionary produced. Reversal -> quarantine auto entry;
+/// refinement -> flag for review. Returns Some(Routed) when handled (caller must NOT learn
+/// a standalone rule).
 pub fn produced_output_feedback(
-    _settings: &mut AppSettings,
-    _now_ms: u64,
-    _replacement_of: &Option<String>,
-    _corrected_phrase: &str,
+    settings: &mut AppSettings,
+    now_ms: u64,
+    replacement_of: &Option<String>,
+    corrected_phrase: &str,
 ) -> Option<ObserveOutcome> {
-    None
+    let dictated = replacement_of.as_deref()?;
+    let dictated_key = canonicalize(dictated);
+    let corrected_key = canonicalize(corrected_phrase);
+
+    let index = settings
+        .dictionary_entries
+        .iter()
+        .position(|e| e.active && canonicalize(&e.phrase) == dictated_key)?;
+
+    let is_reversal = settings.dictionary_entries[index]
+        .replacement_of
+        .as_deref()
+        .map(canonicalize)
+        .as_deref()
+        == Some(corrected_key.as_str());
+
+    let entry = &mut settings.dictionary_entries[index];
+    entry.needs_review = true;
+    entry.updated_at_ms = now_ms;
+    let is_auto = entry.source == DictionaryEntrySource::AutoLearned && !entry.user_confirmed;
+    if is_reversal && is_auto {
+        entry.active = false; // quarantine from apply
+        sync_legacy_custom_words(settings);
+    }
+    Some(ObserveOutcome::Routed)
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
@@ -1056,5 +1080,100 @@ mod tests {
             user_confirmed: false,
             needs_review: false,
         }
+    }
+
+    fn entry_full(id: &str, phrase: &str, replacement_of: Option<&str>) -> DictionaryEntry {
+        DictionaryEntry {
+            id: id.into(),
+            phrase: phrase.into(),
+            replacement_of: replacement_of.map(str::to_string),
+            source: DictionaryEntrySource::Manual,
+            priority: DictionaryEntryPriority::Normal,
+            created_at_ms: 1,
+            updated_at_ms: 1,
+            active: true,
+            user_confirmed: false,
+            needs_review: false,
+        }
+    }
+
+    #[test]
+    fn reversal_of_auto_entry_quarantines_it_and_learns_nothing() {
+        let mut s = get_default_settings();
+        s.dictionary_entries.push(DictionaryEntry {
+            source: DictionaryEntrySource::AutoLearned,
+            ..entry_full("dict_1", "their", Some("there"))
+        });
+        // User edits produced "their" back to "there": dictated="their", corrected="there".
+        let out = observe_correction(&mut s, 5, "s1", "their", Some("there"));
+        assert_eq!(out, ObserveOutcome::Routed);
+        assert!(!s.dictionary_entries[0].active); // quarantined
+        assert!(s.dictionary_entries[0].needs_review);
+        assert!(s.dictionary_learn_candidates.is_empty()); // no inverse learned
+    }
+
+    #[test]
+    fn refinement_of_auto_entry_flags_review_without_new_rule() {
+        let mut s = get_default_settings();
+        s.dictionary_entries.push(DictionaryEntry {
+            source: DictionaryEntrySource::AutoLearned,
+            ..entry_full("dict_1", "ACME Corp", Some("acme"))
+        });
+        // User edits produced "ACME Corp" into "ACME Corporation".
+        let out = observe_correction(&mut s, 5, "s1", "ACME Corp", Some("ACME Corporation"));
+        assert_eq!(out, ObserveOutcome::Routed);
+        assert!(s.dictionary_entries[0].needs_review);
+        assert!(s.dictionary_entries[0].active); // refinement does not quarantine
+        assert!(s.dictionary_learn_candidates.is_empty());
+    }
+
+    #[test]
+    fn manual_entry_reversal_flags_but_stays_active() {
+        let mut s = get_default_settings();
+        s.dictionary_entries
+            .push(entry_full("dict_1", "their", Some("there"))); // Manual
+        let out = observe_correction(&mut s, 5, "s1", "their", Some("there"));
+        assert_eq!(out, ObserveOutcome::Routed);
+        assert!(s.dictionary_entries[0].active); // manual never auto-deactivated
+        assert!(s.dictionary_entries[0].needs_review);
+    }
+
+    #[test]
+    fn user_confirmed_auto_entry_reversal_flags_but_stays_active() {
+        let mut s = get_default_settings();
+        s.dictionary_entries.push(DictionaryEntry {
+            source: DictionaryEntrySource::AutoLearned,
+            user_confirmed: true,
+            ..entry_full("dict_1", "their", Some("there"))
+        });
+        let out = observe_correction(&mut s, 5, "s1", "their", Some("there"));
+        assert_eq!(out, ObserveOutcome::Routed);
+        assert!(s.dictionary_entries[0].active); // user-confirmed = manual-tier trust
+        assert!(s.dictionary_entries[0].needs_review);
+    }
+
+    #[test]
+    fn inactive_entry_phrase_does_not_route_feedback() {
+        let mut s = get_default_settings();
+        s.dictionary_entries.push(DictionaryEntry {
+            source: DictionaryEntrySource::AutoLearned,
+            active: false,
+            ..entry_full("dict_1", "their", Some("there"))
+        });
+        // Entry is quarantined; editing "their" is NOT feedback on it (not produced by apply).
+        let out = observe_correction(&mut s, 5, "s1", "their", Some("there"));
+        assert_ne!(out, ObserveOutcome::Routed);
+    }
+
+    #[test]
+    fn unrelated_correction_does_not_route_feedback() {
+        let mut s = get_default_settings();
+        s.dictionary_entries.push(DictionaryEntry {
+            source: DictionaryEntrySource::AutoLearned,
+            ..entry_full("dict_1", "their", Some("there"))
+        });
+        // "robin" doesn't match any entry phrase -> normal learn path.
+        let out = observe_correction(&mut s, 5, "s1", "robin", Some("Robyn"));
+        assert_eq!(out, ObserveOutcome::Learned);
     }
 }
