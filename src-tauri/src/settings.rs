@@ -1130,10 +1130,12 @@ fn ensure_dictionary_defaults_for_loaded_value(
     settings: &mut AppSettings,
     settings_value: Option<&serde_json::Value>,
 ) -> bool {
-    crate::dictionary::sync_legacy_custom_words_with_migration(
+    let migrated = crate::dictionary::migrate_dictionary_v1(settings);
+    let synced = crate::dictionary::sync_legacy_custom_words_with_migration(
         settings,
         !settings_value_has_dictionary_entries(settings_value),
-    )
+    );
+    migrated || synced
 }
 
 fn ensure_snippet_defaults(settings: &mut AppSettings) -> bool {

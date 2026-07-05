@@ -64,6 +64,30 @@ pub fn dictionary_phrases(entries: &[DictionaryEntry]) -> Vec<String> {
     entries.iter().map(|entry| entry.phrase.clone()).collect()
 }
 
+/// v0 -> v1: sanitize entry fields, then grandfather existing auto-learned entries to
+/// manual-tier trust (`user_confirmed = true`) so their fuzzy behaviour does not silently
+/// tighten under the new stricter auto tier. Idempotent via `dictionary_schema_version`.
+pub fn migrate_dictionary_v1(settings: &mut AppSettings) -> bool {
+    if settings.dictionary_schema_version >= 1 {
+        return false;
+    }
+    for entry in &mut settings.dictionary_entries {
+        // Sanitize before classifying.
+        if let Some(phrase) = sanitize_dictionary_phrase(&entry.phrase) {
+            entry.phrase = phrase;
+        }
+        entry.replacement_of = entry
+            .replacement_of
+            .as_deref()
+            .and_then(sanitize_dictionary_phrase);
+        if entry.source == DictionaryEntrySource::AutoLearned {
+            entry.user_confirmed = true; // grandfather at manual-tier (base threshold)
+        }
+    }
+    settings.dictionary_schema_version = 1;
+    true
+}
+
 pub fn sync_legacy_custom_words(settings: &mut AppSettings) -> bool {
     sync_legacy_custom_words_with_migration(settings, true)
 }
@@ -574,10 +598,10 @@ pub fn promote_candidate_to_entry(
 #[cfg(test)]
 mod tests {
     use super::{
-        delete_entries, dictionary_phrases, make_dictionary_entry_id, observe_correction,
-        promote_candidate_to_entry, replace_dictionary_phrases, sanitize_dictionary_phrase,
-        sync_legacy_custom_words, update_entry, upsert_auto_learn_entry, upsert_manual_entry,
-        ObserveOutcome,
+        delete_entries, dictionary_phrases, make_dictionary_entry_id, migrate_dictionary_v1,
+        observe_correction, promote_candidate_to_entry, replace_dictionary_phrases,
+        sanitize_dictionary_phrase, sync_legacy_custom_words, update_entry,
+        upsert_auto_learn_entry, upsert_manual_entry, ObserveOutcome,
     };
     use crate::settings::{
         get_default_settings, DictionaryEntry, DictionaryEntryPriority, DictionaryEntrySource,
@@ -1175,5 +1199,72 @@ mod tests {
         // "robin" doesn't match any entry phrase -> normal learn path.
         let out = observe_correction(&mut s, 5, "s1", "robin", Some("Robyn"));
         assert_eq!(out, ObserveOutcome::Learned);
+    }
+
+    #[test]
+    fn migration_grandfathers_auto_entries_at_manual_tier_and_is_idempotent() {
+        let mut s = get_default_settings();
+        s.dictionary_schema_version = 0;
+        s.dictionary_entries = vec![
+            DictionaryEntry {
+                source: DictionaryEntrySource::AutoLearned,
+                ..entry_full("dict_1", "Robyn", Some("robin"))
+            },
+            DictionaryEntry {
+                source: DictionaryEntrySource::AutoLearned,
+                ..entry_full("dict_2", "GraphQL", None)
+            },
+        ];
+
+        let changed = migrate_dictionary_v1(&mut s);
+        assert!(changed);
+        assert_eq!(s.dictionary_schema_version, 1);
+        assert!(
+            s.dictionary_entries[0].user_confirmed,
+            "grandfathered auto -> manual-tier"
+        );
+        assert!(s.dictionary_entries[1].user_confirmed);
+        assert!(s.dictionary_entries.iter().all(|e| e.active));
+
+        // Idempotent: second run is a no-op.
+        let changed_again = migrate_dictionary_v1(&mut s);
+        assert!(!changed_again);
+    }
+
+    #[test]
+    fn migration_sanitizes_before_classifying() {
+        let mut s = get_default_settings();
+        s.dictionary_schema_version = 0;
+        s.dictionary_entries = vec![DictionaryEntry {
+            source: DictionaryEntrySource::AutoLearned,
+            // replacement_of sanitizes to None (no alphabetic content)
+            ..entry_full("dict_1", "Robyn", Some("<<>>"))
+        }];
+
+        migrate_dictionary_v1(&mut s);
+        assert_eq!(s.dictionary_entries[0].replacement_of, None); // sanitized away, not kept raw
+        assert!(s.dictionary_entries[0].user_confirmed);
+    }
+
+    #[test]
+    fn migration_leaves_manual_entries_untouched_except_version() {
+        let mut s = get_default_settings();
+        s.dictionary_schema_version = 0;
+        s.dictionary_entries = vec![entry_full("dict_1", "Jean-Luc", None)]; // Manual source
+        migrate_dictionary_v1(&mut s);
+        assert!(!s.dictionary_entries[0].user_confirmed); // manual entries NOT stamped
+        assert_eq!(s.dictionary_schema_version, 1);
+    }
+
+    #[test]
+    fn migration_does_not_run_on_fresh_settings_with_version_current() {
+        let mut s = get_default_settings();
+        s.dictionary_schema_version = 1;
+        s.dictionary_entries = vec![DictionaryEntry {
+            source: DictionaryEntrySource::AutoLearned,
+            ..entry_full("dict_1", "Robyn", Some("robin"))
+        }];
+        assert!(!migrate_dictionary_v1(&mut s));
+        assert!(!s.dictionary_entries[0].user_confirmed); // untouched: created under the new system
     }
 }
