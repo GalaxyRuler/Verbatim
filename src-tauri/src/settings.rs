@@ -1657,9 +1657,10 @@ pub fn mutate_settings_locked<T>(app: &AppHandle, f: impl FnOnce(&mut AppSetting
 }
 
 // NOTE: `write_settings` and `get_settings` are the lock-free primitives. All MUTATION
-// paths must go through `mutate_settings_locked`. The deny-list test
-// `dictionary_mutation_paths_do_not_call_write_settings_directly` guards this for every
-// migrated file.
+// paths must go through `mutate_settings_locked` or the domain writers
+// (`write_settings_domain` / `try_write_settings_domain`), which take the same lock.
+// The deny-list test `dictionary_mutation_paths_do_not_call_write_settings_directly`
+// guards this for every migrated file.
 pub fn write_settings(app: &AppHandle, mut settings: AppSettings) {
     let store = app
         .store(crate::portable::store_path(SETTINGS_STORE_PATH))
@@ -1688,6 +1689,11 @@ where
     })
 }
 
+/// Domain-scoped counterpart of `mutate_settings_locked`: holds `SETTINGS_WRITE_LOCK`
+/// across the whole read-modify-write so domain writes cannot lost-update against
+/// concurrent locked mutations. The lock is not reentrant — never call this (or
+/// `write_settings_domain`) from inside a `mutate_settings_locked` closure. Do NOT
+/// `.await` or emit Tauri events inside `mutate`; emit after this returns.
 pub(crate) fn try_write_settings_domain<F>(
     app: &AppHandle,
     domain: SettingsWriteDomain,
@@ -1696,6 +1702,9 @@ pub(crate) fn try_write_settings_domain<F>(
 where
     F: FnOnce(&mut AppSettings) -> Result<(), String>,
 {
+    let _guard = SETTINGS_WRITE_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let mut settings = get_settings(app);
     try_mutate_settings_domain(&mut settings, domain, mutate)?;
     write_settings(app, settings);
@@ -1786,11 +1795,15 @@ mod tests {
     #[test]
     fn dictionary_mutation_paths_do_not_call_write_settings_directly() {
         // Guard: all settings mutation paths in these files must go through
-        // `mutate_settings_locked` (the serialized read-modify-write). A direct
+        // `mutate_settings_locked` or the locked domain writers
+        // (`write_settings_domain` / `try_write_settings_domain`). A direct
         // `write_settings` call in any of them would reintroduce the lost-update race
         // this hardening effort removed — originally for the dictionary paths, then
         // extended to the remaining unlocked writers (audio/adaptive/transcription/
-        // models/local_llm/snippets/model-manager).
+        // models/local_llm/snippets/model-manager), then to the domain-write callers
+        // (shortcut/history/diagnostics/transcription-manager).
+        // The substring check is safe: `write_settings_domain(` does not contain
+        // `write_settings(`.
         // CWD for unit tests is the manifest dir (src-tauri), so paths are relative to it.
         for path in [
             "src/commands/dictionary.rs",
@@ -1802,12 +1815,16 @@ mod tests {
             "src/commands/local_llm.rs",
             "src/commands/snippets.rs",
             "src/managers/model.rs",
+            "src/shortcut/mod.rs",
+            "src/commands/history.rs",
+            "src/commands/mod.rs",
+            "src/managers/transcription.rs",
         ] {
             let source = std::fs::read_to_string(path)
                 .unwrap_or_else(|error| panic!("failed to read {path}: {error}"));
             assert!(
                 !source.contains("write_settings("),
-                "{path} must mutate via mutate_settings_locked, not write_settings"
+                "{path} must mutate via mutate_settings_locked or the locked domain writers, not write_settings"
             );
         }
     }
