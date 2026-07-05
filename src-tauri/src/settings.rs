@@ -1783,6 +1783,22 @@ mod tests {
     }
 
     #[test]
+    fn dictionary_mutation_paths_do_not_call_write_settings_directly() {
+        // Guard: all dictionary mutation paths must go through `mutate_settings_locked`
+        // (the serialized read-modify-write). A direct `write_settings` call in these
+        // files would reintroduce the lost-update race this hardening effort removed.
+        // CWD for unit tests is the manifest dir (src-tauri), so paths are relative to it.
+        for path in ["src/commands/dictionary.rs", "src/post_paste_learning.rs"] {
+            let source = std::fs::read_to_string(path)
+                .unwrap_or_else(|error| panic!("failed to read {path}: {error}"));
+            assert!(
+                !source.contains("write_settings("),
+                "{path} must mutate via mutate_settings_locked, not write_settings"
+            );
+        }
+    }
+
+    #[test]
     fn apply_settings_mutation_runs_closure_and_returns_value() {
         let mut settings = crate::settings::get_default_settings();
         let added = crate::settings::apply_settings_mutation(&mut settings, |s| {
