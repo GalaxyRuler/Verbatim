@@ -867,6 +867,38 @@ async learnCustomWordsFromCorrection(dictatedText: string, correctedText: string
     else return { status: "error", error: e  as any };
 }
 },
+async listLearnCandidates() : Promise<Result<LearnCandidate[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_learn_candidates") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async approveLearnCandidate(phrase: string, replacementOf: string | null) : Promise<Result<DictionaryEntry | null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("approve_learn_candidate", { phrase, replacementOf }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async rejectLearnCandidate(phrase: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("reject_learn_candidate", { phrase }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async setDictionaryEntryActive(id: string, active: boolean) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_dictionary_entry_active", { id, active }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async listSnippetEntries() : Promise<Result<SnippetEntry[], string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("list_snippet_entries") };
@@ -1363,7 +1395,7 @@ export type AdaptiveProfile = { id: string; name: string; enabled: boolean; clea
 export type AndroidAsrEngineKind = "zipformerWhisper" | "senseVoice" | "canary" | "moonshine" | "parakeet"
 export type AndroidAsrModelPackState = { id: string; displayName: string; description: string; language: string; sizeMb: number; minRamMb: number; engineKind: AndroidAsrEngineKind; installedDir: string; isInstalled: boolean; isDownloading: boolean; isActive: boolean; isSelectable: boolean; downloadPhase: string; downloadProgress: number; missingFiles: string[] }
 export type AndroidLlmModelPackState = { id: string; displayName: string; description: string; runtime: string; license: string; quantization: string; sizeMb: number; minRamMb: number; installedDir: string; modelPath: string; isInstalled: boolean; isDownloading: boolean; isActive: boolean; isSelectable: boolean; downloadPhase: string; downloadProgress: number; missingFiles: string[] }
-export type AppSettings = { bindings: Partial<{ [key in string]: ShortcutBinding }>; push_to_talk: boolean; audio_feedback: boolean; audio_feedback_volume?: number; sound_theme?: SoundTheme; start_hidden?: boolean; autostart_enabled?: boolean; update_checks_enabled?: boolean; selected_model?: string; always_on_microphone?: boolean; selected_microphone?: string | null; clamshell_microphone?: string | null; selected_output_device?: string | null; translate_to_english?: boolean; translation_enabled?: boolean; translation_request?: TranslationRequestSettings | null; translation_provider_id?: string | null; translation_model_id?: string | null; selected_language?: string; dictation_language_mode?: DictationLanguageMode; overlay_position?: OverlayPosition; docked_pill_enabled?: boolean; warn_on_elevated_target?: boolean; debug_mode?: boolean; log_level?: LogLevel; custom_words?: string[]; dictionary_entries?: DictionaryEntry[]; dictionary_auto_learn_suppressed?: string[]; auto_add_dictionary_words?: boolean; snippets?: SnippetEntry[]; model_unload_timeout?: ModelUnloadTimeout; word_correction_threshold?: number; history_enabled?: boolean; recordings_enabled?: boolean; history_limit?: number; recording_retention_period?: RecordingRetentionPeriod; paste_method?: PasteMethod; clipboard_handling?: ClipboardHandling; auto_submit?: boolean; auto_submit_key?: AutoSubmitKey; post_process_enabled?: boolean; formatting_level?: FormattingLevel; post_process_provider_id?: string; post_process_providers?: PostProcessProvider[]; post_process_api_keys?: SecretMap; post_process_models?: Partial<{ [key in string]: string }>; post_process_prompts?: LLMPrompt[]; post_process_selected_prompt_id?: string | null; local_llm?: LocalLlmSettings; mute_while_recording?: boolean; append_trailing_space?: boolean; app_language?: string; experimental_enabled?: boolean; lazy_stream_close?: boolean; keyboard_implementation?: KeyboardImplementation; show_tray_icon?: boolean; paste_delay_ms?: number; typing_tool?: TypingTool; external_script_path: string | null; custom_filler_words?: string[] | null; adaptive_profiles_enabled?: boolean; context_awareness_enabled?: boolean; context_nearby_text_enabled?: boolean; adaptive_language_shortlist?: string[]; adaptive_default_profile_id?: string; adaptive_profiles?: AdaptiveProfile[]; adaptive_correction_memory_enabled?: boolean; adaptive_private_app_patterns?: string[]; whisper_accelerator?: WhisperAcceleratorSetting; ort_accelerator?: OrtAcceleratorSetting; whisper_gpu_device?: number; extra_recording_buffer_ms?: number }
+export type AppSettings = { bindings: Partial<{ [key in string]: ShortcutBinding }>; push_to_talk: boolean; audio_feedback: boolean; audio_feedback_volume?: number; sound_theme?: SoundTheme; start_hidden?: boolean; autostart_enabled?: boolean; update_checks_enabled?: boolean; selected_model?: string; always_on_microphone?: boolean; selected_microphone?: string | null; clamshell_microphone?: string | null; selected_output_device?: string | null; translate_to_english?: boolean; translation_enabled?: boolean; translation_request?: TranslationRequestSettings | null; translation_provider_id?: string | null; translation_model_id?: string | null; selected_language?: string; dictation_language_mode?: DictationLanguageMode; overlay_position?: OverlayPosition; docked_pill_enabled?: boolean; warn_on_elevated_target?: boolean; debug_mode?: boolean; log_level?: LogLevel; custom_words?: string[]; dictionary_entries?: DictionaryEntry[]; dictionary_auto_learn_suppressed?: string[]; dictionary_learn_candidates?: LearnCandidate[]; dictionary_schema_version?: number; auto_add_dictionary_words?: boolean; snippets?: SnippetEntry[]; model_unload_timeout?: ModelUnloadTimeout; word_correction_threshold?: number; history_enabled?: boolean; recordings_enabled?: boolean; history_limit?: number; recording_retention_period?: RecordingRetentionPeriod; paste_method?: PasteMethod; clipboard_handling?: ClipboardHandling; auto_submit?: boolean; auto_submit_key?: AutoSubmitKey; post_process_enabled?: boolean; formatting_level?: FormattingLevel; post_process_provider_id?: string; post_process_providers?: PostProcessProvider[]; post_process_api_keys?: SecretMap; post_process_models?: Partial<{ [key in string]: string }>; post_process_prompts?: LLMPrompt[]; post_process_selected_prompt_id?: string | null; local_llm?: LocalLlmSettings; mute_while_recording?: boolean; append_trailing_space?: boolean; app_language?: string; experimental_enabled?: boolean; lazy_stream_close?: boolean; keyboard_implementation?: KeyboardImplementation; show_tray_icon?: boolean; paste_delay_ms?: number; typing_tool?: TypingTool; external_script_path: string | null; custom_filler_words?: string[] | null; adaptive_profiles_enabled?: boolean; context_awareness_enabled?: boolean; context_nearby_text_enabled?: boolean; adaptive_language_shortlist?: string[]; adaptive_default_profile_id?: string; adaptive_profiles?: AdaptiveProfile[]; adaptive_correction_memory_enabled?: boolean; adaptive_private_app_patterns?: string[]; whisper_accelerator?: WhisperAcceleratorSetting; ort_accelerator?: OrtAcceleratorSetting; whisper_gpu_device?: number; extra_recording_buffer_ms?: number }
 export type AudioDevice = { index: string; name: string; is_default: boolean }
 export type AutoSubmitKey = "enter" | "ctrl_enter" | "cmd_enter"
 export type AvailableAccelerators = { whisper: string[]; ort: string[]; gpu_devices: GpuDeviceOption[] }
@@ -1373,7 +1405,7 @@ export type ClipboardHandling = "dont_modify" | "copy_to_clipboard"
 export type CredentialStoreStatus = { available: boolean; platform: string; message: string | null; retained_legacy_api_key_count: number }
 export type CustomSounds = { start: boolean; stop: boolean }
 export type DictationLanguageMode = "auto" | "single" | "multilingual"
-export type DictionaryEntry = { id: string; phrase: string; replacement_of?: string | null; source?: DictionaryEntrySource; priority?: DictionaryEntryPriority; created_at_ms?: number; updated_at_ms?: number }
+export type DictionaryEntry = { id: string; phrase: string; replacement_of?: string | null; source?: DictionaryEntrySource; priority?: DictionaryEntryPriority; created_at_ms?: number; updated_at_ms?: number; active?: boolean; user_confirmed?: boolean; needs_review?: boolean }
 export type DictionaryEntryInput = { phrase: string; replacement_of?: string | null }
 export type DictionaryEntryPriority = "normal" | "starred"
 export type DictionaryEntrySource = "manual" | "auto_learned" | "imported"
@@ -1393,6 +1425,7 @@ export type ImplementationChangeResult = { success: boolean;
 reset_bindings: string[] }
 export type KeyboardImplementation = "tauri" | "verbatim_keys"
 export type LLMPrompt = { id: string; name: string; prompt: string }
+export type LearnCandidate = { replacement_of?: string | null; phrase: string; occurrences?: number; last_evidence_session?: string | null; created_at_ms?: number; updated_at_ms?: number }
 export type LinuxEnvironmentStatus = { is_linux: boolean; session_type: string; desktop: string; is_wayland: boolean; is_x11: boolean; helpers: LinuxHelperStatus[]; clipboard_helper: string | null; key_combo_helper: string | null; direct_input_helper: string | null; at_spi_available: boolean; tray_status: string; warnings: string[] }
 export type LinuxHelperStatus = { name: string; available: boolean; roles: string[] }
 export type LocalLlmModelInfo = { id: string; label: string; filename: string; url: string | null; sha256: string | null; size_mb: number; quantization: string; context_window: number; recommended_role: string; supported_language_notes: string; license_label: string; runtime: string; is_downloaded: boolean; is_downloading: boolean; partial_size: number }
