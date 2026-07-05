@@ -168,6 +168,16 @@ pub fn apply_custom_words(text: &str, custom_words: &[String], threshold: f64) -
     result.join(" ")
 }
 
+/// Stricter absolute cap for NEW auto-learned fuzzy matching. Lower = stricter
+/// (accept iff combined_score < threshold; 0 = exact). Base default is 0.18.
+pub const AUTO_FUZZY_THRESHOLD: f64 = 0.12;
+
+/// Returns the fuzzy-match threshold to use for auto-learned (not yet
+/// user-confirmed) dictionary entries. Always at least as strict as `base`.
+pub fn auto_learned_fuzzy_threshold(base: f64) -> f64 {
+    AUTO_FUZZY_THRESHOLD.min(base)
+}
+
 pub fn apply_dictionary_entries(text: &str, entries: &[DictionaryEntry], threshold: f64) -> String {
     if entries.is_empty() {
         return text.to_string();
@@ -446,6 +456,12 @@ mod tests {
         let custom_words = vec![];
         let result = apply_custom_words(text, &custom_words, 0.5);
         assert_eq!(result, "hello world");
+    }
+
+    #[test]
+    fn auto_threshold_is_stricter_and_clamped() {
+        assert!((auto_learned_fuzzy_threshold(0.18) - 0.12).abs() < f64::EPSILON);
+        assert!((auto_learned_fuzzy_threshold(0.10) - 0.10).abs() < f64::EPSILON); // never looser than base
     }
 
     #[test]
