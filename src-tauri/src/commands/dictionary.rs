@@ -34,15 +34,13 @@ pub fn add_dictionary_entry(
     app: AppHandle,
     input: DictionaryEntryInput,
 ) -> Result<DictionaryEntry, String> {
-    let mut settings = crate::settings::get_settings(&app);
-    let entry = crate::dictionary::upsert_manual_entry(
-        &mut settings,
-        crate::dictionary::current_unix_ms(),
-        input.phrase,
-        input.replacement_of,
-    )?;
-    crate::settings::write_settings(&app, settings);
-    Ok(entry)
+    let now_ms = crate::dictionary::current_unix_ms();
+    // The closure returns the fallible upsert Result as-is; mutate_settings_locked persists
+    // the settings regardless of Ok/Err. A failed upsert leaves settings unchanged, so the
+    // redundant write-back on the Err path is harmless.
+    crate::settings::mutate_settings_locked(&app, |settings| {
+        crate::dictionary::upsert_manual_entry(settings, now_ms, input.phrase, input.replacement_of)
+    })
 }
 
 #[tauri::command]
@@ -52,25 +50,27 @@ pub fn update_dictionary_entry(
     id: String,
     update: DictionaryEntryUpdate,
 ) -> Result<DictionaryEntry, String> {
-    let mut settings = crate::settings::get_settings(&app);
-    let entry = crate::dictionary::update_entry(
-        &mut settings,
-        crate::dictionary::current_unix_ms(),
-        &id,
-        update.phrase,
-        update.replacement_of,
-        update.priority,
-    )?;
-    crate::settings::write_settings(&app, settings);
-    Ok(entry)
+    let now_ms = crate::dictionary::current_unix_ms();
+    // See add_dictionary_entry: the Result is returned as-is; a failed update leaves
+    // settings unchanged, so the redundant write-back on the Err path is harmless.
+    crate::settings::mutate_settings_locked(&app, |settings| {
+        crate::dictionary::update_entry(
+            settings,
+            now_ms,
+            &id,
+            update.phrase,
+            update.replacement_of,
+            update.priority,
+        )
+    })
 }
 
 #[tauri::command]
 #[specta::specta]
 pub fn delete_dictionary_entry(app: AppHandle, id: String) -> Result<(), String> {
-    let mut settings = crate::settings::get_settings(&app);
-    crate::dictionary::delete_entries(&mut settings, &[id]);
-    crate::settings::write_settings(&app, settings);
+    crate::settings::mutate_settings_locked(&app, |settings| {
+        crate::dictionary::delete_entries(settings, &[id]);
+    });
     Ok(())
 }
 
@@ -80,9 +80,9 @@ pub fn undo_dictionary_entries(
     app: AppHandle,
     ids: Vec<String>,
 ) -> Result<Vec<DictionaryEntry>, String> {
-    let mut settings = crate::settings::get_settings(&app);
-    let deleted = crate::dictionary::delete_entries(&mut settings, &ids);
-    crate::settings::write_settings(&app, settings);
+    let deleted = crate::settings::mutate_settings_locked(&app, |settings| {
+        crate::dictionary::delete_entries(settings, &ids)
+    });
     Ok(deleted)
 }
 
@@ -93,38 +93,81 @@ pub fn learn_custom_words_from_correction(
     dictated_text: String,
     corrected_text: String,
 ) -> Result<Vec<String>, String> {
-    let mut settings = crate::settings::get_settings(&app);
-    let candidates = crate::dictionary_learning::infer_auto_learn_candidates(
-        &dictated_text,
-        &corrected_text,
-        &settings.custom_words,
-    );
-
-    if candidates.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let mut learned_entries = Vec::new();
     let now_ms = crate::dictionary::current_unix_ms();
-    for candidate in candidates {
-        if let Some(entry) = crate::dictionary::upsert_auto_learn_entry(
-            &mut settings,
-            now_ms,
-            candidate.phrase,
-            candidate.replacement_of,
-        )? {
-            learned_entries.push(entry);
+    // Mint a session id local to this command invocation. Running every inferred candidate
+    // through `observe_correction` (rather than `upsert_auto_learn_entry` directly) keeps this
+    // command on the same provisional-candidate state machine as post-paste learning, so a
+    // single correction can no longer mint a permanent entry outright.
+    let session = format!("command_{now_ms}");
+
+    let promoted = crate::settings::mutate_settings_locked(&app, |settings| {
+        let candidates = crate::dictionary_learning::infer_auto_learn_candidates(
+            &dictated_text,
+            &corrected_text,
+            &settings.custom_words,
+        );
+
+        let mut promoted = Vec::new();
+        for candidate in candidates {
+            let dictated = candidate.replacement_of.as_deref().unwrap_or("");
+            if crate::dictionary::observe_correction(
+                settings,
+                now_ms,
+                &session,
+                dictated,
+                Some(&candidate.phrase),
+            ) == crate::dictionary::ObserveOutcome::Promoted
+            {
+                // Promotion pushes the new entry last onto `dictionary_entries` (see
+                // `promote_candidate_to_entry`), so grabbing `.last()` here is safe.
+                if let Some(entry) = settings.dictionary_entries.last() {
+                    promoted.push(entry.phrase.clone());
+                }
+            }
         }
-    }
+        promoted
+    });
 
-    if learned_entries.is_empty() {
-        return Ok(Vec::new());
-    }
+    Ok(promoted)
+}
 
-    crate::settings::write_settings(&app, settings);
+#[tauri::command]
+#[specta::specta]
+pub fn list_learn_candidates(
+    app: AppHandle,
+) -> Result<Vec<crate::settings::LearnCandidate>, String> {
+    Ok(crate::settings::get_settings(&app).dictionary_learn_candidates)
+}
 
-    Ok(learned_entries
-        .into_iter()
-        .map(|entry| entry.phrase)
-        .collect())
+#[tauri::command]
+#[specta::specta]
+pub fn approve_learn_candidate(
+    app: AppHandle,
+    phrase: String,
+    replacement_of: Option<String>,
+) -> Result<Option<DictionaryEntry>, String> {
+    let now_ms = crate::dictionary::current_unix_ms();
+    let entry = crate::settings::mutate_settings_locked(&app, |settings| {
+        crate::dictionary::approve_candidate(settings, now_ms, &phrase, replacement_of.as_deref())
+    });
+    Ok(entry)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn reject_learn_candidate(app: AppHandle, phrase: String) -> Result<(), String> {
+    crate::settings::mutate_settings_locked(&app, |settings| {
+        crate::dictionary::reject_candidate(settings, &phrase);
+    });
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn set_dictionary_entry_active(app: AppHandle, id: String, active: bool) -> Result<(), String> {
+    let now_ms = crate::dictionary::current_unix_ms();
+    crate::settings::mutate_settings_locked(&app, |settings| {
+        crate::dictionary::set_entry_active(settings, now_ms, &id, active);
+    });
+    Ok(())
 }
