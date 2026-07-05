@@ -461,6 +461,22 @@ fn parse_selection_snapshot_output(output: &[u8]) -> Result<FocusedTextSelection
     })
 }
 
+/// Classifies the "secure field" sentinels emitted by the macOS/Linux focused-text
+/// capture scripts. Single-sourced so the mac (stdout) and Linux (stderr) capture
+/// paths share identical fail-closed classification logic, and so the logic is
+/// exercised by unit tests on every platform even though the capture code itself
+/// only compiles on macOS/Linux.
+#[cfg(any(target_os = "macos", target_os = "linux", test))]
+fn classify_secure_sentinel(stdout: &str, stderr: &str) -> Option<&'static str> {
+    if stdout.trim() == "__VERBATIM_SECURE__" || stderr.contains("__VERBATIM_SECURE__") {
+        return Some("skip: secure_field");
+    }
+    if stderr.contains("__VERBATIM_SECURE_CHECK_ERROR__") {
+        return Some("skip: secure_check_error");
+    }
+    None
+}
+
 #[cfg(target_os = "macos")]
 mod macos_focused_text {
     use super::{
@@ -479,6 +495,11 @@ mod macos_focused_text {
                 "macOS Accessibility snapshot failed: {}",
                 String::from_utf8_lossy(&output.stderr).trim()
             ));
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        if let Some(skip) = super::classify_secure_sentinel(&stdout, "") {
+            return Err(skip.to_string());
         }
 
         parse_snapshot_output(&output.stdout)
@@ -514,6 +535,16 @@ end attrText
 tell application "System Events"
   set frontApp to first application process whose frontmost is true
   set focusedElement to value of attribute "AXFocusedUIElement" of frontApp
+
+  set subroleValue to ""
+  try
+    set subroleRaw to value of attribute "AXSubrole" of focusedElement
+    if subroleRaw is not missing value then set subroleValue to subroleRaw as text
+  on error errMsg
+    error "secure_check_error: " & errMsg
+  end try
+  if subroleValue is "AXSecureTextField" then return "__VERBATIM_SECURE__"
+
   set textValue to my attrText(focusedElement, "AXValue")
 
   set targetParts to {unix id of frontApp as text, my attrText(focusedElement, "AXRole"), my attrText(focusedElement, "AXSubrole"), my attrText(focusedElement, "AXIdentifier"), my attrText(focusedElement, "AXTitle")}
@@ -575,10 +606,14 @@ mod linux_focused_text {
             .map_err(|error| format!("failed to run {binary}: {error}"))?;
 
         if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            if let Some(skip) = super::classify_secure_sentinel("", &stderr) {
+                return Err(skip.to_string());
+            }
             return Err(format!(
                 "{} AT-SPI snapshot failed: {}",
                 binary,
-                String::from_utf8_lossy(&output.stderr).trim()
+                stderr.trim()
             ));
         }
 
@@ -669,6 +704,13 @@ if window is None:
 focused, path = find_focused(window)
 if focused is None:
     raise SystemExit("no focused AT-SPI element")
+
+try:
+    role = focused.getRoleName() if hasattr(focused, "getRoleName") else ""
+except Exception as exc:
+    raise SystemExit(f"__VERBATIM_SECURE_CHECK_ERROR__: {exc}")
+if isinstance(role, str) and role.strip().lower() in ("password text", "password"):
+    raise SystemExit("__VERBATIM_SECURE__")
 
 text = accessible_text(focused)
 if text is None:
@@ -1204,5 +1246,32 @@ mod tests {
         assert!(focused_text_within_cap("short"));
         let exact = "a".repeat(MAX_FOCUSED_TEXT_CHARS);
         assert!(focused_text_within_cap(&exact));
+    }
+
+    #[test]
+    fn classifies_secure_sentinels() {
+        assert_eq!(
+            super::classify_secure_sentinel("__VERBATIM_SECURE__", ""),
+            Some("skip: secure_field")
+        );
+        assert_eq!(
+            super::classify_secure_sentinel(" __VERBATIM_SECURE__ \n", ""),
+            Some("skip: secure_field")
+        );
+        assert_eq!(
+            super::classify_secure_sentinel("", "__VERBATIM_SECURE__"),
+            Some("skip: secure_field")
+        );
+        assert_eq!(
+            super::classify_secure_sentinel(
+                "",
+                "Traceback...__VERBATIM_SECURE_CHECK_ERROR__: boom"
+            ),
+            Some("skip: secure_check_error")
+        );
+        assert_eq!(
+            super::classify_secure_sentinel("app|window\ntext", ""),
+            None
+        );
     }
 }
