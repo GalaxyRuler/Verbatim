@@ -6,11 +6,15 @@ use std::collections::HashMap;
 use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use tauri::AppHandle;
 use tauri_plugin_store::StoreExt;
 
 pub const APPLE_INTELLIGENCE_PROVIDER_ID: &str = "apple_intelligence";
 pub const APPLE_INTELLIGENCE_DEFAULT_MODEL_ID: &str = "Apple Intelligence";
+
+#[cfg_attr(not(test), allow(dead_code))]
+static SETTINGS_WRITE_LOCK: Mutex<()> = Mutex::new(());
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1628,6 +1632,32 @@ pub fn get_settings(app: &AppHandle) -> AppSettings {
     settings
 }
 
+/// Pure application of a mutation to an already-loaded settings value.
+/// Kept separate so it is unit-testable without an AppHandle.
+pub fn apply_settings_mutation<T>(
+    settings: &mut AppSettings,
+    f: impl FnOnce(&mut AppSettings) -> T,
+) -> T {
+    f(settings)
+}
+
+/// The ONLY public way to mutate persisted settings. Holds the write lock across the
+/// whole read-modify-write so concurrent mutations cannot lost-update each other.
+/// Do NOT `.await` or emit Tauri events inside `f`; emit after this returns.
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn mutate_settings_locked<T>(app: &AppHandle, f: impl FnOnce(&mut AppSettings) -> T) -> T {
+    let _guard = SETTINGS_WRITE_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut settings = get_settings(app);
+    let result = apply_settings_mutation(&mut settings, f);
+    write_settings(app, settings);
+    result
+}
+
+// NOTE: `write_settings` and `get_settings` are the lock-free primitives. All MUTATION
+// paths must go through `mutate_settings_locked`. A deny-list test guards this (added in a
+// later task).
 pub fn write_settings(app: &AppHandle, mut settings: AppSettings) {
     let store = app
         .store(crate::portable::store_path(SETTINGS_STORE_PATH))
@@ -1749,6 +1779,17 @@ mod tests {
         let settings = get_default_settings();
         assert!(!settings.auto_submit);
         assert_eq!(settings.auto_submit_key, AutoSubmitKey::Enter);
+    }
+
+    #[test]
+    fn apply_settings_mutation_runs_closure_and_returns_value() {
+        let mut settings = crate::settings::get_default_settings();
+        let added = crate::settings::apply_settings_mutation(&mut settings, |s| {
+            s.custom_words.push("Robyn".to_string());
+            s.custom_words.len()
+        });
+        assert_eq!(added, 1);
+        assert_eq!(settings.custom_words, vec!["Robyn".to_string()]);
     }
 
     #[test]
