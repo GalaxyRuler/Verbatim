@@ -60,8 +60,15 @@ pub fn make_dictionary_entry_id(now_ms: u64, phrase: &str) -> String {
     format!("dict_{}_{}", now_ms, slug)
 }
 
+/// Phrases of ACTIVE entries only. Feeds the ASR prompt context and the legacy
+/// `custom_words` mirror — quarantined (inactive) entries must not keep biasing
+/// transcription toward the very phrase the user reversed.
 pub fn dictionary_phrases(entries: &[DictionaryEntry]) -> Vec<String> {
-    entries.iter().map(|entry| entry.phrase.clone()).collect()
+    entries
+        .iter()
+        .filter(|entry| entry.active)
+        .map(|entry| entry.phrase.clone())
+        .collect()
 }
 
 /// v0 -> v1: sanitize entry fields, then grandfather existing auto-learned entries to
@@ -710,6 +717,36 @@ mod tests {
         let entries = vec![entry("dict_1_robyn", "Robyn")];
 
         assert_eq!(dictionary_phrases(&entries), vec!["Robyn"]);
+    }
+
+    #[test]
+    fn dictionary_phrases_exclude_quarantined_entries() {
+        // Quarantined entries must not bias ASR prompts or the custom_words mirror.
+        let entries = vec![
+            entry("dict_1_robyn", "Robyn"),
+            DictionaryEntry {
+                active: false,
+                ..entry("dict_2_their", "their")
+            },
+        ];
+
+        assert_eq!(dictionary_phrases(&entries), vec!["Robyn"]);
+    }
+
+    #[test]
+    fn quarantine_removes_phrase_from_custom_words_mirror() {
+        let mut settings = get_default_settings();
+        settings.dictionary_entries.push(DictionaryEntry {
+            source: DictionaryEntrySource::AutoLearned,
+            ..entry_full("dict_1", "their", Some("there"))
+        });
+        sync_legacy_custom_words(&mut settings);
+        assert_eq!(settings.custom_words, vec!["their"]);
+
+        // Reversal quarantines the entry; the mirror must drop the phrase.
+        let out = observe_correction(&mut settings, 5, "s1", "their", Some("there"));
+        assert_eq!(out, ObserveOutcome::Routed);
+        assert!(settings.custom_words.is_empty());
     }
 
     #[test]

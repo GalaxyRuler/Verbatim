@@ -49,8 +49,7 @@ const sortEntries = (entries: DictionaryEntry[]) =>
 
 const sortCandidates = (candidates: LearnCandidate[]) =>
   [...candidates].sort((left, right) => {
-    const updatedDiff =
-      (right.updated_at_ms ?? 0) - (left.updated_at_ms ?? 0);
+    const updatedDiff = (right.updated_at_ms ?? 0) - (left.updated_at_ms ?? 0);
     if (updatedDiff !== 0) {
       return updatedDiff;
     }

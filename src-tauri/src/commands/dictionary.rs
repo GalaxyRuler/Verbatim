@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
-use tauri::AppHandle;
+use tauri::{AppHandle, Emitter};
 
 use crate::settings::{DictionaryEntry, DictionaryEntryPriority};
 
@@ -100,7 +100,7 @@ pub fn learn_custom_words_from_correction(
     // single correction can no longer mint a permanent entry outright.
     let session = format!("command_{now_ms}");
 
-    let promoted = crate::settings::mutate_settings_locked(&app, |settings| {
+    let (promoted, learned_count) = crate::settings::mutate_settings_locked(&app, |settings| {
         let candidates = crate::dictionary_learning::infer_auto_learn_candidates(
             &dictated_text,
             &corrected_text,
@@ -108,25 +108,35 @@ pub fn learn_custom_words_from_correction(
         );
 
         let mut promoted = Vec::new();
+        let mut learned_count = 0usize;
         for candidate in candidates {
             let dictated = candidate.replacement_of.as_deref().unwrap_or("");
-            if crate::dictionary::observe_correction(
+            match crate::dictionary::observe_correction(
                 settings,
                 now_ms,
                 &session,
                 dictated,
                 Some(&candidate.phrase),
-            ) == crate::dictionary::ObserveOutcome::Promoted
-            {
-                // Promotion pushes the new entry last onto `dictionary_entries` (see
-                // `promote_candidate_to_entry`), so grabbing `.last()` here is safe.
-                if let Some(entry) = settings.dictionary_entries.last() {
-                    promoted.push(entry.phrase.clone());
+            ) {
+                crate::dictionary::ObserveOutcome::Promoted => {
+                    // Promotion pushes the new entry last onto `dictionary_entries` (see
+                    // `promote_candidate_to_entry`), so grabbing `.last()` here is safe.
+                    if let Some(entry) = settings.dictionary_entries.last() {
+                        promoted.push(entry.phrase.clone());
+                    }
                 }
+                crate::dictionary::ObserveOutcome::Learned => learned_count += 1,
+                _ => {}
             }
         }
-        promoted
+        (promoted, learned_count)
     });
+
+    // Emit AFTER the lock is released, mirroring the post-paste learn path, so the
+    // review-queue UI refreshes when a first-time correction stages a candidate.
+    if learned_count > 0 {
+        let _ = app.emit("dictionary-candidates-learned", learned_count);
+    }
 
     Ok(promoted)
 }
