@@ -516,6 +516,9 @@ pub fn observe_correction(
     };
     let replacement_of = sanitize_dictionary_phrase(dictated);
 
+    // Feedback is intentionally checked BEFORE suppression: it concerns an existing
+    // ACTIVE entry (the dictated form is dictionary output), not learning the corrected
+    // phrase — a phrase tombstone must not mask reversal/refinement signals.
     if let Some(outcome) = produced_output_feedback(settings, now_ms, &replacement_of, &phrase) {
         return outcome;
     }
@@ -1051,6 +1054,23 @@ mod tests {
         assert_eq!(e.replacement_of, Some("robin".to_string()));
         // legacy mirror updated on promotion
         assert_eq!(s.custom_words, vec!["Robyn".to_string()]);
+    }
+
+    #[test]
+    fn none_source_corrections_share_one_candidate_and_promote() {
+        // Documents intended behavior: a candidate with no usable source keys as
+        // (None, phrase); repeated None-source corrections are the SAME candidate
+        // (never "conflicting variants") and promote at the threshold.
+        let mut s = get_default_settings();
+        let out1 = observe_correction(&mut s, 10, "s1", "<<>>", Some("Robyn"));
+        assert_eq!(out1, ObserveOutcome::Learned);
+        assert_eq!(s.dictionary_learn_candidates.len(), 1);
+        assert_eq!(s.dictionary_learn_candidates[0].replacement_of, None);
+
+        let out2 = observe_correction(&mut s, 20, "s2", "<<>>", Some("Robyn"));
+        assert_eq!(out2, ObserveOutcome::Promoted);
+        assert_eq!(s.dictionary_entries.len(), 1);
+        assert_eq!(s.dictionary_entries[0].replacement_of, None);
     }
 
     #[test]
