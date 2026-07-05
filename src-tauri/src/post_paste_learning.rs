@@ -9,10 +9,20 @@ const POST_PASTE_SETTLE_DELAY: Duration = Duration::from_millis(120);
 const POST_PASTE_POLL_INTERVAL: Duration = Duration::from_millis(150);
 const POST_PASTE_STABLE_EDIT_DELAY: Duration = Duration::from_millis(300);
 const POST_PASTE_LEARNING_WINDOW: Duration = Duration::from_secs(6);
+/// Cross-platform cap on focused-text size read/diffed by the learning watcher.
+/// Aligned with the Windows UIA read cap (MAX_UIA_TEXT_CHARS). Documents/fields larger
+/// than this abort learning (better no learning than an unbounded diff loop).
+pub const MAX_FOCUSED_TEXT_CHARS: usize = 20_000;
 #[cfg(any(target_os = "macos", target_os = "linux", test))]
 const SELECTION_FIELD_SEPARATOR: &str = "\n--VERBATIM-SELECTED-TEXT--\n";
 #[cfg(any(target_os = "macos", target_os = "linux", test))]
 const TEXT_FIELD_SEPARATOR: &str = "\n--VERBATIM-FOCUSED-TEXT--\n";
+
+/// Returns false when `text` exceeds [`MAX_FOCUSED_TEXT_CHARS`]. Callers should treat
+/// an over-cap snapshot as a skip (fail closed) rather than diffing it.
+pub fn focused_text_within_cap(text: &str) -> bool {
+    text.chars().count() <= MAX_FOCUSED_TEXT_CHARS
+}
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct FocusedTextSnapshot {
@@ -113,13 +123,21 @@ fn watch_for_post_paste_correction(
     inserted_text: String,
     before_paste: FocusedTextSnapshot,
 ) -> Result<(), String> {
+    if !focused_text_within_cap(&before_paste.text) {
+        return Err("skip: read_cap_exceeded".to_string());
+    }
+
     std::thread::sleep(POST_PASTE_SETTLE_DELAY);
 
     let after_paste = capture_matching_snapshot(&before_paste.target_id)?
-        .ok_or_else(|| "focused text target changed after paste".to_string())?;
+        .ok_or_else(|| "skip: target_changed".to_string())?;
+
+    if !focused_text_within_cap(&after_paste.text) {
+        return Err("skip: read_cap_exceeded".to_string());
+    }
 
     if after_paste.text == before_paste.text {
-        return Err("post-paste text snapshot did not change".to_string());
+        return Err("skip: no_post_paste_change".to_string());
     }
 
     let deadline = Instant::now() + POST_PASTE_LEARNING_WINDOW;
@@ -131,8 +149,12 @@ fn watch_for_post_paste_correction(
         std::thread::sleep(POST_PASTE_POLL_INTERVAL);
 
         let Some(current) = capture_matching_snapshot(&before_paste.target_id)? else {
-            return Err("focused text target changed during learning window".to_string());
+            return Err("skip: target_changed".to_string());
         };
+
+        if !focused_text_within_cap(&current.text) {
+            return Err("skip: read_cap_exceeded".to_string());
+        }
 
         if current.text != last_seen_text {
             last_seen_text = current.text.clone();
@@ -785,11 +807,21 @@ mod windows_focused_text {
             let element = automation
                 .GetFocusedElement()
                 .map_err(|error| format!("failed to get focused element: {}", error))?;
+
+            // Skip protected fields BEFORE reading any text (fail closed on error).
+            let is_password = element
+                .CurrentIsPassword()
+                .map(|value| value.as_bool())
+                .unwrap_or(true);
+            if is_password {
+                return Err("skip: secure_field".to_string());
+            }
+
             let text = read_element_text(&element)
                 .ok_or_else(|| "focused element has no readable text pattern".to_string())?;
 
             Ok(FocusedTextSnapshot {
-                target_id: target_id(&element),
+                target_id: strict_target_id(&element)?,
                 text,
             })
         }
@@ -1009,7 +1041,8 @@ mod windows_focused_text {
 mod tests {
     use super::{
         auto_learn_log_message, extract_corrected_inserted_text, focused_text_snapshot_from_parts,
-        parse_selection_snapshot_output, FocusedTextSelection, POST_PASTE_LEARNING_WINDOW,
+        focused_text_within_cap, parse_selection_snapshot_output, FocusedTextSelection,
+        MAX_FOCUSED_TEXT_CHARS, POST_PASTE_LEARNING_WINDOW,
     };
     use std::time::Duration;
 
@@ -1162,5 +1195,14 @@ mod tests {
             .expect_err("malformed snapshot should fail");
 
         assert!(error.contains("malformed"));
+    }
+
+    #[test]
+    fn oversized_focused_text_is_rejected_before_diff() {
+        let big = "a".repeat(MAX_FOCUSED_TEXT_CHARS + 1);
+        assert!(!focused_text_within_cap(&big));
+        assert!(focused_text_within_cap("short"));
+        let exact = "a".repeat(MAX_FOCUSED_TEXT_CHARS);
+        assert!(focused_text_within_cap(&exact));
     }
 }
