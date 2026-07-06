@@ -22,6 +22,7 @@ export const DictionarySettings: React.FC = () => {
     entries,
     recentlyLearnedEntries,
     candidates,
+    diagnostics,
     isLoading,
     updatingIds,
     loadEntries,
@@ -33,6 +34,8 @@ export const DictionarySettings: React.FC = () => {
     approveCandidate,
     rejectCandidate,
     setEntryActive,
+    loadDiagnostics,
+    resetDiagnostics,
   } = useDictionaryStore();
   const { getSetting, updateSetting, isUpdating } = useSettings();
   const [search, setSearch] = useState("");
@@ -50,7 +53,8 @@ export const DictionarySettings: React.FC = () => {
     loadCandidates().catch(() => {
       toast.error(t("settings.dictionary.errors.load"));
     });
-  }, [loadEntries, loadCandidates, t]);
+    loadDiagnostics().catch(() => {});
+  }, [loadEntries, loadCandidates, loadDiagnostics, t]);
 
   const filteredEntries = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -175,6 +179,23 @@ export const DictionarySettings: React.FC = () => {
       });
     }
   };
+
+  const handleResetDiagnostics = async () => {
+    try {
+      await resetDiagnostics();
+    } catch (error) {
+      toast.error(t("settings.dictionary.diagnostics.resetError"), {
+        description: error instanceof Error ? error.message : undefined,
+      });
+    }
+  };
+
+  const skipSecureField = diagnostics?.skip_secure_field ?? 0;
+  const skipReadCapExceeded = diagnostics?.skip_read_cap_exceeded ?? 0;
+  const skipSecureCheckError = diagnostics?.skip_secure_check_error ?? 0;
+  const hasSkips =
+    skipSecureField > 0 || skipReadCapExceeded > 0 || skipSecureCheckError > 0;
+  const sinceMs = diagnostics?.since_ms ?? 0;
 
   return (
     <div className="max-w-3xl w-full mx-auto space-y-5">
@@ -424,6 +445,89 @@ export const DictionarySettings: React.FC = () => {
           ))
         )}
       </div>
+
+      {diagnostics && (
+        <details
+          data-testid="dictionary-diagnostics"
+          className="border border-mid-gray/20 rounded-lg px-3 py-2"
+        >
+          <summary className="text-sm font-medium cursor-pointer select-none">
+            {t("settings.dictionary.diagnostics.title")}
+          </summary>
+          <div className="mt-3 space-y-3">
+            <div className="grid grid-cols-3 gap-2 text-sm">
+              <div className="border border-mid-gray/20 rounded-lg px-3 py-2">
+                <div className="text-mid-gray text-xs">
+                  {t("settings.dictionary.diagnostics.learned")}
+                </div>
+                <div className="font-medium">{diagnostics.learned ?? 0}</div>
+              </div>
+              <div className="border border-mid-gray/20 rounded-lg px-3 py-2">
+                <div className="text-mid-gray text-xs">
+                  {t("settings.dictionary.diagnostics.promoted")}
+                </div>
+                <div className="font-medium">{diagnostics.promoted ?? 0}</div>
+              </div>
+              <div className="border border-mid-gray/20 rounded-lg px-3 py-2">
+                <div className="text-mid-gray text-xs">
+                  {t("settings.dictionary.diagnostics.reinforced")}
+                </div>
+                <div className="font-medium">{diagnostics.reinforced ?? 0}</div>
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <div className="text-xs font-medium text-mid-gray">
+                {t("settings.dictionary.diagnostics.skippedTitle")}
+              </div>
+              {hasSkips ? (
+                <div className="grid grid-cols-3 gap-2 text-sm">
+                  <div className="border border-mid-gray/20 rounded-lg px-3 py-2">
+                    <div className="text-mid-gray text-xs">
+                      {t("settings.dictionary.diagnostics.skipSecureField")}
+                    </div>
+                    <div className="font-medium">{skipSecureField}</div>
+                  </div>
+                  <div className="border border-mid-gray/20 rounded-lg px-3 py-2">
+                    <div className="text-mid-gray text-xs">
+                      {t("settings.dictionary.diagnostics.skipReadCap")}
+                    </div>
+                    <div className="font-medium">{skipReadCapExceeded}</div>
+                  </div>
+                  <div className="border border-mid-gray/20 rounded-lg px-3 py-2">
+                    <div className="text-mid-gray text-xs">
+                      {t("settings.dictionary.diagnostics.skipSecureCheck")}
+                    </div>
+                    <div className="font-medium">{skipSecureCheckError}</div>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-xs text-mid-gray">
+                  {t("settings.dictionary.diagnostics.noSkips")}
+                </p>
+              )}
+            </div>
+
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs text-mid-gray">
+                {sinceMs
+                  ? t("settings.dictionary.diagnostics.since", {
+                      date: new Date(sinceMs).toLocaleDateString(),
+                    })
+                  : t("settings.dictionary.diagnostics.noActivity")}
+              </p>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={handleResetDiagnostics}
+              >
+                {t("settings.dictionary.diagnostics.reset")}
+              </Button>
+            </div>
+          </div>
+        </details>
+      )}
     </div>
   );
 };

@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import {
   commands,
+  type DictionaryDiagnostics,
   type DictionaryEntry,
   type DictionaryEntryInput,
   type DictionaryEntryUpdate,
@@ -11,6 +12,7 @@ type DictionaryState = {
   entries: DictionaryEntry[];
   recentlyLearnedEntries: DictionaryEntry[];
   candidates: LearnCandidate[];
+  diagnostics: DictionaryDiagnostics | null;
   isLoading: boolean;
   updatingIds: Set<string>;
   loadEntries: () => Promise<void>;
@@ -29,6 +31,8 @@ type DictionaryState = {
   ) => Promise<void>;
   rejectCandidate: (phrase: string) => Promise<void>;
   setEntryActive: (id: string, active: boolean) => Promise<void>;
+  loadDiagnostics: () => Promise<void>;
+  resetDiagnostics: () => Promise<void>;
 };
 
 const sortEntries = (entries: DictionaryEntry[]) =>
@@ -71,6 +75,7 @@ export const useDictionaryStore = create<DictionaryState>()((set, get) => ({
   entries: [],
   recentlyLearnedEntries: [],
   candidates: [],
+  diagnostics: null,
   isLoading: false,
   updatingIds: new Set<string>(),
 
@@ -208,5 +213,15 @@ export const useDictionaryStore = create<DictionaryState>()((set, get) => ({
         return { updatingIds };
       });
     }
+  },
+
+  loadDiagnostics: async () => {
+    const diagnostics = unwrapResult(await commands.getDictionaryDiagnostics());
+    set({ diagnostics });
+  },
+
+  resetDiagnostics: async () => {
+    unwrapResult(await commands.resetDictionaryDiagnostics());
+    await get().loadDiagnostics();
   },
 }));
