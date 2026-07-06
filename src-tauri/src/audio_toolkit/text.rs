@@ -3,7 +3,7 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 use strsim::levenshtein;
 
-use crate::settings::DictionaryEntry;
+use crate::settings::{DictionaryEntry, DictionaryEntrySource};
 
 /// Builds an n-gram string by cleaning and concatenating words
 ///
@@ -168,22 +168,72 @@ pub fn apply_custom_words(text: &str, custom_words: &[String], threshold: f64) -
     result.join(" ")
 }
 
-pub fn apply_dictionary_entries(text: &str, entries: &[DictionaryEntry], threshold: f64) -> String {
-    if entries.is_empty() {
+/// Stricter absolute cap for NEW auto-learned fuzzy matching. Lower = stricter
+/// (accept iff combined_score < threshold; 0 = exact). Base default is 0.18.
+pub const AUTO_FUZZY_THRESHOLD: f64 = 0.12;
+
+/// Returns the fuzzy-match threshold to use for auto-learned (not yet
+/// user-confirmed) dictionary entries. Always at least as strict as `base`.
+pub fn auto_learned_fuzzy_threshold(base: f64) -> f64 {
+    AUTO_FUZZY_THRESHOLD.min(base)
+}
+
+/// Trust tier used to decide how strict fuzzy matching should be for an entry.
+///
+/// Manual, Imported, and user-confirmed AutoLearned entries are trusted at the
+/// base threshold. Unconfirmed AutoLearned entries are held to a stricter
+/// threshold (see [`auto_learned_fuzzy_threshold`]) since they were never
+/// reviewed by the user.
+fn is_manual_tier(e: &DictionaryEntry) -> bool {
+    e.user_confirmed
+        || matches!(
+            e.source,
+            DictionaryEntrySource::Manual | DictionaryEntrySource::Imported
+        )
+}
+
+/// Applies dictionary entries to transcribed text, honoring the `active` flag
+/// and per-entry trust tier.
+///
+/// Only entries with `active == true` are considered. Exact `replacement_of`
+/// rules are applied first (longest span wins, manual tier wins ties), then
+/// fuzzy matching runs once per trust tier: manual/confirmed entries at
+/// `base_threshold`, unconfirmed auto-learned entries at a stricter threshold.
+pub fn apply_dictionary_entries(
+    text: &str,
+    entries: &[DictionaryEntry],
+    base_threshold: f64,
+) -> String {
+    let active: Vec<&DictionaryEntry> = entries.iter().filter(|e| e.active).collect();
+    if active.is_empty() {
         return text.to_string();
     }
 
-    let replaced = apply_dictionary_replacement_rules(text, entries);
-    let phrases = entries
-        .iter()
-        .map(|entry| entry.phrase.clone())
-        .collect::<Vec<_>>();
+    // 1) Exact replacement_of rules, longest span first; manual tier wins ties.
+    let replaced = apply_dictionary_replacement_rules_ranked(text, &active);
 
-    apply_custom_words(&replaced, &phrases, threshold)
+    // 2) Fuzzy per trust tier: manual/user-confirmed at base, auto-learned stricter.
+    let manual_words: Vec<String> = active
+        .iter()
+        .filter(|e| is_manual_tier(e))
+        .map(|e| e.phrase.clone())
+        .collect();
+    let auto_words: Vec<String> = active
+        .iter()
+        .filter(|e| !is_manual_tier(e))
+        .map(|e| e.phrase.clone())
+        .collect();
+
+    let after_manual = apply_custom_words(&replaced, &manual_words, base_threshold);
+    apply_custom_words(
+        &after_manual,
+        &auto_words,
+        auto_learned_fuzzy_threshold(base_threshold),
+    )
 }
 
-fn apply_dictionary_replacement_rules(text: &str, entries: &[DictionaryEntry]) -> String {
-    let mut rules = entries
+fn apply_dictionary_replacement_rules_ranked(text: &str, active: &[&DictionaryEntry]) -> String {
+    let mut rules = active
         .iter()
         .filter_map(|entry| {
             let replacement_of = entry.replacement_of.as_deref()?;
@@ -191,7 +241,11 @@ fn apply_dictionary_replacement_rules(text: &str, entries: &[DictionaryEntry]) -
                 .split_whitespace()
                 .map(str::to_string)
                 .collect::<Vec<_>>();
-            (!replacement_tokens.is_empty()).then_some((replacement_tokens, entry.phrase.as_str()))
+            if replacement_tokens.is_empty() {
+                return None;
+            }
+            let tier_rank = if is_manual_tier(entry) { 0 } else { 1 };
+            Some((replacement_tokens, entry.phrase.as_str(), tier_rank))
         })
         .collect::<Vec<_>>();
 
@@ -199,7 +253,9 @@ fn apply_dictionary_replacement_rules(text: &str, entries: &[DictionaryEntry]) -
         return text.to_string();
     }
 
-    rules.sort_by(|left, right| right.0.len().cmp(&left.0.len()));
+    // Longest span first; manual tier (rank 0) wins ties over auto tier (rank 1).
+    // Stable sort preserves input order as the final tiebreak.
+    rules.sort_by(|left, right| right.0.len().cmp(&left.0.len()).then(left.2.cmp(&right.2)));
 
     let words = text.split_whitespace().collect::<Vec<_>>();
     let mut result = Vec::new();
@@ -208,7 +264,7 @@ fn apply_dictionary_replacement_rules(text: &str, entries: &[DictionaryEntry]) -
     while index < words.len() {
         let mut matched = false;
 
-        for (replacement_tokens, phrase) in &rules {
+        for (replacement_tokens, phrase, _tier_rank) in &rules {
             let rule_len = replacement_tokens.len();
             if index + rule_len > words.len() {
                 continue;
@@ -449,6 +505,13 @@ mod tests {
     }
 
     #[test]
+    fn auto_threshold_is_stricter_and_clamped() {
+        assert!((auto_learned_fuzzy_threshold(0.18) - 0.12).abs() < f64::EPSILON);
+        assert!((auto_learned_fuzzy_threshold(0.10) - 0.10).abs() < f64::EPSILON);
+        // never looser than base
+    }
+
+    #[test]
     fn apply_dictionary_entries_uses_replacement_rule() {
         let result = apply_dictionary_entries(
             "robin joined",
@@ -529,6 +592,53 @@ mod tests {
     }
 
     #[test]
+    fn apply_excludes_inactive_entries() {
+        let mut e = dictionary_entry("Robyn", Some("robin"));
+        e.active = false;
+        assert_eq!(
+            apply_dictionary_entries("meet robin", &[e], 0.18),
+            "meet robin"
+        );
+    }
+
+    #[test]
+    fn apply_exact_rule_beats_fuzzy_and_uses_original_tokens() {
+        let e = dictionary_entry("Node.js", Some("nodejs"));
+        assert_eq!(
+            apply_dictionary_entries("use nodejs today", &[e], 0.18),
+            "use Node.js today"
+        );
+    }
+
+    #[test]
+    fn apply_auto_entry_uses_stricter_threshold_than_manual() {
+        let mut auto = dictionary_entry("Postgres", None);
+        auto.source = DictionaryEntrySource::AutoLearned;
+        // manual-tier entry with same phrase rewrites at base threshold 0.18:
+        let manual = dictionary_entry("Postgres", None); // source Manual by helper default
+        assert_eq!(
+            apply_dictionary_entries("posgres is running", &[manual], 0.18),
+            "Postgres is running"
+        );
+        // auto tier at base 0.18 -> effective 0.12 -> rejected (score is 0.125):
+        assert_eq!(
+            apply_dictionary_entries("posgres is running", &[auto], 0.18),
+            "posgres is running"
+        );
+    }
+
+    #[test]
+    fn user_confirmed_auto_entry_gets_manual_tier_fuzzy() {
+        let mut e = dictionary_entry("Postgres", None);
+        e.source = DictionaryEntrySource::AutoLearned;
+        e.user_confirmed = true; // manual-tier trust
+        assert_eq!(
+            apply_dictionary_entries("posgres is running", &[e], 0.18),
+            "Postgres is running"
+        );
+    }
+
+    #[test]
     fn test_filter_filler_words() {
         let text = "So uhm I was thinking uh about this";
         let result = filter_transcription_output(text, "en", &None);
@@ -544,6 +654,9 @@ mod tests {
             priority: DictionaryEntryPriority::Normal,
             created_at_ms: 1,
             updated_at_ms: 1,
+            active: true,
+            user_confirmed: false,
+            needs_review: false,
         }
     }
 

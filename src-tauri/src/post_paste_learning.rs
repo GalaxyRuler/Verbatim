@@ -9,10 +9,20 @@ const POST_PASTE_SETTLE_DELAY: Duration = Duration::from_millis(120);
 const POST_PASTE_POLL_INTERVAL: Duration = Duration::from_millis(150);
 const POST_PASTE_STABLE_EDIT_DELAY: Duration = Duration::from_millis(300);
 const POST_PASTE_LEARNING_WINDOW: Duration = Duration::from_secs(6);
+/// Cross-platform cap on focused-text size read/diffed by the learning watcher.
+/// Aligned with the Windows UIA read cap (MAX_UIA_TEXT_CHARS). Documents/fields larger
+/// than this abort learning (better no learning than an unbounded diff loop).
+pub const MAX_FOCUSED_TEXT_CHARS: usize = 20_000;
 #[cfg(any(target_os = "macos", target_os = "linux", test))]
 const SELECTION_FIELD_SEPARATOR: &str = "\n--VERBATIM-SELECTED-TEXT--\n";
 #[cfg(any(target_os = "macos", target_os = "linux", test))]
 const TEXT_FIELD_SEPARATOR: &str = "\n--VERBATIM-FOCUSED-TEXT--\n";
+
+/// Returns false when `text` exceeds [`MAX_FOCUSED_TEXT_CHARS`]. Callers should treat
+/// an over-cap snapshot as a skip (fail closed) rather than diffing it.
+pub fn focused_text_within_cap(text: &str) -> bool {
+    text.chars().count() <= MAX_FOCUSED_TEXT_CHARS
+}
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct FocusedTextSnapshot {
@@ -87,8 +97,19 @@ pub fn maybe_spawn_auto_add_watcher(
         return;
     }
 
+    // Stable per-paste session id for the state machine's per-session dedup. `target_id`
+    // can contain window titles, so only its length (a little entropy) is folded in here
+    // rather than the id itself, keeping window titles out of logs.
+    let session_id = format!(
+        "paste_{}_{}",
+        crate::dictionary::current_unix_ms(),
+        before_paste.target_id.len()
+    );
+
     std::thread::spawn(move || {
-        if let Err(error) = watch_for_post_paste_correction(app, inserted_text, before_paste) {
+        if let Err(error) =
+            watch_for_post_paste_correction(app, session_id, inserted_text, before_paste)
+        {
             debug!("Post-paste dictionary watcher skipped: {}", error);
         }
     });
@@ -110,16 +131,25 @@ pub fn capture_focused_text_selection_snapshot() -> Result<FocusedTextSelectionS
 
 fn watch_for_post_paste_correction(
     app: AppHandle,
+    session_id: String,
     inserted_text: String,
     before_paste: FocusedTextSnapshot,
 ) -> Result<(), String> {
+    if !focused_text_within_cap(&before_paste.text) {
+        return Err("skip: read_cap_exceeded".to_string());
+    }
+
     std::thread::sleep(POST_PASTE_SETTLE_DELAY);
 
     let after_paste = capture_matching_snapshot(&before_paste.target_id)?
-        .ok_or_else(|| "focused text target changed after paste".to_string())?;
+        .ok_or_else(|| "skip: target_changed".to_string())?;
+
+    if !focused_text_within_cap(&after_paste.text) {
+        return Err("skip: read_cap_exceeded".to_string());
+    }
 
     if after_paste.text == before_paste.text {
-        return Err("post-paste text snapshot did not change".to_string());
+        return Err("skip: no_post_paste_change".to_string());
     }
 
     let deadline = Instant::now() + POST_PASTE_LEARNING_WINDOW;
@@ -131,8 +161,12 @@ fn watch_for_post_paste_correction(
         std::thread::sleep(POST_PASTE_POLL_INTERVAL);
 
         let Some(current) = capture_matching_snapshot(&before_paste.target_id)? else {
-            return Err("focused text target changed during learning window".to_string());
+            return Err("skip: target_changed".to_string());
         };
+
+        if !focused_text_within_cap(&current.text) {
+            return Err("skip: read_cap_exceeded".to_string());
+        }
 
         if current.text != last_seen_text {
             last_seen_text = current.text.clone();
@@ -145,6 +179,7 @@ fn watch_for_post_paste_correction(
             if stable_since.elapsed() >= POST_PASTE_STABLE_EDIT_DELAY {
                 learn_from_text_snapshots(
                     &app,
+                    &session_id,
                     &inserted_text,
                     &before_paste.text,
                     &after_paste.text,
@@ -158,6 +193,7 @@ fn watch_for_post_paste_correction(
     if let Some(candidate_text) = changed_text {
         learn_from_text_snapshots(
             &app,
+            &session_id,
             &inserted_text,
             &before_paste.text,
             &after_paste.text,
@@ -191,6 +227,7 @@ fn focused_text_snapshot_from_parts(
 
 fn learn_from_text_snapshots(
     app: &AppHandle,
+    session_id: &str,
     inserted_text: &str,
     before_paste_text: &str,
     after_paste_text: &str,
@@ -206,51 +243,71 @@ fn learn_from_text_snapshots(
         return Ok(());
     };
 
-    let mut settings = crate::settings::get_settings(app);
     let inserted_text = strip_paste_direction_marks(inserted_text);
     let corrected_text = strip_paste_direction_marks(&corrected_text);
-    let candidates = crate::dictionary_learning::infer_auto_learn_candidates(
-        &inserted_text,
-        &corrected_text,
-        &settings.custom_words,
-    );
 
-    if candidates.is_empty() {
-        return Ok(());
-    }
-
-    let mut learned_entries = Vec::new();
     let now_ms = crate::dictionary::current_unix_ms();
-    for candidate in candidates {
-        if let Some(entry) = crate::dictionary::upsert_auto_learn_entry(
-            &mut settings,
-            now_ms,
-            candidate.phrase,
-            candidate.replacement_of,
-        )? {
-            learned_entries.push(entry);
-        }
+    let (promoted_entries, learned_count, routed_count) =
+        crate::settings::mutate_settings_locked(app, |settings| {
+            let candidates = crate::dictionary_learning::infer_auto_learn_candidates(
+                &inserted_text,
+                &corrected_text,
+                &settings.custom_words,
+            );
+
+            let mut promoted = Vec::new();
+            let mut learned = 0usize;
+            let mut routed = 0usize;
+            for candidate in candidates {
+                let dictated = candidate.replacement_of.as_deref().unwrap_or("");
+                match crate::dictionary::observe_correction(
+                    settings,
+                    now_ms,
+                    session_id,
+                    dictated,
+                    Some(&candidate.phrase),
+                ) {
+                    crate::dictionary::ObserveOutcome::Promoted => {
+                        // Promotion pushes the new entry last onto `dictionary_entries`
+                        // (see `promote_candidate_to_entry`), so grabbing `.last()` here,
+                        // within the same closure iteration, is safe.
+                        if let Some(entry) = settings.dictionary_entries.last() {
+                            promoted.push(entry.clone());
+                        }
+                    }
+                    crate::dictionary::ObserveOutcome::Learned => learned += 1,
+                    crate::dictionary::ObserveOutcome::Routed => routed += 1,
+                    _ => {}
+                }
+            }
+            (promoted, learned, routed)
+        });
+
+    // Emit AFTER the lock is released.
+    if !promoted_entries.is_empty() {
+        let promoted_words = promoted_entries
+            .iter()
+            .map(|entry| entry.phrase.clone())
+            .collect::<Vec<_>>();
+        let _ = app.emit("dictionary-entries-learned", promoted_entries.clone());
+        let _ = app.emit("custom-words-learned", promoted_words);
+    }
+    if learned_count > 0 {
+        // New event for the (future) review-queue UI; payload is intentionally phrase-free
+        // (the store re-fetches candidates via command).
+        let _ = app.emit("dictionary-candidates-learned", learned_count);
     }
 
-    if learned_entries.is_empty() {
-        return Ok(());
-    }
-
-    crate::settings::write_settings(app, settings);
-    let learned_words = learned_entries
-        .iter()
-        .map(|entry| entry.phrase.clone())
-        .collect::<Vec<_>>();
-    let _ = app.emit("dictionary-entries-learned", learned_entries.clone());
-    let _ = app.emit("custom-words-learned", learned_words.clone());
-    info!("{}", auto_learn_log_message(learned_words.len()));
+    info!(
+        "{}",
+        auto_learn_outcome_log_message(promoted_entries.len(), learned_count, routed_count)
+    );
 
     Ok(())
 }
 
-fn auto_learn_log_message(count: usize) -> String {
-    let noun = if count == 1 { "entry" } else { "entries" };
-    format!("Auto-added {count} corrected dictionary {noun}")
+fn auto_learn_outcome_log_message(promoted: usize, learned: usize, routed: usize) -> String {
+    format!("Auto-learn pass: {promoted} promoted, {learned} new candidates, {routed} routed as feedback")
 }
 
 pub fn extract_corrected_inserted_text(
@@ -439,6 +496,22 @@ fn parse_selection_snapshot_output(output: &[u8]) -> Result<FocusedTextSelection
     })
 }
 
+/// Classifies the "secure field" sentinels emitted by the macOS/Linux focused-text
+/// capture scripts. Single-sourced so the mac (stdout) and Linux (stderr) capture
+/// paths share identical fail-closed classification logic, and so the logic is
+/// exercised by unit tests on every platform even though the capture code itself
+/// only compiles on macOS/Linux.
+#[cfg(any(target_os = "macos", target_os = "linux", test))]
+fn classify_secure_sentinel(stdout: &str, stderr: &str) -> Option<&'static str> {
+    if stdout.trim() == "__VERBATIM_SECURE__" || stderr.contains("__VERBATIM_SECURE__") {
+        return Some("skip: secure_field");
+    }
+    if stderr.contains("__VERBATIM_SECURE_CHECK_ERROR__") {
+        return Some("skip: secure_check_error");
+    }
+    None
+}
+
 #[cfg(target_os = "macos")]
 mod macos_focused_text {
     use super::{
@@ -457,6 +530,11 @@ mod macos_focused_text {
                 "macOS Accessibility snapshot failed: {}",
                 String::from_utf8_lossy(&output.stderr).trim()
             ));
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        if let Some(skip) = super::classify_secure_sentinel(&stdout, "") {
+            return Err(skip.to_string());
         }
 
         parse_snapshot_output(&output.stdout)
@@ -492,6 +570,16 @@ end attrText
 tell application "System Events"
   set frontApp to first application process whose frontmost is true
   set focusedElement to value of attribute "AXFocusedUIElement" of frontApp
+
+  set subroleValue to ""
+  try
+    set subroleRaw to value of attribute "AXSubrole" of focusedElement
+    if subroleRaw is not missing value then set subroleValue to subroleRaw as text
+  on error errMsg
+    error "secure_check_error: " & errMsg
+  end try
+  if subroleValue is "AXSecureTextField" then return "__VERBATIM_SECURE__"
+
   set textValue to my attrText(focusedElement, "AXValue")
 
   set targetParts to {unix id of frontApp as text, my attrText(focusedElement, "AXRole"), my attrText(focusedElement, "AXSubrole"), my attrText(focusedElement, "AXIdentifier"), my attrText(focusedElement, "AXTitle")}
@@ -553,10 +641,14 @@ mod linux_focused_text {
             .map_err(|error| format!("failed to run {binary}: {error}"))?;
 
         if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            if let Some(skip) = super::classify_secure_sentinel("", &stderr) {
+                return Err(skip.to_string());
+            }
             return Err(format!(
                 "{} AT-SPI snapshot failed: {}",
                 binary,
-                String::from_utf8_lossy(&output.stderr).trim()
+                stderr.trim()
             ));
         }
 
@@ -647,6 +739,13 @@ if window is None:
 focused, path = find_focused(window)
 if focused is None:
     raise SystemExit("no focused AT-SPI element")
+
+try:
+    role = focused.getRoleName() if hasattr(focused, "getRoleName") else ""
+except Exception as exc:
+    raise SystemExit(f"__VERBATIM_SECURE_CHECK_ERROR__: {exc}")
+if isinstance(role, str) and role.strip().lower() in ("password text", "password"):
+    raise SystemExit("__VERBATIM_SECURE__")
 
 text = accessible_text(focused)
 if text is None:
@@ -785,11 +884,21 @@ mod windows_focused_text {
             let element = automation
                 .GetFocusedElement()
                 .map_err(|error| format!("failed to get focused element: {}", error))?;
+
+            // Skip protected fields BEFORE reading any text (fail closed on error).
+            let is_password = element
+                .CurrentIsPassword()
+                .map(|value| value.as_bool())
+                .unwrap_or(true);
+            if is_password {
+                return Err("skip: secure_field".to_string());
+            }
+
             let text = read_element_text(&element)
                 .ok_or_else(|| "focused element has no readable text pattern".to_string())?;
 
             Ok(FocusedTextSnapshot {
-                target_id: target_id(&element),
+                target_id: strict_target_id(&element)?,
                 text,
             })
         }
@@ -1008,8 +1117,9 @@ mod windows_focused_text {
 #[cfg(test)]
 mod tests {
     use super::{
-        auto_learn_log_message, extract_corrected_inserted_text, focused_text_snapshot_from_parts,
-        parse_selection_snapshot_output, FocusedTextSelection, POST_PASTE_LEARNING_WINDOW,
+        auto_learn_outcome_log_message, extract_corrected_inserted_text,
+        focused_text_snapshot_from_parts, focused_text_within_cap, parse_selection_snapshot_output,
+        FocusedTextSelection, MAX_FOCUSED_TEXT_CHARS, POST_PASTE_LEARNING_WINDOW,
     };
     use std::time::Duration;
 
@@ -1138,10 +1248,11 @@ mod tests {
     }
 
     #[test]
-    fn auto_learn_log_message_does_not_include_learned_phrase() {
-        let message = auto_learn_log_message(1);
+    fn auto_learn_outcome_log_message_is_phrase_free() {
+        let message = auto_learn_outcome_log_message(1, 2, 0);
 
-        assert!(message.contains("Auto-added 1"));
+        assert!(message.contains("1 promoted"));
+        assert!(message.contains("2 new candidates"));
         assert!(!message.contains("Robyn"));
     }
 
@@ -1162,5 +1273,41 @@ mod tests {
             .expect_err("malformed snapshot should fail");
 
         assert!(error.contains("malformed"));
+    }
+
+    #[test]
+    fn oversized_focused_text_is_rejected_before_diff() {
+        let big = "a".repeat(MAX_FOCUSED_TEXT_CHARS + 1);
+        assert!(!focused_text_within_cap(&big));
+        assert!(focused_text_within_cap("short"));
+        let exact = "a".repeat(MAX_FOCUSED_TEXT_CHARS);
+        assert!(focused_text_within_cap(&exact));
+    }
+
+    #[test]
+    fn classifies_secure_sentinels() {
+        assert_eq!(
+            super::classify_secure_sentinel("__VERBATIM_SECURE__", ""),
+            Some("skip: secure_field")
+        );
+        assert_eq!(
+            super::classify_secure_sentinel(" __VERBATIM_SECURE__ \n", ""),
+            Some("skip: secure_field")
+        );
+        assert_eq!(
+            super::classify_secure_sentinel("", "__VERBATIM_SECURE__"),
+            Some("skip: secure_field")
+        );
+        assert_eq!(
+            super::classify_secure_sentinel(
+                "",
+                "Traceback...__VERBATIM_SECURE_CHECK_ERROR__: boom"
+            ),
+            Some("skip: secure_check_error")
+        );
+        assert_eq!(
+            super::classify_secure_sentinel("app|window\ntext", ""),
+            None
+        );
     }
 }

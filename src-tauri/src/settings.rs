@@ -6,11 +6,15 @@ use std::collections::HashMap;
 use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use tauri::AppHandle;
 use tauri_plugin_store::StoreExt;
 
 pub const APPLE_INTELLIGENCE_PROVIDER_ID: &str = "apple_intelligence";
 pub const APPLE_INTELLIGENCE_DEFAULT_MODEL_ID: &str = "Apple Intelligence";
+
+#[cfg_attr(not(test), allow(dead_code))]
+static SETTINGS_WRITE_LOCK: Mutex<()> = Mutex::new(());
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -159,6 +163,27 @@ pub struct DictionaryEntry {
     pub source: DictionaryEntrySource,
     #[serde(default)]
     pub priority: DictionaryEntryPriority,
+    #[serde(default)]
+    pub created_at_ms: u64,
+    #[serde(default)]
+    pub updated_at_ms: u64,
+    #[serde(default = "default_true")]
+    pub active: bool,
+    #[serde(default)]
+    pub user_confirmed: bool,
+    #[serde(default)]
+    pub needs_review: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Type)]
+pub struct LearnCandidate {
+    #[serde(default)]
+    pub replacement_of: Option<String>,
+    pub phrase: String,
+    #[serde(default)]
+    pub occurrences: u32,
+    #[serde(default)]
+    pub last_evidence_session: Option<String>,
     #[serde(default)]
     pub created_at_ms: u64,
     #[serde(default)]
@@ -514,6 +539,10 @@ pub struct AppSettings {
     pub dictionary_entries: Vec<DictionaryEntry>,
     #[serde(default)]
     pub dictionary_auto_learn_suppressed: Vec<String>,
+    #[serde(default)]
+    pub dictionary_learn_candidates: Vec<LearnCandidate>,
+    #[serde(default)]
+    pub dictionary_schema_version: u32,
     #[serde(default = "default_auto_add_dictionary_words")]
     pub auto_add_dictionary_words: bool,
     #[serde(default)]
@@ -641,6 +670,10 @@ fn default_translate_to_english() -> bool {
 
 fn default_start_hidden() -> bool {
     false
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn default_autostart_enabled() -> bool {
@@ -1097,10 +1130,12 @@ fn ensure_dictionary_defaults_for_loaded_value(
     settings: &mut AppSettings,
     settings_value: Option<&serde_json::Value>,
 ) -> bool {
-    crate::dictionary::sync_legacy_custom_words_with_migration(
+    let migrated = crate::dictionary::migrate_dictionary_v1(settings);
+    let synced = crate::dictionary::sync_legacy_custom_words_with_migration(
         settings,
         !settings_value_has_dictionary_entries(settings_value),
-    )
+    );
+    migrated || synced
 }
 
 fn ensure_snippet_defaults(settings: &mut AppSettings) -> bool {
@@ -1244,6 +1279,8 @@ pub fn get_default_settings() -> AppSettings {
         custom_words: Vec::new(),
         dictionary_entries: Vec::new(),
         dictionary_auto_learn_suppressed: Vec::new(),
+        dictionary_learn_candidates: Vec::new(),
+        dictionary_schema_version: 0,
         auto_add_dictionary_words: default_auto_add_dictionary_words(),
         snippets: Vec::new(),
         model_unload_timeout: ModelUnloadTimeout::default(),
@@ -1597,6 +1634,33 @@ pub fn get_settings(app: &AppHandle) -> AppSettings {
     settings
 }
 
+/// Pure application of a mutation to an already-loaded settings value.
+/// Kept separate so it is unit-testable without an AppHandle.
+pub fn apply_settings_mutation<T>(
+    settings: &mut AppSettings,
+    f: impl FnOnce(&mut AppSettings) -> T,
+) -> T {
+    f(settings)
+}
+
+/// The ONLY public way to mutate persisted settings. Holds the write lock across the
+/// whole read-modify-write so concurrent mutations cannot lost-update each other.
+/// Do NOT `.await` or emit Tauri events inside `f`; emit after this returns.
+pub fn mutate_settings_locked<T>(app: &AppHandle, f: impl FnOnce(&mut AppSettings) -> T) -> T {
+    let _guard = SETTINGS_WRITE_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut settings = get_settings(app);
+    let result = apply_settings_mutation(&mut settings, f);
+    write_settings(app, settings);
+    result
+}
+
+// NOTE: `write_settings` and `get_settings` are the lock-free primitives. All MUTATION
+// paths must go through `mutate_settings_locked` or the domain writers
+// (`write_settings_domain` / `try_write_settings_domain`), which take the same lock.
+// The deny-list test `dictionary_mutation_paths_do_not_call_write_settings_directly`
+// guards this for every migrated file.
 pub fn write_settings(app: &AppHandle, mut settings: AppSettings) {
     let store = app
         .store(crate::portable::store_path(SETTINGS_STORE_PATH))
@@ -1625,6 +1689,11 @@ where
     })
 }
 
+/// Domain-scoped counterpart of `mutate_settings_locked`: holds `SETTINGS_WRITE_LOCK`
+/// across the whole read-modify-write so domain writes cannot lost-update against
+/// concurrent locked mutations. The lock is not reentrant — never call this (or
+/// `write_settings_domain`) from inside a `mutate_settings_locked` closure. Do NOT
+/// `.await` or emit Tauri events inside `mutate`; emit after this returns.
 pub(crate) fn try_write_settings_domain<F>(
     app: &AppHandle,
     domain: SettingsWriteDomain,
@@ -1633,6 +1702,9 @@ pub(crate) fn try_write_settings_domain<F>(
 where
     F: FnOnce(&mut AppSettings) -> Result<(), String>,
 {
+    let _guard = SETTINGS_WRITE_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let mut settings = get_settings(app);
     try_mutate_settings_domain(&mut settings, domain, mutate)?;
     write_settings(app, settings);
@@ -1718,6 +1790,54 @@ mod tests {
         let settings = get_default_settings();
         assert!(!settings.auto_submit);
         assert_eq!(settings.auto_submit_key, AutoSubmitKey::Enter);
+    }
+
+    #[test]
+    fn dictionary_mutation_paths_do_not_call_write_settings_directly() {
+        // Guard: all settings mutation paths in these files must go through
+        // `mutate_settings_locked` or the locked domain writers
+        // (`write_settings_domain` / `try_write_settings_domain`). A direct
+        // `write_settings` call in any of them would reintroduce the lost-update race
+        // this hardening effort removed — originally for the dictionary paths, then
+        // extended to the remaining unlocked writers (audio/adaptive/transcription/
+        // models/local_llm/snippets/model-manager), then to the domain-write callers
+        // (shortcut/history/diagnostics/transcription-manager).
+        // The substring check is safe: `write_settings_domain(` does not contain
+        // `write_settings(`.
+        // CWD for unit tests is the manifest dir (src-tauri), so paths are relative to it.
+        for path in [
+            "src/commands/dictionary.rs",
+            "src/post_paste_learning.rs",
+            "src/commands/audio.rs",
+            "src/commands/adaptive.rs",
+            "src/commands/transcription.rs",
+            "src/commands/models.rs",
+            "src/commands/local_llm.rs",
+            "src/commands/snippets.rs",
+            "src/managers/model.rs",
+            "src/shortcut/mod.rs",
+            "src/commands/history.rs",
+            "src/commands/mod.rs",
+            "src/managers/transcription.rs",
+        ] {
+            let source = std::fs::read_to_string(path)
+                .unwrap_or_else(|error| panic!("failed to read {path}: {error}"));
+            assert!(
+                !source.contains("write_settings("),
+                "{path} must mutate via mutate_settings_locked or the locked domain writers, not write_settings"
+            );
+        }
+    }
+
+    #[test]
+    fn apply_settings_mutation_runs_closure_and_returns_value() {
+        let mut settings = crate::settings::get_default_settings();
+        let added = crate::settings::apply_settings_mutation(&mut settings, |s| {
+            s.custom_words.push("Robyn".to_string());
+            s.custom_words.len()
+        });
+        assert_eq!(added, 1);
+        assert_eq!(settings.custom_words, vec!["Robyn".to_string()]);
     }
 
     #[test]
@@ -1827,6 +1947,29 @@ mod tests {
     fn default_settings_start_with_empty_dictionary_auto_learn_suppression() {
         let settings = get_default_settings();
         assert!(settings.dictionary_auto_learn_suppressed.is_empty());
+    }
+
+    #[test]
+    fn default_settings_have_empty_candidates_and_schema_zero() {
+        let settings = crate::settings::get_default_settings();
+        assert!(settings.dictionary_learn_candidates.is_empty());
+        assert_eq!(settings.dictionary_schema_version, 0);
+    }
+
+    #[test]
+    fn learn_candidate_round_trips() {
+        let c = crate::settings::LearnCandidate {
+            replacement_of: Some("robin".into()),
+            phrase: "Robyn".into(),
+            occurrences: 1,
+            last_evidence_session: Some("s1".into()),
+            created_at_ms: 1,
+            updated_at_ms: 1,
+        };
+        let json = serde_json::to_string(&c).unwrap();
+        let back: crate::settings::LearnCandidate = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.phrase, "Robyn");
+        assert_eq!(back.occurrences, 1);
     }
 
     #[test]
@@ -2347,5 +2490,15 @@ mod tests {
         let out = format!("{:?}", map);
         assert!(!out.contains("secret"));
         assert!(out.contains("[REDACTED]"));
+    }
+
+    #[test]
+    fn dictionary_entry_defaults_active_true_flags_false() {
+        // Legacy JSON without the new fields must deserialize as active + untouched flags.
+        let legacy = r#"{"id":"dict_1_robyn","phrase":"Robyn"}"#;
+        let entry: crate::settings::DictionaryEntry = serde_json::from_str(legacy).unwrap();
+        assert!(entry.active);
+        assert!(!entry.user_confirmed);
+        assert!(!entry.needs_review);
     }
 }

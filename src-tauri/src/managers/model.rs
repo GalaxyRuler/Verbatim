@@ -1,4 +1,4 @@
-use crate::settings::{get_settings, write_settings};
+use crate::settings::{get_settings, mutate_settings_locked};
 use anyhow::Result;
 use flate2::read::GzDecoder;
 use futures_util::StreamExt;
@@ -269,43 +269,47 @@ impl ModelManager {
     }
 
     fn auto_select_model_if_needed(&self) -> Result<()> {
-        let mut settings = get_settings(&self.app_handle);
-
-        // Clear stale selection: selected model is set but doesn't exist
-        // in available_models (e.g. deleted custom model file)
-        if !settings.selected_model.is_empty() {
+        // Snapshot the model list up front so the settings-lock closure below never
+        // nests the available_models mutex inside the settings write lock.
+        let (known_model_ids, first_downloaded) = {
             let models = self.available_models.lock().unwrap();
-            let exists = models.contains_key(&settings.selected_model);
-            drop(models);
+            let known: HashSet<String> = models.keys().cloned().collect();
+            let first = models
+                .values()
+                .find(|model| model.is_downloaded)
+                .map(|model| (model.id.clone(), model.name.clone()));
+            (known, first)
+        };
 
-            if !exists {
+        // Fast path: current selection exists in available_models — nothing to mutate,
+        // so skip taking the settings write lock entirely.
+        let current = get_settings(&self.app_handle).selected_model;
+        if !current.is_empty() && known_model_ids.contains(&current) {
+            return Ok(());
+        }
+
+        mutate_settings_locked(&self.app_handle, |settings| {
+            // Clear stale selection: selected model is set but doesn't exist
+            // in available_models (e.g. deleted custom model file)
+            if !settings.selected_model.is_empty()
+                && !known_model_ids.contains(&settings.selected_model)
+            {
                 info!(
                     "Selected model '{}' not found in available models, clearing selection",
                     settings.selected_model
                 );
                 settings.selected_model = String::new();
-                write_settings(&self.app_handle, settings.clone());
             }
-        }
 
-        // If no model is selected, pick the first downloaded one
-        if settings.selected_model.is_empty() {
-            // Find the first available (downloaded) model
-            let models = self.available_models.lock().unwrap();
-            if let Some(available_model) = models.values().find(|model| model.is_downloaded) {
-                info!(
-                    "Auto-selecting model: {} ({})",
-                    available_model.id, available_model.name
-                );
-
-                // Update settings with the selected model
-                let mut updated_settings = settings;
-                updated_settings.selected_model = available_model.id.clone();
-                write_settings(&self.app_handle, updated_settings);
-
-                info!("Successfully auto-selected model: {}", available_model.id);
+            // If no model is selected, pick the first downloaded one
+            if settings.selected_model.is_empty() {
+                if let Some((id, name)) = &first_downloaded {
+                    info!("Auto-selecting model: {} ({})", id, name);
+                    settings.selected_model = id.clone();
+                    info!("Successfully auto-selected model: {}", id);
+                }
             }
-        }
+        });
 
         Ok(())
     }

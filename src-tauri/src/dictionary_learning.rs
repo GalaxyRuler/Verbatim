@@ -3,6 +3,42 @@ const MAX_AUTO_LEARN_PHRASE_CHARS: usize = 120;
 const MAX_AUTO_LEARN_PHRASE_TOKENS: usize = 5;
 const MAX_HYPHEN_PART_DISTANCE: usize = 2;
 
+/// The single normalizer used for inverse/refinement detection, exact-rule source
+/// matching, conflict grouping, occurrence identity, and suppression keys.
+/// Folds case, collapses whitespace, and maps smart punctuation to ASCII.
+///
+/// NOTE: Does not NFC-normalize (the `unicode-normalization` crate is not a
+/// dependency of this crate). If it is added later, prefix with
+/// `raw.nfc().collect::<String>()` before the fold below.
+pub fn canonicalize(raw: &str) -> String {
+    let mut out = String::new();
+    let mut last_was_space = false;
+    for ch in raw.trim().chars() {
+        // Fold smart quotes/dashes to ASCII equivalents.
+        let ch = match ch {
+            '\u{2018}' | '\u{2019}' | '\u{201B}' => '\'',
+            '\u{201C}' | '\u{201D}' => '"',
+            '\u{2013}' | '\u{2014}' | '\u{2212}' => '-',
+            other => other,
+        };
+        if ch.is_whitespace() {
+            if !last_was_space && !out.is_empty() {
+                out.push(' ');
+                last_was_space = true;
+            }
+            continue;
+        }
+        last_was_space = false;
+        for lower in ch.to_lowercase() {
+            out.push(lower);
+        }
+    }
+    while out.ends_with(' ') {
+        out.pop();
+    }
+    out
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AutoLearnCandidate {
     pub phrase: String,
@@ -675,6 +711,25 @@ fn is_phrase_connector(token: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{infer_auto_learn_candidates, merge_auto_learn_candidates, AutoLearnCandidate};
+
+    #[test]
+    fn canonicalize_folds_case_whitespace_and_smart_punct() {
+        assert_eq!(
+            super::canonicalize("  ACME,\u{2019}s   Corp  "),
+            super::canonicalize("acme,'s corp")
+        );
+        assert_eq!(super::canonicalize("Robyn"), "robyn");
+        assert_eq!(
+            super::canonicalize("Node.js"),
+            super::canonicalize("node.js")
+        );
+        assert_eq!(
+            super::canonicalize("Wi\u{2013}Fi"),
+            super::canonicalize("wi-fi")
+        );
+        assert_eq!(super::canonicalize("a   b\t c"), "a b c");
+        assert_eq!(super::canonicalize(""), "");
+    }
 
     #[test]
     fn auto_learn_candidate_matrix_covers_realistic_scenarios() {

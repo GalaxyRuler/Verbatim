@@ -23,6 +23,7 @@ export const DictionaryEntryRow: React.FC<DictionaryEntryRowProps> = ({
   const { t } = useTranslation();
   const isStarred = entry.priority === "starred";
   const source = entry.source ?? "manual";
+  const isQuarantined = entry.active === false;
   const updated = entry.updated_at_ms
     ? new Intl.DateTimeFormat(undefined, {
         dateStyle: "medium",
@@ -31,7 +32,9 @@ export const DictionaryEntryRow: React.FC<DictionaryEntryRowProps> = ({
     : "";
 
   return (
-    <div className="grid grid-cols-[auto_1fr_auto] gap-3 items-center px-3 py-2 border-b border-mid-gray/10 last:border-b-0">
+    <div
+      className={`grid grid-cols-[auto_1fr_auto] gap-3 items-center px-3 py-2 border-b border-mid-gray/10 last:border-b-0 ${isQuarantined ? "opacity-60" : ""}`}
+    >
       <Button
         type="button"
         variant="ghost"
@@ -63,6 +66,11 @@ export const DictionaryEntryRow: React.FC<DictionaryEntryRowProps> = ({
           <Badge variant={source === "auto_learned" ? "success" : "secondary"}>
             {t(`settings.dictionary.source.${source}`)}
           </Badge>
+          {isQuarantined && (
+            <Badge variant="secondary">
+              {t("settings.dictionary.needsReview.quarantined")}
+            </Badge>
+          )}
         </div>
         <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-mid-gray">
           {entry.replacement_of && (

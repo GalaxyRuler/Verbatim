@@ -829,13 +829,14 @@
       "counts": {
         "total": "{{count}} إدخالات",
         "autoLearned": "{{count}} متعلمة تلقائيًا",
-        "starred": "{{count}} مميزة"
+        "starred": "{{count}} مميزة",
+        "pending": "{{count}} قيد المراجعة"
       },
       "empty": "لا توجد إدخالات في القاموس بعد.",
       "noResults": "لا توجد إدخالات تطابق بحثك.",
       "recentlyLearned": {
-        "title": "أضيف إلى القاموس",
-        "description": "تمت الإضافة: {{phrases}}",
+        "title": "تم تحديث القاموس",
+        "description": "التصحيح الآن يشمل: {{phrases}}",
         "undo": "تراجع"
       },
       "errors": {
@@ -843,7 +844,24 @@
         "add": "فشل إضافة إدخال القاموس",
         "update": "فشل تحديث إدخال القاموس",
         "delete": "فشل حذف إدخال القاموس",
-        "duplicate": "{{phrase}} موجود بالفعل في قاموسك"
+        "duplicate": "{{phrase}} موجود بالفعل في قاموسك",
+        "approve": "تعذرت الموافقة على الإدخال",
+        "reject": "تعذر رفض الإدخال"
+      },
+      "pending": {
+        "title": "قيد المراجعة",
+        "description": "تصحيحات لاحظها Verbatim. وافق لإضافتها إلى قاموسك.",
+        "from": "من \"{{source}}\"",
+        "approve": "موافقة",
+        "reject": "رفض",
+        "occurrences": "×{{count}} مرة"
+      },
+      "needsReview": {
+        "title": "بحاجة إلى مراجعة",
+        "quarantined": "تم الإيقاف بعد أن تراجعت عنه",
+        "flagged": "قمت بتعديل هذا التصحيح",
+        "keep": "احتفظ",
+        "delete": "حذف"
       }
     },
     "formattingLevel": {

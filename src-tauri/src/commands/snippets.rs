@@ -28,15 +28,13 @@ pub fn list_snippet_entries(app: AppHandle) -> Result<Vec<SnippetEntry>, String>
 #[tauri::command]
 #[specta::specta]
 pub fn add_snippet_entry(app: AppHandle, input: SnippetEntryInput) -> Result<SnippetEntry, String> {
-    let mut settings = crate::settings::get_settings(&app);
-    let entry = crate::snippets::upsert_snippet_entry(
-        &mut settings,
-        crate::snippets::current_unix_ms(),
-        input.trigger,
-        input.content,
-    )?;
-    crate::settings::write_settings(&app, settings);
-    Ok(entry)
+    let now_ms = crate::snippets::current_unix_ms();
+    // The closure returns the fallible upsert Result as-is; a failed upsert leaves settings
+    // unchanged, so the redundant write-back on the Err path is harmless (same pattern as
+    // commands/dictionary.rs).
+    crate::settings::mutate_settings_locked(&app, |settings| {
+        crate::snippets::upsert_snippet_entry(settings, now_ms, input.trigger, input.content)
+    })
 }
 
 #[tauri::command]
@@ -46,23 +44,18 @@ pub fn update_snippet_entry(
     id: String,
     update: SnippetEntryUpdate,
 ) -> Result<SnippetEntry, String> {
-    let mut settings = crate::settings::get_settings(&app);
-    let entry = crate::snippets::update_snippet_entry(
-        &mut settings,
-        crate::snippets::current_unix_ms(),
-        &id,
-        update.trigger,
-        update.content,
-    )?;
-    crate::settings::write_settings(&app, settings);
-    Ok(entry)
+    let now_ms = crate::snippets::current_unix_ms();
+    // See add_snippet_entry: a failed update leaves settings unchanged.
+    crate::settings::mutate_settings_locked(&app, |settings| {
+        crate::snippets::update_snippet_entry(settings, now_ms, &id, update.trigger, update.content)
+    })
 }
 
 #[tauri::command]
 #[specta::specta]
 pub fn delete_snippet_entry(app: AppHandle, id: String) -> Result<(), String> {
-    let mut settings = crate::settings::get_settings(&app);
-    crate::snippets::delete_snippet_entries(&mut settings, &[id]);
-    crate::settings::write_settings(&app, settings);
+    crate::settings::mutate_settings_locked(&app, |settings| {
+        crate::snippets::delete_snippet_entries(settings, &[id]);
+    });
     Ok(())
 }

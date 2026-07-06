@@ -91,6 +91,9 @@ function DesktopApp() {
   const setRecentlyLearnedDictionaryEntries = useDictionaryStore(
     (state) => state.setRecentlyLearnedEntries,
   );
+  const loadDictionaryCandidates = useDictionaryStore(
+    (state) => state.loadCandidates,
+  );
   const hasCompletedPostOnboardingInit = useRef(false);
   const [startupStatus, setStartupStatus] = useState<StartupStatus | null>(
     null,
@@ -380,6 +383,17 @@ function DesktopApp() {
       unlisten.then((fn) => fn());
     };
   }, [refreshSettings, setRecentlyLearnedDictionaryEntries, t]);
+
+  // Refresh the quarantined-candidate list when post-paste learning stages
+  // new (unconfirmed) phrases for review.
+  useEffect(() => {
+    const unlisten = listen<number>("dictionary-candidates-learned", () => {
+      void loadDictionaryCandidates();
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [loadDictionaryCandidates]);
 
   useEffect(() => {
     const unlisten = listen("open-dictionary-settings", () => {

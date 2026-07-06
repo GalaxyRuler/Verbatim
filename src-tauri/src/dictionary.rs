@@ -1,5 +1,6 @@
+use crate::dictionary_learning::canonicalize;
 use crate::settings::{
-    AppSettings, DictionaryEntry, DictionaryEntryPriority, DictionaryEntrySource,
+    AppSettings, DictionaryEntry, DictionaryEntryPriority, DictionaryEntrySource, LearnCandidate,
 };
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -59,8 +60,39 @@ pub fn make_dictionary_entry_id(now_ms: u64, phrase: &str) -> String {
     format!("dict_{}_{}", now_ms, slug)
 }
 
+/// Phrases of ACTIVE entries only. Feeds the ASR prompt context and the legacy
+/// `custom_words` mirror — quarantined (inactive) entries must not keep biasing
+/// transcription toward the very phrase the user reversed.
 pub fn dictionary_phrases(entries: &[DictionaryEntry]) -> Vec<String> {
-    entries.iter().map(|entry| entry.phrase.clone()).collect()
+    entries
+        .iter()
+        .filter(|entry| entry.active)
+        .map(|entry| entry.phrase.clone())
+        .collect()
+}
+
+/// v0 -> v1: sanitize entry fields, then grandfather existing auto-learned entries to
+/// manual-tier trust (`user_confirmed = true`) so their fuzzy behaviour does not silently
+/// tighten under the new stricter auto tier. Idempotent via `dictionary_schema_version`.
+pub fn migrate_dictionary_v1(settings: &mut AppSettings) -> bool {
+    if settings.dictionary_schema_version >= 1 {
+        return false;
+    }
+    for entry in &mut settings.dictionary_entries {
+        // Sanitize before classifying.
+        if let Some(phrase) = sanitize_dictionary_phrase(&entry.phrase) {
+            entry.phrase = phrase;
+        }
+        entry.replacement_of = entry
+            .replacement_of
+            .as_deref()
+            .and_then(sanitize_dictionary_phrase);
+        if entry.source == DictionaryEntrySource::AutoLearned {
+            entry.user_confirmed = true; // grandfather at manual-tier (base threshold)
+        }
+    }
+    settings.dictionary_schema_version = 1;
+    true
 }
 
 pub fn sync_legacy_custom_words(settings: &mut AppSettings) -> bool {
@@ -105,6 +137,9 @@ pub fn sync_legacy_custom_words_with_migration(
                 priority: DictionaryEntryPriority::Normal,
                 created_at_ms: 0,
                 updated_at_ms: 0,
+                active: true,
+                user_confirmed: false,
+                needs_review: false,
             });
         }
 
@@ -144,6 +179,9 @@ pub fn upsert_manual_entry(
         priority: DictionaryEntryPriority::Normal,
         created_at_ms: now_ms,
         updated_at_ms: now_ms,
+        active: true,
+        user_confirmed: false,
+        needs_review: false,
     };
 
     settings.dictionary_entries.push(entry.clone());
@@ -152,6 +190,11 @@ pub fn upsert_manual_entry(
     Ok(entry)
 }
 
+/// No longer called from production code paths — `learn_custom_words_from_correction` now
+/// routes through `observe_correction` (the provisional-candidate state machine) instead of
+/// minting entries directly. Kept for its test coverage; candidate for removal in a future
+/// cleanup pass.
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn upsert_auto_learn_entry(
     settings: &mut AppSettings,
     now_ms: u64,
@@ -176,6 +219,9 @@ pub fn upsert_auto_learn_entry(
         priority: DictionaryEntryPriority::Normal,
         created_at_ms: now_ms,
         updated_at_ms: now_ms,
+        active: true,
+        user_confirmed: false,
+        needs_review: false,
     };
 
     settings.dictionary_entries.push(entry.clone());
@@ -296,6 +342,9 @@ pub fn replace_dictionary_phrases(
             priority: DictionaryEntryPriority::Normal,
             created_at_ms: now_ms,
             updated_at_ms: now_ms,
+            active: true,
+            user_confirmed: false,
+            needs_review: false,
         });
     }
 
@@ -395,15 +444,225 @@ fn has_phrase(entries: &[DictionaryEntry], phrase: &str, except_id: Option<&str>
     })
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum ObserveOutcome {
+    Learned,    // new candidate
+    Reinforced, // existing candidate, +1, not yet promoted (or blocked by conflict)
+    Promoted,   // reached threshold -> became an active entry
+    NoChange,   // suppressed / duplicate session / already active
+    Routed,     // produced-output feedback: edit of dictionary-produced text
+}
+
+pub const PROMOTE_THRESHOLD: u32 = 2;
+
+/// If `replacement_of` (the post-apply dictated form) matches an ACTIVE entry's phrase, the
+/// user is editing text the dictionary produced. Reversal -> quarantine auto entry;
+/// refinement -> flag for review. Returns Some(Routed) when handled (caller must NOT learn
+/// a standalone rule).
+pub fn produced_output_feedback(
+    settings: &mut AppSettings,
+    now_ms: u64,
+    replacement_of: &Option<String>,
+    corrected_phrase: &str,
+) -> Option<ObserveOutcome> {
+    let dictated = replacement_of.as_deref()?;
+    let dictated_key = canonicalize(dictated);
+    let corrected_key = canonicalize(corrected_phrase);
+
+    let index = settings
+        .dictionary_entries
+        .iter()
+        .position(|e| e.active && canonicalize(&e.phrase) == dictated_key)?;
+
+    let is_reversal = settings.dictionary_entries[index]
+        .replacement_of
+        .as_deref()
+        .map(canonicalize)
+        .as_deref()
+        == Some(corrected_key.as_str());
+
+    let entry = &mut settings.dictionary_entries[index];
+    entry.needs_review = true;
+    entry.updated_at_ms = now_ms;
+    let is_auto = entry.source == DictionaryEntrySource::AutoLearned && !entry.user_confirmed;
+    if is_reversal && is_auto {
+        entry.active = false; // quarantine from apply
+        sync_legacy_custom_words(settings);
+    }
+    Some(ObserveOutcome::Routed)
+}
+
+fn candidate_pair(replacement_of: &Option<String>, phrase: &str) -> (Option<String>, String) {
+    (
+        replacement_of.as_deref().map(canonicalize),
+        canonicalize(phrase),
+    )
+}
+
+fn source_is_conflicted(
+    settings: &AppSettings,
+    canon_src: &Option<String>,
+    canon_phrase: &str,
+) -> bool {
+    let Some(src) = canon_src else { return false };
+    settings.dictionary_learn_candidates.iter().any(|c| {
+        c.replacement_of.as_deref().map(canonicalize).as_deref() == Some(src.as_str())
+            && canonicalize(&c.phrase) != canon_phrase
+    })
+}
+
+pub fn observe_correction(
+    settings: &mut AppSettings,
+    now_ms: u64,
+    session: &str,
+    dictated: &str,
+    corrected: Option<&str>,
+) -> ObserveOutcome {
+    let Some(phrase) = corrected.and_then(sanitize_dictionary_phrase) else {
+        return ObserveOutcome::NoChange;
+    };
+    let replacement_of = sanitize_dictionary_phrase(dictated);
+
+    // Feedback is intentionally checked BEFORE suppression: it concerns an existing
+    // ACTIVE entry (the dictated form is dictionary output), not learning the corrected
+    // phrase — a phrase tombstone must not mask reversal/refinement signals.
+    if let Some(outcome) = produced_output_feedback(settings, now_ms, &replacement_of, &phrase) {
+        return outcome;
+    }
+
+    if auto_learn_phrase_is_suppressed(settings, &phrase) {
+        return ObserveOutcome::NoChange;
+    }
+    if has_phrase(&settings.dictionary_entries, &phrase, None) {
+        return ObserveOutcome::NoChange;
+    }
+
+    let (canon_src, canon_phrase) = candidate_pair(&replacement_of, &phrase);
+    if let Some(index) = settings.dictionary_learn_candidates.iter().position(|c| {
+        c.replacement_of.as_deref().map(canonicalize) == canon_src
+            && canonicalize(&c.phrase) == canon_phrase
+    }) {
+        {
+            let c = &mut settings.dictionary_learn_candidates[index];
+            if c.last_evidence_session.as_deref() == Some(session) {
+                return ObserveOutcome::NoChange;
+            }
+            c.occurrences += 1;
+            c.updated_at_ms = now_ms;
+            c.last_evidence_session = Some(session.to_string());
+        }
+        let promote = settings.dictionary_learn_candidates[index].occurrences >= PROMOTE_THRESHOLD
+            && !source_is_conflicted(settings, &canon_src, &canon_phrase);
+        if promote {
+            let candidate = settings.dictionary_learn_candidates.remove(index);
+            promote_candidate_to_entry(settings, now_ms, candidate, false);
+            return ObserveOutcome::Promoted;
+        }
+        return ObserveOutcome::Reinforced;
+    }
+
+    settings.dictionary_learn_candidates.push(LearnCandidate {
+        replacement_of,
+        phrase,
+        occurrences: 1,
+        last_evidence_session: Some(session.to_string()),
+        created_at_ms: now_ms,
+        updated_at_ms: now_ms,
+    });
+    ObserveOutcome::Learned
+}
+
+/// Convert a candidate into an active auto-learned entry. `user_confirmed` is true when
+/// promotion came from an explicit Approve (manual-tier trust); false for recurrence.
+pub fn promote_candidate_to_entry(
+    settings: &mut AppSettings,
+    now_ms: u64,
+    candidate: LearnCandidate,
+    user_confirmed: bool,
+) {
+    let Some(phrase) = sanitize_dictionary_phrase(&candidate.phrase) else {
+        return;
+    };
+    if has_phrase(&settings.dictionary_entries, &phrase, None) {
+        return; // phrase already active; keep the existing entry's replacement_of
+    }
+    unsuppress_auto_learn_phrase(settings, &phrase);
+    settings.dictionary_entries.push(DictionaryEntry {
+        id: make_dictionary_entry_id(now_ms, &phrase),
+        phrase,
+        replacement_of: candidate
+            .replacement_of
+            .and_then(|r| sanitize_dictionary_phrase(&r)),
+        source: DictionaryEntrySource::AutoLearned,
+        priority: DictionaryEntryPriority::Normal,
+        created_at_ms: now_ms,
+        updated_at_ms: now_ms,
+        active: true,
+        user_confirmed,
+        needs_review: false,
+    });
+    sync_legacy_custom_words(settings);
+}
+
+/// Approve a pending candidate: promote it with user_confirmed (manual-tier) trust.
+/// Matches by canonical pair; None replacement_of matches only candidates with None source.
+/// Returns the promoted entry (the one now owning the phrase), or None if no candidate matched.
+pub fn approve_candidate(
+    settings: &mut AppSettings,
+    now_ms: u64,
+    phrase: &str,
+    replacement_of: Option<&str>,
+) -> Option<DictionaryEntry> {
+    let phrase_key = canonicalize(phrase);
+    let source_key = replacement_of.map(canonicalize);
+    let index = settings.dictionary_learn_candidates.iter().position(|c| {
+        canonicalize(&c.phrase) == phrase_key
+            && c.replacement_of.as_deref().map(canonicalize) == source_key
+    })?;
+    let candidate = settings.dictionary_learn_candidates.remove(index);
+    promote_candidate_to_entry(settings, now_ms, candidate, true);
+    settings
+        .dictionary_entries
+        .iter()
+        .find(|entry| normalize_dictionary_key(&entry.phrase) == normalize_dictionary_key(phrase))
+        .cloned()
+}
+
+/// Reject a pending candidate: drop ALL candidates with this phrase (any source variant)
+/// and suppress the phrase so it is not re-learned (explicit user rejection).
+pub fn reject_candidate(settings: &mut AppSettings, phrase: &str) {
+    let phrase_key = canonicalize(phrase);
+    settings
+        .dictionary_learn_candidates
+        .retain(|c| canonicalize(&c.phrase) != phrase_key);
+    suppress_auto_learn_phrase(settings, phrase);
+}
+
+/// Reactivate / quarantine an entry from the review UI; clears the review flag either way
+/// (the user has looked at it).
+pub fn set_entry_active(settings: &mut AppSettings, now_ms: u64, id: &str, active: bool) -> bool {
+    let Some(entry) = settings.dictionary_entries.iter_mut().find(|e| e.id == id) else {
+        return false;
+    };
+    entry.active = active;
+    entry.needs_review = false;
+    entry.updated_at_ms = now_ms;
+    sync_legacy_custom_words(settings);
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        delete_entries, dictionary_phrases, make_dictionary_entry_id, replace_dictionary_phrases,
-        sanitize_dictionary_phrase, sync_legacy_custom_words, update_entry,
-        upsert_auto_learn_entry, upsert_manual_entry,
+        approve_candidate, delete_entries, dictionary_phrases, make_dictionary_entry_id,
+        migrate_dictionary_v1, observe_correction, promote_candidate_to_entry, reject_candidate,
+        replace_dictionary_phrases, sanitize_dictionary_phrase, set_entry_active,
+        sync_legacy_custom_words, update_entry, upsert_auto_learn_entry, upsert_manual_entry,
+        ObserveOutcome,
     };
     use crate::settings::{
         get_default_settings, DictionaryEntry, DictionaryEntryPriority, DictionaryEntrySource,
+        LearnCandidate,
     };
 
     #[test]
@@ -458,6 +717,36 @@ mod tests {
         let entries = vec![entry("dict_1_robyn", "Robyn")];
 
         assert_eq!(dictionary_phrases(&entries), vec!["Robyn"]);
+    }
+
+    #[test]
+    fn dictionary_phrases_exclude_quarantined_entries() {
+        // Quarantined entries must not bias ASR prompts or the custom_words mirror.
+        let entries = vec![
+            entry("dict_1_robyn", "Robyn"),
+            DictionaryEntry {
+                active: false,
+                ..entry("dict_2_their", "their")
+            },
+        ];
+
+        assert_eq!(dictionary_phrases(&entries), vec!["Robyn"]);
+    }
+
+    #[test]
+    fn quarantine_removes_phrase_from_custom_words_mirror() {
+        let mut settings = get_default_settings();
+        settings.dictionary_entries.push(DictionaryEntry {
+            source: DictionaryEntrySource::AutoLearned,
+            ..entry_full("dict_1", "their", Some("there"))
+        });
+        sync_legacy_custom_words(&mut settings);
+        assert_eq!(settings.custom_words, vec!["their"]);
+
+        // Reversal quarantines the entry; the mirror must drop the phrase.
+        let out = observe_correction(&mut settings, 5, "s1", "their", Some("there"));
+        assert_eq!(out, ObserveOutcome::Routed);
+        assert!(settings.custom_words.is_empty());
     }
 
     #[test]
@@ -770,6 +1059,142 @@ mod tests {
         assert_eq!(settings.custom_words, vec!["Robyn", "ChargeBee"]);
     }
 
+    #[test]
+    fn first_correction_learns_provisional_candidate() {
+        let mut s = get_default_settings();
+        let out = observe_correction(&mut s, 10, "s1", "robin", Some("Robyn"));
+        assert_eq!(out, ObserveOutcome::Learned);
+        assert_eq!(s.dictionary_learn_candidates.len(), 1);
+        assert_eq!(s.dictionary_learn_candidates[0].phrase, "Robyn");
+        assert_eq!(s.dictionary_learn_candidates[0].occurrences, 1);
+        assert!(s.dictionary_entries.is_empty()); // inert, not applied
+    }
+
+    #[test]
+    fn same_pair_twice_across_sessions_promotes_to_entry() {
+        let mut s = get_default_settings();
+        assert_eq!(
+            observe_correction(&mut s, 10, "s1", "robin", Some("Robyn")),
+            ObserveOutcome::Learned
+        );
+        assert_eq!(
+            observe_correction(&mut s, 20, "s2", "robin", Some("Robyn")),
+            ObserveOutcome::Promoted
+        );
+        assert!(s.dictionary_learn_candidates.is_empty());
+        assert_eq!(s.dictionary_entries.len(), 1);
+        let e = &s.dictionary_entries[0];
+        assert_eq!(e.phrase, "Robyn");
+        assert_eq!(e.source, DictionaryEntrySource::AutoLearned);
+        assert!(e.active);
+        assert!(!e.user_confirmed);
+        assert_eq!(e.replacement_of, Some("robin".to_string()));
+        // legacy mirror updated on promotion
+        assert_eq!(s.custom_words, vec!["Robyn".to_string()]);
+    }
+
+    #[test]
+    fn none_source_corrections_share_one_candidate_and_promote() {
+        // Documents intended behavior: a candidate with no usable source keys as
+        // (None, phrase); repeated None-source corrections are the SAME candidate
+        // (never "conflicting variants") and promote at the threshold.
+        let mut s = get_default_settings();
+        let out1 = observe_correction(&mut s, 10, "s1", "<<>>", Some("Robyn"));
+        assert_eq!(out1, ObserveOutcome::Learned);
+        assert_eq!(s.dictionary_learn_candidates.len(), 1);
+        assert_eq!(s.dictionary_learn_candidates[0].replacement_of, None);
+
+        let out2 = observe_correction(&mut s, 20, "s2", "<<>>", Some("Robyn"));
+        assert_eq!(out2, ObserveOutcome::Promoted);
+        assert_eq!(s.dictionary_entries.len(), 1);
+        assert_eq!(s.dictionary_entries[0].replacement_of, None);
+    }
+
+    #[test]
+    fn same_session_does_not_double_count() {
+        let mut s = get_default_settings();
+        observe_correction(&mut s, 10, "s1", "robin", Some("Robyn"));
+        let out = observe_correction(&mut s, 11, "s1", "robin", Some("Robyn")); // same session
+        assert_eq!(out, ObserveOutcome::NoChange);
+        assert_eq!(s.dictionary_learn_candidates[0].occurrences, 1);
+    }
+
+    #[test]
+    fn conflicting_targets_for_same_source_block_promotion() {
+        let mut s = get_default_settings();
+        observe_correction(&mut s, 10, "s1", "jon", Some("John"));
+        observe_correction(&mut s, 20, "s2", "jon", Some("Jon")); // conflict on source "jon"
+        let out = observe_correction(&mut s, 30, "s3", "jon", Some("John"));
+        assert_eq!(out, ObserveOutcome::Reinforced); // occurrences reached 2 but conflicted -> no promotion
+        assert!(s.dictionary_entries.is_empty());
+    }
+
+    #[test]
+    fn suppressed_phrase_is_not_learned() {
+        let mut s = get_default_settings();
+        s.dictionary_auto_learn_suppressed.push("robyn".to_string());
+        let out = observe_correction(&mut s, 10, "s1", "robin", Some("Robyn"));
+        assert_eq!(out, ObserveOutcome::NoChange);
+        assert!(s.dictionary_learn_candidates.is_empty());
+    }
+
+    #[test]
+    fn existing_active_phrase_is_not_relearned() {
+        let mut s = get_default_settings();
+        s.dictionary_entries = vec![entry("dict_1_robyn", "Robyn")];
+        let out = observe_correction(&mut s, 10, "s1", "robin", Some("Robyn"));
+        assert_eq!(out, ObserveOutcome::NoChange);
+        assert!(s.dictionary_learn_candidates.is_empty());
+    }
+
+    #[test]
+    fn promotion_creates_auto_entry_and_merges_existing_phrase() {
+        let mut s = get_default_settings();
+        let cand = LearnCandidate {
+            replacement_of: Some("robin".into()),
+            phrase: "Robyn".into(),
+            occurrences: 2,
+            last_evidence_session: Some("s2".into()),
+            created_at_ms: 1,
+            updated_at_ms: 2,
+        };
+        promote_candidate_to_entry(&mut s, 42, cand, false);
+        assert_eq!(s.dictionary_entries.len(), 1);
+        let e = &s.dictionary_entries[0];
+        assert_eq!(e.phrase, "Robyn");
+        assert_eq!(e.replacement_of, Some("robin".into()));
+        assert!(!e.user_confirmed);
+
+        // Promoting a second candidate whose phrase already exists must not duplicate or clobber.
+        let dup = LearnCandidate {
+            replacement_of: Some("robbin".into()),
+            phrase: "robyn".into(),
+            occurrences: 2,
+            last_evidence_session: None,
+            created_at_ms: 3,
+            updated_at_ms: 3,
+        };
+        promote_candidate_to_entry(&mut s, 43, dup, true);
+        assert_eq!(s.dictionary_entries.len(), 1); // merged by phrase key
+        assert_eq!(s.dictionary_entries[0].replacement_of, Some("robin".into()));
+        // kept
+    }
+
+    #[test]
+    fn approve_promotion_sets_user_confirmed() {
+        let mut s = get_default_settings();
+        let cand = LearnCandidate {
+            replacement_of: Some("robin".into()),
+            phrase: "Robyn".into(),
+            occurrences: 1,
+            last_evidence_session: None,
+            created_at_ms: 1,
+            updated_at_ms: 1,
+        };
+        promote_candidate_to_entry(&mut s, 42, cand, true);
+        assert!(s.dictionary_entries[0].user_confirmed);
+    }
+
     fn entry(id: &str, phrase: &str) -> DictionaryEntry {
         DictionaryEntry {
             id: id.to_string(),
@@ -779,6 +1204,219 @@ mod tests {
             priority: DictionaryEntryPriority::Normal,
             created_at_ms: 1,
             updated_at_ms: 1,
+            active: true,
+            user_confirmed: false,
+            needs_review: false,
         }
+    }
+
+    fn entry_full(id: &str, phrase: &str, replacement_of: Option<&str>) -> DictionaryEntry {
+        DictionaryEntry {
+            id: id.into(),
+            phrase: phrase.into(),
+            replacement_of: replacement_of.map(str::to_string),
+            source: DictionaryEntrySource::Manual,
+            priority: DictionaryEntryPriority::Normal,
+            created_at_ms: 1,
+            updated_at_ms: 1,
+            active: true,
+            user_confirmed: false,
+            needs_review: false,
+        }
+    }
+
+    #[test]
+    fn reversal_of_auto_entry_quarantines_it_and_learns_nothing() {
+        let mut s = get_default_settings();
+        s.dictionary_entries.push(DictionaryEntry {
+            source: DictionaryEntrySource::AutoLearned,
+            ..entry_full("dict_1", "their", Some("there"))
+        });
+        // User edits produced "their" back to "there": dictated="their", corrected="there".
+        let out = observe_correction(&mut s, 5, "s1", "their", Some("there"));
+        assert_eq!(out, ObserveOutcome::Routed);
+        assert!(!s.dictionary_entries[0].active); // quarantined
+        assert!(s.dictionary_entries[0].needs_review);
+        assert!(s.dictionary_learn_candidates.is_empty()); // no inverse learned
+    }
+
+    #[test]
+    fn refinement_of_auto_entry_flags_review_without_new_rule() {
+        let mut s = get_default_settings();
+        s.dictionary_entries.push(DictionaryEntry {
+            source: DictionaryEntrySource::AutoLearned,
+            ..entry_full("dict_1", "ACME Corp", Some("acme"))
+        });
+        // User edits produced "ACME Corp" into "ACME Corporation".
+        let out = observe_correction(&mut s, 5, "s1", "ACME Corp", Some("ACME Corporation"));
+        assert_eq!(out, ObserveOutcome::Routed);
+        assert!(s.dictionary_entries[0].needs_review);
+        assert!(s.dictionary_entries[0].active); // refinement does not quarantine
+        assert!(s.dictionary_learn_candidates.is_empty());
+    }
+
+    #[test]
+    fn manual_entry_reversal_flags_but_stays_active() {
+        let mut s = get_default_settings();
+        s.dictionary_entries
+            .push(entry_full("dict_1", "their", Some("there"))); // Manual
+        let out = observe_correction(&mut s, 5, "s1", "their", Some("there"));
+        assert_eq!(out, ObserveOutcome::Routed);
+        assert!(s.dictionary_entries[0].active); // manual never auto-deactivated
+        assert!(s.dictionary_entries[0].needs_review);
+    }
+
+    #[test]
+    fn user_confirmed_auto_entry_reversal_flags_but_stays_active() {
+        let mut s = get_default_settings();
+        s.dictionary_entries.push(DictionaryEntry {
+            source: DictionaryEntrySource::AutoLearned,
+            user_confirmed: true,
+            ..entry_full("dict_1", "their", Some("there"))
+        });
+        let out = observe_correction(&mut s, 5, "s1", "their", Some("there"));
+        assert_eq!(out, ObserveOutcome::Routed);
+        assert!(s.dictionary_entries[0].active); // user-confirmed = manual-tier trust
+        assert!(s.dictionary_entries[0].needs_review);
+    }
+
+    #[test]
+    fn inactive_entry_phrase_does_not_route_feedback() {
+        let mut s = get_default_settings();
+        s.dictionary_entries.push(DictionaryEntry {
+            source: DictionaryEntrySource::AutoLearned,
+            active: false,
+            ..entry_full("dict_1", "their", Some("there"))
+        });
+        // Entry is quarantined; editing "their" is NOT feedback on it (not produced by apply).
+        let out = observe_correction(&mut s, 5, "s1", "their", Some("there"));
+        assert_ne!(out, ObserveOutcome::Routed);
+    }
+
+    #[test]
+    fn unrelated_correction_does_not_route_feedback() {
+        let mut s = get_default_settings();
+        s.dictionary_entries.push(DictionaryEntry {
+            source: DictionaryEntrySource::AutoLearned,
+            ..entry_full("dict_1", "their", Some("there"))
+        });
+        // "robin" doesn't match any entry phrase -> normal learn path.
+        let out = observe_correction(&mut s, 5, "s1", "robin", Some("Robyn"));
+        assert_eq!(out, ObserveOutcome::Learned);
+    }
+
+    #[test]
+    fn migration_grandfathers_auto_entries_at_manual_tier_and_is_idempotent() {
+        let mut s = get_default_settings();
+        s.dictionary_schema_version = 0;
+        s.dictionary_entries = vec![
+            DictionaryEntry {
+                source: DictionaryEntrySource::AutoLearned,
+                ..entry_full("dict_1", "Robyn", Some("robin"))
+            },
+            DictionaryEntry {
+                source: DictionaryEntrySource::AutoLearned,
+                ..entry_full("dict_2", "GraphQL", None)
+            },
+        ];
+
+        let changed = migrate_dictionary_v1(&mut s);
+        assert!(changed);
+        assert_eq!(s.dictionary_schema_version, 1);
+        assert!(
+            s.dictionary_entries[0].user_confirmed,
+            "grandfathered auto -> manual-tier"
+        );
+        assert!(s.dictionary_entries[1].user_confirmed);
+        assert!(s.dictionary_entries.iter().all(|e| e.active));
+
+        // Idempotent: second run is a no-op.
+        let changed_again = migrate_dictionary_v1(&mut s);
+        assert!(!changed_again);
+    }
+
+    #[test]
+    fn migration_sanitizes_before_classifying() {
+        let mut s = get_default_settings();
+        s.dictionary_schema_version = 0;
+        s.dictionary_entries = vec![DictionaryEntry {
+            source: DictionaryEntrySource::AutoLearned,
+            // replacement_of sanitizes to None (no alphabetic content)
+            ..entry_full("dict_1", "Robyn", Some("<<>>"))
+        }];
+
+        migrate_dictionary_v1(&mut s);
+        assert_eq!(s.dictionary_entries[0].replacement_of, None); // sanitized away, not kept raw
+        assert!(s.dictionary_entries[0].user_confirmed);
+    }
+
+    #[test]
+    fn migration_leaves_manual_entries_untouched_except_version() {
+        let mut s = get_default_settings();
+        s.dictionary_schema_version = 0;
+        s.dictionary_entries = vec![entry_full("dict_1", "Jean-Luc", None)]; // Manual source
+        migrate_dictionary_v1(&mut s);
+        assert!(!s.dictionary_entries[0].user_confirmed); // manual entries NOT stamped
+        assert_eq!(s.dictionary_schema_version, 1);
+    }
+
+    #[test]
+    fn migration_does_not_run_on_fresh_settings_with_version_current() {
+        let mut s = get_default_settings();
+        s.dictionary_schema_version = 1;
+        s.dictionary_entries = vec![DictionaryEntry {
+            source: DictionaryEntrySource::AutoLearned,
+            ..entry_full("dict_1", "Robyn", Some("robin"))
+        }];
+        assert!(!migrate_dictionary_v1(&mut s));
+        assert!(!s.dictionary_entries[0].user_confirmed); // untouched: created under the new system
+    }
+
+    #[test]
+    fn approve_candidate_promotes_with_user_confirmed() {
+        let mut s = get_default_settings();
+        observe_correction(&mut s, 10, "s1", "robin", Some("Robyn"));
+        let entry = approve_candidate(&mut s, 20, "Robyn", Some("robin")).expect("promoted");
+        assert!(entry.user_confirmed);
+        assert_eq!(entry.phrase, "Robyn");
+        assert!(s.dictionary_learn_candidates.is_empty());
+        assert_eq!(s.dictionary_entries.len(), 1);
+    }
+
+    #[test]
+    fn approve_candidate_requires_matching_pair() {
+        let mut s = get_default_settings();
+        observe_correction(&mut s, 10, "s1", "robin", Some("Robyn"));
+        assert!(approve_candidate(&mut s, 20, "Robyn", Some("different")).is_none());
+        assert_eq!(s.dictionary_learn_candidates.len(), 1); // untouched
+    }
+
+    #[test]
+    fn reject_candidate_drops_all_variants_and_suppresses() {
+        let mut s = get_default_settings();
+        observe_correction(&mut s, 10, "s1", "robin", Some("Robyn"));
+        observe_correction(&mut s, 20, "s2", "rob in", Some("Robyn")); // second source variant
+        assert_eq!(s.dictionary_learn_candidates.len(), 2);
+        reject_candidate(&mut s, "Robyn");
+        assert!(s.dictionary_learn_candidates.is_empty());
+        // suppressed: next observation is NoChange
+        let out = observe_correction(&mut s, 30, "s3", "robin", Some("Robyn"));
+        assert_eq!(out, ObserveOutcome::NoChange);
+    }
+
+    #[test]
+    fn set_entry_active_toggles_and_clears_review_flag() {
+        let mut s = get_default_settings();
+        s.dictionary_entries.push(DictionaryEntry {
+            source: DictionaryEntrySource::AutoLearned,
+            active: false,
+            needs_review: true,
+            ..entry_full("dict_1", "their", Some("there"))
+        });
+        assert!(set_entry_active(&mut s, 99, "dict_1", true));
+        assert!(s.dictionary_entries[0].active);
+        assert!(!s.dictionary_entries[0].needs_review);
+        assert_eq!(s.dictionary_entries[0].updated_at_ms, 99);
+        assert!(!set_entry_active(&mut s, 99, "missing", true));
     }
 }

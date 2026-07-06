@@ -829,7 +829,8 @@
       "counts": {
         "total": "{{count}} entries",
         "autoLearned": "{{count}} auto-learned",
-        "starred": "{{count}} starred"
+        "starred": "{{count}} starred",
+        "pending": "{{count}} pending"
       },
       "empty": "No dictionary entries yet.",
       "noResults": "No entries match your search.",
@@ -843,7 +844,24 @@
         "add": "Failed to add dictionary entry",
         "update": "Failed to update dictionary entry",
         "delete": "Failed to delete dictionary entry",
-        "duplicate": "{{phrase}} is already in your dictionary"
+        "duplicate": "{{phrase}} is already in your dictionary",
+        "approve": "Couldn't approve entry",
+        "reject": "Couldn't reject entry"
+      },
+      "pending": {
+        "title": "Pending review",
+        "description": "Corrections Verbatim noticed. Approve to add them to your dictionary.",
+        "from": "from \"{{source}}\"",
+        "approve": "Approve",
+        "reject": "Reject",
+        "occurrences": "×{{count}}"
+      },
+      "needsReview": {
+        "title": "Needs review",
+        "quarantined": "Paused after you reversed it",
+        "flagged": "You edited this correction",
+        "keep": "Keep",
+        "delete": "Delete"
       }
     },
     "formattingLevel": {
