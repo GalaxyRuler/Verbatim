@@ -651,6 +651,59 @@ pub fn set_entry_active(settings: &mut AppSettings, now_ms: u64, id: &str, activ
     true
 }
 
+fn stamp_since(diag: &mut crate::settings::DictionaryDiagnostics, now_ms: u64) {
+    if diag.since_ms == 0 {
+        diag.since_ms = now_ms;
+    }
+}
+
+/// Accumulate learn-pass outcome counts (phrase-free) into the persisted diagnostics.
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn record_learn_outcomes(
+    settings: &mut AppSettings,
+    now_ms: u64,
+    learned: u32,
+    promoted: u32,
+    reinforced: u32,
+    routed: u32,
+) {
+    let diag = &mut settings.dictionary_diagnostics;
+    if learned + promoted + reinforced + routed > 0 {
+        stamp_since(diag, now_ms);
+    }
+    diag.learned += learned;
+    diag.promoted += promoted;
+    diag.reinforced += reinforced;
+    diag.routed += routed;
+}
+
+/// Map a phrase-free `skip: <reason>` token to its counter. Unknown reasons are ignored.
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn record_skip(settings: &mut AppSettings, now_ms: u64, reason: &str) {
+    let key = reason.trim_start_matches("skip:").trim();
+    let diag = &mut settings.dictionary_diagnostics;
+    let field = match key {
+        "secure_field" => &mut diag.skip_secure_field,
+        "secure_check_error" => &mut diag.skip_secure_check_error,
+        "read_cap_exceeded" => &mut diag.skip_read_cap_exceeded,
+        "target_changed" => &mut diag.skip_target_changed,
+        "no_post_paste_change" => &mut diag.skip_no_post_paste_change,
+        "runtime_id_missing" | "runtime_id_changed" => &mut diag.skip_runtime_id,
+        _ => return,
+    };
+    *field += 1;
+    stamp_since(diag, now_ms);
+}
+
+/// Zero all counters and start a fresh counting window.
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn reset_dictionary_diagnostics(settings: &mut AppSettings, now_ms: u64) {
+    settings.dictionary_diagnostics = crate::settings::DictionaryDiagnostics {
+        since_ms: now_ms,
+        ..Default::default()
+    };
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -1418,5 +1471,67 @@ mod tests {
         assert!(!s.dictionary_entries[0].needs_review);
         assert_eq!(s.dictionary_entries[0].updated_at_ms, 99);
         assert!(!set_entry_active(&mut s, 99, "missing", true));
+    }
+
+    #[test]
+    fn diagnostics_default_is_all_zero() {
+        let d = crate::settings::DictionaryDiagnostics::default();
+        assert_eq!(d.learned, 0);
+        assert_eq!(d.promoted, 0);
+        assert_eq!(d.skip_secure_field, 0);
+        assert_eq!(d.since_ms, 0);
+    }
+
+    #[test]
+    fn record_learn_outcomes_accumulates_and_stamps_since() {
+        let mut s = get_default_settings();
+        super::record_learn_outcomes(&mut s, 100, 2, 1, 3, 0);
+        assert_eq!(s.dictionary_diagnostics.learned, 2);
+        assert_eq!(s.dictionary_diagnostics.promoted, 1);
+        assert_eq!(s.dictionary_diagnostics.reinforced, 3);
+        assert_eq!(s.dictionary_diagnostics.since_ms, 100); // stamped on first event
+        super::record_learn_outcomes(&mut s, 200, 1, 0, 0, 2);
+        assert_eq!(s.dictionary_diagnostics.learned, 3);
+        assert_eq!(s.dictionary_diagnostics.routed, 2);
+        assert_eq!(s.dictionary_diagnostics.since_ms, 100); // unchanged after first
+    }
+
+    #[test]
+    fn record_skip_maps_known_reasons_to_fields() {
+        let mut s = get_default_settings();
+        super::record_skip(&mut s, 50, "skip: secure_field");
+        super::record_skip(&mut s, 60, "skip: secure_field");
+        super::record_skip(&mut s, 70, "skip: read_cap_exceeded");
+        super::record_skip(&mut s, 80, "skip: target_changed");
+        super::record_skip(&mut s, 90, "skip: no_post_paste_change");
+        super::record_skip(&mut s, 95, "skip: secure_check_error");
+        super::record_skip(&mut s, 96, "skip: runtime_id_missing");
+        super::record_skip(&mut s, 97, "skip: runtime_id_changed");
+        let d = &s.dictionary_diagnostics;
+        assert_eq!(d.skip_secure_field, 2);
+        assert_eq!(d.skip_read_cap_exceeded, 1);
+        assert_eq!(d.skip_target_changed, 1);
+        assert_eq!(d.skip_no_post_paste_change, 1);
+        assert_eq!(d.skip_secure_check_error, 1);
+        assert_eq!(d.skip_runtime_id, 2); // missing + changed both map here
+        assert_eq!(d.since_ms, 50);
+    }
+
+    #[test]
+    fn record_skip_ignores_unknown_reason() {
+        let mut s = get_default_settings();
+        super::record_skip(&mut s, 10, "skip: something_new");
+        // unknown reasons don't panic and don't stamp since (no known counter touched)
+        assert_eq!(s.dictionary_diagnostics.since_ms, 0);
+    }
+
+    #[test]
+    fn reset_diagnostics_zeroes_all_and_restamps() {
+        let mut s = get_default_settings();
+        super::record_learn_outcomes(&mut s, 100, 5, 2, 1, 0);
+        super::reset_dictionary_diagnostics(&mut s, 999);
+        assert_eq!(s.dictionary_diagnostics.learned, 0);
+        assert_eq!(s.dictionary_diagnostics.promoted, 0);
+        assert_eq!(s.dictionary_diagnostics.since_ms, 999); // reset stamps a fresh window start
     }
 }
