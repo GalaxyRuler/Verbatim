@@ -862,6 +862,21 @@
         "flagged": "قمت بتعديل هذا التصحيح",
         "keep": "احتفظ",
         "delete": "حذف"
+      },
+      "diagnostics": {
+        "title": "تشخيص التعلّم",
+        "learned": "تم تعلّمه",
+        "promoted": "تمت ترقيته",
+        "reinforced": "تم تعزيزه",
+        "skippedTitle": "الالتقاطات المتجاهَلة",
+        "skipSecureField": "حقول كلمات المرور",
+        "skipReadCap": "حقول كبيرة الحجم",
+        "skipSecureCheck": "أخطاء فحص الأمان",
+        "noSkips": "لم يتم تجاهل أي التقاط",
+        "since": "منذ {{date}}",
+        "noActivity": "لا يوجد نشاط تعلّم مسجَّل بعد",
+        "reset": "إعادة تعيين الإحصاءات",
+        "resetError": "تعذّرت إعادة تعيين التشخيص"
       }
     },
     "formattingLevel": {

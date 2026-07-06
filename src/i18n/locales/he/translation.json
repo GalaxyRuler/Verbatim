@@ -862,6 +862,21 @@
         "flagged": "ערכת תיקון זה",
         "keep": "שמור",
         "delete": "מחק"
+      },
+      "diagnostics": {
+        "title": "אבחון למידה",
+        "learned": "נלמד",
+        "promoted": "קודם",
+        "reinforced": "חוזק",
+        "skippedTitle": "לכידות שדולגו",
+        "skipSecureField": "שדות סיסמה",
+        "skipReadCap": "שדות גדולים מדי",
+        "skipSecureCheck": "שגיאות בדיקת אבטחה",
+        "noSkips": "לא דולגה אף לכידה",
+        "since": "מאז {{date}}",
+        "noActivity": "טרם נרשמה פעילות למידה",
+        "reset": "איפוס נתונים",
+        "resetError": "לא ניתן היה לאפס את האבחון"
       }
     },
     "formattingLevel": {
