@@ -181,3 +181,21 @@ pub fn set_dictionary_entry_active(app: AppHandle, id: String, active: bool) -> 
     });
     Ok(())
 }
+
+#[tauri::command]
+#[specta::specta]
+pub fn get_dictionary_diagnostics(
+    app: AppHandle,
+) -> Result<crate::settings::DictionaryDiagnostics, String> {
+    Ok(crate::settings::get_settings(&app).dictionary_diagnostics)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn reset_dictionary_diagnostics(app: AppHandle) -> Result<(), String> {
+    let now_ms = crate::dictionary::current_unix_ms();
+    crate::settings::mutate_settings_locked(&app, |settings| {
+        crate::dictionary::reset_dictionary_diagnostics(settings, now_ms);
+    });
+    Ok(())
+}

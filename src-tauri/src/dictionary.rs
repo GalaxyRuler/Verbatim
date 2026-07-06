@@ -694,7 +694,6 @@ pub fn record_skip(settings: &mut AppSettings, now_ms: u64, reason: &str) {
 }
 
 /// Zero all counters and start a fresh counting window.
-#[cfg_attr(not(test), allow(dead_code))]
 pub fn reset_dictionary_diagnostics(settings: &mut AppSettings, now_ms: u64) {
     settings.dictionary_diagnostics = crate::settings::DictionaryDiagnostics {
         since_ms: now_ms,

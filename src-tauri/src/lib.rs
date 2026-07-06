@@ -1213,6 +1213,8 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::dictionary::approve_learn_candidate,
             commands::dictionary::reject_learn_candidate,
             commands::dictionary::set_dictionary_entry_active,
+            commands::dictionary::get_dictionary_diagnostics,
+            commands::dictionary::reset_dictionary_diagnostics,
             commands::snippets::list_snippet_entries,
             commands::snippets::add_snippet_entry,
             commands::snippets::update_snippet_entry,
