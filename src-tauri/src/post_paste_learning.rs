@@ -107,10 +107,24 @@ pub fn maybe_spawn_auto_add_watcher(
     );
 
     std::thread::spawn(move || {
+        let app_for_skip = app.clone();
         if let Err(error) =
             watch_for_post_paste_correction(app, session_id, inserted_text, before_paste)
         {
             debug!("Post-paste dictionary watcher skipped: {}", error);
+            // Persist only rare, informative capability-limit skips (password field, oversized
+            // field, secure-check error). The common control-flow skips (target_changed /
+            // no_post_paste_change) are intentionally NOT counted — they fire on almost every
+            // un-corrected dictation and would write settings each time.
+            if matches!(
+                error.as_str(),
+                "skip: secure_field" | "skip: secure_check_error" | "skip: read_cap_exceeded"
+            ) {
+                let now_ms = crate::dictionary::current_unix_ms();
+                crate::settings::mutate_settings_locked(&app_for_skip, |settings| {
+                    crate::dictionary::record_skip(settings, now_ms, &error);
+                });
+            }
         }
     });
 }
@@ -257,6 +271,7 @@ fn learn_from_text_snapshots(
 
             let mut promoted = Vec::new();
             let mut learned = 0usize;
+            let mut reinforced = 0usize;
             let mut routed = 0usize;
             for candidate in candidates {
                 let dictated = candidate.replacement_of.as_deref().unwrap_or("");
@@ -276,10 +291,19 @@ fn learn_from_text_snapshots(
                         }
                     }
                     crate::dictionary::ObserveOutcome::Learned => learned += 1,
+                    crate::dictionary::ObserveOutcome::Reinforced => reinforced += 1,
                     crate::dictionary::ObserveOutcome::Routed => routed += 1,
                     _ => {}
                 }
             }
+            crate::dictionary::record_learn_outcomes(
+                settings,
+                now_ms,
+                learned as u32,
+                promoted.len() as u32,
+                reinforced as u32,
+                routed as u32,
+            );
             (promoted, learned, routed)
         });
 

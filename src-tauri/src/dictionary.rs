@@ -658,7 +658,6 @@ fn stamp_since(diag: &mut crate::settings::DictionaryDiagnostics, now_ms: u64) {
 }
 
 /// Accumulate learn-pass outcome counts (phrase-free) into the persisted diagnostics.
-#[cfg_attr(not(test), allow(dead_code))]
 pub fn record_learn_outcomes(
     settings: &mut AppSettings,
     now_ms: u64,
@@ -678,7 +677,6 @@ pub fn record_learn_outcomes(
 }
 
 /// Map a phrase-free `skip: <reason>` token to its counter. Unknown reasons are ignored.
-#[cfg_attr(not(test), allow(dead_code))]
 pub fn record_skip(settings: &mut AppSettings, now_ms: u64, reason: &str) {
     let key = reason.trim_start_matches("skip:").trim();
     let diag = &mut settings.dictionary_diagnostics;
@@ -708,10 +706,10 @@ pub fn reset_dictionary_diagnostics(settings: &mut AppSettings, now_ms: u64) {
 mod tests {
     use super::{
         approve_candidate, delete_entries, dictionary_phrases, make_dictionary_entry_id,
-        migrate_dictionary_v1, observe_correction, promote_candidate_to_entry, reject_candidate,
-        replace_dictionary_phrases, sanitize_dictionary_phrase, set_entry_active,
-        sync_legacy_custom_words, update_entry, upsert_auto_learn_entry, upsert_manual_entry,
-        ObserveOutcome,
+        migrate_dictionary_v1, observe_correction, promote_candidate_to_entry,
+        record_learn_outcomes, reject_candidate, replace_dictionary_phrases,
+        sanitize_dictionary_phrase, set_entry_active, sync_legacy_custom_words, update_entry,
+        upsert_auto_learn_entry, upsert_manual_entry, ObserveOutcome,
     };
     use crate::settings::{
         get_default_settings, DictionaryEntry, DictionaryEntryPriority, DictionaryEntrySource,
@@ -1494,6 +1492,27 @@ mod tests {
         assert_eq!(s.dictionary_diagnostics.learned, 3);
         assert_eq!(s.dictionary_diagnostics.routed, 2);
         assert_eq!(s.dictionary_diagnostics.since_ms, 100); // unchanged after first
+    }
+
+    #[test]
+    fn learn_outcomes_feed_diagnostics_counts() {
+        // Simulate what learn_from_text_snapshots does: observe corrections, then record outcomes.
+        let mut s = get_default_settings();
+        let mut learned = 0u32;
+        let mut promoted = 0u32;
+        let mut reinforced = 0u32;
+        for (session, dictated, corrected) in [("s1", "robin", "Robyn"), ("s2", "robin", "Robyn")] {
+            match observe_correction(&mut s, 10, session, dictated, Some(corrected)) {
+                ObserveOutcome::Learned => learned += 1,
+                ObserveOutcome::Promoted => promoted += 1,
+                ObserveOutcome::Reinforced => reinforced += 1,
+                _ => {}
+            }
+        }
+        record_learn_outcomes(&mut s, 10, learned, promoted, reinforced, 0);
+        assert_eq!(s.dictionary_diagnostics.learned, 1); // first correction
+        assert_eq!(s.dictionary_diagnostics.promoted, 1); // second promotes
+        assert!(s.dictionary_diagnostics.since_ms > 0);
     }
 
     #[test]
