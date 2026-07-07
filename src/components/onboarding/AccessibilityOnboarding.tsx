@@ -341,8 +341,8 @@ const AccessibilityOnboarding: React.FC<AccessibilityOnboardingProps> = ({
         {showMicrophonePermission && (
           <div className="w-full p-4 rounded-lg bg-white/5 border border-mid-gray/20">
             <div className="flex items-center gap-4">
-              <div className="p-3 rounded-full bg-logo-primary/20 shrink-0">
-                <Mic className="w-6 h-6 text-logo-primary" />
+              <div className="p-3 rounded-full bg-accent/20 shrink-0">
+                <Mic className="w-6 h-6 text-text" />
               </div>
               <div className="flex-1 min-w-0">
                 <h3 className="font-medium text-text">
@@ -364,7 +364,7 @@ const AccessibilityOnboarding: React.FC<AccessibilityOnboardingProps> = ({
                 ) : (
                   <button
                     onClick={handleGrantMicrophone}
-                    className="px-4 py-2 rounded-lg bg-logo-primary hover:bg-logo-primary/90 text-white text-sm font-medium transition-colors"
+                    className="px-4 py-2 rounded-lg bg-accent hover:bg-accent/90 text-accent-fg text-sm font-medium transition-colors"
                   >
                     {isWindows
                       ? t("accessibility.openSettings")
@@ -380,8 +380,8 @@ const AccessibilityOnboarding: React.FC<AccessibilityOnboardingProps> = ({
         {showAccessibilityPermission && (
           <div className="w-full p-4 rounded-lg bg-white/5 border border-mid-gray/20">
             <div className="flex items-center gap-4">
-              <div className="p-3 rounded-full bg-logo-primary/20 shrink-0">
-                <Keyboard className="w-6 h-6 text-logo-primary" />
+              <div className="p-3 rounded-full bg-accent/20 shrink-0">
+                <Keyboard className="w-6 h-6 text-text" />
               </div>
               <div className="flex-1 min-w-0">
                 <h3 className="font-medium text-text">
@@ -403,7 +403,7 @@ const AccessibilityOnboarding: React.FC<AccessibilityOnboardingProps> = ({
                 ) : (
                   <button
                     onClick={handleGrantAccessibility}
-                    className="px-4 py-2 rounded-lg bg-logo-primary hover:bg-logo-primary/90 text-white text-sm font-medium transition-colors"
+                    className="px-4 py-2 rounded-lg bg-accent hover:bg-accent/90 text-accent-fg text-sm font-medium transition-colors"
                   >
                     {t("onboarding.permissions.grant")}
                   </button>

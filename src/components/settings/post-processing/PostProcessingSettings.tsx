@@ -149,7 +149,7 @@ const PostProcessingSettingsApiComponent: React.FC = () => {
                   setSessionOnlyApiKey(event.currentTarget.checked)
                 }
                 disabled={state.isApiKeyUpdating}
-                className="mt-0.5 h-4 w-4 rounded border-mid-gray/50 bg-background-ui text-logo-primary focus:ring-logo-primary"
+                className="mt-0.5 h-4 w-4 rounded border-mid-gray/50 accent-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
               />
               <span>{t("settings.postProcessing.api.apiKey.sessionOnly")}</span>
             </label>
@@ -412,7 +412,7 @@ const PostProcessingLocalModelComponent: React.FC = () => {
                           {model.label}
                         </span>
                         {isSelected && (
-                          <span className="rounded bg-logo-primary/20 px-2 py-0.5 text-xs text-logo-primary">
+                          <span className="rounded bg-accent/15 px-2 py-0.5 text-xs font-medium text-text">
                             {t("settings.postProcessing.localModel.selected")}
                           </span>
                         )}
@@ -436,7 +436,7 @@ const PostProcessingLocalModelComponent: React.FC = () => {
                       {model.is_downloading && (
                         <div className="h-1.5 overflow-hidden rounded bg-mid-gray/20">
                           <div
-                            className="h-full rounded bg-logo-primary"
+                            className="h-full rounded bg-accent"
                             style={{
                               width: `${Math.min(100, Math.max(0, modelProgress))}%`,
                             }}

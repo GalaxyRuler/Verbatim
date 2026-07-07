@@ -356,10 +356,10 @@ export const DictionarySettings: React.FC = () => {
           role="status"
           aria-live="polite"
           data-testid="dictionary-recently-learned"
-          className="border border-logo-primary/30 rounded-lg bg-logo-primary/10 px-3 py-2 text-sm flex flex-col sm:flex-row sm:items-center gap-2 justify-between"
+          className="border border-accent/30 rounded-lg bg-accent/10 px-3 py-2 text-sm flex flex-col sm:flex-row sm:items-center gap-2 justify-between"
         >
           <div>
-            <div className="font-medium text-logo-primary">
+            <div className="font-medium text-text">
               {t("settings.dictionary.recentlyLearned.title")}
             </div>
             <div>

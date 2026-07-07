@@ -47,8 +47,8 @@ const IconButton: React.FC<{
     disabled={disabled}
     className={`p-1.5 rounded-md flex items-center justify-center transition-colors cursor-pointer disabled:cursor-not-allowed disabled:text-text/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
       active
-        ? "text-logo-primary hover:text-logo-primary/80"
-        : "text-text/50 hover:text-logo-primary"
+        ? "text-accent hover:text-accent/80"
+        : "text-text/50 hover:text-accent"
     }`}
     title={title}
     aria-label={title}
@@ -711,7 +711,7 @@ const HistoryEntryComponent: React.FC<HistoryEntryProps> = ({
             onChange={(event) => setCorrectedText(event.target.value)}
             disabled={learningCorrection}
             aria-label={t("settings.history.correctedText")}
-            className="w-full min-h-24 rounded-md border border-mid-gray/20 bg-background p-2 text-sm text-text/90 outline-none focus:border-logo-primary disabled:opacity-60"
+            className="w-full min-h-24 rounded-md border border-mid-gray/20 bg-background p-2 text-sm text-text/90 outline-none focus:border-accent disabled:opacity-60"
           />
           <div className="flex justify-end gap-1">
             <IconButton

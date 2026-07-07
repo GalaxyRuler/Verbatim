@@ -122,8 +122,8 @@ const MicrophoneReadinessOnboarding: React.FC<
         <div className="rounded-lg border border-mid-gray/20 bg-white/5 p-4 flex flex-col gap-4">
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-3 min-w-0">
-              <div className="p-2 rounded-full bg-logo-primary/20 shrink-0">
-                <Mic className="w-5 h-5 text-logo-primary" />
+              <div className="p-2 rounded-full bg-accent/20 shrink-0">
+                <Mic className="w-5 h-5 text-text" />
               </div>
               <div className="min-w-0">
                 <p className="text-sm font-medium text-text truncate">
@@ -162,7 +162,7 @@ const MicrophoneReadinessOnboarding: React.FC<
             {levels.map((level, index) => (
               <div
                 key={index}
-                className="self-end rounded-md bg-logo-primary transition-all"
+                className="self-end rounded-md bg-accent transition-all"
                 style={{
                   height: `${Math.max(8, normalizeLevel(level) * 100)}%`,
                   opacity: 0.25 + normalizeLevel(level) * 0.75,

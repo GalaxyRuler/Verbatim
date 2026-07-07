@@ -151,7 +151,7 @@ export const LanguageSelector: React.FC<LanguageSelectorProps> = ({
             className={`px-2 py-1 text-sm font-semibold bg-mid-gray/10 border border-mid-gray/80 rounded min-w-[200px] text-start flex items-center justify-between transition-all duration-150 ${
               isLanguageUpdating
                 ? "opacity-50 cursor-not-allowed"
-                : "hover:bg-logo-primary/10 cursor-pointer hover:border-logo-primary"
+                : "hover:bg-accent/10 cursor-pointer hover:border-accent"
             }`}
             onClick={handleToggle}
             disabled={isLanguageUpdating}
@@ -185,7 +185,7 @@ export const LanguageSelector: React.FC<LanguageSelectorProps> = ({
                   onChange={handleSearchChange}
                   onKeyDown={handleKeyDown}
                   placeholder={t("settings.general.language.searchPlaceholder")}
-                  className="w-full px-2 py-1 text-sm bg-mid-gray/10 border border-mid-gray/40 rounded focus:outline-none focus:ring-1 focus:ring-logo-primary focus:border-logo-primary"
+                  className="w-full px-2 py-1 text-sm bg-mid-gray/10 border border-mid-gray/40 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:border-accent"
                 />
               </div>
 
@@ -206,9 +206,9 @@ export const LanguageSelector: React.FC<LanguageSelectorProps> = ({
                       <button
                         key={language.value}
                         type="button"
-                        className={`w-full px-2 py-1 text-sm text-start hover:bg-logo-primary/10 transition-colors duration-150 ${
+                        className={`w-full px-2 py-1 text-sm text-start hover:bg-accent/10 transition-colors duration-150 ${
                           isChecked
-                            ? "bg-logo-primary/20 text-logo-primary font-semibold"
+                            ? "bg-accent/15 text-text font-medium"
                             : ""
                         } ${isOnlyChecked ? "cursor-default" : ""}`}
                         onClick={() => handleLanguageToggle(language.value)}
@@ -219,7 +219,7 @@ export const LanguageSelector: React.FC<LanguageSelectorProps> = ({
                             type="checkbox"
                             readOnly
                             checked={isChecked}
-                            className="h-3.5 w-3.5 accent-logo-primary"
+                            className="h-3.5 w-3.5 accent-accent"
                           />
                           <span className="truncate">{language.label}</span>
                         </div>
@@ -235,7 +235,7 @@ export const LanguageSelector: React.FC<LanguageSelectorProps> = ({
       </div>
       {isLanguageUpdating && (
         <div className="absolute inset-0 bg-mid-gray/10 rounded flex items-center justify-center">
-          <div className="w-4 h-4 border-2 border-logo-primary border-t-transparent rounded-full animate-spin"></div>
+          <div className="w-4 h-4 border-2 border-accent border-t-transparent rounded-full animate-spin"></div>
         </div>
       )}
     </SettingContainer>

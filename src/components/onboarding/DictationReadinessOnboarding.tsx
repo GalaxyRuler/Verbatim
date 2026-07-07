@@ -103,8 +103,8 @@ const DictationReadinessOnboarding: React.FC<
 
         <div className="rounded-lg border border-mid-gray/20 bg-white/5 p-4 flex flex-col gap-4">
           <div className="flex items-center gap-3">
-            <div className="p-2 rounded-full bg-logo-primary/20 shrink-0">
-              <Mic className="w-5 h-5 text-logo-primary" />
+            <div className="p-2 rounded-full bg-accent/20 shrink-0">
+              <Mic className="w-5 h-5 text-text" />
             </div>
             <div>
               <p className="text-sm font-medium text-text">
