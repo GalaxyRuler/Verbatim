@@ -2,6 +2,8 @@ import React from "react";
 import { useTranslation } from "react-i18next";
 import { type } from "@tauri-apps/plugin-os";
 import { MicrophoneSelector } from "../MicrophoneSelector";
+import { AlwaysOnMicrophone } from "../AlwaysOnMicrophone";
+import { ClamshellMicrophoneSelector } from "../ClamshellMicrophoneSelector";
 import { ShortcutInput } from "../ShortcutInput";
 import { SettingsGroup } from "../../ui/SettingsGroup";
 import { OutputDeviceSelector } from "../OutputDeviceSelector";
@@ -49,6 +51,8 @@ export const GeneralSettings: React.FC = () => {
       <ModelSettingsCard />
       <SettingsGroup title={t("settings.sound.title")}>
         <MicrophoneSelector descriptionMode="tooltip" grouped={true} />
+        <AlwaysOnMicrophone descriptionMode="tooltip" grouped={true} />
+        <ClamshellMicrophoneSelector descriptionMode="tooltip" grouped={true} />
         <MuteWhileRecording descriptionMode="tooltip" grouped={true} />
         <AudioFeedback descriptionMode="tooltip" grouped={true} />
         <SoundPicker
