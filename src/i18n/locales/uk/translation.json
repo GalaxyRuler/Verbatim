@@ -625,7 +625,8 @@
       "clearRecordingsConfirm": "Delete unsaved dictation recordings while keeping saved entries and transform-only text?",
       "clearRecordingsError": "Failed to clear recordings.",
       "clearRecordingsSuccess": "Recordings cleared.",
-      "retentionNote": "History can include raw transcripts, refined text, transform text, and linked WAV files. Saved entries are kept until you delete them."
+      "retentionNote": "History can include raw transcripts, refined text, transform text, and linked WAV files. Saved entries are kept until you delete them.",
+      "storageGroup": "Зберігання"
     },
     "debug": {
       "title": "Дебаг",

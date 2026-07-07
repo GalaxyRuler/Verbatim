@@ -80,7 +80,7 @@ test.describe("accessibility gates", () => {
     for (const sectionName of [
       "General",
       "Models",
-      "History",
+      "History & Privacy",
       "Post Process",
       "Debug",
     ]) {

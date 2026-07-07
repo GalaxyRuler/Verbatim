@@ -1597,7 +1597,7 @@ test.describe("Verbatim App", () => {
       "Dictionary",
       "Snippets",
       "Advanced",
-      "History",
+      "History & Privacy",
       "Post Process",
       "Debug",
       "About",
@@ -3103,7 +3103,7 @@ test.describe("Verbatim App", () => {
     ]);
     await page.goto("/");
 
-    await page.getByText("History").click();
+    await page.getByText("History & Privacy").click();
 
     await expect(page.getByText("Polished transform result")).toBeVisible();
     await expect(page.getByText("Raw selected text")).toHaveCount(0);

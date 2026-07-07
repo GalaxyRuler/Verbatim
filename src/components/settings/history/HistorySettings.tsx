@@ -24,6 +24,14 @@ import { useSettingsStore } from "@/stores/settingsStore";
 import { formatDateTime } from "@/utils/dateFormat";
 import { AudioPlayer } from "../../ui/AudioPlayer";
 import { Button } from "../../ui/Button";
+import { SettingsGroup } from "../../ui/SettingsGroup";
+import { HistoryLimit } from "../HistoryLimit";
+import {
+  HistoryStorageToggle,
+  RecordingStorageToggle,
+} from "../HistoryStorage";
+import { PrivateSessionToggle } from "../PrivateSession";
+import { RecordingRetentionPeriodSelector } from "../RecordingRetentionPeriod";
 
 const IconButton: React.FC<{
   onClick: () => void;
@@ -335,6 +343,16 @@ export const HistorySettings: React.FC = () => {
 
   return (
     <div className="max-w-3xl w-full mx-auto space-y-6">
+      <SettingsGroup title={t("settings.history.storageGroup")}>
+        <PrivateSessionToggle descriptionMode="tooltip" grouped={true} />
+        <HistoryStorageToggle descriptionMode="tooltip" grouped={true} />
+        <RecordingStorageToggle descriptionMode="tooltip" grouped={true} />
+        <HistoryLimit descriptionMode="tooltip" grouped={true} />
+        <RecordingRetentionPeriodSelector
+          descriptionMode="tooltip"
+          grouped={true}
+        />
+      </SettingsGroup>
       <div className="space-y-2">
         <div className="px-4 flex flex-wrap items-start justify-between gap-3">
           <div>
