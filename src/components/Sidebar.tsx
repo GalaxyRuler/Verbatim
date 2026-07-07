@@ -3,10 +3,10 @@ import { useTranslation } from "react-i18next";
 import {
   BookOpen,
   Cog,
-  FlaskConical,
   History,
   Info,
   Wand2,
+  Wrench,
   Cpu,
   TextQuote,
 } from "lucide-react";
@@ -86,7 +86,7 @@ export const SECTIONS_CONFIG = {
   },
   debug: {
     labelKey: "sidebar.debug",
-    icon: FlaskConical,
+    icon: Wrench,
     component: DebugSettings,
     enabled: () => true,
   },

@@ -43,6 +43,7 @@ export const HistoryLimit: React.FC<HistoryLimitProps> = ({
             type="number"
             min="0"
             max="1000"
+            aria-label={t("settings.debug.historyLimit.title")}
             value={historyLimit}
             onChange={handleChange}
             disabled={isUpdating("history_limit")}

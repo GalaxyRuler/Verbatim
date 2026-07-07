@@ -1599,7 +1599,7 @@ test.describe("Verbatim App", () => {
       "Advanced",
       "History & Privacy",
       "Post Process",
-      "Debug",
+      "Troubleshooting",
       "About",
     ]) {
       const sectionButton = page.getByRole("button", {

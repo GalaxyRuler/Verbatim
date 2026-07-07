@@ -82,7 +82,7 @@ test.describe("accessibility gates", () => {
       "Models",
       "History & Privacy",
       "Post Process",
-      "Debug",
+      "Troubleshooting",
     ]) {
       const sectionButton = page.getByRole("button", {
         name: sectionName,

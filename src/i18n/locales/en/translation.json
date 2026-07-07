@@ -14,7 +14,7 @@
     "advanced": "Advanced",
     "postProcessing": "Post Process",
     "history": "History & Privacy",
-    "debug": "Debug",
+    "debug": "Troubleshooting",
     "about": "About",
     "dictionary": "Dictionary",
     "snippets": "Snippets"
@@ -769,6 +769,9 @@
           "credentialStore": "{{platform}} credential backend",
           "credentialStoreRetainedLegacy": "Credential store is unavailable; {{count}} legacy API-key value remains in settings so it is not lost."
         }
+      },
+      "groups": {
+        "logs": "Logs"
       }
     },
     "about": {
