@@ -134,7 +134,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               aria-current={isActive ? "page" : undefined}
               className={`flex gap-2 items-center p-2 w-full rounded-lg cursor-pointer transition-colors text-start focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ${
                 isActive
-                  ? "bg-accent/15 font-semibold"
+                  ? "bg-accent/15"
                   : "hover:bg-surface opacity-85 hover:opacity-100"
               }`}
               onClick={() => onSectionChange(section.id)}
@@ -145,7 +145,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 className={`shrink-0 ${isActive ? "text-accent" : ""}`}
               />
               <p
-                className="text-sm font-medium truncate"
+                className={`text-sm truncate ${isActive ? "font-semibold" : "font-medium"}`}
                 title={t(section.labelKey)}
               >
                 {t(section.labelKey)}

@@ -469,7 +469,7 @@ export const DiagnosticsPanel: React.FC = () => {
           {diagnostics.paths.appDir ? (
             <PathDisplay path={diagnostics.paths.appDir} onOpen={openAppDir} />
           ) : (
-            <p className="text-xs text-amber-900 dark:text-amber-300">
+            <p className="text-xs text-warning">
               {t("settings.debug.diagnostics.pathError", {
                 error:
                   diagnostics.paths.appDirError ??
@@ -480,7 +480,7 @@ export const DiagnosticsPanel: React.FC = () => {
           {diagnostics.paths.logDir ? (
             <PathDisplay path={diagnostics.paths.logDir} onOpen={openLogDir} />
           ) : (
-            <p className="text-xs text-amber-900 dark:text-amber-300">
+            <p className="text-xs text-warning">
               {t("settings.debug.diagnostics.pathError", {
                 error:
                   diagnostics.paths.logDirError ??
