@@ -16,24 +16,24 @@ const variantStyles: Record<
   { container: string; icon: string; text: string }
 > = {
   error: {
-    container: "bg-red-500/10",
-    icon: "text-red-800 dark:text-red-300",
-    text: "text-red-800 dark:text-red-300",
+    container: "bg-danger-bg",
+    icon: "text-danger",
+    text: "text-danger",
   },
   warning: {
-    container: "bg-yellow-500/10",
-    icon: "text-yellow-800 dark:text-yellow-300",
-    text: "text-yellow-800 dark:text-yellow-300",
+    container: "bg-warning-bg",
+    icon: "text-warning",
+    text: "text-warning",
   },
   info: {
-    container: "bg-blue-500/10",
-    icon: "text-blue-800 dark:text-blue-300",
-    text: "text-blue-800 dark:text-blue-300",
+    container: "bg-info-bg",
+    icon: "text-info",
+    text: "text-info",
   },
   success: {
-    container: "bg-green-500/10",
-    icon: "text-green-800 dark:text-green-300",
-    text: "text-green-800 dark:text-green-300",
+    container: "bg-success-bg",
+    icon: "text-success",
+    text: "text-success",
   },
 };
 
