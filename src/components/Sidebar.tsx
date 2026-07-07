@@ -6,7 +6,7 @@ import {
   FlaskConical,
   History,
   Info,
-  Sparkles,
+  Wand2,
   Cpu,
   TextQuote,
 } from "lucide-react";
@@ -81,7 +81,7 @@ export const SECTIONS_CONFIG = {
   },
   postprocessing: {
     labelKey: "sidebar.postProcessing",
-    icon: Sparkles,
+    icon: Wand2,
     component: PostProcessingSettings,
     enabled: (settings) => settings?.post_process_enabled ?? false,
   },
