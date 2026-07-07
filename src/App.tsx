@@ -670,6 +670,7 @@ function DesktopApp() {
     >
       <Toaster
         theme="system"
+        closeButton
         toastOptions={{
           unstyled: true,
           classNames: {
@@ -677,6 +678,8 @@ function DesktopApp() {
               "bg-background border border-mid-gray/20 rounded-lg shadow-lg px-4 py-3 flex items-center gap-3 text-sm",
             title: "font-medium",
             description: "text-mid-gray",
+            closeButton:
+              "text-mid-gray hover:text-text border border-mid-gray/20 rounded-full bg-background",
           },
         }}
       />
