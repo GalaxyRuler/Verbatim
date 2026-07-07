@@ -195,16 +195,6 @@ export const ModelsSettings: React.FC = () => {
     };
   }, [filteredModels, downloadingModels, extractingModels, currentModel]);
 
-  if (loading) {
-    return (
-      <div className="max-w-3xl w-full mx-auto">
-        <div className="flex items-center justify-center py-16">
-          <div className="w-8 h-8 border-2 border-logo-primary border-t-transparent rounded-full animate-spin" />
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="max-w-3xl w-full mx-auto space-y-4">
       <div className="mb-4">
@@ -215,7 +205,13 @@ export const ModelsSettings: React.FC = () => {
           {t("settings.models.description")}
         </p>
       </div>
-      {filteredModels.length > 0 ? (
+      {loading ? (
+        <div className="flex flex-col gap-2" aria-busy="true">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="h-16 rounded-lg bg-surface animate-pulse" />
+          ))}
+        </div>
+      ) : filteredModels.length > 0 ? (
         <div className="space-y-6">
           {/* Downloaded Models Section — header always visible so filter stays accessible */}
           <div className="space-y-3">
