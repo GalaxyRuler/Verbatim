@@ -132,10 +132,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
               type="button"
               key={section.id}
               aria-current={isActive ? "page" : undefined}
-              className={`flex gap-2 items-center p-2 w-full rounded-lg cursor-pointer transition-colors text-start focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-logo-primary ${
+              className={`flex gap-2 items-center p-2 w-full rounded-lg cursor-pointer transition-colors text-start focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ${
                 isActive
-                  ? "bg-logo-primary/80"
-                  : "hover:bg-mid-gray/20 hover:opacity-100 opacity-85"
+                  ? "bg-accent/15 text-accent font-semibold"
+                  : "hover:bg-surface opacity-85 hover:opacity-100"
               }`}
               onClick={() => onSectionChange(section.id)}
             >

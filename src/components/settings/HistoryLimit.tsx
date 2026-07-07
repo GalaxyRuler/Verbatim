@@ -53,7 +53,7 @@ export const HistoryLimit: React.FC<HistoryLimitProps> = ({
           </span>
         </div>
         {invalid && (
-          <p className="text-xs text-red-600 dark:text-red-300" role="alert">
+          <p className="text-xs text-danger" role="alert">
             {t("settings.debug.historyLimit.invalid")}
           </p>
         )}
