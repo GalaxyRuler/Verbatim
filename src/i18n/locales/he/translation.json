@@ -494,6 +494,9 @@
     },
     "postProcessing": {
       "title": "עיבוד משלים",
+      "groups": {
+        "enable": "עיבוד משלים"
+      },
       "hotkey": {
         "title": "קיצור מקשים"
       },

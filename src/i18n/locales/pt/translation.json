@@ -494,6 +494,9 @@
     },
     "postProcessing": {
       "title": "Pós-Processamento",
+      "groups": {
+        "enable": "Pós-Processamento"
+      },
       "hotkey": {
         "title": "Tecla de atalho"
       },

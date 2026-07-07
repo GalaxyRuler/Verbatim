@@ -494,6 +494,9 @@
     },
     "postProcessing": {
       "title": "Post Proceso",
+      "groups": {
+        "enable": "Post Proceso"
+      },
       "hotkey": {
         "title": "Tecla de acceso rápido"
       },

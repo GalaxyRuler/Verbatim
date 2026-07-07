@@ -494,6 +494,9 @@
     },
     "postProcessing": {
       "title": "Son İşlem",
+      "groups": {
+        "enable": "Son İşlem"
+      },
       "hotkey": {
         "title": "Kısayol Tuşu"
       },

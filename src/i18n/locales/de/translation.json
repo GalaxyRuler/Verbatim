@@ -494,6 +494,9 @@
     },
     "postProcessing": {
       "title": "Nachbearbeitung",
+      "groups": {
+        "enable": "Nachbearbeitung"
+      },
       "hotkey": {
         "title": "Tastenkürzel"
       },

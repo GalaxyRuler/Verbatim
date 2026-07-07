@@ -2795,7 +2795,10 @@ test.describe("Verbatim App", () => {
     await page.goto("/");
 
     await expect(page.getByTitle("General")).toBeVisible();
-    await expect(page.getByTitle("Post Process")).toHaveCount(0);
+    await page.getByTitle("Post Process").click();
+
+    await expect(page.getByText("Post Processing", { exact: true })).toBeVisible();
+    await expect(page.getByText("Hotkey", { exact: true })).toHaveCount(0);
     await expect(page.getByText("Managed Local Model")).toHaveCount(0);
   });
 

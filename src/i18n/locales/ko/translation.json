@@ -494,6 +494,9 @@
     },
     "postProcessing": {
       "title": "후처리",
+      "groups": {
+        "enable": "후처리"
+      },
       "hotkey": {
         "title": "단축키"
       },

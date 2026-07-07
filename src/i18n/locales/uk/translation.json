@@ -494,6 +494,9 @@
     },
     "postProcessing": {
       "title": "Постобробка",
+      "groups": {
+        "enable": "Постобробка"
+      },
       "hotkey": {
         "title": "Гаряча клавіша"
       },

@@ -494,6 +494,9 @@
     },
     "postProcessing": {
       "title": "Efterbearbetning",
+      "groups": {
+        "enable": "Efterbearbetning"
+      },
       "hotkey": {
         "title": "Snabbkommando"
       },

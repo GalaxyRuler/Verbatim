@@ -494,6 +494,9 @@
     },
     "postProcessing": {
       "title": "后处理",
+      "groups": {
+        "enable": "后处理"
+      },
       "hotkey": {
         "title": "快捷键"
       },

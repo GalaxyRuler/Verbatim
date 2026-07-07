@@ -472,6 +472,9 @@
     },
     "postProcessing": {
       "title": "معالجة لاحقة",
+      "groups": {
+        "enable": "معالجة لاحقة"
+      },
       "hotkey": {
         "title": "مفتاح الاختصار"
       },

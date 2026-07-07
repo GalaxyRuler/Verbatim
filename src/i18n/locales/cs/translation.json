@@ -494,6 +494,9 @@
     },
     "postProcessing": {
       "title": "Následné zpracování",
+      "groups": {
+        "enable": "Následné zpracování"
+      },
       "hotkey": {
         "title": "Klávesová zkratka"
       },

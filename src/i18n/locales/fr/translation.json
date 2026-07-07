@@ -494,6 +494,9 @@
     },
     "postProcessing": {
       "title": "Post-traitement",
+      "groups": {
+        "enable": "Post-traitement"
+      },
       "hotkey": {
         "title": "Raccourci clavier"
       },

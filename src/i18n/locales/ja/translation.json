@@ -494,6 +494,9 @@
     },
     "postProcessing": {
       "title": "後処理",
+      "groups": {
+        "enable": "後処理"
+      },
       "hotkey": {
         "title": "ホットキー"
       },

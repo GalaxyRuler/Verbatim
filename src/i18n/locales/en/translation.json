@@ -494,6 +494,9 @@
     },
     "postProcessing": {
       "title": "Post Process",
+      "groups": {
+        "enable": "Post-processing"
+      },
       "hotkey": {
         "title": "Hotkey"
       },

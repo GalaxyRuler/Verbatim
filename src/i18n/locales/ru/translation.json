@@ -494,6 +494,9 @@
     },
     "postProcessing": {
       "title": "Постобработка",
+      "groups": {
+        "enable": "Постобработка"
+      },
       "hotkey": {
         "title": "Горячая клавиша"
       },

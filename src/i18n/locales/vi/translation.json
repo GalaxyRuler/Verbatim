@@ -494,6 +494,9 @@
     },
     "postProcessing": {
       "title": "Xử lý sau",
+      "groups": {
+        "enable": "Xử lý sau"
+      },
       "hotkey": {
         "title": "Phím tắt"
       },

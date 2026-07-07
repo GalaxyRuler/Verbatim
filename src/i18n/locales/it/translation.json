@@ -494,6 +494,9 @@
     },
     "postProcessing": {
       "title": "Post-Elaborazione",
+      "groups": {
+        "enable": "Post-Elaborazione"
+      },
       "hotkey": {
         "title": "Tasto di scelta rapida"
       },
