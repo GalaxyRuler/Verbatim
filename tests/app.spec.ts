@@ -3110,10 +3110,23 @@ test.describe("Verbatim App", () => {
     await expect(
       page.getByTitle("Copy transcript to clipboard"),
     ).toBeVisible();
-    await expect(page.getByTitle("Save transcript")).toBeVisible();
     await expect(page.getByTitle("Delete entry")).toBeVisible();
-    await expect(page.getByTitle("Learn dictionary correction")).toHaveCount(0);
-    await expect(page.getByTitle("Re-transcribe")).toHaveCount(0);
+
+    // Remaining actions live behind the overflow menu.
+    await page.getByRole("button", { name: "More actions" }).click();
+    await expect(
+      page.getByRole("button", { name: "Save transcript" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Learn dictionary correction" }),
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: "Re-transcribe" }),
+    ).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    await expect(
+      page.getByRole("button", { name: "Save transcript" }),
+    ).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Play" })).toHaveCount(0);
 
     const commandsInvoked = await page.evaluate(() => {

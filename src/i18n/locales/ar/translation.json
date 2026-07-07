@@ -604,7 +604,8 @@
       "clearRecordingsError": "فشل مسح التسجيلات.",
       "clearRecordingsSuccess": "تم مسح التسجيلات.",
       "retentionNote": "قد يتضمن السجل النصوص الخام والنصوص المحسنة ونصوص التحويل وملفات WAV المرتبطة. تبقى الإدخالات المحفوظة حتى تحذفها.",
-      "storageGroup": "التخزين"
+      "storageGroup": "التخزين",
+      "moreActions": "المزيد من الإجراءات"
     },
     "debug": {
       "title": "تصحيح الأخطاء",
