@@ -395,10 +395,10 @@
       },
       "clipboardHandling": {
         "title": "Clipboard handling",
-        "description": "Don't Modify Clipboard preserves your current clipboard contents after transcription. Copy to Clipboard leaves the transcript in your clipboard after pasting.",
+        "description": "Don't modify clipboard preserves your current clipboard contents after transcription. Copy to clipboard leaves the transcript in your clipboard after pasting.",
         "options": {
-          "dontModify": "Don't Modify Clipboard",
-          "copyToClipboard": "Copy to Clipboard"
+          "dontModify": "Don't modify clipboard",
+          "copyToClipboard": "Copy to clipboard"
         }
       },
       "autoSubmit": {
