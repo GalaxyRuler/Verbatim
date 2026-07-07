@@ -21,6 +21,8 @@
   },
   "onboarding": {
     "subtitle": "Para comenzar, elige un modelo de transcripción",
+    "privacyNote": "La transcripción se ejecuta completamente en este equipo. Tu audio nunca se sube a internet.",
+    "privacyNoteNetwork": "Verbatim solo usa la red para buscar actualizaciones, descargar modelos y para los servicios opcionales que configures.",
     "recommended": "Recomendado",
     "download": "Descargar",
     "downloading": "Descargando...",

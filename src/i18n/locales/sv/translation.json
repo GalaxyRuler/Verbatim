@@ -21,6 +21,8 @@
   },
   "onboarding": {
     "subtitle": "För att komma igång, välj en transkriptionsmodell",
+    "privacyNote": "Transkriberingen sker helt och hållet på den här datorn. Ditt ljud laddas aldrig upp.",
+    "privacyNoteNetwork": "Verbatim använder bara nätverket för uppdateringskontroller, modellnedladdningar och valfria tjänster som du konfigurerar.",
     "recommended": "Rekommenderat",
     "download": "Ladda ner",
     "downloading": "Laddar ner...",

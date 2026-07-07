@@ -21,6 +21,8 @@
   },
   "onboarding": {
     "subtitle": "시작하려면 음성 인식 모델을 선택하세요",
+    "privacyNote": "음성을 텍스트로 변환하는 작업은 모두 이 컴퓨터에서 이루어집니다. 오디오는 절대 업로드되지 않습니다.",
+    "privacyNoteNetwork": "Verbatim은 업데이트 확인, 모델 다운로드, 그리고 사용자가 설정한 선택적 서비스에만 네트워크를 사용합니다.",
     "recommended": "추천",
     "download": "다운로드",
     "downloading": "다운로드 중...",

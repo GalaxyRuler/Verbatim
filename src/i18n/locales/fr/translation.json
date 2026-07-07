@@ -21,6 +21,8 @@
   },
   "onboarding": {
     "subtitle": "Pour commencer, choisissez un modèle de transcription",
+    "privacyNote": "La transcription s'exécute entièrement sur cet ordinateur. Votre audio n'est jamais téléversé.",
+    "privacyNoteNetwork": "Verbatim n'utilise le réseau que pour la recherche de mises à jour, le téléchargement de modèles et les services optionnels que vous configurez.",
     "recommended": "Recommandé",
     "download": "Télécharger",
     "downloading": "Téléchargement...",

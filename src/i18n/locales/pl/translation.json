@@ -21,6 +21,8 @@
   },
   "onboarding": {
     "subtitle": "Aby rozpocząć, wybierz model transkrypcji",
+    "privacyNote": "Transkrypcja odbywa się w całości na tym komputerze. Twoje nagrania nigdy nie są przesyłane do sieci.",
+    "privacyNoteNetwork": "Verbatim korzysta z sieci wyłącznie do sprawdzania aktualizacji, pobierania modeli oraz obsługi opcjonalnych usług, które skonfigurujesz.",
     "recommended": "Polecane",
     "download": "Pobierz",
     "downloading": "Pobieranie...",

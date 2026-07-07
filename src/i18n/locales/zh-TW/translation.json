@@ -21,6 +21,8 @@
   },
   "onboarding": {
     "subtitle": "首先，請選擇一種模型",
+    "privacyNote": "轉錄完全在這台電腦上進行。您的音訊絕不會被上傳。",
+    "privacyNoteNetwork": "Verbatim 僅將網路用於檢查更新、下載模型，以及您設定的選用服務。",
     "recommended": "推薦",
     "download": "下載",
     "downloading": "下載中...",

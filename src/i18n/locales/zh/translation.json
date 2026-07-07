@@ -21,6 +21,8 @@
   },
   "onboarding": {
     "subtitle": "请选择一个转录模型以开始使用",
+    "privacyNote": "转录完全在这台电脑上进行。您的音频绝不会被上传。",
+    "privacyNoteNetwork": "Verbatim 仅将网络用于检查更新、下载模型，以及您配置的可选服务。",
     "recommended": "推荐",
     "download": "下载",
     "downloading": "下载中...",

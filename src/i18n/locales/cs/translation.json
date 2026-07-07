@@ -21,6 +21,8 @@
   },
   "onboarding": {
     "subtitle": "Pro začátek vyberte model pro přepis",
+    "privacyNote": "Přepis probíhá výhradně na tomto počítači. Váš zvuk se nikdy nikam nenahrává.",
+    "privacyNoteNetwork": "Verbatim používá síť pouze ke kontrole aktualizací, stahování modelů a pro volitelné služby, které si nastavíte.",
     "recommended": "Doporučeno",
     "download": "Stáhnout",
     "downloading": "Stahování...",

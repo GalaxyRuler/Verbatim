@@ -21,6 +21,8 @@
   },
   "onboarding": {
     "subtitle": "Wähle ein Transkriptionsmodell, um loszulegen",
+    "privacyNote": "Die Transkription läuft vollständig auf diesem Computer. Deine Audioaufnahmen werden niemals hochgeladen.",
+    "privacyNoteNetwork": "Verbatim nutzt das Netzwerk nur für Update-Prüfungen, Modell-Downloads und optionale Dienste, die du konfigurierst.",
     "recommended": "Empfohlen",
     "download": "Herunterladen",
     "downloading": "Wird heruntergeladen...",
