@@ -120,7 +120,11 @@
       "allGranted": "Tudo pronto!",
       "errors": {
         "checkFailed": "Erro ao verificar permissões. Por favor, tente novamente.",
-        "requestFailed": "Erro ao solicitar permissão. Por favor, tente novamente."
+        "requestFailed": "Erro ao solicitar permissão. Por favor, tente novamente.",
+        "manualFallbackTitle": "Não foi possível verificar automaticamente",
+        "manualFallbackMacos": "Abra Ajustes do Sistema → Privacidade e Segurança → Microfone (e Acessibilidade), ative o Verbatim e depois escolha \"Verificar novamente\".",
+        "manualFallbackWindows": "Abra Configurações → Privacidade e segurança → Microfone, permita que os aplicativos acessem seu microfone e depois escolha \"Verificar novamente\".",
+        "checkAgain": "Verificar novamente"
       }
     },
     "shortcut": {
@@ -648,7 +652,8 @@
       "historyLimit": {
         "title": "Limite de Histórico",
         "description": "Número máximo de entradas de histórico a manter",
-        "entries": "entradas"
+        "entries": "entradas",
+        "invalid": "Digite um número entre 0 e 1000."
       },
       "recordingRetention": {
         "title": "Excluir Gravações Automaticamente",

@@ -120,7 +120,11 @@
       "allGranted": "Allt klart!",
       "errors": {
         "checkFailed": "Misslyckades med att kontrollera behörigheter. Försök igen.",
-        "requestFailed": "Misslyckades med att begära behörighet. Försök igen."
+        "requestFailed": "Misslyckades med att begära behörighet. Försök igen.",
+        "manualFallbackTitle": "Kan inte verifiera automatiskt",
+        "manualFallbackMacos": "Öppna Systeminställningar → Integritet och säkerhet → Mikrofon (och Hjälpmedel), aktivera Verbatim och välj sedan \"Kontrollera igen\".",
+        "manualFallbackWindows": "Öppna Inställningar → Sekretess och säkerhet → Mikrofon, tillåt appar att komma åt din mikrofon och välj sedan \"Kontrollera igen\".",
+        "checkAgain": "Kontrollera igen"
       }
     },
     "shortcut": {
@@ -648,7 +652,8 @@
       "historyLimit": {
         "title": "Historikgräns",
         "description": "Maximalt antal historikposter som ska sparas",
-        "entries": "poster"
+        "entries": "poster",
+        "invalid": "Ange ett tal mellan 0 och 1000."
       },
       "recordingRetention": {
         "title": "Radera inspelningar automatiskt",

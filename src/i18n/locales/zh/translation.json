@@ -120,7 +120,11 @@
       "allGranted": "全部完成！",
       "errors": {
         "checkFailed": "检查权限失败。请重试。",
-        "requestFailed": "请求权限失败。请重试。"
+        "requestFailed": "请求权限失败。请重试。",
+        "manualFallbackTitle": "无法自动验证",
+        "manualFallbackMacos": "打开「系统设置」→「隐私与安全性」→「麦克风」（以及「辅助功能」），启用 Verbatim，然后选择“重新检查”。",
+        "manualFallbackWindows": "打开「设置」→「隐私和安全性」→「麦克风」，允许应用访问你的麦克风，然后选择“重新检查”。",
+        "checkAgain": "重新检查"
       }
     },
     "shortcut": {
@@ -648,7 +652,8 @@
       "historyLimit": {
         "title": "历史记录上限",
         "description": "保留的最大历史条目数",
-        "entries": "条"
+        "entries": "条",
+        "invalid": "请输入 0 到 1000 之间的数字。"
       },
       "recordingRetention": {
         "title": "自动删除录音",

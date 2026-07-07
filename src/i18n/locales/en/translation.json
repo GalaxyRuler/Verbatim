@@ -120,7 +120,11 @@
       "allGranted": "All set!",
       "errors": {
         "checkFailed": "Failed to check permissions. Please try again.",
-        "requestFailed": "Failed to request permission. Please try again."
+        "requestFailed": "Failed to request permission. Please try again.",
+        "manualFallbackTitle": "Can't verify automatically",
+        "manualFallbackMacos": "Open System Settings → Privacy & Security → Microphone (and Accessibility), enable Verbatim, then choose Check again.",
+        "manualFallbackWindows": "Open Settings → Privacy & security → Microphone, allow apps to access your microphone, then choose Check again.",
+        "checkAgain": "Check again"
       }
     },
     "shortcut": {
@@ -648,7 +652,8 @@
       "historyLimit": {
         "title": "History Limit",
         "description": "Maximum number of history entries to keep",
-        "entries": "entries"
+        "entries": "entries",
+        "invalid": "Enter a number between 0 and 1000."
       },
       "recordingRetention": {
         "title": "Auto-Delete Recordings",

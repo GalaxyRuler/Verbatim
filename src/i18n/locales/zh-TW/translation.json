@@ -120,7 +120,11 @@
       "allGranted": "全部完成！",
       "errors": {
         "checkFailed": "檢查權限失敗，請重試",
-        "requestFailed": "請求權限失敗，請重試"
+        "requestFailed": "請求權限失敗，請重試",
+        "manualFallbackTitle": "無法自動驗證",
+        "manualFallbackMacos": "開啟「系統設定」→「隱私權與安全性」→「麥克風」（以及「輔助使用」），啟用 Verbatim，然後選擇「重新檢查」。",
+        "manualFallbackWindows": "開啟「設定」→「隱私權與安全性」→「麥克風」，允許應用程式存取你的麥克風，然後選擇「重新檢查」。",
+        "checkAgain": "重新檢查"
       }
     },
     "shortcut": {
@@ -648,7 +652,8 @@
       "historyLimit": {
         "title": "歷史紀錄上限",
         "description": "歷史紀錄的最大保留筆數",
-        "entries": "筆"
+        "entries": "筆",
+        "invalid": "請輸入 0 到 1000 之間的數字。"
       },
       "recordingRetention": {
         "title": "自動刪除錄音",

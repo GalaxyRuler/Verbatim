@@ -120,7 +120,11 @@
       "allGranted": "準備完了！",
       "errors": {
         "checkFailed": "権限の確認に失敗しました。もう一度お試しください。",
-        "requestFailed": "権限のリクエストに失敗しました。もう一度お試しください。"
+        "requestFailed": "権限のリクエストに失敗しました。もう一度お試しください。",
+        "manualFallbackTitle": "自動で確認できません",
+        "manualFallbackMacos": "「システム設定」→「プライバシーとセキュリティ」→「マイク」（および「アクセシビリティ」）を開き、Verbatim を有効にしてから「再確認」を選択してください。",
+        "manualFallbackWindows": "「設定」→「プライバシーとセキュリティ」→「マイク」を開き、アプリによるマイクへのアクセスを許可してから「再確認」を選択してください。",
+        "checkAgain": "再確認"
       }
     },
     "shortcut": {
@@ -648,7 +652,8 @@
       "historyLimit": {
         "title": "履歴上限",
         "description": "保持する履歴エントリーの最大数",
-        "entries": "件"
+        "entries": "件",
+        "invalid": "0 から 1000 までの数値を入力してください。"
       },
       "recordingRetention": {
         "title": "録音の自動削除",

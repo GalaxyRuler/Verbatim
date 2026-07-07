@@ -120,7 +120,11 @@
       "allGranted": "Her şey hazır!",
       "errors": {
         "checkFailed": "İzinler kontrol edilemedi. Lütfen tekrar deneyin.",
-        "requestFailed": "İzin isteği başarısız oldu. Lütfen tekrar deneyin."
+        "requestFailed": "İzin isteği başarısız oldu. Lütfen tekrar deneyin.",
+        "manualFallbackTitle": "Otomatik olarak doğrulanamıyor",
+        "manualFallbackMacos": "Sistem Ayarları → Gizlilik ve Güvenlik → Mikrofon (ve Erişilebilirlik) bölümünü açın, Verbatim'i etkinleştirin, ardından \"Tekrar kontrol et\"i seçin.",
+        "manualFallbackWindows": "Ayarlar → Gizlilik ve güvenlik → Mikrofon bölümünü açın, uygulamaların mikrofonunuza erişmesine izin verin, ardından \"Tekrar kontrol et\"i seçin.",
+        "checkAgain": "Tekrar kontrol et"
       }
     },
     "shortcut": {
@@ -648,7 +652,8 @@
       "historyLimit": {
         "title": "Geçmiş Limiti",
         "description": "Saklanacak maksimum geçmiş kaydı sayısı",
-        "entries": "kayıt"
+        "entries": "kayıt",
+        "invalid": "0 ile 1000 arasında bir sayı girin."
       },
       "recordingRetention": {
         "title": "Kayıtları Otomatik Sil",

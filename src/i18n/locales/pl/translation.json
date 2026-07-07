@@ -120,7 +120,11 @@
       "allGranted": "Wszystko gotowe!",
       "errors": {
         "checkFailed": "Nie udało się sprawdzić uprawnień. Spróbuj ponownie.",
-        "requestFailed": "Nie udało się poprosić o uprawnienie. Spróbuj ponownie."
+        "requestFailed": "Nie udało się poprosić o uprawnienie. Spróbuj ponownie.",
+        "manualFallbackTitle": "Nie można zweryfikować automatycznie",
+        "manualFallbackMacos": "Otwórz Ustawienia systemowe → Prywatność i ochrona → Mikrofon (oraz Dostępność), włącz Verbatim, a następnie wybierz „Sprawdź ponownie”.",
+        "manualFallbackWindows": "Otwórz Ustawienia → Prywatność i zabezpieczenia → Mikrofon, zezwól aplikacjom na dostęp do mikrofonu, a następnie wybierz „Sprawdź ponownie”.",
+        "checkAgain": "Sprawdź ponownie"
       }
     },
     "shortcut": {
@@ -648,7 +652,8 @@
       "historyLimit": {
         "title": "Limit historii",
         "description": "Maksymalna liczba wpisów w historii",
-        "entries": "wpisy"
+        "entries": "wpisy",
+        "invalid": "Wpisz liczbę od 0 do 1000."
       },
       "recordingRetention": {
         "title": "Automatyczne usuwanie nagrań",

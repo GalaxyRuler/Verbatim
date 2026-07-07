@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSettings } from "../../hooks/useSettings";
 import { Input } from "../ui/Input";
@@ -18,9 +18,13 @@ export const HistoryLimit: React.FC<HistoryLimitProps> = ({
 
   const historyLimit = getSetting("history_limit") ?? 5;
 
+  const [invalid, setInvalid] = useState(false);
+
   const handleChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const value = parseInt(event.target.value, 10);
-    if (!isNaN(value) && value >= 0) {
+    const ok = !isNaN(value) && value >= 0 && value <= 1000;
+    setInvalid(!ok);
+    if (ok) {
       updateSetting("history_limit", value);
     }
   };
@@ -33,19 +37,26 @@ export const HistoryLimit: React.FC<HistoryLimitProps> = ({
       grouped={grouped}
       layout="horizontal"
     >
-      <div className="flex items-center space-x-2">
-        <Input
-          type="number"
-          min="0"
-          max="1000"
-          value={historyLimit}
-          onChange={handleChange}
-          disabled={isUpdating("history_limit")}
-          className="w-20"
-        />
-        <span className="text-sm text-text">
-          {t("settings.debug.historyLimit.entries")}
-        </span>
+      <div className="flex flex-col items-end gap-1">
+        <div className="flex items-center space-x-2">
+          <Input
+            type="number"
+            min="0"
+            max="1000"
+            value={historyLimit}
+            onChange={handleChange}
+            disabled={isUpdating("history_limit")}
+            className="w-20"
+          />
+          <span className="text-sm text-text">
+            {t("settings.debug.historyLimit.entries")}
+          </span>
+        </div>
+        {invalid && (
+          <p className="text-xs text-red-600 dark:text-red-300" role="alert">
+            {t("settings.debug.historyLimit.invalid")}
+          </p>
+        )}
       </div>
     </SettingContainer>
   );

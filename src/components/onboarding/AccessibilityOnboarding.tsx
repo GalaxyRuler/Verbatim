@@ -11,6 +11,8 @@ import { toast } from "sonner";
 import { commands } from "@/bindings";
 import { useSettingsStore } from "@/stores/settingsStore";
 import VerbatimTextLogo from "../icons/VerbatimTextLogo";
+import { Alert } from "../ui/Alert";
+import { Button } from "../ui/Button";
 import { Keyboard, Mic, Check, Loader2 } from "lucide-react";
 
 interface AccessibilityOnboardingProps {
@@ -41,6 +43,7 @@ const AccessibilityOnboarding: React.FC<AccessibilityOnboardingProps> = ({
     accessibility: "checking",
     microphone: "checking",
   });
+  const [showManualFallback, setShowManualFallback] = useState(false);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const errorCountRef = useRef<number>(0);
@@ -230,6 +233,7 @@ const AccessibilityOnboarding: React.FC<AccessibilityOnboardingProps> = ({
             pollingRef.current = null;
           }
           toast.error(t("onboarding.permissions.errors.checkFailed"));
+          setShowManualFallback(true);
         }
       }
     }, 1000);
@@ -246,6 +250,12 @@ const AccessibilityOnboarding: React.FC<AccessibilityOnboardingProps> = ({
       }
     };
   }, []);
+
+  const handleCheckAgain = () => {
+    setShowManualFallback(false);
+    errorCountRef.current = 0;
+    startPolling();
+  };
 
   const handleGrantAccessibility = async () => {
     try {
@@ -395,6 +405,25 @@ const AccessibilityOnboarding: React.FC<AccessibilityOnboardingProps> = ({
               </div>
             </div>
           </div>
+        )}
+
+        {/* Manual fallback when automatic permission checks keep failing */}
+        {showManualFallback && (
+          <Alert variant="warning" className="w-full">
+            <span className="flex flex-col items-start gap-2">
+              <span className="font-medium">
+                {t("onboarding.permissions.errors.manualFallbackTitle")}
+              </span>
+              <span>
+                {isMacOS
+                  ? t("onboarding.permissions.errors.manualFallbackMacos")
+                  : t("onboarding.permissions.errors.manualFallbackWindows")}
+              </span>
+              <Button variant="secondary" size="sm" onClick={handleCheckAgain}>
+                {t("onboarding.permissions.errors.checkAgain")}
+              </Button>
+            </span>
+          </Alert>
         )}
       </div>
     </div>

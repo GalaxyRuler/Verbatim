@@ -120,7 +120,11 @@
       "allGranted": "Tout est prêt !",
       "errors": {
         "checkFailed": "Échec de la vérification des autorisations. Veuillez réessayer.",
-        "requestFailed": "Échec de la demande d'autorisation. Veuillez réessayer."
+        "requestFailed": "Échec de la demande d'autorisation. Veuillez réessayer.",
+        "manualFallbackTitle": "Vérification automatique impossible",
+        "manualFallbackMacos": "Ouvrez Réglages Système → Confidentialité et sécurité → Microphone (et Accessibilité), activez Verbatim, puis choisissez « Vérifier à nouveau ».",
+        "manualFallbackWindows": "Ouvrez Paramètres → Confidentialité et sécurité → Microphone, autorisez les applications à accéder à votre microphone, puis choisissez « Vérifier à nouveau ».",
+        "checkAgain": "Vérifier à nouveau"
       }
     },
     "shortcut": {
@@ -648,7 +652,8 @@
       "historyLimit": {
         "title": "Limite d'historique",
         "description": "Nombre maximum d'entrées d'historique à conserver",
-        "entries": "entrées"
+        "entries": "entrées",
+        "invalid": "Saisissez un nombre entre 0 et 1000."
       },
       "recordingRetention": {
         "title": "Suppression automatique des enregistrements",

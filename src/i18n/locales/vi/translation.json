@@ -120,7 +120,11 @@
       "allGranted": "Hoàn tất!",
       "errors": {
         "checkFailed": "Không thể kiểm tra quyền. Vui lòng thử lại.",
-        "requestFailed": "Không thể yêu cầu quyền. Vui lòng thử lại."
+        "requestFailed": "Không thể yêu cầu quyền. Vui lòng thử lại.",
+        "manualFallbackTitle": "Không thể tự động xác minh",
+        "manualFallbackMacos": "Mở Cài đặt Hệ thống → Quyền riêng tư & Bảo mật → Micrô (và Trợ năng), bật Verbatim, sau đó chọn \"Kiểm tra lại\".",
+        "manualFallbackWindows": "Mở Cài đặt → Quyền riêng tư & bảo mật → Micrô, cho phép ứng dụng truy cập micrô, sau đó chọn \"Kiểm tra lại\".",
+        "checkAgain": "Kiểm tra lại"
       }
     },
     "shortcut": {
@@ -648,7 +652,8 @@
       "historyLimit": {
         "title": "Giới hạn lịch sử",
         "description": "Số lượng mục lịch sử tối đa cần giữ",
-        "entries": "mục"
+        "entries": "mục",
+        "invalid": "Nhập một số từ 0 đến 1000."
       },
       "recordingRetention": {
         "title": "Tự động xóa ghi âm",

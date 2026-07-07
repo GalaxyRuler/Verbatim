@@ -120,7 +120,11 @@
       "allGranted": "Alles bereit!",
       "errors": {
         "checkFailed": "Berechtigungsprüfung fehlgeschlagen. Bitte erneut versuchen.",
-        "requestFailed": "Berechtigungsanfrage fehlgeschlagen. Bitte erneut versuchen."
+        "requestFailed": "Berechtigungsanfrage fehlgeschlagen. Bitte erneut versuchen.",
+        "manualFallbackTitle": "Automatische Prüfung nicht möglich",
+        "manualFallbackMacos": "Öffnen Sie Systemeinstellungen → Datenschutz & Sicherheit → Mikrofon (und Bedienungshilfen), aktivieren Sie Verbatim und wählen Sie dann „Erneut prüfen“.",
+        "manualFallbackWindows": "Öffnen Sie Einstellungen → Datenschutz und Sicherheit → Mikrofon, erlauben Sie Apps den Zugriff auf Ihr Mikrofon und wählen Sie dann „Erneut prüfen“.",
+        "checkAgain": "Erneut prüfen"
       }
     },
     "shortcut": {
@@ -648,7 +652,8 @@
       "historyLimit": {
         "title": "Verlaufslimit",
         "description": "Maximale Anzahl der Verlaufseinträge",
-        "entries": "Einträge"
+        "entries": "Einträge",
+        "invalid": "Geben Sie eine Zahl zwischen 0 und 1000 ein."
       },
       "recordingRetention": {
         "title": "Aufnahmen automatisch löschen",

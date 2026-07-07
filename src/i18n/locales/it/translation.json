@@ -120,7 +120,11 @@
       "allGranted": "Tutto pronto!",
       "errors": {
         "checkFailed": "Impossibile verificare i permessi. Riprova.",
-        "requestFailed": "Impossibile richiedere il permesso. Riprova."
+        "requestFailed": "Impossibile richiedere il permesso. Riprova.",
+        "manualFallbackTitle": "Impossibile verificare automaticamente",
+        "manualFallbackMacos": "Apri Impostazioni di Sistema → Privacy e sicurezza → Microfono (e Accessibilità), attiva Verbatim, poi scegli \"Controlla di nuovo\".",
+        "manualFallbackWindows": "Apri Impostazioni → Privacy e sicurezza → Microfono, consenti alle app di accedere al microfono, poi scegli \"Controlla di nuovo\".",
+        "checkAgain": "Controlla di nuovo"
       }
     },
     "shortcut": {
@@ -648,7 +652,8 @@
       "historyLimit": {
         "title": "Limite della Cronologia",
         "description": "Massimo numero di elementi da conservare nella cronologia",
-        "entries": "elementi"
+        "entries": "elementi",
+        "invalid": "Inserisci un numero tra 0 e 1000."
       },
       "recordingRetention": {
         "title": "Eliminazione Automatica Registrazioni",

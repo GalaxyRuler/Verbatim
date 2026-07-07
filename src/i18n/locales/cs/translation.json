@@ -120,7 +120,11 @@
       "allGranted": "Vše připraveno!",
       "errors": {
         "checkFailed": "Nepodařilo se zkontrolovat oprávnění. Zkuste to prosím znovu.",
-        "requestFailed": "Nepodařilo se požádat o oprávnění. Zkuste to prosím znovu."
+        "requestFailed": "Nepodařilo se požádat o oprávnění. Zkuste to prosím znovu.",
+        "manualFallbackTitle": "Nelze ověřit automaticky",
+        "manualFallbackMacos": "Otevřete Nastavení systému → Soukromí a zabezpečení → Mikrofon (a Zpřístupnění), povolte Verbatim a poté zvolte „Zkontrolovat znovu“.",
+        "manualFallbackWindows": "Otevřete Nastavení → Soukromí a zabezpečení → Mikrofon, povolte aplikacím přístup k mikrofonu a poté zvolte „Zkontrolovat znovu“.",
+        "checkAgain": "Zkontrolovat znovu"
       }
     },
     "shortcut": {
@@ -648,7 +652,8 @@
       "historyLimit": {
         "title": "Limit historie",
         "description": "Maximální počet záznamů historie k uchování",
-        "entries": "záznamů"
+        "entries": "záznamů",
+        "invalid": "Zadejte číslo od 0 do 1000."
       },
       "recordingRetention": {
         "title": "Automatické mazání nahrávek",
