@@ -12,6 +12,7 @@ import { ClipboardHandlingSetting } from "../ClipboardHandling";
 import { AutoSubmit } from "../AutoSubmit";
 import { AppendTrailingSpace } from "../AppendTrailingSpace";
 import { ExperimentalToggle } from "../ExperimentalToggle";
+import { UpdateChecksToggle } from "../UpdateChecksToggle";
 import { DockedPill } from "../DockedPill";
 import { ElevatedWarningToggle } from "../ElevatedWarningToggle";
 import { useSettings } from "../../../hooks/useSettings";
@@ -35,6 +36,7 @@ export const AdvancedSettings: React.FC = () => {
         <ShowOverlay descriptionMode="tooltip" grouped={true} />
         <DockedPill descriptionMode="tooltip" grouped={true} />
         <ModelUnloadTimeoutSetting descriptionMode="tooltip" grouped={true} />
+        <UpdateChecksToggle descriptionMode="tooltip" grouped={true} />
         <ElevatedWarningToggle descriptionMode="tooltip" grouped={true} />
         <ExperimentalToggle descriptionMode="tooltip" grouped={true} />
       </SettingsGroup>

@@ -5,7 +5,6 @@ import { LogLevelSelector } from "./LogLevelSelector";
 import { PasteDelay } from "./PasteDelay";
 import { RecordingBuffer } from "./RecordingBuffer";
 import { SettingsGroup } from "../../ui/SettingsGroup";
-import { UpdateChecksToggle } from "../UpdateChecksToggle";
 import { LogDirectory } from "./LogDirectory";
 import { DiagnosticsPanel } from "./DiagnosticsPanel";
 
@@ -18,7 +17,6 @@ export const DebugSettings: React.FC = () => {
         <DiagnosticsPanel />
         <LogDirectory grouped={true} />
         <LogLevelSelector grouped={true} />
-        <UpdateChecksToggle descriptionMode="tooltip" grouped={true} />
         <WordCorrectionThreshold descriptionMode="tooltip" grouped={true} />
         <PasteDelay descriptionMode="tooltip" grouped={true} />
         <RecordingBuffer descriptionMode="tooltip" grouped={true} />
