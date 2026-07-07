@@ -13,8 +13,8 @@
     "models": "Modely",
     "advanced": "Pokročilé",
     "postProcessing": "Následné zpracování",
-    "history": "Historie",
-    "debug": "Ladění",
+    "history": "Historie a soukromí",
+    "debug": "Řešení potíží",
     "about": "O aplikaci",
     "dictionary": "Dictionary",
     "snippets": "Snippets"
@@ -274,7 +274,7 @@
         "unassigned": "Unassigned"
       },
       "language": {
-        "title": "Jazyk",
+        "title": "Jazyky diktování",
         "description": "Vyberte jazyk rozpoznávání řeči. Auto jazyk určí automaticky, zatímco výběr konkrétního jazyka může zlepšit přesnost.",
         "descriptionUnsupported": "Model Parakeet rozpozná jazyk automaticky. Ruční výběr není potřeba.",
         "searchPlaceholder": "Hledat jazyky...",
@@ -319,7 +319,6 @@
         "app": "Aplikace",
         "output": "Výstup",
         "transcription": "Přepis",
-        "history": "Historie",
         "experimental": "Experimentální",
         "performance": "Výkon"
       },
@@ -1015,7 +1014,7 @@
     "targetPrivacyExcludedDescription": "The active app matches a private-app exclusion. Verbatim did not start recording."
   },
   "appLanguage": {
-    "title": "Jazyk aplikace",
+    "title": "Jazyk rozhraní aplikace",
     "description": "Změňte jazyk rozhraní Verbatim"
   },
   "overlay": {

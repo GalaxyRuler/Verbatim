@@ -13,8 +13,8 @@
     "models": "מודלים",
     "advanced": "מתקדם",
     "postProcessing": "עיבוד משלים",
-    "history": "היסטוריה",
-    "debug": "ניפוי שגיאות",
+    "history": "היסטוריה ופרטיות",
+    "debug": "פתרון בעיות",
     "about": "אודות",
     "dictionary": "מילון",
     "snippets": "קטעים"
@@ -256,7 +256,7 @@
         "unassigned": "Unassigned"
       },
       "language": {
-        "title": "שפה",
+        "title": "שפות הכתבה",
         "description": "בחר את שפת זיהוי הדיבור. מצב אוטומטי יזהה את השפה לבד, בעוד שבחירת שפה מסוימת יכולה לשפר את הדיוק עבורה.",
         "descriptionUnsupported": "מודל Parakeet מזהה את השפה אוטומטית. אין צורך בבחירה ידנית.",
         "searchPlaceholder": "חפש שפות...",
@@ -319,7 +319,6 @@
         "app": "אפליקציה",
         "output": "פלט",
         "transcription": "תמלול",
-        "history": "היסטוריה",
         "experimental": "ניסיוני",
         "performance": "ביצועים"
       },
@@ -1015,7 +1014,7 @@
     "targetPrivacyExcludedDescription": "האפליקציה הפעילה תואמת החרגת פרטיות. Verbatim לא התחיל להקליט."
   },
   "appLanguage": {
-    "title": "שפת האפליקציה",
+    "title": "שפת הממשק",
     "description": "שנה את שפת הממשק של Verbatim"
   },
   "overlay": {

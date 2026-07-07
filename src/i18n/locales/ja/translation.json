@@ -13,8 +13,8 @@
     "models": "モデル",
     "advanced": "詳細設定",
     "postProcessing": "後処理",
-    "history": "履歴",
-    "debug": "デバッグ",
+    "history": "履歴とプライバシー",
+    "debug": "トラブルシューティング",
     "about": "概要",
     "dictionary": "Dictionary",
     "snippets": "Snippets"
@@ -274,7 +274,7 @@
         "unassigned": "Unassigned"
       },
       "language": {
-        "title": "言語",
+        "title": "音声入力の言語",
         "description": "音声認識の言語を選択してください。自動を選択すると言語を自動的に判定します。特定の言語を選択すると、その言語の精度が向上する場合があります。",
         "descriptionUnsupported": "Parakeetモデルは言語を自動的に検出します。手動選択は不要です。",
         "searchPlaceholder": "言語を検索...",
@@ -319,7 +319,6 @@
         "app": "アプリ",
         "output": "出力",
         "transcription": "文字起こし",
-        "history": "履歴",
         "experimental": "実験的",
         "performance": "パフォーマンス"
       },
@@ -1015,7 +1014,7 @@
     "targetPrivacyExcludedDescription": "The active app matches a private-app exclusion. Verbatim did not start recording."
   },
   "appLanguage": {
-    "title": "アプリケーション言語",
+    "title": "アプリの表示言語",
     "description": "Verbatimインターフェースの言語を変更"
   },
   "overlay": {

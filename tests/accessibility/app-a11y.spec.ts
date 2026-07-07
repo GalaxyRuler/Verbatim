@@ -65,7 +65,7 @@ test.describe("accessibility gates", () => {
     await page.goto("/");
 
     await expect(
-      page.getByRole("heading", { name: "Permissions Required" }),
+      page.getByRole("heading", { name: "Permissions required" }),
     ).toBeVisible();
     await expectNoAxeViolations(page, "onboarding permissions");
   });
@@ -81,7 +81,7 @@ test.describe("accessibility gates", () => {
       "General",
       "Models",
       "History & Privacy",
-      "Post Process",
+      "Post-processing",
       "Troubleshooting",
     ]) {
       const sectionButton = page.getByRole("button", {

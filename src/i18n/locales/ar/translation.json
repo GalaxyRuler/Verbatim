@@ -12,8 +12,8 @@
     "general": "عام",
     "advanced": "متقدم",
     "postProcessing": "معالجة لاحقة",
-    "history": "السجل",
-    "debug": "تصحيح الأخطاء",
+    "history": "السجل والخصوصية",
+    "debug": "استكشاف الأخطاء وإصلاحها",
     "about": "حول",
     "models": "النماذج",
     "dictionary": "القاموس",
@@ -252,7 +252,7 @@
         "unassigned": "Unassigned"
       },
       "language": {
-        "title": "اللغة",
+        "title": "لغات الإملاء",
         "description": "اختر لغة أو أكثر للكلام. يستخدم Verbatim تلميحات خاصة بكل نموذج حتى تساعد اللغات المحددة في النسخ قبل التنظيف.",
         "descriptionUnsupported": ".يكتشف نموذج Parakeet اللغة تلقائياً. لا يلزم الاختيار اليدوي",
         "searchPlaceholder": "البحث عن اللغات...",
@@ -297,7 +297,6 @@
         "app": "التطبيق",
         "output": "الإخراج",
         "transcription": "التفريغ الصوتي",
-        "history": "السجل",
         "experimental": "تجريبي",
         "performance": "الأداء"
       },
@@ -1015,7 +1014,7 @@
     "targetPrivacyExcludedDescription": "يطابق التطبيق النشط استثناء تطبيق خاص. لم يبدأ Verbatim التسجيل."
   },
   "appLanguage": {
-    "title": "لغة التطبيق",
+    "title": "لغة واجهة التطبيق",
     "description": "تغيير لغة واجهة Verbatim"
   },
   "overlay": {

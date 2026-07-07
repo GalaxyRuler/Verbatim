@@ -13,8 +13,8 @@
     "models": "模型",
     "advanced": "高级",
     "postProcessing": "后处理",
-    "history": "历史记录",
-    "debug": "调试",
+    "history": "历史记录与隐私",
+    "debug": "故障排除",
     "about": "关于",
     "dictionary": "Dictionary",
     "snippets": "Snippets"
@@ -274,7 +274,7 @@
         "unassigned": "Unassigned"
       },
       "language": {
-        "title": "语言",
+        "title": "语音输入语言",
         "description": "选择语音识别的语言。自动将自动确定语言，选择特定语言可以提高该语言的准确度。",
         "descriptionUnsupported": "Parakeet 模型会自动检测语言，无需手动选择。",
         "searchPlaceholder": "搜索语言...",
@@ -319,7 +319,6 @@
         "app": "应用",
         "output": "输出",
         "transcription": "转录",
-        "history": "历史",
         "experimental": "实验性",
         "performance": "性能"
       },
@@ -1015,7 +1014,7 @@
     "targetPrivacyExcludedDescription": "The active app matches a private-app exclusion. Verbatim did not start recording."
   },
   "appLanguage": {
-    "title": "应用语言",
+    "title": "应用显示语言",
     "description": "更改 Verbatim 界面的语言"
   },
   "overlay": {

@@ -13,8 +13,8 @@
     "models": "Modelli",
     "advanced": "Avanzate",
     "postProcessing": "Post-Elaborazione",
-    "history": "Cronologia",
-    "debug": "Debug",
+    "history": "Cronologia e privacy",
+    "debug": "Risoluzione dei problemi",
     "about": "Informazioni",
     "dictionary": "Dictionary",
     "snippets": "Snippets"
@@ -274,7 +274,7 @@
         "unassigned": "Unassigned"
       },
       "language": {
-        "title": "Lingua",
+        "title": "Lingue di dettatura",
         "description": "Scegli la lingua per il riconoscimento vocale. Auto la determinerà automaticamente, mentre scegliere una lingua specifica può migliorare l'accuratezza per quella lingua.",
         "descriptionUnsupported": "Il modello Parakeet sceglie automaticamente la lingua. Non serve scegliere manualmente.",
         "searchPlaceholder": "Cerca lingue...",
@@ -319,7 +319,6 @@
         "app": "App",
         "output": "Output",
         "transcription": "Trascrizione",
-        "history": "Cronologia",
         "experimental": "Sperimentale",
         "performance": "Prestazioni"
       },
@@ -1015,7 +1014,7 @@
     "targetPrivacyExcludedDescription": "The active app matches a private-app exclusion. Verbatim did not start recording."
   },
   "appLanguage": {
-    "title": "Lingua Applicazione",
+    "title": "Lingua dell'interfaccia",
     "description": "Cambia la lingua dell'interfaccia di Verbatim"
   },
   "overlay": {

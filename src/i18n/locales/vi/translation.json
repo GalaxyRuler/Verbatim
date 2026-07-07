@@ -13,8 +13,8 @@
     "models": "Mô hình",
     "advanced": "Nâng cao",
     "postProcessing": "Xử lý sau",
-    "history": "Lịch sử",
-    "debug": "Gỡ lỗi",
+    "history": "Lịch sử & quyền riêng tư",
+    "debug": "Khắc phục sự cố",
     "about": "Giới thiệu",
     "dictionary": "Dictionary",
     "snippets": "Snippets"
@@ -274,7 +274,7 @@
         "unassigned": "Unassigned"
       },
       "language": {
-        "title": "Ngôn ngữ",
+        "title": "Ngôn ngữ đọc chính tả",
         "description": "Chọn ngôn ngữ để nhận dạng giọng nói. Tự động sẽ tự động xác định ngôn ngữ, trong khi chọn một ngôn ngữ cụ thể có thể cải thiện độ chính xác cho ngôn ngữ đó.",
         "descriptionUnsupported": "Mô hình Parakeet tự động phát hiện ngôn ngữ. Không cần chọn thủ công.",
         "searchPlaceholder": "Tìm kiếm ngôn ngữ...",
@@ -319,7 +319,6 @@
         "app": "Ứng dụng",
         "output": "Đầu ra",
         "transcription": "Chuyển đổi",
-        "history": "Lịch sử",
         "experimental": "Thử nghiệm",
         "performance": "Hiệu năng"
       },
@@ -1015,7 +1014,7 @@
     "targetPrivacyExcludedDescription": "The active app matches a private-app exclusion. Verbatim did not start recording."
   },
   "appLanguage": {
-    "title": "Ngôn ngữ ứng dụng",
+    "title": "Ngôn ngữ hiển thị ứng dụng",
     "description": "Thay đổi ngôn ngữ giao diện của Verbatim"
   },
   "overlay": {

@@ -13,8 +13,8 @@
     "models": "Модели",
     "advanced": "Продвинутые",
     "postProcessing": "Постобработка",
-    "history": "История",
-    "debug": "Отладка",
+    "history": "История и конфиденциальность",
+    "debug": "Устранение неполадок",
     "about": "О программе",
     "dictionary": "Dictionary",
     "snippets": "Snippets"
@@ -274,7 +274,7 @@
         "unassigned": "Unassigned"
       },
       "language": {
-        "title": "Язык",
+        "title": "Языки диктовки",
         "description": "Выберите язык для распознавания речи. «Авто» автоматически определит язык, а выбор конкретного языка может повысить точность определения этого языка.",
         "descriptionUnsupported": "Модель Parakeet автоматически определяет язык. Ручной выбор не требуется.",
         "searchPlaceholder": "Поиск языков...",
@@ -319,7 +319,6 @@
         "app": "Приложение",
         "output": "Вывод",
         "transcription": "Транскрипция",
-        "history": "История",
         "experimental": "Экспериментальное",
         "performance": "Производительность"
       },
@@ -1015,7 +1014,7 @@
     "targetPrivacyExcludedDescription": "The active app matches a private-app exclusion. Verbatim did not start recording."
   },
   "appLanguage": {
-    "title": "Язык приложения",
+    "title": "Язык интерфейса приложения",
     "description": "Изменить язык интерфейса Verbatim"
   },
   "overlay": {

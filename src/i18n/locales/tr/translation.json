@@ -13,8 +13,8 @@
     "models": "Modeller",
     "advanced": "Gelişmiş",
     "postProcessing": "Son İşlem",
-    "history": "Geçmiş",
-    "debug": "Hata Ayıklama",
+    "history": "Geçmiş ve Gizlilik",
+    "debug": "Sorun Giderme",
     "about": "Hakkında",
     "dictionary": "Dictionary",
     "snippets": "Snippets"
@@ -274,7 +274,7 @@
         "unassigned": "Unassigned"
       },
       "language": {
-        "title": "Dil",
+        "title": "Dikte Dilleri",
         "description": "Konuşma tanıma dilini seçin. 'Otomatik' seçeneği dili kendisi belirler, ancak belirli bir dil seçmek o dildeki doğruluğu artırabilir.",
         "descriptionUnsupported": "Parakeet modeli dili otomatik algılar. Manuel seçim gerekmez.",
         "searchPlaceholder": "Dil ara...",
@@ -319,7 +319,6 @@
         "app": "Uygulama",
         "output": "Çıktı",
         "transcription": "Transkripsiyon",
-        "history": "Geçmiş",
         "experimental": "Deneysel",
         "performance": "Performans"
       },
@@ -1015,7 +1014,7 @@
     "targetPrivacyExcludedDescription": "The active app matches a private-app exclusion. Verbatim did not start recording."
   },
   "appLanguage": {
-    "title": "Uygulama Dili",
+    "title": "Uygulama Görüntüleme Dili",
     "description": "Verbatim arayüzünün dilini değiştirin"
   },
   "overlay": {
