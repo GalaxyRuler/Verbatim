@@ -960,7 +960,8 @@
     "yes": "Yes",
     "no": "No",
     "starting": "Starting…",
-    "noOptionsFound": "No options found"
+    "noOptionsFound": "No options found",
+    "moreInfo": "More information"
   },
   "accessibility": {
     "permissionsRequired": "Accessibility Permissions Required",

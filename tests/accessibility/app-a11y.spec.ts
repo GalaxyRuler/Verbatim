@@ -94,6 +94,18 @@ test.describe("accessibility gates", () => {
     }
   });
 
+  test("setting info tooltips are keyboard reachable", async ({ page }) => {
+    await installA11yTauriMocks(page);
+    await page.goto("/");
+    await expect(page.getByRole("button", { name: "General" })).toBeVisible();
+
+    const trigger = page.locator('[data-testid="setting-info-trigger"]').first();
+    await trigger.focus();
+    await expect(trigger).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(page.locator('[role="tooltip"]').first()).toBeVisible();
+  });
+
   test("recording overlay has no axe violations", async ({ page }) => {
     await installA11yTauriMocks(page);
     await page.goto("/src/overlay/index.html");
