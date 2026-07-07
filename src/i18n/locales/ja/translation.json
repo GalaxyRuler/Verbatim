@@ -943,6 +943,7 @@
     "off": "オフ",
     "yes": "はい",
     "no": "いいえ",
+    "starting": "起動中…",
     "noOptionsFound": "オプションが見つかりません",
     "appName": "Verbatim"
   },

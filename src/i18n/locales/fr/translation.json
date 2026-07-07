@@ -943,6 +943,7 @@
     "off": "Désactivé",
     "yes": "Oui",
     "no": "Non",
+    "starting": "Démarrage…",
     "noOptionsFound": "Aucune option trouvée",
     "appName": "Verbatim"
   },

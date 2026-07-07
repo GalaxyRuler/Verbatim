@@ -24,6 +24,7 @@ import Onboarding, {
   ShortcutReadinessOnboarding,
 } from "./components/onboarding";
 import { Sidebar, SidebarSection, SECTIONS_CONFIG } from "./components/Sidebar";
+import VerbatimMark from "./components/icons/VerbatimMark";
 import { useSettings } from "./hooks/useSettings";
 import type { DictionaryEntry, StartupStatus } from "@/bindings";
 import { useDictionaryStore } from "./stores/dictionaryStore";
@@ -547,9 +548,17 @@ function DesktopApp() {
     }
   };
 
-  // Still checking onboarding status
+  // Still checking onboarding status — show a quiet splash instead of a blank window
   if (startupStatus === null || startupStatus.status === "starting") {
-    return null;
+    return (
+      <div
+        dir={direction}
+        className="h-screen flex flex-col items-center justify-center gap-3 select-none cursor-default bg-background text-text"
+      >
+        <VerbatimMark width={40} height={40} />
+        <p className="text-sm text-mid-gray">{t("common.starting")}</p>
+      </div>
+    );
   }
 
   if (startupStatus.status === "failed") {

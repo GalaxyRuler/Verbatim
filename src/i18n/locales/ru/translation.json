@@ -943,6 +943,7 @@
     "off": "Выключенный",
     "yes": "Да",
     "no": "Нет",
+    "starting": "Запуск…",
     "noOptionsFound": "Вариантов не найдено",
     "appName": "Verbatim"
   },

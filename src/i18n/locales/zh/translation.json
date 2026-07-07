@@ -943,6 +943,7 @@
     "off": "关",
     "yes": "是",
     "no": "否",
+    "starting": "启动中…",
     "noOptionsFound": "未找到选项",
     "appName": "Verbatim"
   },
