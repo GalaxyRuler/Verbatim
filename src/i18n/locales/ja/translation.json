@@ -499,6 +499,7 @@
       },
       "api": {
         "title": "API（OpenAI互換）",
+        "dataFlowNotice": "後処理の実行時、完成した文字起こしは {{provider}} に送信されます。音声がこのコンピューターの外に出ることはありません。",
         "provider": {
           "title": "プロバイダー",
           "description": "OpenAI互換のプロバイダーを選択。"

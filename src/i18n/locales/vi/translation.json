@@ -499,6 +499,7 @@
       },
       "api": {
         "title": "API (Tương thích OpenAI)",
+        "dataFlowNotice": "Khi xử lý sau chạy, bản chép lời hoàn chỉnh sẽ được gửi đến {{provider}}. Âm thanh không bao giờ rời khỏi máy tính này.",
         "provider": {
           "title": "Nhà cung cấp",
           "description": "Chọn một nhà cung cấp tương thích OpenAI."

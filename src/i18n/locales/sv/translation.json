@@ -499,6 +499,7 @@
       },
       "api": {
         "title": "API (OpenAI-kompatibelt)",
+        "dataFlowNotice": "När efterbearbetningen körs skickas den färdiga transkriptionen till {{provider}}. Ljudet lämnar aldrig den här datorn.",
         "provider": {
           "title": "Leverantör",
           "description": "Välj en OpenAI-kompatibel leverantör."

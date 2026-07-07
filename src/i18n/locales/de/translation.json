@@ -499,6 +499,7 @@
       },
       "api": {
         "title": "API (OpenAI-kompatibel)",
+        "dataFlowNotice": "Wenn die Nachbearbeitung ausgeführt wird, wird das fertige Transkript an {{provider}} gesendet. Audio verlässt diesen Computer nie.",
         "provider": {
           "title": "Anbieter",
           "description": "Wähle einen OpenAI-kompatiblen Anbieter."

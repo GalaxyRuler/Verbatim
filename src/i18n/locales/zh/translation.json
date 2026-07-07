@@ -499,6 +499,7 @@
       },
       "api": {
         "title": "API（兼容 OpenAI）",
+        "dataFlowNotice": "运行后处理时，完成的转录文本会发送给 {{provider}}。音频绝不会离开这台电脑。",
         "provider": {
           "title": "提供商",
           "description": "选择一个兼容 OpenAI 的提供商。"

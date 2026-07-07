@@ -499,6 +499,7 @@
       },
       "api": {
         "title": "API (Compatible OpenAI)",
+        "dataFlowNotice": "Lorsque le post-traitement s'exécute, la transcription finale est envoyée à {{provider}}. L'audio ne quitte jamais cet ordinateur.",
         "provider": {
           "title": "Fournisseur",
           "description": "Sélectionnez un fournisseur compatible OpenAI."

@@ -499,6 +499,7 @@
       },
       "api": {
         "title": "API (OpenAI Uyumlu)",
+        "dataFlowNotice": "Son işlem çalıştığında, tamamlanan transkript {{provider}} hizmetine gönderilir. Ses hiçbir zaman bu bilgisayardan ayrılmaz.",
         "provider": {
           "title": "Sağlayıcı",
           "description": "OpenAI uyumlu bir sağlayıcı seçin."

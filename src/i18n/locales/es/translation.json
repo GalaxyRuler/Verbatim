@@ -499,6 +499,7 @@
       },
       "api": {
         "title": "API (Compatible con OpenAI)",
+        "dataFlowNotice": "Cuando se ejecuta el post proceso, la transcripción final se envía a {{provider}}. El audio nunca sale de este equipo.",
         "provider": {
           "title": "Proveedor",
           "description": "Selecciona un proveedor compatible con OpenAI."

@@ -499,6 +499,7 @@
       },
       "api": {
         "title": "API (kompatibilní s OpenAI)",
+        "dataFlowNotice": "Při spuštění následného zpracování se hotový přepis odešle do {{provider}}. Zvuk nikdy neopustí tento počítač.",
         "provider": {
           "title": "Poskytovatel",
           "description": "Vyberte poskytovatele kompatibilního s OpenAI."

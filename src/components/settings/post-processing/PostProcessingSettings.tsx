@@ -82,6 +82,14 @@ const PostProcessingSettingsApiComponent: React.FC = () => {
         </div>
       </SettingContainer>
 
+      {!state.isAppleProvider && (
+        <Alert variant="info" contained>
+          {t("settings.postProcessing.api.dataFlowNotice", {
+            provider: state.selectedProvider?.label ?? state.selectedProviderId,
+          })}
+        </Alert>
+      )}
+
       {state.isAppleProvider ? (
         state.appleIntelligenceUnavailable ? (
           <Alert variant="error" contained>

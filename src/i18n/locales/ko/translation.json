@@ -499,6 +499,7 @@
       },
       "api": {
         "title": "API (OpenAI 호환)",
+        "dataFlowNotice": "후처리가 실행되면 완성된 전사 텍스트가 {{provider}}(으)로 전송됩니다. 오디오는 절대 이 컴퓨터를 벗어나지 않습니다.",
         "provider": {
           "title": "제공자",
           "description": "OpenAI 호환 제공자를 선택하세요."

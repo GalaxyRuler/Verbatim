@@ -499,6 +499,7 @@
       },
       "api": {
         "title": "API (תואם OpenAI)",
+        "dataFlowNotice": "כאשר עיבוד משלים פועל, התמליל המוגמר נשלח אל {{provider}}. השמע לעולם אינו עוזב את המחשב הזה.",
         "provider": {
           "title": "ספק",
           "description": "בחר ספק שתואם ל-OpenAI."

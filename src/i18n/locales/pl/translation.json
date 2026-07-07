@@ -499,6 +499,7 @@
       },
       "api": {
         "title": "API (zgodne z OpenAI)",
+        "dataFlowNotice": "Gdy uruchamiany jest postprocess, gotowa transkrypcja jest wysyłana do {{provider}}. Dźwięk nigdy nie opuszcza tego komputera.",
         "provider": {
           "title": "Dostawca",
           "description": "Wybierz dostawcę zgodnego z OpenAI."

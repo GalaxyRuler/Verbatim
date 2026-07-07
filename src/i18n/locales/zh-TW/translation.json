@@ -499,6 +499,7 @@
       },
       "api": {
         "title": "API（相容 OpenAI）",
+        "dataFlowNotice": "執行後處理時，完成的逐字稿會傳送給 {{provider}}。音訊絕不會離開這台電腦。",
         "provider": {
           "title": "供應商",
           "description": "選擇一個相容 OpenAI 的供應商"
