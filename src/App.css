@@ -1,13 +1,39 @@
 @import "tailwindcss";
 
 @theme {
-  /* Design tokens */
-  --color-text: #0f0f0f;
-  --color-background: #fbfbfb;
-  --color-background-ui: #2563eb;
+  /* Brand (logo rendering only — never for UI surfaces) */
   --color-logo-primary: #2563eb;
   --color-logo-stroke: #0f1419;
   --color-text-stroke: #f6f6f6;
+
+  /* Core */
+  --color-text: #0f0f0f;
+  --color-text-secondary: #4b5563;
+  --color-text-disabled: #9ca3af;
+  --color-background: #fbfbfb;
+  --color-surface: #f1f2f4;
+  --color-border: #d1d5db;
+  --color-border-strong: #6b7280;
+
+  /* Interaction */
+  --color-accent: #2563eb;
+  --color-accent-fg: #ffffff;
+
+  /* Status */
+  --color-success: #166534;
+  --color-success-bg: #1665341a;
+  --color-warning: #854d0e;
+  --color-warning-bg: #854d0e1a;
+  --color-danger: #b91c1c;
+  --color-danger-bg: #b91c1c1a;
+  --color-info: #1d4ed8;
+  --color-info-bg: #1d4ed81a;
+
+  /* Menu shadow (replaces inline boxShadow in Select.tsx later) */
+  --shadow-menu: 0 10px 30px rgba(15, 15, 15, 0.2);
+
+  /* Legacy aliases — components migrate off these in Task 9 */
+  --color-background-ui: var(--color-accent);
   --color-mid-gray: #5f6368;
 }
 
@@ -49,7 +75,22 @@
   :root {
     /* Colors - Dark Theme */
     --color-text: #fbfbfb;
+    --color-text-secondary: #b6bcc6;
+    --color-text-disabled: #6b7280;
     --color-background: #0f1419;
+    --color-surface: #171d24;
+    --color-border: #2b3440;
+    --color-border-strong: #8b95a3;
+    --color-accent: #7aa2f7;
+    --color-accent-fg: #0f1419;
+    --color-success: #4ade80;
+    --color-success-bg: #4ade8022;
+    --color-warning: #facc15;
+    --color-warning-bg: #facc1522;
+    --color-danger: #f87171;
+    --color-danger-bg: #f8717122;
+    --color-info: #93c5fd;
+    --color-info-bg: #93c5fd22;
     --color-logo-primary: #7aa2f7;
     --color-logo-stroke: #f3f4f6;
     --color-mid-gray: #9ca3af;
