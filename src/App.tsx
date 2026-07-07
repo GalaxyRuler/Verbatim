@@ -252,6 +252,7 @@ function DesktopApp() {
 
         if (recovery.reason === "target_changed") {
           toast.warning(t("errors.targetChangedTitle"), {
+            duration: 10000,
             description: t("errors.targetChangedDescription"),
             action: {
               label: t("errors.targetChangedPasteHereAction"),
@@ -264,6 +265,7 @@ function DesktopApp() {
         }
 
         toast.error(t("errors.pasteFailedTitle"), {
+          duration: Infinity,
           description: recovery.copied
             ? `${t("errors.pasteFailed")} ${t("errors.pasteFailedCopiedHint")}`
             : t("errors.pasteFailed"),
@@ -284,6 +286,7 @@ function DesktopApp() {
   useEffect(() => {
     const unlisten = listen("transform-recovery-copied", () => {
       toast.error(t("errors.transformRecoveryCopiedTitle"), {
+        duration: Infinity,
         description: t("errors.transformRecoveryCopiedDescription"),
         action: {
           label: t("errors.pasteFailedCopyAction"),
@@ -315,6 +318,7 @@ function DesktopApp() {
         }
 
         toast.warning(t("errors.languageGuardTitle"), {
+          duration: 10000,
           description: descriptionParts.join(" "),
           action: {
             label: t("errors.languageGuardPasteAnyway"),
