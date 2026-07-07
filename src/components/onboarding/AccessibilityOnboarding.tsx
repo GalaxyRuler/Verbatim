@@ -63,7 +63,9 @@ const AccessibilityOnboarding: React.FC<AccessibilityOnboardingProps> = ({
 
   const completeOnboarding = useCallback(async () => {
     await Promise.all([refreshAudioDevices(), refreshOutputDevices()]);
-    timeoutRef.current = setTimeout(() => onComplete(), 300);
+    // Show the quiet success state briefly, then auto-advance. The timeout is
+    // cleared on unmount by the cleanup effect below.
+    timeoutRef.current = setTimeout(() => onComplete(), 800);
   }, [onComplete, refreshAudioDevices, refreshOutputDevices]);
 
   const hasWindowsMicrophoneAccess = useCallback(async (): Promise<boolean> => {
@@ -258,6 +260,9 @@ const AccessibilityOnboarding: React.FC<AccessibilityOnboardingProps> = ({
   };
 
   const handleGrantAccessibility = async () => {
+    // A fresh grant attempt gets a fresh polling error budget.
+    errorCountRef.current = 0;
+    setShowManualFallback(false);
     try {
       await requestAccessibilityPermission();
       setPermissions((prev) => ({ ...prev, accessibility: "waiting" }));
@@ -269,6 +274,9 @@ const AccessibilityOnboarding: React.FC<AccessibilityOnboardingProps> = ({
   };
 
   const handleGrantMicrophone = async () => {
+    // A fresh grant attempt gets a fresh polling error budget.
+    errorCountRef.current = 0;
+    setShowManualFallback(false);
     try {
       if (isWindows) {
         await commands.openMicrophonePrivacySettings();
@@ -304,9 +312,7 @@ const AccessibilityOnboarding: React.FC<AccessibilityOnboardingProps> = ({
   if (allGranted) {
     return (
       <div className="h-screen w-screen flex flex-col items-center justify-center gap-4">
-        <div className="p-4 rounded-full bg-emerald-500/20">
-          <Check className="w-12 h-12 text-emerald-400" />
-        </div>
+        <Check className="w-6 h-6 text-success" />
         <p className="text-lg font-medium text-text">
           {t("onboarding.permissions.allGranted")}
         </p>
@@ -346,7 +352,7 @@ const AccessibilityOnboarding: React.FC<AccessibilityOnboardingProps> = ({
                   {t("onboarding.permissions.microphone.description")}
                 </p>
                 {permissions.microphone === "granted" ? (
-                  <div className="flex items-center gap-2 text-emerald-400 text-sm">
+                  <div className="flex items-center gap-2 text-success text-sm">
                     <Check className="w-4 h-4" />
                     {t("onboarding.permissions.granted")}
                   </div>
@@ -385,7 +391,7 @@ const AccessibilityOnboarding: React.FC<AccessibilityOnboardingProps> = ({
                   {t("onboarding.permissions.accessibility.description")}
                 </p>
                 {permissions.accessibility === "granted" ? (
-                  <div className="flex items-center gap-2 text-emerald-400 text-sm">
+                  <div className="flex items-center gap-2 text-success text-sm">
                     <Check className="w-4 h-4" />
                     {t("onboarding.permissions.granted")}
                   </div>
