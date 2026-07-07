@@ -182,7 +182,15 @@ const MicrophoneReadinessOnboarding: React.FC<
           </Alert>
         )}
 
-        <div className="flex justify-end">
+        <div className="flex justify-end gap-2">
+          <Button
+            variant="ghost"
+            onClick={() => {
+              void complete();
+            }}
+          >
+            {t("onboarding.skipForNow")}
+          </Button>
           <Button
             variant="primary"
             disabled={!streamOpened}

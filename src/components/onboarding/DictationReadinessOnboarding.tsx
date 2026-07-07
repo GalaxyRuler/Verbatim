@@ -185,7 +185,10 @@ const DictationReadinessOnboarding: React.FC<
           </Alert>
         )}
 
-        <div className="flex justify-end">
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={onComplete}>
+            {t("onboarding.skipForNow")}
+          </Button>
           <Button
             variant="primary"
             disabled={testState !== "ready"}

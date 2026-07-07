@@ -20,6 +20,7 @@
     "snippets": "Snippets"
   },
   "onboarding": {
+    "skipForNow": "Şimdilik atla",
     "subtitle": "Başlamak için bir transkripsiyon modeli seçin",
     "privacyNote": "Transkripsiyon tamamen bu bilgisayarda çalışır. Ses kaydınız hiçbir zaman internete yüklenmez.",
     "privacyNoteNetwork": "Verbatim ağı yalnızca güncelleme denetimleri, model indirmeleri ve yapılandırdığınız isteğe bağlı hizmetler için kullanır.",

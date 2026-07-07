@@ -20,6 +20,7 @@
     "snippets": "Snippets"
   },
   "onboarding": {
+    "skipForNow": "Pular por enquanto",
     "subtitle": "Para começar, escolha um modelo de transcrição",
     "privacyNote": "A transcrição é executada inteiramente neste computador. Seu áudio nunca é enviado para a internet.",
     "privacyNoteNetwork": "O Verbatim só usa a rede para verificar atualizações, baixar modelos e para os serviços opcionais que você configurar.",

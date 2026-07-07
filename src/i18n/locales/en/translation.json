@@ -20,6 +20,7 @@
     "snippets": "Snippets"
   },
   "onboarding": {
+    "skipForNow": "Skip for now",
     "subtitle": "To get started, choose a transcription model",
     "privacyNote": "Transcription runs entirely on this computer. Your audio is never uploaded.",
     "privacyNoteNetwork": "Verbatim only uses the network for update checks, model downloads, and optional services you configure.",

@@ -20,6 +20,7 @@
     "snippets": "Snippets"
   },
   "onboarding": {
+    "skipForNow": "Tạm thời bỏ qua",
     "subtitle": "Để bắt đầu, hãy chọn một mô hình chuyển đổi giọng nói",
     "privacyNote": "Quá trình chuyển đổi giọng nói diễn ra hoàn toàn trên máy tính này. Âm thanh của bạn không bao giờ được tải lên.",
     "privacyNoteNetwork": "Verbatim chỉ dùng mạng để kiểm tra bản cập nhật, tải mô hình và cho các dịch vụ tùy chọn mà bạn thiết lập.",

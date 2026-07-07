@@ -20,6 +20,7 @@
     "snippets": "Snippets"
   },
   "onboarding": {
+    "skipForNow": "Hoppa över för tillfället",
     "subtitle": "För att komma igång, välj en transkriptionsmodell",
     "privacyNote": "Transkriberingen sker helt och hållet på den här datorn. Ditt ljud laddas aldrig upp.",
     "privacyNoteNetwork": "Verbatim använder bara nätverket för uppdateringskontroller, modellnedladdningar och valfria tjänster som du konfigurerar.",
