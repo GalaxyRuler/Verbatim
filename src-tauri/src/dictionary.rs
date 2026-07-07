@@ -511,6 +511,30 @@ fn source_is_conflicted(
     })
 }
 
+/// Max inert auto-learn candidates kept in the review queue.
+pub const MAX_LEARN_CANDIDATES: usize = 50;
+/// Candidates untouched longer than this are expired (30 days).
+pub const MAX_CANDIDATE_AGE_MS: u64 = 30 * 24 * 60 * 60 * 1000;
+
+/// Bound the inert candidate store: drop candidates untouched past the age limit, then, if
+/// still over the size cap, evict the oldest (least-recently-updated). Returns count removed.
+pub fn prune_learn_candidates(settings: &mut AppSettings, now_ms: u64) -> usize {
+    let before = settings.dictionary_learn_candidates.len();
+    settings
+        .dictionary_learn_candidates
+        .retain(|c| now_ms.saturating_sub(c.updated_at_ms) <= MAX_CANDIDATE_AGE_MS);
+    if settings.dictionary_learn_candidates.len() > MAX_LEARN_CANDIDATES {
+        // newest first, then keep the cap
+        settings
+            .dictionary_learn_candidates
+            .sort_by(|a, b| b.updated_at_ms.cmp(&a.updated_at_ms));
+        settings
+            .dictionary_learn_candidates
+            .truncate(MAX_LEARN_CANDIDATES);
+    }
+    before - settings.dictionary_learn_candidates.len()
+}
+
 pub fn observe_correction(
     settings: &mut AppSettings,
     now_ms: u64,
@@ -536,6 +560,10 @@ pub fn observe_correction(
     if has_phrase(&settings.dictionary_entries, &phrase, None) {
         return ObserveOutcome::NoChange;
     }
+
+    // Bound the candidate store on every learn pass (part of this locked mutation); a pair
+    // re-corrected after the age limit simply starts fresh.
+    prune_learn_candidates(settings, now_ms);
 
     let (canon_src, canon_phrase) = candidate_pair(&replacement_of, &phrase);
     if let Some(index) = settings.dictionary_learn_candidates.iter().position(|c| {
@@ -706,9 +734,10 @@ mod tests {
     use super::{
         approve_candidate, delete_entries, dictionary_phrases, make_dictionary_entry_id,
         migrate_dictionary_v1, observe_correction, promote_candidate_to_entry,
-        record_learn_outcomes, reject_candidate, replace_dictionary_phrases,
-        sanitize_dictionary_phrase, set_entry_active, sync_legacy_custom_words, update_entry,
-        upsert_auto_learn_entry, upsert_manual_entry, ObserveOutcome,
+        prune_learn_candidates, record_learn_outcomes, reject_candidate,
+        replace_dictionary_phrases, sanitize_dictionary_phrase, set_entry_active,
+        sync_legacy_custom_words, update_entry, upsert_auto_learn_entry, upsert_manual_entry,
+        ObserveOutcome, MAX_CANDIDATE_AGE_MS, MAX_LEARN_CANDIDATES,
     };
     use crate::settings::{
         get_default_settings, DictionaryEntry, DictionaryEntryPriority, DictionaryEntrySource,
@@ -1551,5 +1580,90 @@ mod tests {
         assert_eq!(s.dictionary_diagnostics.learned, 0);
         assert_eq!(s.dictionary_diagnostics.promoted, 0);
         assert_eq!(s.dictionary_diagnostics.since_ms, 999); // reset stamps a fresh window start
+    }
+
+    fn candidate(phrase: &str, replacement_of: Option<&str>, updated_at_ms: u64) -> LearnCandidate {
+        LearnCandidate {
+            replacement_of: replacement_of.map(str::to_string),
+            phrase: phrase.into(),
+            occurrences: 1,
+            last_evidence_session: None,
+            created_at_ms: updated_at_ms,
+            updated_at_ms,
+        }
+    }
+
+    #[test]
+    fn prune_drops_candidates_older_than_age_limit() {
+        let mut s = get_default_settings();
+        let now = 1_000_000_000_000u64;
+        s.dictionary_learn_candidates = vec![
+            candidate("Fresh", Some("fresh"), now - 1000), // recent
+            candidate("Stale", Some("stale"), now - MAX_CANDIDATE_AGE_MS - 1), // just past limit
+            candidate("Edge", Some("edge"), now - MAX_CANDIDATE_AGE_MS), // exactly at limit -> kept
+        ];
+        let removed = prune_learn_candidates(&mut s, now);
+        assert_eq!(removed, 1);
+        let phrases: Vec<&str> = s
+            .dictionary_learn_candidates
+            .iter()
+            .map(|c| c.phrase.as_str())
+            .collect();
+        assert!(phrases.contains(&"Fresh") && phrases.contains(&"Edge"));
+        assert!(!phrases.contains(&"Stale"));
+    }
+
+    #[test]
+    fn prune_caps_store_evicting_oldest() {
+        let mut s = get_default_settings();
+        let now = 1_000_000_000_000u64;
+        // MAX_LEARN_CANDIDATES + 3 candidates, all within age, distinct updated_at.
+        s.dictionary_learn_candidates = (0..(MAX_LEARN_CANDIDATES as u64 + 3))
+            .map(|i| candidate(&format!("p{i}"), Some(&format!("s{i}")), now - i * 10))
+            .collect();
+        let removed = prune_learn_candidates(&mut s, now);
+        assert_eq!(removed, 3);
+        assert_eq!(s.dictionary_learn_candidates.len(), MAX_LEARN_CANDIDATES);
+        // The 3 evicted are the oldest (largest i => smallest updated_at). Newest (p0) survives.
+        let phrases: Vec<String> = s
+            .dictionary_learn_candidates
+            .iter()
+            .map(|c| c.phrase.clone())
+            .collect();
+        assert!(phrases.contains(&"p0".to_string()));
+        assert!(!phrases.contains(&format!("p{}", MAX_LEARN_CANDIDATES as u64 + 2)));
+    }
+
+    #[test]
+    fn prune_noop_when_within_limits() {
+        let mut s = get_default_settings();
+        let now = 1_000_000_000_000u64;
+        s.dictionary_learn_candidates = vec![
+            candidate("A", Some("a"), now),
+            candidate("B", Some("b"), now),
+        ];
+        assert_eq!(prune_learn_candidates(&mut s, now), 0);
+        assert_eq!(s.dictionary_learn_candidates.len(), 2);
+    }
+
+    #[test]
+    fn observe_correction_prunes_stale_candidates() {
+        let mut s = get_default_settings();
+        let now = 1_000_000_000_000u64;
+        s.dictionary_learn_candidates = vec![candidate(
+            "Stale",
+            Some("stale"),
+            now - MAX_CANDIDATE_AGE_MS - 1,
+        )];
+        // A brand-new correction triggers pruning; the stale candidate is dropped and the new one learned.
+        let out = observe_correction(&mut s, now, "s1", "robin", Some("Robyn"));
+        assert_eq!(out, ObserveOutcome::Learned);
+        let phrases: Vec<&str> = s
+            .dictionary_learn_candidates
+            .iter()
+            .map(|c| c.phrase.as_str())
+            .collect();
+        assert!(phrases.contains(&"Robyn"));
+        assert!(!phrases.contains(&"Stale"));
     }
 }
