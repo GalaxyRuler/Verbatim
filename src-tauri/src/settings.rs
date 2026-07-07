@@ -175,6 +175,32 @@ pub struct DictionaryEntry {
     pub needs_review: bool,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, Type)]
+pub struct DictionaryDiagnostics {
+    #[serde(default)]
+    pub learned: u32,
+    #[serde(default)]
+    pub promoted: u32,
+    #[serde(default)]
+    pub reinforced: u32,
+    #[serde(default)]
+    pub routed: u32,
+    #[serde(default)]
+    pub skip_secure_field: u32,
+    #[serde(default)]
+    pub skip_secure_check_error: u32,
+    #[serde(default)]
+    pub skip_read_cap_exceeded: u32,
+    #[serde(default)]
+    pub skip_target_changed: u32,
+    #[serde(default)]
+    pub skip_no_post_paste_change: u32,
+    #[serde(default)]
+    pub skip_runtime_id: u32,
+    #[serde(default)]
+    pub since_ms: u64,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Type)]
 pub struct LearnCandidate {
     #[serde(default)]
@@ -545,6 +571,8 @@ pub struct AppSettings {
     pub dictionary_schema_version: u32,
     #[serde(default = "default_auto_add_dictionary_words")]
     pub auto_add_dictionary_words: bool,
+    #[serde(default)]
+    pub dictionary_diagnostics: DictionaryDiagnostics,
     #[serde(default)]
     pub snippets: Vec<crate::snippets::SnippetEntry>,
     #[serde(default)]
@@ -1282,6 +1310,7 @@ pub fn get_default_settings() -> AppSettings {
         dictionary_learn_candidates: Vec::new(),
         dictionary_schema_version: 0,
         auto_add_dictionary_words: default_auto_add_dictionary_words(),
+        dictionary_diagnostics: DictionaryDiagnostics::default(),
         snippets: Vec::new(),
         model_unload_timeout: ModelUnloadTimeout::default(),
         word_correction_threshold: default_word_correction_threshold(),

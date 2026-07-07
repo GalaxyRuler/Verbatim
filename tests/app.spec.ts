@@ -225,6 +225,7 @@ const installTauriMocks = async (
     androidAsrPacks?: Array<Record<string, unknown>>;
     androidLlmPacks?: Array<Record<string, unknown>>;
     learnCandidates?: Array<Record<string, unknown>>;
+    dictionaryDiagnostics?: Record<string, unknown> | null;
   } = {},
 ) => {
   const availableModels = mockOptions.availableModels ?? models;
@@ -292,6 +293,7 @@ const installTauriMocks = async (
       androidAsrPacks,
       androidLlmPacks,
       learnCandidates,
+      dictionaryDiagnostics,
       localPostProcessingModels,
       initialHistoryEntries,
       osType,
@@ -357,6 +359,8 @@ const installTauriMocks = async (
       let learnCandidateRows = [
         ...((learnCandidates as Array<Record<string, unknown>>) ?? []),
       ];
+      let dictionaryDiagnosticsRow =
+        (dictionaryDiagnostics as Record<string, unknown> | null) ?? null;
       const availableMicrophones = [
         { index: "default", name: "Default", is_default: true },
         { index: "studio", name: "Studio Mic", is_default: false },
@@ -669,6 +673,12 @@ const installTauriMocks = async (
               learnCandidateRows = learnCandidateRows.filter(
                 (candidate) => candidate.phrase !== phrase,
               );
+              return null;
+            }
+            case "get_dictionary_diagnostics":
+              return dictionaryDiagnosticsRow;
+            case "reset_dictionary_diagnostics": {
+              dictionaryDiagnosticsRow = null;
               return null;
             }
             case "list_snippet_entries":
@@ -1374,6 +1384,7 @@ const installTauriMocks = async (
       androidAsrPacks,
       androidLlmPacks,
       learnCandidates: mockOptions.learnCandidates ?? [],
+      dictionaryDiagnostics: mockOptions.dictionaryDiagnostics ?? null,
       localPostProcessingModels: localLlmModels,
       initialHistoryEntries: historyEntries,
       osType,
@@ -3055,6 +3066,29 @@ test.describe("Verbatim App", () => {
     await page.getByText("Dictionary").click();
 
     await expect(page.getByTestId("dictionary-pending-review")).toHaveCount(0);
+  });
+
+  test("learning diagnostics panel shows outcome counts", async ({ page }) => {
+    await installTauriMocks(page, {}, [], "windows", {
+      dictionaryDiagnostics: {
+        learned: 3,
+        promoted: 1,
+        reinforced: 2,
+        skip_secure_field: 1,
+        since_ms: 1700000000000,
+      },
+    });
+    await page.goto("/");
+
+    await page.getByText("Dictionary").click();
+
+    const diagnostics = page.getByTestId("dictionary-diagnostics");
+    await expect(diagnostics).toBeVisible();
+    await diagnostics.locator("summary").click();
+    await expect(diagnostics).toContainText("3");
+    await expect(diagnostics).toContainText("1");
+    await expect(diagnostics).toContainText("2");
+    await expect(diagnostics).toContainText("Password fields");
   });
 
   test("advanced settings no longer owns dictionary management", async ({

@@ -854,6 +854,21 @@
         "keep": "Keep",
         "delete": "Delete"
       },
+      "diagnostics": {
+        "title": "Learning diagnostics",
+        "learned": "Learned",
+        "promoted": "Promoted",
+        "reinforced": "Reinforced",
+        "skippedTitle": "Skipped captures",
+        "skipSecureField": "Password fields",
+        "skipReadCap": "Oversized fields",
+        "skipSecureCheck": "Secure-check errors",
+        "noSkips": "No captures were skipped",
+        "since": "Since {{date}}",
+        "noActivity": "No learning activity recorded yet",
+        "reset": "Reset stats",
+        "resetError": "Couldn't reset diagnostics"
+      },
       "errors": {
         "load": "Failed to load dictionary",
         "add": "Failed to add dictionary entry",
