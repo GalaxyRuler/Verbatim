@@ -50,12 +50,10 @@ interface DiagnosticState {
 }
 
 const toneClasses: Record<StatusTone, string> = {
-  success:
-    "bg-green-500/15 text-green-800 dark:text-green-300 border-green-500/30",
-  warning:
-    "bg-amber-500/15 text-amber-900 dark:text-amber-300 border-amber-500/30",
-  neutral: "bg-mid-gray/10 text-text/70 border-mid-gray/20",
-  danger: "bg-red-500/15 text-red-800 dark:text-red-300 border-red-500/30",
+  success: "text-success",
+  warning: "text-warning",
+  danger: "text-danger",
+  neutral: "text-text-secondary",
 };
 
 const formatList = (items: string[], fallback: string): string =>
@@ -449,8 +447,12 @@ export const DiagnosticsPanel: React.FC = () => {
               </div>
               <div className="min-w-0 space-y-1">
                 <span
-                  className={`inline-flex max-w-full items-center rounded border px-2 py-0.5 text-xs font-medium ${toneClasses[item.tone ?? "neutral"]}`}
+                  className={`inline-flex max-w-full items-center gap-1.5 text-xs font-medium ${toneClasses[item.tone ?? "neutral"]}`}
                 >
+                  <span
+                    aria-hidden
+                    className="w-1.5 h-1.5 rounded-full bg-current shrink-0"
+                  />
                   <span className="truncate">{item.value}</span>
                 </span>
                 {item.detail && (
