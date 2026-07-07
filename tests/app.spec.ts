@@ -2345,9 +2345,9 @@ test.describe("Verbatim App", () => {
     await page.getByRole("button", { name: /Bottom right/ }).click();
     await expect(page.getByText("Bottom right")).toBeVisible();
 
-    await page.getByRole("button", { name: /Application Language/ }).click();
+    await page.getByRole("button", { name: /App display language/ }).click();
     const languageDialog = page.getByRole("dialog", {
-      name: "Application Language",
+      name: "App display language",
     });
     await expect(languageDialog).toBeVisible();
     await expect(

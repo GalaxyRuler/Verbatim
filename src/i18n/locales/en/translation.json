@@ -256,7 +256,7 @@
         }
       },
       "language": {
-        "title": "Languages",
+        "title": "Speech languages",
         "description": "Choose one or more speech languages. Verbatim uses model-specific hints so selected languages can guide transcription before cleanup.",
         "descriptionUnsupported": "Parakeet model automatically detects the language. No manual selection is needed.",
         "searchPlaceholder": "Search languages...",
@@ -1010,7 +1010,7 @@
     "targetPrivacyExcludedDescription": "The active app matches a private-app exclusion. Verbatim did not start recording."
   },
   "appLanguage": {
-    "title": "Application Language",
+    "title": "App display language",
     "description": "Change the language of the Verbatim interface"
   },
   "overlay": {
