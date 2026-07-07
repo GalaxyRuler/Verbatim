@@ -559,7 +559,7 @@ function DesktopApp() {
         dir={direction}
         className="h-screen flex flex-col items-center justify-center gap-3 select-none cursor-default bg-background text-text"
       >
-        <VerbatimMark width={40} height={40} />
+        <VerbatimMark width={40} height={40} aria-hidden />
         <p className="text-sm text-mid-gray">{t("common.starting")}</p>
       </div>
     );

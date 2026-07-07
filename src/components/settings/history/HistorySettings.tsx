@@ -2,12 +2,12 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { readFile } from "@tauri-apps/plugin-fs";
 import {
+  BookPlus,
   Check,
   Copy,
   FolderOpen,
   MoreVertical,
   RotateCcw,
-  Sparkles,
   Star,
   Trash2,
   X,
@@ -630,7 +630,7 @@ const HistoryEntryComponent: React.FC<HistoryEntryProps> = ({
           {
             key: "learn-correction",
             label: t("settings.history.learnCorrection"),
-            icon: <Sparkles width={16} height={16} />,
+            icon: <BookPlus width={16} height={16} />,
             onSelect: handleStartLearningCorrection,
             disabled: !hasTranscription || retrying || isLearningCorrection,
           },

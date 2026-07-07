@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { ChevronDown } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 export interface DropdownOption {
@@ -72,19 +73,11 @@ export const Dropdown: React.FC<DropdownProps> = ({
         disabled={disabled}
       >
         <span className="truncate">{selectedOption?.label || placeholder}</span>
-        <svg
-          className={`w-4 h-4 ms-2 transition-transform duration-200 ${isOpen ? "transform rotate-180" : ""}`}
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M19 9l-7 7-7-7"
-          />
-        </svg>
+        <ChevronDown
+          size={16}
+          aria-hidden
+          className={`ms-2 shrink-0 transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`}
+        />
       </button>
       {isOpen && !disabled && (
         <div className="absolute top-full left-0 right-0 mt-1 bg-background border border-border rounded-md shadow-menu z-50 max-h-60 overflow-y-auto">

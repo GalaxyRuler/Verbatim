@@ -1,16 +1,20 @@
+import type React from "react";
+
 const VerbatimMark = ({
   width,
   height,
+  ...props
 }: {
   width?: number | string;
   height?: number | string;
-}) => (
+} & React.SVGProps<SVGSVGElement>) => (
   <svg
     width={width || 126}
     height={height || 135}
     viewBox="0 0 126 135"
     className="fill-text stroke-text"
     xmlns="http://www.w3.org/2000/svg"
+    {...props}
   >
     <path
       fillRule="evenodd"

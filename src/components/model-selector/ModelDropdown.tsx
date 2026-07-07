@@ -52,7 +52,7 @@ const ModelDropdown: React.FC<ModelDropdownProps> = ({
                     {getTranslatedModelName(model, t)}
                     {model.is_custom && (
                       <span
-                        className="ms-1.5 text-[10px] font-semibold text-amber-600 uppercase"
+                        className="ms-1.5 text-xs font-semibold text-warning uppercase"
                         title={t("modelSelector.customUnverifiedDescription")}
                       >
                         {t("modelSelector.customUnverified")}

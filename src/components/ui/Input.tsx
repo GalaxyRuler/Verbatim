@@ -11,7 +11,7 @@ export const Input: React.FC<InputProps> = ({
   ...props
 }) => {
   const baseClasses =
-    "px-2 py-1 text-sm font-semibold bg-mid-gray/10 border border-border rounded-md text-start transition-all duration-150";
+    "text-sm font-semibold bg-mid-gray/10 border border-border rounded-md text-start transition-all duration-150";
 
   const interactiveClasses = disabled
     ? "opacity-60 cursor-not-allowed"

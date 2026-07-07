@@ -162,7 +162,7 @@ const MicrophoneReadinessOnboarding: React.FC<
             {levels.map((level, index) => (
               <div
                 key={index}
-                className="self-end rounded-sm bg-logo-primary transition-all"
+                className="self-end rounded-md bg-logo-primary transition-all"
                 style={{
                   height: `${Math.max(8, normalizeLevel(level) * 100)}%`,
                   opacity: 0.25 + normalizeLevel(level) * 0.75,

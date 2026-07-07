@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { Check, Copy } from "lucide-react";
 import { SettingContainer } from "./SettingContainer";
 
 interface TextDisplayProps {
@@ -65,25 +66,12 @@ export const TextDisplay: React.FC<TextDisplayProps> = ({
             onClick={handleCopy}
             className="flex items-center justify-center px-2 py-1 w-12 min-h-8 text-xs font-semibold bg-mid-gray/10 border border-border hover:border-border-strong hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-md transition-all duration-150 flex-shrink-0 cursor-pointer"
             title="Copy to clipboard"
+            aria-label="Copy to clipboard"
           >
             {showCopied ? (
-              <div className="flex items-center space-x-1">
-                <svg
-                  className="w-4 h-4"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M5 13l4 4L19 7"
-                  />
-                </svg>
-              </div>
+              <Check size={16} aria-hidden />
             ) : (
-              "Copy"
+              <Copy size={16} aria-hidden />
             )}
           </button>
         )}
