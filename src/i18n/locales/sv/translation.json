@@ -320,7 +320,8 @@
         "output": "Utmatning",
         "transcription": "Transkription",
         "history": "Historik",
-        "experimental": "Experimentellt"
+        "experimental": "Experimentellt",
+        "performance": "Prestanda"
       },
       "experimentalToggle": {
         "label": "Experimentella funktioner",

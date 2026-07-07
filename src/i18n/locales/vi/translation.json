@@ -320,7 +320,8 @@
         "output": "Đầu ra",
         "transcription": "Chuyển đổi",
         "history": "Lịch sử",
-        "experimental": "Thử nghiệm"
+        "experimental": "Thử nghiệm",
+        "performance": "Hiệu năng"
       },
       "experimentalToggle": {
         "label": "Tính năng thử nghiệm",

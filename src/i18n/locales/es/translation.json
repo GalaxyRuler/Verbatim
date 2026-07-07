@@ -320,7 +320,8 @@
         "output": "Salida",
         "transcription": "Transcripción",
         "history": "Historial",
-        "experimental": "Experimental"
+        "experimental": "Experimental",
+        "performance": "Rendimiento"
       },
       "experimentalToggle": {
         "label": "Funciones Experimentales",

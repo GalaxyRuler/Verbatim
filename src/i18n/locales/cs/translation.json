@@ -320,7 +320,8 @@
         "output": "Výstup",
         "transcription": "Přepis",
         "history": "Historie",
-        "experimental": "Experimentální"
+        "experimental": "Experimentální",
+        "performance": "Výkon"
       },
       "experimentalToggle": {
         "label": "Experimentální funkce",

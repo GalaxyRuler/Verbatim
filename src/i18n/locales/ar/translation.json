@@ -298,7 +298,8 @@
         "output": "الإخراج",
         "transcription": "التفريغ الصوتي",
         "history": "السجل",
-        "experimental": "تجريبي"
+        "experimental": "تجريبي",
+        "performance": "الأداء"
       },
       "experimentalToggle": {
         "label": "الميزات التجريبية",

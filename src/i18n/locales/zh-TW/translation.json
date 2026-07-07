@@ -320,7 +320,8 @@
         "output": "輸出",
         "transcription": "轉錄",
         "history": "歷史",
-        "experimental": "實驗性"
+        "experimental": "實驗性",
+        "performance": "效能"
       },
       "experimentalToggle": {
         "label": "實驗性功能",

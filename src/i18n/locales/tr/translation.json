@@ -320,7 +320,8 @@
         "output": "Çıktı",
         "transcription": "Transkripsiyon",
         "history": "Geçmiş",
-        "experimental": "Deneysel"
+        "experimental": "Deneysel",
+        "performance": "Performans"
       },
       "experimentalToggle": {
         "label": "Deneysel Özellikler",

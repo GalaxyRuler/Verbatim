@@ -320,7 +320,8 @@
         "output": "Вывод",
         "transcription": "Транскрипция",
         "history": "История",
-        "experimental": "Экспериментальное"
+        "experimental": "Экспериментальное",
+        "performance": "Производительность"
       },
       "experimentalToggle": {
         "label": "Экспериментальные функции",

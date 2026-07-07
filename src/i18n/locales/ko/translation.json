@@ -320,7 +320,8 @@
         "output": "출력",
         "transcription": "전사",
         "history": "히스토리",
-        "experimental": "실험적"
+        "experimental": "실험적",
+        "performance": "성능"
       },
       "experimentalToggle": {
         "label": "실험적 기능",

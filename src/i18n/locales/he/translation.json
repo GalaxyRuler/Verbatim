@@ -320,7 +320,8 @@
         "output": "פלט",
         "transcription": "תמלול",
         "history": "היסטוריה",
-        "experimental": "ניסיוני"
+        "experimental": "ניסיוני",
+        "performance": "ביצועים"
       },
       "experimentalToggle": {
         "label": "תכונות ניסיוניות",

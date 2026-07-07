@@ -320,7 +320,8 @@
         "output": "Вивід",
         "transcription": "Транскрипція",
         "history": "Історія",
-        "experimental": "Експериментальне"
+        "experimental": "Експериментальне",
+        "performance": "Продуктивність"
       },
       "experimentalToggle": {
         "label": "Експериментальні функції",

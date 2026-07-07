@@ -320,7 +320,8 @@
         "output": "Output",
         "transcription": "Trascrizione",
         "history": "Cronologia",
-        "experimental": "Sperimentale"
+        "experimental": "Sperimentale",
+        "performance": "Prestazioni"
       },
       "experimentalToggle": {
         "label": "Funzionalità Sperimentali",
