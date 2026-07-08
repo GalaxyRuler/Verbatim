@@ -97,6 +97,10 @@
       "cohere-int8": {
         "name": "Cohere",
         "description": "크고 느리지만 매우 정확한 다국어 모델."
+      },
+      "cohere-arabic-int8": {
+        "name": "Cohere Arabic",
+        "description": "아랍어 방언에 최적화되었습니다. 영어도 지원합니다."
       }
     },
     "errors": {

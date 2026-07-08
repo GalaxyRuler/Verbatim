@@ -320,5 +320,24 @@
     "supportsLanguageSelection": true,
     "licenseLabel": "Apache-2.0",
     "acceleratorSupport": ["onnx-runtime"]
+  },
+  {
+    "id": "cohere-arabic-int8",
+    "name": "Cohere Arabic",
+    "description": "Optimized for Arabic dialects. Also supports English.",
+    "filename": "cohere-arabic-int8",
+    "url": "asset:cohere-arabic-int8.tar.gz",
+    "sha256": "8603bf5362b992a27f527d977ed020e7a2e494dbba2f5b1d3d54a74319789fff",
+    "sizeMb": 1723,
+    "isDirectory": true,
+    "engineType": "Cohere",
+    "accuracyScore": 0.9,
+    "speedScore": 0.6,
+    "supportsTranslation": false,
+    "isRecommended": false,
+    "supportedLanguages": ["ar", "en"],
+    "supportsLanguageSelection": true,
+    "licenseLabel": "Apache-2.0",
+    "acceleratorSupport": ["onnx-runtime"]
   }
 ]

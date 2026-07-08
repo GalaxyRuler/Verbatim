@@ -33,6 +33,7 @@ Required mirrored files:
 - `canary-180m-flash.tar.gz`
 - `canary-1b-v2.tar.gz`
 - `cohere-int8.tar.gz`
+- `cohere-arabic-int8.tar.gz`
 - `onnxruntime-osx-x86_64-1.24.2.tgz`
 
 Linux ONNX Runtime builds use Microsoft release assets directly. The macOS

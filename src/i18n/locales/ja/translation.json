@@ -97,6 +97,10 @@
       "cohere-int8": {
         "name": "Cohere",
         "description": "大型で低速ですが、非常に高精度な多言語モデル。"
+      },
+      "cohere-arabic-int8": {
+        "name": "Cohere Arabic",
+        "description": "アラビア語の方言に最適化。英語にも対応。"
       }
     },
     "errors": {

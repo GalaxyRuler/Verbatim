@@ -97,6 +97,10 @@
       "cohere-int8": {
         "name": "Cohere",
         "description": "Büyük, daha yavaş, ancak çok doğru çok dilli bir model."
+      },
+      "cohere-arabic-int8": {
+        "name": "Cohere Arabic",
+        "description": "Arap lehçeleri için optimize edilmiştir. İngilizceyi de destekler."
       }
     },
     "errors": {

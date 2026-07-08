@@ -167,6 +167,25 @@ mod tests {
     }
 
     #[test]
+    fn cohere_arabic_entry_is_arabic_and_english_only() {
+        let models = load_builtin_models().expect("catalog parses");
+        let model = models
+            .get("cohere-arabic-int8")
+            .expect("cohere-arabic-int8 exists");
+
+        assert!(matches!(model.engine_type, EngineType::Cohere));
+        assert_eq!(model.supported_languages, ["ar", "en"]);
+        assert!(model.supports_language_selection);
+        assert!(!model.is_recommended);
+        assert!(!model.supports_translation);
+        assert!(model
+            .url
+            .as_deref()
+            .expect("download url")
+            .ends_with("/cohere-arabic-int8.tar.gz"));
+    }
+
+    #[test]
     fn asset_urls_resolve_to_configured_asset_host() {
         let models = load_builtin_models().expect("catalog parses");
         let medium = models.get("medium").expect("medium exists");

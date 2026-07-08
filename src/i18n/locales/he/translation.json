@@ -97,6 +97,10 @@
       "cohere-int8": {
         "name": "Cohere",
         "description": "מודל גדול, איטי יותר, אך מדויק מאוד ורב-לשוני."
+      },
+      "cohere-arabic-int8": {
+        "name": "Cohere Arabic",
+        "description": "מותאם לניבים ערביים. תומך גם באנגלית."
       }
     },
     "errors": {
