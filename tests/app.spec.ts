@@ -2797,7 +2797,9 @@ test.describe("Verbatim App", () => {
     await expect(page.getByTitle("General")).toBeVisible();
     await page.getByTitle("Post-processing").click();
 
-    await expect(page.getByText("Enable post-processing", { exact: true })).toBeVisible();
+    await expect(
+      page.getByText("Enable post-processing", { exact: true }),
+    ).toBeVisible();
     await expect(page.getByText("Hotkey", { exact: true })).toHaveCount(0);
     await expect(page.getByText("Managed local model")).toHaveCount(0);
   });
@@ -3107,9 +3109,7 @@ test.describe("Verbatim App", () => {
 
     await expect(page.getByText("Polished transform result")).toBeVisible();
     await expect(page.getByText("Raw selected text")).toHaveCount(0);
-    await expect(
-      page.getByTitle("Copy transcript to clipboard"),
-    ).toBeVisible();
+    await expect(page.getByTitle("Copy transcript to clipboard")).toBeVisible();
     await expect(page.getByTitle("Delete entry")).toBeVisible();
 
     // Remaining actions live behind the overflow menu.

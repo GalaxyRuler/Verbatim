@@ -200,9 +200,7 @@ export const LanguageSelector: React.FC<LanguageSelectorProps> = ({
                         key={language.value}
                         type="button"
                         className={`w-full px-2 py-1 text-sm text-start hover:bg-accent/10 transition-colors duration-150 ${
-                          isChecked
-                            ? "bg-accent/15 text-text font-medium"
-                            : ""
+                          isChecked ? "bg-accent/15 text-text font-medium" : ""
                         } ${isOnlyChecked ? "cursor-default" : ""}`}
                         onClick={() => handleLanguageToggle(language.value)}
                         disabled={isOnlyChecked}

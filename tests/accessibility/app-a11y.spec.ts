@@ -99,7 +99,9 @@ test.describe("accessibility gates", () => {
     await page.goto("/");
     await expect(page.getByRole("button", { name: "General" })).toBeVisible();
 
-    const trigger = page.locator('[data-testid="setting-info-trigger"]').first();
+    const trigger = page
+      .locator('[data-testid="setting-info-trigger"]')
+      .first();
     await trigger.focus();
     await expect(trigger).toBeFocused();
     await page.keyboard.press("Enter");

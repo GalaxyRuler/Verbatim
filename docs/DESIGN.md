@@ -17,13 +17,13 @@ alone: every color, icon, and motion either communicates state or is removed.
 directly from the `@theme` block. Light values live in `@theme`, dark
 overrides in the `prefers-color-scheme: dark` block of the same file.
 
-| Group | Tokens |
-| --- | --- |
-| Core | `text`, `text-secondary`, `text-disabled`, `background`, `surface`, `border`, `border-strong` |
-| Interaction | `accent`, `accent-fg` |
-| Status | `success`, `success-bg`, `warning`, `warning-bg`, `danger`, `danger-bg`, `info`, `info-bg` |
-| Shadow | `shadow-menu` (dropdown/tooltip panels) |
-| Brand | `logo-primary`, `logo-stroke`, `text-stroke` — **logo rendering only**, never for UI surfaces or text |
+| Group       | Tokens                                                                                                |
+| ----------- | ----------------------------------------------------------------------------------------------------- |
+| Core        | `text`, `text-secondary`, `text-disabled`, `background`, `surface`, `border`, `border-strong`         |
+| Interaction | `accent`, `accent-fg`                                                                                 |
+| Status      | `success`, `success-bg`, `warning`, `warning-bg`, `danger`, `danger-bg`, `info`, `info-bg`            |
+| Shadow      | `shadow-menu` (dropdown/tooltip panels)                                                               |
+| Brand       | `logo-primary`, `logo-stroke`, `text-stroke` — **logo rendering only**, never for UI surfaces or text |
 
 Rules:
 
@@ -54,12 +54,12 @@ Rules:
 
 Type steps (no arbitrary values like `text-[10px]`):
 
-| Role | Classes |
-| --- | --- |
-| Page title | `text-xl font-semibold` |
-| Group label | `text-xs font-medium uppercase tracking-wide` |
-| Row label | `text-sm font-medium` |
-| Secondary text | `text-sm text-text-secondary` |
+| Role           | Classes                                       |
+| -------------- | --------------------------------------------- |
+| Page title     | `text-xl font-semibold`                       |
+| Group label    | `text-xs font-medium uppercase tracking-wide` |
+| Row label      | `text-sm font-medium`                         |
+| Secondary text | `text-sm text-text-secondary`                 |
 
 Radius scale:
 
