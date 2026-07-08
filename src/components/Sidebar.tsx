@@ -4,13 +4,13 @@ import {
   BookOpen,
   Cog,
   History,
+  House,
   Info,
   Wand2,
   Wrench,
   Cpu,
   TextQuote,
 } from "lucide-react";
-import VerbatimMark from "./icons/VerbatimMark";
 import {
   GeneralSettings,
   AdvancedSettings,
@@ -44,7 +44,7 @@ interface SectionConfig {
 export const SECTIONS_CONFIG = {
   general: {
     labelKey: "sidebar.general",
-    icon: VerbatimMark,
+    icon: House,
     component: GeneralSettings,
     enabled: () => true,
   },
