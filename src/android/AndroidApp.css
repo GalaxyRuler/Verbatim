@@ -891,3 +891,22 @@
 .android-nav-active .android-nav-icon {
   background: var(--android-primary-container);
 }
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  /* The bubble-preview waveform loops purely for decoration. Kill the
+     animation outright; the staggered per-bar heights are baked into the
+     CSS (see .android-wave span nth-child rules), so the bars still render
+     as a static waveform shape conveying the recording affordance —
+     information preserved, motion removed (WCAG SC 2.3.3). */
+  .android-wave span {
+    animation: none !important;
+  }
+}
