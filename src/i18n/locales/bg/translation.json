@@ -13,14 +13,17 @@
     "models": "Модели",
     "advanced": "Разширени",
     "postProcessing": "Постобработка",
-    "history": "История",
-    "debug": "Отстраняване",
+    "history": "История и поверителност",
+    "debug": "Отстраняване на проблеми",
     "about": "За приложението",
     "dictionary": "Dictionary",
     "snippets": "Snippets"
   },
   "onboarding": {
+    "skipForNow": "Пропусни засега",
     "subtitle": "За да започнете, изберете модел за транскрипция",
+    "privacyNote": "Транскрипцията се извършва изцяло на този компютър. Вашето аудио никога не се качва.",
+    "privacyNoteNetwork": "Verbatim използва мрежата само за проверка за актуализации, изтегляне на модели и за незадължителните услуги, които конфигурирате.",
     "recommended": "Препоръчан",
     "download": "Изтегляне",
     "downloading": "Изтегля се...",
@@ -118,7 +121,11 @@
       "allGranted": "Готово!",
       "errors": {
         "checkFailed": "Проверката на разрешенията не бе успешна. Опитайте отново.",
-        "requestFailed": "Заявката за разрешение не бе успешна. Опитайте отново."
+        "requestFailed": "Заявката за разрешение не бе успешна. Опитайте отново.",
+        "manualFallbackTitle": "Не може да се провери автоматично",
+        "manualFallbackMacos": "Отворете Системни настройки → Поверителност и сигурност → Микрофон (и Достъпност), разрешете Verbatim и след това изберете „Провери отново“.",
+        "manualFallbackWindows": "Отворете Настройки → Поверителност и защита → Микрофон, разрешете на приложенията достъп до микрофона и след това изберете „Провери отново“.",
+        "checkAgain": "Провери отново"
       }
     },
     "shortcut": {
@@ -250,7 +257,7 @@
         "unassigned": "Unassigned"
       },
       "language": {
-        "title": "Език",
+        "title": "Езици за диктуване",
         "description": "Изберете езика за разпознаване на реч. „Автоматично“ определя езика сам, а изборът на конкретен език може да подобри точността за него.",
         "descriptionUnsupported": "Моделът Parakeet автоматично открива езика. Ръчен избор не е необходим.",
         "searchPlaceholder": "Търсене на езици...",
@@ -313,8 +320,8 @@
         "app": "Приложение",
         "output": "Изход",
         "transcription": "Транскрипция",
-        "history": "История",
-        "experimental": "Експериментални"
+        "experimental": "Експериментални",
+        "performance": "Производителност"
       },
       "experimentalToggle": {
         "label": "Експериментални функции",
@@ -492,11 +499,15 @@
     },
     "postProcessing": {
       "title": "Постобработка",
+      "groups": {
+        "enable": "Постобработка"
+      },
       "hotkey": {
         "title": "Бърз клавиш"
       },
       "api": {
         "title": "API (съвместим с OpenAI)",
+        "dataFlowNotice": "Когато се изпълнява постобработка, готовата транскрипция се изпраща към {{provider}}. Аудиото никога не напуска този компютър.",
         "provider": {
           "title": "Доставчик",
           "description": "Изберете доставчик, съвместим с OpenAI."
@@ -615,7 +626,9 @@
       "clearRecordingsConfirm": "Delete unsaved dictation recordings while keeping saved entries and transform-only text?",
       "clearRecordingsError": "Failed to clear recordings.",
       "clearRecordingsSuccess": "Recordings cleared.",
-      "retentionNote": "History can include raw transcripts, refined text, transform text, and linked WAV files. Saved entries are kept until you delete them."
+      "retentionNote": "History can include raw transcripts, refined text, transform text, and linked WAV files. Saved entries are kept until you delete them.",
+      "storageGroup": "Съхранение",
+      "moreActions": "Още действия"
     },
     "debug": {
       "title": "Отстраняване",
@@ -642,7 +655,8 @@
       "historyLimit": {
         "title": "Лимит на историята",
         "description": "Максимален брой записи в историята за пазене",
-        "entries": "записа"
+        "entries": "записа",
+        "invalid": "Въведете число между 0 и 1000."
       },
       "recordingRetention": {
         "title": "Автоматично изтриване на записи",
@@ -756,6 +770,9 @@
           "credentialStore": "{{platform}} credential backend",
           "credentialStoreRetainedLegacy": "Credential store is unavailable; {{count}} legacy API-key value remains in settings so it is not lost."
         }
+      },
+      "groups": {
+        "logs": "Логове"
       }
     },
     "about": {
@@ -958,7 +975,9 @@
     "off": "Изкл.",
     "yes": "Да",
     "no": "Не",
+    "starting": "Стартиране…",
     "noOptionsFound": "Няма намерени опции",
+    "moreInfo": "Повече информация",
     "appName": "Verbatim"
   },
   "accessibility": {
@@ -1013,7 +1032,7 @@
     "targetPrivacyExcludedDescription": "The active app matches a private-app exclusion. Verbatim did not start recording."
   },
   "appLanguage": {
-    "title": "Език на приложението",
+    "title": "Език на интерфейса",
     "description": "Промяна на езика на интерфейса на Verbatim"
   },
   "overlay": {

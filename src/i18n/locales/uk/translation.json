@@ -13,14 +13,17 @@
     "models": "Моделі",
     "advanced": "Розширені",
     "postProcessing": "Постобробка",
-    "history": "Історія",
-    "debug": "Дебаг",
+    "history": "Історія та конфіденційність",
+    "debug": "Усунення несправностей",
     "about": "Інфо",
     "dictionary": "Dictionary",
     "snippets": "Snippets"
   },
   "onboarding": {
+    "skipForNow": "Поки що пропустити",
     "subtitle": "Для початку оберіть модель транскрипції",
+    "privacyNote": "Транскрипція виконується повністю на цьому комп'ютері. Ваше аудіо ніколи не передається в інтернет.",
+    "privacyNoteNetwork": "Verbatim використовує мережу лише для перевірки оновлень, завантаження моделей і додаткових сервісів, які ви налаштовуєте.",
     "recommended": "Рекомендовано",
     "download": "Завантажити",
     "downloading": "Завантаження...",
@@ -118,7 +121,11 @@
       "allGranted": "Все готово!",
       "errors": {
         "checkFailed": "Не вдалося перевірити дозволи. Будь ласка, спробуйте ще раз.",
-        "requestFailed": "Не вдалося запросити дозвіл. Будь ласка, спробуйте ще раз."
+        "requestFailed": "Не вдалося запросити дозвіл. Будь ласка, спробуйте ще раз.",
+        "manualFallbackTitle": "Не вдається перевірити автоматично",
+        "manualFallbackMacos": "Відкрийте «Системні параметри» → «Конфіденційність і безпека» → «Мікрофон» (і «Доступність»), увімкніть Verbatim, потім натисніть «Перевірити ще раз».",
+        "manualFallbackWindows": "Відкрийте «Параметри» → «Конфіденційність і захист» → «Мікрофон», дозвольте програмам доступ до мікрофона, потім натисніть «Перевірити ще раз».",
+        "checkAgain": "Перевірити ще раз"
       }
     },
     "shortcut": {
@@ -250,7 +257,7 @@
         "unassigned": "Unassigned"
       },
       "language": {
-        "title": "Мова",
+        "title": "Мови диктування",
         "description": "Оберіть мову для розпізнавання мовлення. Режим «Авто» визначить мову автоматично, а вибір конкретної мови може покращити точність.",
         "descriptionUnsupported": "Модель Parakeet автоматично визначає мову. Ручний вибір не потрібен.",
         "searchPlaceholder": "Пошук мов...",
@@ -313,8 +320,8 @@
         "app": "Додаток",
         "output": "Вивід",
         "transcription": "Транскрипція",
-        "history": "Історія",
-        "experimental": "Експериментальне"
+        "experimental": "Експериментальне",
+        "performance": "Продуктивність"
       },
       "experimentalToggle": {
         "label": "Експериментальні функції",
@@ -492,11 +499,15 @@
     },
     "postProcessing": {
       "title": "Постобробка",
+      "groups": {
+        "enable": "Постобробка"
+      },
       "hotkey": {
         "title": "Гаряча клавіша"
       },
       "api": {
         "title": "API (сумісний з OpenAI)",
+        "dataFlowNotice": "Під час постобробки готова транскрипція надсилається до {{provider}}. Аудіо ніколи не залишає цей комп'ютер.",
         "provider": {
           "title": "Провайдер",
           "description": "Оберіть OpenAI-сумісного провайдера"
@@ -615,7 +626,9 @@
       "clearRecordingsConfirm": "Delete unsaved dictation recordings while keeping saved entries and transform-only text?",
       "clearRecordingsError": "Failed to clear recordings.",
       "clearRecordingsSuccess": "Recordings cleared.",
-      "retentionNote": "History can include raw transcripts, refined text, transform text, and linked WAV files. Saved entries are kept until you delete them."
+      "retentionNote": "History can include raw transcripts, refined text, transform text, and linked WAV files. Saved entries are kept until you delete them.",
+      "storageGroup": "Зберігання",
+      "moreActions": "Більше дій"
     },
     "debug": {
       "title": "Дебаг",
@@ -642,7 +655,8 @@
       "historyLimit": {
         "title": "Ліміт історії",
         "description": "Максимальна кількість записів в історії",
-        "entries": "записів"
+        "entries": "записів",
+        "invalid": "Введіть число від 0 до 1000."
       },
       "recordingRetention": {
         "title": "Автовидалення записів",
@@ -756,6 +770,9 @@
           "credentialStore": "{{platform}} credential backend",
           "credentialStoreRetainedLegacy": "Credential store is unavailable; {{count}} legacy API-key value remains in settings so it is not lost."
         }
+      },
+      "groups": {
+        "logs": "Логи"
       }
     },
     "about": {
@@ -958,7 +975,9 @@
     "off": "Вимк.",
     "yes": "Так",
     "no": "Ні",
+    "starting": "Запуск…",
     "noOptionsFound": "Опцій не знайдено",
+    "moreInfo": "Докладніше",
     "appName": "Verbatim"
   },
   "accessibility": {
@@ -1013,7 +1032,7 @@
     "targetPrivacyExcludedDescription": "The active app matches a private-app exclusion. Verbatim did not start recording."
   },
   "appLanguage": {
-    "title": "Мова інтерфейсу",
+    "title": "Мова інтерфейсу застосунку",
     "description": "Змінити мову інтерфейсу Verbatim"
   },
   "overlay": {

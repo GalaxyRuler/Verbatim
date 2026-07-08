@@ -95,6 +95,9 @@ const Onboarding: React.FC<OnboardingProps> = ({ onModelSelected }) => {
         <p className="text-text/70 max-w-md font-medium mx-auto">
           {t("onboarding.subtitle")}
         </p>
+        <p className="text-sm text-mid-gray max-w-md text-center">
+          {t("onboarding.privacyNote")} {t("onboarding.privacyNoteNetwork")}
+        </p>
       </div>
 
       <div className="max-w-[600px] w-full mx-auto text-center flex-1 flex flex-col min-h-0">

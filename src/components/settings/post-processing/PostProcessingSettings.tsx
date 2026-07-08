@@ -25,6 +25,7 @@ import { ApiKeyField } from "../PostProcessingSettingsApi/ApiKeyField";
 import { ModelSelect } from "../PostProcessingSettingsApi/ModelSelect";
 import { usePostProcessProviderState } from "../PostProcessingSettingsApi/usePostProcessProviderState";
 import { ShortcutInput } from "../ShortcutInput";
+import { PostProcessingToggle } from "../PostProcessingToggle";
 import { useSettings } from "../../../hooks/useSettings";
 
 type LocalLlmDownloadProgress = {
@@ -81,6 +82,14 @@ const PostProcessingSettingsApiComponent: React.FC = () => {
           />
         </div>
       </SettingContainer>
+
+      {!state.isAppleProvider && (
+        <Alert variant="info" contained>
+          {t("settings.postProcessing.api.dataFlowNotice", {
+            provider: state.selectedProvider?.label ?? state.selectedProviderId,
+          })}
+        </Alert>
+      )}
 
       {state.isAppleProvider ? (
         state.appleIntelligenceUnavailable ? (
@@ -140,7 +149,7 @@ const PostProcessingSettingsApiComponent: React.FC = () => {
                   setSessionOnlyApiKey(event.currentTarget.checked)
                 }
                 disabled={state.isApiKeyUpdating}
-                className="mt-0.5 h-4 w-4 rounded border-mid-gray/50 bg-background-ui text-logo-primary focus:ring-logo-primary"
+                className="mt-0.5 h-4 w-4 rounded-md border-mid-gray/50 accent-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
               />
               <span>{t("settings.postProcessing.api.apiKey.sessionOnly")}</span>
             </label>
@@ -403,11 +412,11 @@ const PostProcessingLocalModelComponent: React.FC = () => {
                           {model.label}
                         </span>
                         {isSelected && (
-                          <span className="rounded bg-logo-primary/20 px-2 py-0.5 text-xs text-logo-primary">
+                          <span className="rounded-md bg-accent/15 px-2 py-0.5 text-xs font-medium text-text">
                             {t("settings.postProcessing.localModel.selected")}
                           </span>
                         )}
-                        <span className="rounded bg-mid-gray/10 px-2 py-0.5 text-xs text-mid-gray">
+                        <span className="rounded-md bg-mid-gray/10 px-2 py-0.5 text-xs text-mid-gray">
                           {t(
                             `settings.postProcessing.localModel.roles.${model.recommended_role}`,
                             model.recommended_role,
@@ -425,9 +434,9 @@ const PostProcessingLocalModelComponent: React.FC = () => {
                         {model.supported_language_notes}
                       </p>
                       {model.is_downloading && (
-                        <div className="h-1.5 overflow-hidden rounded bg-mid-gray/20">
+                        <div className="h-1.5 overflow-hidden rounded-full bg-mid-gray/20">
                           <div
-                            className="h-full rounded bg-logo-primary"
+                            className="h-full rounded-full bg-accent"
                             style={{
                               width: `${Math.min(100, Math.max(0, modelProgress))}%`,
                             }}
@@ -808,13 +817,19 @@ export const PostProcessingSettings: React.FC = () => {
 
   return (
     <div className="max-w-3xl w-full mx-auto space-y-6">
-      <SettingsGroup title={t("settings.postProcessing.hotkey.title")}>
-        <ShortcutInput
-          shortcutId="transcribe_with_post_process"
-          descriptionMode="tooltip"
-          grouped={true}
-        />
+      <SettingsGroup title={t("settings.postProcessing.groups.enable")}>
+        <PostProcessingToggle grouped descriptionMode="inline" />
       </SettingsGroup>
+
+      {postProcessingEnabled && (
+        <SettingsGroup title={t("settings.postProcessing.hotkey.title")}>
+          <ShortcutInput
+            shortcutId="transcribe_with_post_process"
+            descriptionMode="tooltip"
+            grouped={true}
+          />
+        </SettingsGroup>
+      )}
 
       {postProcessingEnabled && (
         <SettingsGroup title={t("settings.postProcessing.engine.title")}>
@@ -866,7 +881,7 @@ export const PostProcessingSettings: React.FC = () => {
         </SettingsGroup>
       )}
 
-      {!localLlmEnabled && (
+      {postProcessingEnabled && !localLlmEnabled && (
         <SettingsGroup title={t("settings.postProcessing.api.title")}>
           <PostProcessingSettingsApi />
         </SettingsGroup>
@@ -880,9 +895,11 @@ export const PostProcessingSettings: React.FC = () => {
         </SettingsGroup>
       )}
 
-      <SettingsGroup title={t("settings.postProcessing.prompts.title")}>
-        <PostProcessingSettingsPrompts />
-      </SettingsGroup>
+      {postProcessingEnabled && (
+        <SettingsGroup title={t("settings.postProcessing.prompts.title")}>
+          <PostProcessingSettingsPrompts />
+        </SettingsGroup>
+      )}
     </div>
   );
 };

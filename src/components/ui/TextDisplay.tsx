@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { Check, Copy } from "lucide-react";
 import { SettingContainer } from "./SettingContainer";
 
 interface TextDisplayProps {
@@ -55,7 +56,7 @@ export const TextDisplay: React.FC<TextDisplayProps> = ({
       <div className="flex items-center space-x-2">
         <div className="flex-1 min-w-0">
           <div
-            className={`px-2 min-h-8 flex items-center bg-mid-gray/10 border border-mid-gray/80 rounded-md text-xs ${textClasses} ${!value ? "opacity-60" : ""}`}
+            className={`px-2 min-h-8 flex items-center bg-mid-gray/10 border border-border rounded-md text-xs ${textClasses} ${!value ? "opacity-60" : ""}`}
           >
             {displayValue}
           </div>
@@ -63,27 +64,14 @@ export const TextDisplay: React.FC<TextDisplayProps> = ({
         {copyable && value && (
           <button
             onClick={handleCopy}
-            className="flex items-center justify-center px-2 py-1 w-12 min-h-8 text-xs font-semibold bg-mid-gray/10 hover:bg-logo-primary/10 border border-mid-gray/80 hover:border-logo-primary hover:text-logo-primary rounded-md transition-all duration-150 flex-shrink-0 cursor-pointer"
+            className="flex items-center justify-center px-2 py-1 w-12 min-h-8 text-xs font-semibold bg-mid-gray/10 border border-border hover:border-border-strong hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-md transition-all duration-150 flex-shrink-0 cursor-pointer"
             title="Copy to clipboard"
+            aria-label="Copy to clipboard"
           >
             {showCopied ? (
-              <div className="flex items-center space-x-1">
-                <svg
-                  className="w-4 h-4"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M5 13l4 4L19 7"
-                  />
-                </svg>
-              </div>
+              <Check size={16} aria-hidden />
             ) : (
-              "Copy"
+              <Copy size={16} aria-hidden />
             )}
           </button>
         )}

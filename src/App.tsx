@@ -24,6 +24,7 @@ import Onboarding, {
   ShortcutReadinessOnboarding,
 } from "./components/onboarding";
 import { Sidebar, SidebarSection, SECTIONS_CONFIG } from "./components/Sidebar";
+import VerbatimMark from "./components/icons/VerbatimMark";
 import { useSettings } from "./hooks/useSettings";
 import type { DictionaryEntry, StartupStatus } from "@/bindings";
 import { useDictionaryStore } from "./stores/dictionaryStore";
@@ -251,6 +252,7 @@ function DesktopApp() {
 
         if (recovery.reason === "target_changed") {
           toast.warning(t("errors.targetChangedTitle"), {
+            duration: 10000,
             description: t("errors.targetChangedDescription"),
             action: {
               label: t("errors.targetChangedPasteHereAction"),
@@ -263,6 +265,7 @@ function DesktopApp() {
         }
 
         toast.error(t("errors.pasteFailedTitle"), {
+          duration: Infinity,
           description: recovery.copied
             ? `${t("errors.pasteFailed")} ${t("errors.pasteFailedCopiedHint")}`
             : t("errors.pasteFailed"),
@@ -283,6 +286,7 @@ function DesktopApp() {
   useEffect(() => {
     const unlisten = listen("transform-recovery-copied", () => {
       toast.error(t("errors.transformRecoveryCopiedTitle"), {
+        duration: Infinity,
         description: t("errors.transformRecoveryCopiedDescription"),
         action: {
           label: t("errors.pasteFailedCopyAction"),
@@ -314,6 +318,7 @@ function DesktopApp() {
         }
 
         toast.warning(t("errors.languageGuardTitle"), {
+          duration: 10000,
           description: descriptionParts.join(" "),
           action: {
             label: t("errors.languageGuardPasteAnyway"),
@@ -547,9 +552,17 @@ function DesktopApp() {
     }
   };
 
-  // Still checking onboarding status
+  // Still checking onboarding status — show a quiet splash instead of a blank window
   if (startupStatus === null || startupStatus.status === "starting") {
-    return null;
+    return (
+      <div
+        dir={direction}
+        className="h-screen flex flex-col items-center justify-center gap-3 select-none cursor-default bg-background text-text"
+      >
+        <VerbatimMark width={40} height={40} aria-hidden />
+        <p className="text-sm text-text-secondary">{t("common.starting")}</p>
+      </div>
+    );
   }
 
   if (startupStatus.status === "failed") {
@@ -564,7 +577,7 @@ function DesktopApp() {
               <h1 className="text-xl font-semibold">
                 {t("errors.startupFailedTitle")}
               </h1>
-              <p className="mt-2 text-sm text-mid-gray">
+              <p className="mt-2 text-sm text-text-secondary">
                 {t("errors.startupFailedDescription")}
               </p>
             </div>
@@ -573,7 +586,7 @@ function DesktopApp() {
                 step: startupStatus.step,
               })}
             </Alert>
-            <p className="text-sm text-mid-gray break-words">
+            <p className="text-sm text-text-secondary break-words">
               {startupStatus.message}
             </p>
             <div className="flex flex-wrap gap-2">
@@ -657,13 +670,16 @@ function DesktopApp() {
     >
       <Toaster
         theme="system"
+        closeButton
         toastOptions={{
           unstyled: true,
           classNames: {
             toast:
-              "bg-background border border-mid-gray/20 rounded-lg shadow-lg px-4 py-3 flex items-center gap-3 text-sm",
+              "bg-background border border-border rounded-lg shadow-lg px-4 py-3 flex items-center gap-3 text-sm",
             title: "font-medium",
-            description: "text-mid-gray",
+            description: "text-text-secondary",
+            closeButton:
+              "text-text-secondary hover:text-text border border-border rounded-full bg-background",
           },
         }}
       />

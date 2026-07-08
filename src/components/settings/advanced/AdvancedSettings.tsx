@@ -10,16 +10,9 @@ import { PasteMethodSetting } from "../PasteMethod";
 import { TypingToolSetting } from "../TypingTool";
 import { ClipboardHandlingSetting } from "../ClipboardHandling";
 import { AutoSubmit } from "../AutoSubmit";
-import { PostProcessingToggle } from "../PostProcessingToggle";
 import { AppendTrailingSpace } from "../AppendTrailingSpace";
-import { HistoryLimit } from "../HistoryLimit";
-import {
-  HistoryStorageToggle,
-  RecordingStorageToggle,
-} from "../HistoryStorage";
-import { PrivateSessionToggle } from "../PrivateSession";
-import { RecordingRetentionPeriodSelector } from "../RecordingRetentionPeriod";
 import { ExperimentalToggle } from "../ExperimentalToggle";
+import { UpdateChecksToggle } from "../UpdateChecksToggle";
 import { DockedPill } from "../DockedPill";
 import { ElevatedWarningToggle } from "../ElevatedWarningToggle";
 import { useSettings } from "../../../hooks/useSettings";
@@ -43,6 +36,7 @@ export const AdvancedSettings: React.FC = () => {
         <ShowOverlay descriptionMode="tooltip" grouped={true} />
         <DockedPill descriptionMode="tooltip" grouped={true} />
         <ModelUnloadTimeoutSetting descriptionMode="tooltip" grouped={true} />
+        <UpdateChecksToggle descriptionMode="tooltip" grouped={true} />
         <ElevatedWarningToggle descriptionMode="tooltip" grouped={true} />
         <ExperimentalToggle descriptionMode="tooltip" grouped={true} />
       </SettingsGroup>
@@ -52,6 +46,10 @@ export const AdvancedSettings: React.FC = () => {
         <TypingToolSetting descriptionMode="tooltip" grouped={true} />
         <ClipboardHandlingSetting descriptionMode="tooltip" grouped={true} />
         <AutoSubmit descriptionMode="tooltip" grouped={true} />
+        <KeyboardImplementationSelector
+          descriptionMode="tooltip"
+          grouped={true}
+        />
       </SettingsGroup>
 
       <SettingsGroup title={t("settings.advanced.groups.transcription")}>
@@ -59,26 +57,13 @@ export const AdvancedSettings: React.FC = () => {
         <AppendTrailingSpace descriptionMode="tooltip" grouped={true} />
       </SettingsGroup>
 
-      <SettingsGroup title={t("settings.advanced.groups.history")}>
-        <PrivateSessionToggle descriptionMode="tooltip" grouped={true} />
-        <HistoryStorageToggle descriptionMode="tooltip" grouped={true} />
-        <RecordingStorageToggle descriptionMode="tooltip" grouped={true} />
-        <HistoryLimit descriptionMode="tooltip" grouped={true} />
-        <RecordingRetentionPeriodSelector
-          descriptionMode="tooltip"
-          grouped={true}
-        />
+      <SettingsGroup title={t("settings.advanced.groups.performance")}>
+        <AccelerationSelector descriptionMode="tooltip" grouped={true} />
+        <LazyStreamClose descriptionMode="tooltip" grouped={true} />
       </SettingsGroup>
 
       {experimentalEnabled && (
         <SettingsGroup title={t("settings.advanced.groups.experimental")}>
-          <PostProcessingToggle descriptionMode="tooltip" grouped={true} />
-          <KeyboardImplementationSelector
-            descriptionMode="tooltip"
-            grouped={true}
-          />
-          <AccelerationSelector descriptionMode="tooltip" grouped={true} />
-          <LazyStreamClose descriptionMode="tooltip" grouped={true} />
           <AdaptiveProfiles descriptionMode="tooltip" grouped={true} />
         </SettingsGroup>
       )}

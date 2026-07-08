@@ -13,14 +13,17 @@
     "models": "Mô hình",
     "advanced": "Nâng cao",
     "postProcessing": "Xử lý sau",
-    "history": "Lịch sử",
-    "debug": "Gỡ lỗi",
+    "history": "Lịch sử & quyền riêng tư",
+    "debug": "Khắc phục sự cố",
     "about": "Giới thiệu",
     "dictionary": "Dictionary",
     "snippets": "Snippets"
   },
   "onboarding": {
+    "skipForNow": "Tạm thời bỏ qua",
     "subtitle": "Để bắt đầu, hãy chọn một mô hình chuyển đổi giọng nói",
+    "privacyNote": "Quá trình chuyển đổi giọng nói diễn ra hoàn toàn trên máy tính này. Âm thanh của bạn không bao giờ được tải lên.",
+    "privacyNoteNetwork": "Verbatim chỉ dùng mạng để kiểm tra bản cập nhật, tải mô hình và cho các dịch vụ tùy chọn mà bạn thiết lập.",
     "recommended": "Đề xuất",
     "download": "Tải xuống",
     "downloading": "Đang tải xuống...",
@@ -118,7 +121,11 @@
       "allGranted": "Hoàn tất!",
       "errors": {
         "checkFailed": "Không thể kiểm tra quyền. Vui lòng thử lại.",
-        "requestFailed": "Không thể yêu cầu quyền. Vui lòng thử lại."
+        "requestFailed": "Không thể yêu cầu quyền. Vui lòng thử lại.",
+        "manualFallbackTitle": "Không thể tự động xác minh",
+        "manualFallbackMacos": "Mở Cài đặt Hệ thống → Quyền riêng tư & Bảo mật → Micrô (và Trợ năng), bật Verbatim, sau đó chọn \"Kiểm tra lại\".",
+        "manualFallbackWindows": "Mở Cài đặt → Quyền riêng tư & bảo mật → Micrô, cho phép ứng dụng truy cập micrô, sau đó chọn \"Kiểm tra lại\".",
+        "checkAgain": "Kiểm tra lại"
       }
     },
     "shortcut": {
@@ -268,7 +275,7 @@
         "unassigned": "Unassigned"
       },
       "language": {
-        "title": "Ngôn ngữ",
+        "title": "Ngôn ngữ đọc chính tả",
         "description": "Chọn ngôn ngữ để nhận dạng giọng nói. Tự động sẽ tự động xác định ngôn ngữ, trong khi chọn một ngôn ngữ cụ thể có thể cải thiện độ chính xác cho ngôn ngữ đó.",
         "descriptionUnsupported": "Mô hình Parakeet tự động phát hiện ngôn ngữ. Không cần chọn thủ công.",
         "searchPlaceholder": "Tìm kiếm ngôn ngữ...",
@@ -313,8 +320,8 @@
         "app": "Ứng dụng",
         "output": "Đầu ra",
         "transcription": "Chuyển đổi",
-        "history": "Lịch sử",
-        "experimental": "Thử nghiệm"
+        "experimental": "Thử nghiệm",
+        "performance": "Hiệu năng"
       },
       "experimentalToggle": {
         "label": "Tính năng thử nghiệm",
@@ -492,11 +499,15 @@
     },
     "postProcessing": {
       "title": "Xử lý sau",
+      "groups": {
+        "enable": "Xử lý sau"
+      },
       "hotkey": {
         "title": "Phím tắt"
       },
       "api": {
         "title": "API (Tương thích OpenAI)",
+        "dataFlowNotice": "Khi xử lý sau chạy, bản chép lời hoàn chỉnh sẽ được gửi đến {{provider}}. Âm thanh không bao giờ rời khỏi máy tính này.",
         "provider": {
           "title": "Nhà cung cấp",
           "description": "Chọn một nhà cung cấp tương thích OpenAI."
@@ -615,7 +626,9 @@
       "clearRecordingsConfirm": "Delete unsaved dictation recordings while keeping saved entries and transform-only text?",
       "clearRecordingsError": "Failed to clear recordings.",
       "clearRecordingsSuccess": "Recordings cleared.",
-      "retentionNote": "History can include raw transcripts, refined text, transform text, and linked WAV files. Saved entries are kept until you delete them."
+      "retentionNote": "History can include raw transcripts, refined text, transform text, and linked WAV files. Saved entries are kept until you delete them.",
+      "storageGroup": "Lưu trữ",
+      "moreActions": "Thao tác khác"
     },
     "debug": {
       "title": "Gỡ lỗi",
@@ -642,7 +655,8 @@
       "historyLimit": {
         "title": "Giới hạn lịch sử",
         "description": "Số lượng mục lịch sử tối đa cần giữ",
-        "entries": "mục"
+        "entries": "mục",
+        "invalid": "Nhập một số từ 0 đến 1000."
       },
       "recordingRetention": {
         "title": "Tự động xóa ghi âm",
@@ -756,6 +770,9 @@
           "credentialStore": "{{platform}} credential backend",
           "credentialStoreRetainedLegacy": "Credential store is unavailable; {{count}} legacy API-key value remains in settings so it is not lost."
         }
+      },
+      "groups": {
+        "logs": "Nhật ký"
       }
     },
     "about": {
@@ -958,7 +975,9 @@
     "off": "Tắt",
     "yes": "Có",
     "no": "Không",
+    "starting": "Đang khởi động…",
     "noOptionsFound": "Không tìm thấy tùy chọn",
+    "moreInfo": "Thêm thông tin",
     "appName": "Verbatim"
   },
   "accessibility": {
@@ -1013,7 +1032,7 @@
     "targetPrivacyExcludedDescription": "The active app matches a private-app exclusion. Verbatim did not start recording."
   },
   "appLanguage": {
-    "title": "Ngôn ngữ ứng dụng",
+    "title": "Ngôn ngữ hiển thị ứng dụng",
     "description": "Thay đổi ngôn ngữ giao diện của Verbatim"
   },
   "overlay": {

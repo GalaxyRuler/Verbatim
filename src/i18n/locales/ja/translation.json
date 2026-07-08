@@ -13,14 +13,17 @@
     "models": "モデル",
     "advanced": "詳細設定",
     "postProcessing": "後処理",
-    "history": "履歴",
-    "debug": "デバッグ",
+    "history": "履歴とプライバシー",
+    "debug": "トラブルシューティング",
     "about": "概要",
     "dictionary": "Dictionary",
     "snippets": "Snippets"
   },
   "onboarding": {
+    "skipForNow": "今はスキップ",
     "subtitle": "開始するには、文字起こしモデルを選択してください",
+    "privacyNote": "文字起こしはすべてこのコンピューター上で実行されます。音声がアップロードされることは一切ありません。",
+    "privacyNoteNetwork": "Verbatim がネットワークを使用するのは、アップデートの確認、モデルのダウンロード、およびユーザーが設定したオプションのサービスに限られます。",
     "recommended": "おすすめ",
     "download": "ダウンロード",
     "downloading": "ダウンロード中...",
@@ -118,7 +121,11 @@
       "allGranted": "準備完了！",
       "errors": {
         "checkFailed": "権限の確認に失敗しました。もう一度お試しください。",
-        "requestFailed": "権限のリクエストに失敗しました。もう一度お試しください。"
+        "requestFailed": "権限のリクエストに失敗しました。もう一度お試しください。",
+        "manualFallbackTitle": "自動で確認できません",
+        "manualFallbackMacos": "「システム設定」→「プライバシーとセキュリティ」→「マイク」（および「アクセシビリティ」）を開き、Verbatim を有効にしてから「再確認」を選択してください。",
+        "manualFallbackWindows": "「設定」→「プライバシーとセキュリティ」→「マイク」を開き、アプリによるマイクへのアクセスを許可してから「再確認」を選択してください。",
+        "checkAgain": "再確認"
       }
     },
     "shortcut": {
@@ -268,7 +275,7 @@
         "unassigned": "Unassigned"
       },
       "language": {
-        "title": "言語",
+        "title": "音声入力の言語",
         "description": "音声認識の言語を選択してください。自動を選択すると言語を自動的に判定します。特定の言語を選択すると、その言語の精度が向上する場合があります。",
         "descriptionUnsupported": "Parakeetモデルは言語を自動的に検出します。手動選択は不要です。",
         "searchPlaceholder": "言語を検索...",
@@ -313,8 +320,8 @@
         "app": "アプリ",
         "output": "出力",
         "transcription": "文字起こし",
-        "history": "履歴",
-        "experimental": "実験的"
+        "experimental": "実験的",
+        "performance": "パフォーマンス"
       },
       "experimentalToggle": {
         "label": "実験的機能",
@@ -492,11 +499,15 @@
     },
     "postProcessing": {
       "title": "後処理",
+      "groups": {
+        "enable": "後処理"
+      },
       "hotkey": {
         "title": "ホットキー"
       },
       "api": {
         "title": "API（OpenAI互換）",
+        "dataFlowNotice": "後処理の実行時、完成した文字起こしは {{provider}} に送信されます。音声がこのコンピューターの外に出ることはありません。",
         "provider": {
           "title": "プロバイダー",
           "description": "OpenAI互換のプロバイダーを選択。"
@@ -615,7 +626,9 @@
       "clearRecordingsConfirm": "Delete unsaved dictation recordings while keeping saved entries and transform-only text?",
       "clearRecordingsError": "Failed to clear recordings.",
       "clearRecordingsSuccess": "Recordings cleared.",
-      "retentionNote": "History can include raw transcripts, refined text, transform text, and linked WAV files. Saved entries are kept until you delete them."
+      "retentionNote": "History can include raw transcripts, refined text, transform text, and linked WAV files. Saved entries are kept until you delete them.",
+      "storageGroup": "保存",
+      "moreActions": "その他の操作"
     },
     "debug": {
       "title": "デバッグ",
@@ -642,7 +655,8 @@
       "historyLimit": {
         "title": "履歴上限",
         "description": "保持する履歴エントリーの最大数",
-        "entries": "件"
+        "entries": "件",
+        "invalid": "0 から 1000 までの数値を入力してください。"
       },
       "recordingRetention": {
         "title": "録音の自動削除",
@@ -756,6 +770,9 @@
           "credentialStore": "{{platform}} credential backend",
           "credentialStoreRetainedLegacy": "Credential store is unavailable; {{count}} legacy API-key value remains in settings so it is not lost."
         }
+      },
+      "groups": {
+        "logs": "ログ"
       }
     },
     "about": {
@@ -958,7 +975,9 @@
     "off": "オフ",
     "yes": "はい",
     "no": "いいえ",
+    "starting": "起動中…",
     "noOptionsFound": "オプションが見つかりません",
+    "moreInfo": "詳細情報",
     "appName": "Verbatim"
   },
   "accessibility": {
@@ -1013,7 +1032,7 @@
     "targetPrivacyExcludedDescription": "The active app matches a private-app exclusion. Verbatim did not start recording."
   },
   "appLanguage": {
-    "title": "アプリケーション言語",
+    "title": "アプリの表示言語",
     "description": "Verbatimインターフェースの言語を変更"
   },
   "overlay": {

@@ -12,15 +12,18 @@
     "general": "عام",
     "advanced": "متقدم",
     "postProcessing": "معالجة لاحقة",
-    "history": "السجل",
-    "debug": "تصحيح الأخطاء",
+    "history": "السجل والخصوصية",
+    "debug": "استكشاف الأخطاء وإصلاحها",
     "about": "حول",
     "models": "النماذج",
     "dictionary": "القاموس",
     "snippets": "المقتطفات"
   },
   "onboarding": {
+    "skipForNow": "تخطي الآن",
     "subtitle": "للبدء، اختر نموذج التفريغ الصوتي",
+    "privacyNote": "يتم التفريغ الصوتي بالكامل على هذا الكمبيوتر. لا يتم رفع الصوت الخاص بك أبدًا.",
+    "privacyNoteNetwork": "لا يستخدم Verbatim الشبكة إلا للتحقق من التحديثات وتنزيل النماذج والخدمات الاختيارية التي تقوم بإعدادها.",
     "recommended": "موصى به",
     "download": "تنزيل",
     "downloading": "...جاري التنزيل",
@@ -118,7 +121,11 @@
       "allGranted": "كل شيء جاهز!",
       "errors": {
         "checkFailed": "فشل التحقق من الأذونات. يرجير المحاولة مرة أخرى.",
-        "requestFailed": "فشل طلب الإذن. يرجى المحاولة مرة أخرى."
+        "requestFailed": "فشل طلب الإذن. يرجى المحاولة مرة أخرى.",
+        "manualFallbackTitle": "تعذر التحقق تلقائيًا",
+        "manualFallbackMacos": "افتح إعدادات النظام ← الخصوصية والأمن ← الميكروفون (وسهولة الاستخدام)، وفعّل Verbatim، ثم اختر \"التحقق مرة أخرى\".",
+        "manualFallbackWindows": "افتح الإعدادات ← الخصوصية والأمان ← الميكروفون، واسمح للتطبيقات بالوصول إلى الميكروفون، ثم اختر \"التحقق مرة أخرى\".",
+        "checkAgain": "التحقق مرة أخرى"
       }
     },
     "shortcut": {
@@ -246,7 +253,7 @@
         "unassigned": "Unassigned"
       },
       "language": {
-        "title": "اللغة",
+        "title": "لغات الإملاء",
         "description": "اختر لغة أو أكثر للكلام. يستخدم Verbatim تلميحات خاصة بكل نموذج حتى تساعد اللغات المحددة في النسخ قبل التنظيف.",
         "descriptionUnsupported": ".يكتشف نموذج Parakeet اللغة تلقائياً. لا يلزم الاختيار اليدوي",
         "searchPlaceholder": "البحث عن اللغات...",
@@ -291,8 +298,8 @@
         "app": "التطبيق",
         "output": "الإخراج",
         "transcription": "التفريغ الصوتي",
-        "history": "السجل",
-        "experimental": "تجريبي"
+        "experimental": "تجريبي",
+        "performance": "الأداء"
       },
       "experimentalToggle": {
         "label": "الميزات التجريبية",
@@ -470,11 +477,15 @@
     },
     "postProcessing": {
       "title": "معالجة لاحقة",
+      "groups": {
+        "enable": "معالجة لاحقة"
+      },
       "hotkey": {
         "title": "مفتاح الاختصار"
       },
       "api": {
         "title": "API (متوافق مع OpenAI)",
+        "dataFlowNotice": "عند تشغيل المعالجة اللاحقة، يُرسل النص المفرّغ النهائي إلى {{provider}}. الصوت لا يغادر هذا الجهاز أبدًا.",
         "provider": {
           "title": "المزود",
           "description": "اختر مزوداً متوافقاً مع OpenAI."
@@ -593,7 +604,9 @@
       "clearRecordingsConfirm": "هل تريد حذف تسجيلات الإملاء غير المحفوظة مع إبقاء الإدخالات المحفوظة ونصوص التحويل فقط؟",
       "clearRecordingsError": "فشل مسح التسجيلات.",
       "clearRecordingsSuccess": "تم مسح التسجيلات.",
-      "retentionNote": "قد يتضمن السجل النصوص الخام والنصوص المحسنة ونصوص التحويل وملفات WAV المرتبطة. تبقى الإدخالات المحفوظة حتى تحذفها."
+      "retentionNote": "قد يتضمن السجل النصوص الخام والنصوص المحسنة ونصوص التحويل وملفات WAV المرتبطة. تبقى الإدخالات المحفوظة حتى تحذفها.",
+      "storageGroup": "التخزين",
+      "moreActions": "المزيد من الإجراءات"
     },
     "debug": {
       "title": "تصحيح الأخطاء",
@@ -620,7 +633,8 @@
       "historyLimit": {
         "title": "حد السجل",
         "description": "الحد الأقصى لعدد إدخالات السجل المراد الاحتفاظ بها",
-        "entries": "إدخالات"
+        "entries": "إدخالات",
+        "invalid": "أدخل رقمًا بين 0 و1000."
       },
       "recordingRetention": {
         "title": "حذف التسجيلات تلقائياً",
@@ -734,6 +748,9 @@
           "credentialStore": "{{platform}} credential backend",
           "credentialStoreRetainedLegacy": "Credential store is unavailable; {{count}} legacy API-key value remains in settings so it is not lost."
         }
+      },
+      "groups": {
+        "logs": "السجلات"
       }
     },
     "about": {
@@ -958,7 +975,9 @@
     "off": "إيقاف",
     "yes": "نعم",
     "no": "لا",
+    "starting": "جارٍ البدء…",
     "noOptionsFound": "لم يتم العثور على خيارات",
+    "moreInfo": "مزيد من المعلومات",
     "appName": "Verbatim"
   },
   "accessibility": {
@@ -1013,7 +1032,7 @@
     "targetPrivacyExcludedDescription": "يطابق التطبيق النشط استثناء تطبيق خاص. لم يبدأ Verbatim التسجيل."
   },
   "appLanguage": {
-    "title": "لغة التطبيق",
+    "title": "لغة واجهة التطبيق",
     "description": "تغيير لغة واجهة Verbatim"
   },
   "overlay": {

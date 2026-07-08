@@ -13,14 +13,17 @@
     "models": "Modèles",
     "advanced": "Avancé",
     "postProcessing": "Post-traitement",
-    "history": "Historique",
-    "debug": "Débogage",
+    "history": "Historique et confidentialité",
+    "debug": "Dépannage",
     "about": "À propos",
     "dictionary": "Dictionary",
     "snippets": "Snippets"
   },
   "onboarding": {
+    "skipForNow": "Passer pour l'instant",
     "subtitle": "Pour commencer, choisissez un modèle de transcription",
+    "privacyNote": "La transcription s'exécute entièrement sur cet ordinateur. Votre audio n'est jamais téléversé.",
+    "privacyNoteNetwork": "Verbatim n'utilise le réseau que pour la recherche de mises à jour, le téléchargement de modèles et les services optionnels que vous configurez.",
     "recommended": "Recommandé",
     "download": "Télécharger",
     "downloading": "Téléchargement...",
@@ -118,7 +121,11 @@
       "allGranted": "Tout est prêt !",
       "errors": {
         "checkFailed": "Échec de la vérification des autorisations. Veuillez réessayer.",
-        "requestFailed": "Échec de la demande d'autorisation. Veuillez réessayer."
+        "requestFailed": "Échec de la demande d'autorisation. Veuillez réessayer.",
+        "manualFallbackTitle": "Vérification automatique impossible",
+        "manualFallbackMacos": "Ouvrez Réglages Système → Confidentialité et sécurité → Microphone (et Accessibilité), activez Verbatim, puis choisissez « Vérifier à nouveau ».",
+        "manualFallbackWindows": "Ouvrez Paramètres → Confidentialité et sécurité → Microphone, autorisez les applications à accéder à votre microphone, puis choisissez « Vérifier à nouveau ».",
+        "checkAgain": "Vérifier à nouveau"
       }
     },
     "shortcut": {
@@ -268,7 +275,7 @@
         "unassigned": "Unassigned"
       },
       "language": {
-        "title": "Langue",
+        "title": "Langues de dictée",
         "description": "Sélectionnez la langue pour la reconnaissance vocale. Auto déterminera automatiquement la langue, tandis que sélectionner une langue spécifique peut améliorer la précision pour cette langue.",
         "descriptionUnsupported": "Le modèle Parakeet détecte automatiquement la langue. Aucune sélection manuelle n'est nécessaire.",
         "searchPlaceholder": "Rechercher des langues...",
@@ -313,8 +320,8 @@
         "app": "Application",
         "output": "Sortie",
         "transcription": "Transcription",
-        "history": "Historique",
-        "experimental": "Expérimental"
+        "experimental": "Expérimental",
+        "performance": "Performances"
       },
       "experimentalToggle": {
         "label": "Fonctionnalités Expérimentales",
@@ -492,11 +499,15 @@
     },
     "postProcessing": {
       "title": "Post-traitement",
+      "groups": {
+        "enable": "Post-traitement"
+      },
       "hotkey": {
         "title": "Raccourci clavier"
       },
       "api": {
         "title": "API (Compatible OpenAI)",
+        "dataFlowNotice": "Lorsque le post-traitement s'exécute, la transcription finale est envoyée à {{provider}}. L'audio ne quitte jamais cet ordinateur.",
         "provider": {
           "title": "Fournisseur",
           "description": "Sélectionnez un fournisseur compatible OpenAI."
@@ -615,7 +626,9 @@
       "clearRecordingsConfirm": "Delete unsaved dictation recordings while keeping saved entries and transform-only text?",
       "clearRecordingsError": "Failed to clear recordings.",
       "clearRecordingsSuccess": "Recordings cleared.",
-      "retentionNote": "History can include raw transcripts, refined text, transform text, and linked WAV files. Saved entries are kept until you delete them."
+      "retentionNote": "History can include raw transcripts, refined text, transform text, and linked WAV files. Saved entries are kept until you delete them.",
+      "storageGroup": "Stockage",
+      "moreActions": "Plus d'actions"
     },
     "debug": {
       "title": "Débogage",
@@ -642,7 +655,8 @@
       "historyLimit": {
         "title": "Limite d'historique",
         "description": "Nombre maximum d'entrées d'historique à conserver",
-        "entries": "entrées"
+        "entries": "entrées",
+        "invalid": "Saisissez un nombre entre 0 et 1000."
       },
       "recordingRetention": {
         "title": "Suppression automatique des enregistrements",
@@ -756,6 +770,9 @@
           "credentialStore": "{{platform}} credential backend",
           "credentialStoreRetainedLegacy": "Credential store is unavailable; {{count}} legacy API-key value remains in settings so it is not lost."
         }
+      },
+      "groups": {
+        "logs": "Journaux"
       }
     },
     "about": {
@@ -958,7 +975,9 @@
     "off": "Désactivé",
     "yes": "Oui",
     "no": "Non",
+    "starting": "Démarrage…",
     "noOptionsFound": "Aucune option trouvée",
+    "moreInfo": "Plus d'informations",
     "appName": "Verbatim"
   },
   "accessibility": {
@@ -1013,7 +1032,7 @@
     "targetPrivacyExcludedDescription": "The active app matches a private-app exclusion. Verbatim did not start recording."
   },
   "appLanguage": {
-    "title": "Langue de l'application",
+    "title": "Langue de l'interface",
     "description": "Changer la langue de l'interface de Verbatim"
   },
   "overlay": {

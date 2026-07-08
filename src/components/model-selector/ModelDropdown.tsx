@@ -41,9 +41,7 @@ const ModelDropdown: React.FC<ModelDropdownProps> = ({
               tabIndex={0}
               role="button"
               className={`w-full px-3 py-2 text-start hover:bg-mid-gray/10 transition-colors cursor-pointer focus:outline-none ${
-                currentModelId === model.id
-                  ? "bg-logo-primary/10 text-logo-primary"
-                  : ""
+                currentModelId === model.id ? "bg-accent/10 text-text" : ""
               }`}
             >
               <div className="flex items-center justify-between">
@@ -52,7 +50,7 @@ const ModelDropdown: React.FC<ModelDropdownProps> = ({
                     {getTranslatedModelName(model, t)}
                     {model.is_custom && (
                       <span
-                        className="ms-1.5 text-[10px] font-semibold text-amber-600 uppercase"
+                        className="ms-1.5 text-xs font-semibold text-warning uppercase"
                         title={t("modelSelector.customUnverifiedDescription")}
                       >
                         {t("modelSelector.customUnverified")}
@@ -64,7 +62,7 @@ const ModelDropdown: React.FC<ModelDropdownProps> = ({
                   </div>
                 </div>
                 {currentModelId === model.id && (
-                  <div className="text-xs text-logo-primary">
+                  <div className="text-xs font-medium text-text">
                     {t("modelSelector.active")}
                   </div>
                 )}

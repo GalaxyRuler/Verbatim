@@ -13,14 +13,17 @@
     "models": "Modeller",
     "advanced": "Avancerat",
     "postProcessing": "Efterbearbetning",
-    "history": "Historik",
+    "history": "Historik och integritet",
     "debug": "Felsökning",
     "about": "Om",
     "dictionary": "Dictionary",
     "snippets": "Snippets"
   },
   "onboarding": {
+    "skipForNow": "Hoppa över för tillfället",
     "subtitle": "För att komma igång, välj en transkriptionsmodell",
+    "privacyNote": "Transkriberingen sker helt och hållet på den här datorn. Ditt ljud laddas aldrig upp.",
+    "privacyNoteNetwork": "Verbatim använder bara nätverket för uppdateringskontroller, modellnedladdningar och valfria tjänster som du konfigurerar.",
     "recommended": "Rekommenderat",
     "download": "Ladda ner",
     "downloading": "Laddar ner...",
@@ -118,7 +121,11 @@
       "allGranted": "Allt klart!",
       "errors": {
         "checkFailed": "Misslyckades med att kontrollera behörigheter. Försök igen.",
-        "requestFailed": "Misslyckades med att begära behörighet. Försök igen."
+        "requestFailed": "Misslyckades med att begära behörighet. Försök igen.",
+        "manualFallbackTitle": "Kan inte verifiera automatiskt",
+        "manualFallbackMacos": "Öppna Systeminställningar → Integritet och säkerhet → Mikrofon (och Hjälpmedel), aktivera Verbatim och välj sedan \"Kontrollera igen\".",
+        "manualFallbackWindows": "Öppna Inställningar → Sekretess och säkerhet → Mikrofon, tillåt appar att komma åt din mikrofon och välj sedan \"Kontrollera igen\".",
+        "checkAgain": "Kontrollera igen"
       }
     },
     "shortcut": {
@@ -250,7 +257,7 @@
         "unassigned": "Unassigned"
       },
       "language": {
-        "title": "Språk",
+        "title": "Språk för diktering",
         "description": "Välj språk för taligenkänning. Auto kommer automatiskt att bestämma språket, medan val av ett specifikt språk kan förbättra noggrannheten för det språket.",
         "descriptionUnsupported": "Parakeet-modellen upptäcker automatiskt språket. Inget manuellt val behövs.",
         "searchPlaceholder": "Sök språk...",
@@ -313,8 +320,8 @@
         "app": "App",
         "output": "Utmatning",
         "transcription": "Transkription",
-        "history": "Historik",
-        "experimental": "Experimentellt"
+        "experimental": "Experimentellt",
+        "performance": "Prestanda"
       },
       "experimentalToggle": {
         "label": "Experimentella funktioner",
@@ -492,11 +499,15 @@
     },
     "postProcessing": {
       "title": "Efterbearbetning",
+      "groups": {
+        "enable": "Efterbearbetning"
+      },
       "hotkey": {
         "title": "Snabbkommando"
       },
       "api": {
         "title": "API (OpenAI-kompatibelt)",
+        "dataFlowNotice": "När efterbearbetningen körs skickas den färdiga transkriptionen till {{provider}}. Ljudet lämnar aldrig den här datorn.",
         "provider": {
           "title": "Leverantör",
           "description": "Välj en OpenAI-kompatibel leverantör."
@@ -615,7 +626,9 @@
       "clearRecordingsConfirm": "Delete unsaved dictation recordings while keeping saved entries and transform-only text?",
       "clearRecordingsError": "Failed to clear recordings.",
       "clearRecordingsSuccess": "Recordings cleared.",
-      "retentionNote": "History can include raw transcripts, refined text, transform text, and linked WAV files. Saved entries are kept until you delete them."
+      "retentionNote": "History can include raw transcripts, refined text, transform text, and linked WAV files. Saved entries are kept until you delete them.",
+      "storageGroup": "Lagring",
+      "moreActions": "Fler åtgärder"
     },
     "debug": {
       "title": "Felsökning",
@@ -642,7 +655,8 @@
       "historyLimit": {
         "title": "Historikgräns",
         "description": "Maximalt antal historikposter som ska sparas",
-        "entries": "poster"
+        "entries": "poster",
+        "invalid": "Ange ett tal mellan 0 och 1000."
       },
       "recordingRetention": {
         "title": "Radera inspelningar automatiskt",
@@ -756,6 +770,9 @@
           "credentialStore": "{{platform}} credential backend",
           "credentialStoreRetainedLegacy": "Credential store is unavailable; {{count}} legacy API-key value remains in settings so it is not lost."
         }
+      },
+      "groups": {
+        "logs": "Loggar"
       }
     },
     "about": {
@@ -958,7 +975,9 @@
     "off": "Av",
     "yes": "Ja",
     "no": "Nej",
+    "starting": "Startar…",
     "noOptionsFound": "Inga alternativ hittades",
+    "moreInfo": "Mer information",
     "appName": "Verbatim"
   },
   "accessibility": {
@@ -1013,7 +1032,7 @@
     "targetPrivacyExcludedDescription": "The active app matches a private-app exclusion. Verbatim did not start recording."
   },
   "appLanguage": {
-    "title": "Applikationsspråk",
+    "title": "Appens visningsspråk",
     "description": "Ändra språket i Verbatim-gränssnittet"
   },
   "overlay": {

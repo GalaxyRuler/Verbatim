@@ -13,14 +13,17 @@
     "models": "Modely",
     "advanced": "Pokročilé",
     "postProcessing": "Následné zpracování",
-    "history": "Historie",
-    "debug": "Ladění",
+    "history": "Historie a soukromí",
+    "debug": "Řešení potíží",
     "about": "O aplikaci",
     "dictionary": "Dictionary",
     "snippets": "Snippets"
   },
   "onboarding": {
+    "skipForNow": "Zatím přeskočit",
     "subtitle": "Pro začátek vyberte model pro přepis",
+    "privacyNote": "Přepis probíhá výhradně na tomto počítači. Váš zvuk se nikdy nikam nenahrává.",
+    "privacyNoteNetwork": "Verbatim používá síť pouze ke kontrole aktualizací, stahování modelů a pro volitelné služby, které si nastavíte.",
     "recommended": "Doporučeno",
     "download": "Stáhnout",
     "downloading": "Stahování...",
@@ -118,7 +121,11 @@
       "allGranted": "Vše připraveno!",
       "errors": {
         "checkFailed": "Nepodařilo se zkontrolovat oprávnění. Zkuste to prosím znovu.",
-        "requestFailed": "Nepodařilo se požádat o oprávnění. Zkuste to prosím znovu."
+        "requestFailed": "Nepodařilo se požádat o oprávnění. Zkuste to prosím znovu.",
+        "manualFallbackTitle": "Nelze ověřit automaticky",
+        "manualFallbackMacos": "Otevřete Nastavení systému → Soukromí a zabezpečení → Mikrofon (a Zpřístupnění), povolte Verbatim a poté zvolte „Zkontrolovat znovu“.",
+        "manualFallbackWindows": "Otevřete Nastavení → Soukromí a zabezpečení → Mikrofon, povolte aplikacím přístup k mikrofonu a poté zvolte „Zkontrolovat znovu“.",
+        "checkAgain": "Zkontrolovat znovu"
       }
     },
     "shortcut": {
@@ -268,7 +275,7 @@
         "unassigned": "Unassigned"
       },
       "language": {
-        "title": "Jazyk",
+        "title": "Jazyky diktování",
         "description": "Vyberte jazyk rozpoznávání řeči. Auto jazyk určí automaticky, zatímco výběr konkrétního jazyka může zlepšit přesnost.",
         "descriptionUnsupported": "Model Parakeet rozpozná jazyk automaticky. Ruční výběr není potřeba.",
         "searchPlaceholder": "Hledat jazyky...",
@@ -313,8 +320,8 @@
         "app": "Aplikace",
         "output": "Výstup",
         "transcription": "Přepis",
-        "history": "Historie",
-        "experimental": "Experimentální"
+        "experimental": "Experimentální",
+        "performance": "Výkon"
       },
       "experimentalToggle": {
         "label": "Experimentální funkce",
@@ -492,11 +499,15 @@
     },
     "postProcessing": {
       "title": "Následné zpracování",
+      "groups": {
+        "enable": "Následné zpracování"
+      },
       "hotkey": {
         "title": "Klávesová zkratka"
       },
       "api": {
         "title": "API (kompatibilní s OpenAI)",
+        "dataFlowNotice": "Při spuštění následného zpracování se hotový přepis odešle do {{provider}}. Zvuk nikdy neopustí tento počítač.",
         "provider": {
           "title": "Poskytovatel",
           "description": "Vyberte poskytovatele kompatibilního s OpenAI."
@@ -615,7 +626,9 @@
       "clearRecordingsConfirm": "Delete unsaved dictation recordings while keeping saved entries and transform-only text?",
       "clearRecordingsError": "Failed to clear recordings.",
       "clearRecordingsSuccess": "Recordings cleared.",
-      "retentionNote": "History can include raw transcripts, refined text, transform text, and linked WAV files. Saved entries are kept until you delete them."
+      "retentionNote": "History can include raw transcripts, refined text, transform text, and linked WAV files. Saved entries are kept until you delete them.",
+      "storageGroup": "Úložiště",
+      "moreActions": "Další akce"
     },
     "debug": {
       "title": "Ladění",
@@ -642,7 +655,8 @@
       "historyLimit": {
         "title": "Limit historie",
         "description": "Maximální počet záznamů historie k uchování",
-        "entries": "záznamů"
+        "entries": "záznamů",
+        "invalid": "Zadejte číslo od 0 do 1000."
       },
       "recordingRetention": {
         "title": "Automatické mazání nahrávek",
@@ -756,6 +770,9 @@
           "credentialStore": "{{platform}} credential backend",
           "credentialStoreRetainedLegacy": "Credential store is unavailable; {{count}} legacy API-key value remains in settings so it is not lost."
         }
+      },
+      "groups": {
+        "logs": "Protokoly"
       }
     },
     "about": {
@@ -958,7 +975,9 @@
     "off": "Vypnuto",
     "yes": "Ano",
     "no": "Ne",
+    "starting": "Spouštění…",
     "noOptionsFound": "Nenalezeny žádné možnosti",
+    "moreInfo": "Více informací",
     "appName": "Verbatim"
   },
   "accessibility": {
@@ -1013,7 +1032,7 @@
     "targetPrivacyExcludedDescription": "The active app matches a private-app exclusion. Verbatim did not start recording."
   },
   "appLanguage": {
-    "title": "Jazyk aplikace",
+    "title": "Jazyk rozhraní aplikace",
     "description": "Změňte jazyk rozhraní Verbatim"
   },
   "overlay": {

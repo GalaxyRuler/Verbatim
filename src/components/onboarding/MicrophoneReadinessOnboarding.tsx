@@ -31,6 +31,8 @@ const MicrophoneReadinessOnboarding: React.FC<
   const [heardInput, setHeardInput] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const testActiveRef = useRef(false);
+  const startPendingRef = useRef(false);
+  const abandonedRef = useRef(false);
 
   const selectedMicrophone =
     getSetting("selected_microphone") === "default"
@@ -61,6 +63,9 @@ const MicrophoneReadinessOnboarding: React.FC<
 
   useEffect(() => {
     return () => {
+      // If a start is still in flight, tell it to stop the stream once it
+      // resolves; otherwise stop an already-open test directly.
+      abandonedRef.current = true;
       if (testActiveRef.current) {
         void commands.stopMicrophoneTest();
       }
@@ -72,18 +77,35 @@ const MicrophoneReadinessOnboarding: React.FC<
     setHeardInput(false);
     setLevels(Array(LEVEL_BAR_COUNT).fill(0));
 
-    const result = await commands.startMicrophoneTest();
-    if (result.status === "error") {
-      setIsTesting(false);
-      setStreamOpened(false);
-      testActiveRef.current = false;
-      setError(String(result.error));
-      return;
-    }
+    // Fresh attempt: clear any abandonment left by a prior teardown (e.g. a
+    // StrictMode mount/unmount/remount cycle) before awaiting the backend.
+    abandonedRef.current = false;
+    startPendingRef.current = true;
+    try {
+      const result = await commands.startMicrophoneTest();
+      if (result.status === "error") {
+        setIsTesting(false);
+        setStreamOpened(false);
+        testActiveRef.current = false;
+        setError(String(result.error));
+        return;
+      }
 
-    testActiveRef.current = true;
-    setIsTesting(result.data.stream_open);
-    setStreamOpened(result.data.stream_open);
+      if (abandonedRef.current) {
+        // The user advanced (skip/continue) or the view unmounted while the
+        // start was pending. Close the stream the backend just opened instead
+        // of leaving it running behind the next step.
+        testActiveRef.current = false;
+        void commands.stopMicrophoneTest();
+        return;
+      }
+
+      testActiveRef.current = true;
+      setIsTesting(result.data.stream_open);
+      setStreamOpened(result.data.stream_open);
+    } finally {
+      startPendingRef.current = false;
+    }
   };
 
   const stopTest = async () => {
@@ -93,7 +115,10 @@ const MicrophoneReadinessOnboarding: React.FC<
   };
 
   const complete = async () => {
-    if (testActiveRef.current) {
+    if (startPendingRef.current) {
+      // Start not resolved yet; startTest will stop the stream when it does.
+      abandonedRef.current = true;
+    } else if (testActiveRef.current) {
       await stopTest();
     }
     onComplete();
@@ -122,8 +147,8 @@ const MicrophoneReadinessOnboarding: React.FC<
         <div className="rounded-lg border border-mid-gray/20 bg-white/5 p-4 flex flex-col gap-4">
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-3 min-w-0">
-              <div className="p-2 rounded-full bg-logo-primary/20 shrink-0">
-                <Mic className="w-5 h-5 text-logo-primary" />
+              <div className="p-2 rounded-full bg-accent/20 shrink-0">
+                <Mic className="w-5 h-5 text-text" />
               </div>
               <div className="min-w-0">
                 <p className="text-sm font-medium text-text truncate">
@@ -162,7 +187,7 @@ const MicrophoneReadinessOnboarding: React.FC<
             {levels.map((level, index) => (
               <div
                 key={index}
-                className="self-end rounded-sm bg-logo-primary transition-all"
+                className="self-end rounded-md bg-accent transition-all"
                 style={{
                   height: `${Math.max(8, normalizeLevel(level) * 100)}%`,
                   opacity: 0.25 + normalizeLevel(level) * 0.75,
@@ -182,7 +207,15 @@ const MicrophoneReadinessOnboarding: React.FC<
           </Alert>
         )}
 
-        <div className="flex justify-end">
+        <div className="flex justify-end gap-2">
+          <Button
+            variant="ghost"
+            onClick={() => {
+              void complete();
+            }}
+          >
+            {t("onboarding.skipForNow")}
+          </Button>
           <Button
             variant="primary"
             disabled={!streamOpened}

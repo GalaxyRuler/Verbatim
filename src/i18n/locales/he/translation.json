@@ -13,14 +13,17 @@
     "models": "מודלים",
     "advanced": "מתקדם",
     "postProcessing": "עיבוד משלים",
-    "history": "היסטוריה",
-    "debug": "ניפוי שגיאות",
+    "history": "היסטוריה ופרטיות",
+    "debug": "פתרון בעיות",
     "about": "אודות",
     "dictionary": "מילון",
     "snippets": "קטעים"
   },
   "onboarding": {
+    "skipForNow": "דלג בינתיים",
     "subtitle": "כדי להתחיל, בחר מודל תמלול",
+    "privacyNote": "התמלול מתבצע כולו במחשב זה. השמע שלך לעולם אינו מועלה לרשת.",
+    "privacyNoteNetwork": "Verbatim משתמש ברשת רק לבדיקת עדכונים, להורדת מודלים ולשירותים אופציונליים שתגדיר.",
     "recommended": "מומלץ",
     "download": "הורדה",
     "downloading": "מוריד...",
@@ -118,7 +121,11 @@
       "allGranted": "הכול מוכן!",
       "errors": {
         "checkFailed": "בדיקת ההרשאות נכשלה. נסה שוב.",
-        "requestFailed": "בקשת ההרשאה נכשלה. נסה שוב."
+        "requestFailed": "בקשת ההרשאה נכשלה. נסה שוב.",
+        "manualFallbackTitle": "לא ניתן לאמת אוטומטית",
+        "manualFallbackMacos": "פתחו את הגדרות המערכת ← פרטיות ואבטחה ← מיקרופון (וגם נגישות), הפעילו את Verbatim ואז בחרו \"בדוק שוב\".",
+        "manualFallbackWindows": "פתחו את ההגדרות ← פרטיות ואבטחה ← מיקרופון, אפשרו לאפליקציות גישה למיקרופון ואז בחרו \"בדוק שוב\".",
+        "checkAgain": "בדוק שוב"
       }
     },
     "shortcut": {
@@ -250,7 +257,7 @@
         "unassigned": "Unassigned"
       },
       "language": {
-        "title": "שפה",
+        "title": "שפות הכתבה",
         "description": "בחר את שפת זיהוי הדיבור. מצב אוטומטי יזהה את השפה לבד, בעוד שבחירת שפה מסוימת יכולה לשפר את הדיוק עבורה.",
         "descriptionUnsupported": "מודל Parakeet מזהה את השפה אוטומטית. אין צורך בבחירה ידנית.",
         "searchPlaceholder": "חפש שפות...",
@@ -313,8 +320,8 @@
         "app": "אפליקציה",
         "output": "פלט",
         "transcription": "תמלול",
-        "history": "היסטוריה",
-        "experimental": "ניסיוני"
+        "experimental": "ניסיוני",
+        "performance": "ביצועים"
       },
       "experimentalToggle": {
         "label": "תכונות ניסיוניות",
@@ -492,11 +499,15 @@
     },
     "postProcessing": {
       "title": "עיבוד משלים",
+      "groups": {
+        "enable": "עיבוד משלים"
+      },
       "hotkey": {
         "title": "קיצור מקשים"
       },
       "api": {
         "title": "API (תואם OpenAI)",
+        "dataFlowNotice": "כאשר עיבוד משלים פועל, התמליל המוגמר נשלח אל {{provider}}. השמע לעולם אינו עוזב את המחשב הזה.",
         "provider": {
           "title": "ספק",
           "description": "בחר ספק שתואם ל-OpenAI."
@@ -615,7 +626,9 @@
       "clearRecordingsConfirm": "למחוק הקלטות הכתבה לא שמורות תוך שמירת ערכים שמורים וטקסטים של המרות בלבד?",
       "clearRecordingsError": "ניקוי ההקלטות נכשל.",
       "clearRecordingsSuccess": "ההקלטות נוקו.",
-      "retentionNote": "ההיסטוריה יכולה לכלול תמלולים גולמיים, טקסט מעובד, טקסט המרות וקבצי WAV מקושרים. ערכים שמורים נשארים עד שתמחק אותם."
+      "retentionNote": "ההיסטוריה יכולה לכלול תמלולים גולמיים, טקסט מעובד, טקסט המרות וקבצי WAV מקושרים. ערכים שמורים נשארים עד שתמחק אותם.",
+      "storageGroup": "אחסון",
+      "moreActions": "פעולות נוספות"
     },
     "debug": {
       "title": "ניפוי שגיאות",
@@ -642,7 +655,8 @@
       "historyLimit": {
         "title": "מגבלת היסטוריה",
         "description": "המספר המרבי של רשומות היסטוריה לשמירה",
-        "entries": "רשומות"
+        "entries": "רשומות",
+        "invalid": "הזן מספר בין 0 ל-1000."
       },
       "recordingRetention": {
         "title": "מחיקה אוטומטית של הקלטות",
@@ -756,6 +770,9 @@
           "credentialStore": "{{platform}} credential backend",
           "credentialStoreRetainedLegacy": "Credential store is unavailable; {{count}} legacy API-key value remains in settings so it is not lost."
         }
+      },
+      "groups": {
+        "logs": "לוגים"
       }
     },
     "about": {
@@ -958,7 +975,9 @@
     "off": "כבוי",
     "yes": "כן",
     "no": "לא",
+    "starting": "מתחיל…",
     "noOptionsFound": "לא נמצאו אפשרויות",
+    "moreInfo": "מידע נוסף",
     "appName": "Verbatim"
   },
   "accessibility": {
@@ -1013,7 +1032,7 @@
     "targetPrivacyExcludedDescription": "האפליקציה הפעילה תואמת החרגת פרטיות. Verbatim לא התחיל להקליט."
   },
   "appLanguage": {
-    "title": "שפת האפליקציה",
+    "title": "שפת הממשק",
     "description": "שנה את שפת הממשק של Verbatim"
   },
   "overlay": {

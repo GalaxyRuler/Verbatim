@@ -2,11 +2,12 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { readFile } from "@tauri-apps/plugin-fs";
 import {
+  BookPlus,
   Check,
   Copy,
   FolderOpen,
+  MoreVertical,
   RotateCcw,
-  Sparkles,
   Star,
   Trash2,
   X,
@@ -24,6 +25,14 @@ import { useSettingsStore } from "@/stores/settingsStore";
 import { formatDateTime } from "@/utils/dateFormat";
 import { AudioPlayer } from "../../ui/AudioPlayer";
 import { Button } from "../../ui/Button";
+import { SettingsGroup } from "../../ui/SettingsGroup";
+import { HistoryLimit } from "../HistoryLimit";
+import {
+  HistoryStorageToggle,
+  RecordingStorageToggle,
+} from "../HistoryStorage";
+import { PrivateSessionToggle } from "../PrivateSession";
+import { RecordingRetentionPeriodSelector } from "../RecordingRetentionPeriod";
 
 const IconButton: React.FC<{
   onClick: () => void;
@@ -33,18 +42,111 @@ const IconButton: React.FC<{
   children: React.ReactNode;
 }> = ({ onClick, title, disabled, active, children }) => (
   <button
+    type="button"
     onClick={onClick}
     disabled={disabled}
-    className={`p-1.5 rounded-md flex items-center justify-center transition-colors cursor-pointer disabled:cursor-not-allowed disabled:text-text/20 ${
+    className={`p-1.5 rounded-md flex items-center justify-center transition-colors cursor-pointer disabled:cursor-not-allowed disabled:text-text/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
       active
-        ? "text-logo-primary hover:text-logo-primary/80"
-        : "text-text/50 hover:text-logo-primary"
+        ? "text-accent hover:text-accent/80"
+        : "text-text/50 hover:text-accent"
     }`}
     title={title}
+    aria-label={title}
   >
     {children}
   </button>
 );
+
+interface RowAction {
+  key: string;
+  label: string;
+  icon: React.ReactNode;
+  onSelect: () => void;
+  disabled?: boolean;
+}
+
+const RowActionsMenu: React.FC<{
+  label: string;
+  actions: RowAction[];
+}> = ({ label, actions }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        containerRef.current &&
+        !containerRef.current.contains(event.target as Node)
+      ) {
+        setIsOpen(false);
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsOpen(false);
+        triggerRef.current?.focus();
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isOpen]);
+
+  // Move focus into the menu when it opens so items are keyboard-reachable.
+  useEffect(() => {
+    if (isOpen) {
+      menuRef.current
+        ?.querySelector<HTMLButtonElement>("button:not(:disabled)")
+        ?.focus();
+    }
+  }, [isOpen]);
+
+  return (
+    <div className="relative" ref={containerRef}>
+      <button
+        ref={triggerRef}
+        type="button"
+        onClick={() => setIsOpen((open) => !open)}
+        title={label}
+        aria-label={label}
+        aria-haspopup="true"
+        aria-expanded={isOpen}
+        className="p-1.5 rounded-md flex items-center justify-center transition-colors cursor-pointer text-text/50 hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+      >
+        <MoreVertical width={16} height={16} />
+      </button>
+      {isOpen && (
+        <div
+          ref={menuRef}
+          className="absolute end-0 top-full mt-1 z-50 min-w-48 py-1 bg-background border border-border rounded-lg shadow-menu"
+        >
+          {actions.map((action) => (
+            <button
+              key={action.key}
+              type="button"
+              disabled={action.disabled}
+              onClick={() => {
+                setIsOpen(false);
+                action.onSelect();
+              }}
+              className="w-full px-3 py-1.5 text-sm text-start flex items-center gap-2 transition-colors cursor-pointer hover:bg-accent/10 disabled:cursor-not-allowed disabled:text-text-disabled disabled:hover:bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            >
+              {action.icon}
+              <span className="whitespace-nowrap">{action.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
 
 const PAGE_SIZE = 30;
 
@@ -335,6 +437,16 @@ export const HistorySettings: React.FC = () => {
 
   return (
     <div className="max-w-3xl w-full mx-auto space-y-6">
+      <SettingsGroup title={t("settings.history.storageGroup")}>
+        <PrivateSessionToggle descriptionMode="tooltip" grouped={true} />
+        <HistoryStorageToggle descriptionMode="tooltip" grouped={true} />
+        <RecordingStorageToggle descriptionMode="tooltip" grouped={true} />
+        <HistoryLimit descriptionMode="tooltip" grouped={true} />
+        <RecordingRetentionPeriodSelector
+          descriptionMode="tooltip"
+          grouped={true}
+        />
+      </SettingsGroup>
       <div className="space-y-2">
         <div className="px-4 flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -512,6 +624,56 @@ const HistoryEntryComponent: React.FC<HistoryEntryProps> = ({
 
   const formattedDate = formatDateTime(String(entry.timestamp), i18n.language);
 
+  const overflowActions: RowAction[] = [
+    ...(!isTransformEntry
+      ? [
+          {
+            key: "learn-correction",
+            label: t("settings.history.learnCorrection"),
+            icon: <BookPlus width={16} height={16} />,
+            onSelect: handleStartLearningCorrection,
+            disabled: !hasTranscription || retrying || isLearningCorrection,
+          },
+        ]
+      : []),
+    {
+      key: "toggle-saved",
+      label: entry.saved
+        ? t("settings.history.unsave")
+        : t("settings.history.save"),
+      icon: (
+        <Star
+          width={16}
+          height={16}
+          fill={entry.saved ? "currentColor" : "none"}
+        />
+      ),
+      onSelect: onToggleSaved,
+      disabled: retrying,
+    },
+    ...(hasRecording
+      ? [
+          {
+            key: "retranscribe",
+            label: t("settings.history.retranscribe"),
+            icon: (
+              <RotateCcw
+                width={16}
+                height={16}
+                style={
+                  retrying
+                    ? { animation: "spin 1s linear infinite reverse" }
+                    : undefined
+                }
+              />
+            ),
+            onSelect: handleRetranscribe,
+            disabled: retrying,
+          },
+        ]
+      : []),
+  ];
+
   return (
     <div className="px-4 py-2 pb-5 flex flex-col gap-3">
       <div className="flex justify-between items-center">
@@ -528,48 +690,6 @@ const HistoryEntryComponent: React.FC<HistoryEntryProps> = ({
               <Copy width={16} height={16} />
             )}
           </IconButton>
-          {!isTransformEntry && (
-            <IconButton
-              onClick={handleStartLearningCorrection}
-              disabled={!hasTranscription || retrying || isLearningCorrection}
-              title={t("settings.history.learnCorrection")}
-            >
-              <Sparkles width={16} height={16} />
-            </IconButton>
-          )}
-          <IconButton
-            onClick={onToggleSaved}
-            disabled={retrying}
-            active={entry.saved}
-            title={
-              entry.saved
-                ? t("settings.history.unsave")
-                : t("settings.history.save")
-            }
-          >
-            <Star
-              width={16}
-              height={16}
-              fill={entry.saved ? "currentColor" : "none"}
-            />
-          </IconButton>
-          {hasRecording && (
-            <IconButton
-              onClick={handleRetranscribe}
-              disabled={retrying}
-              title={t("settings.history.retranscribe")}
-            >
-              <RotateCcw
-                width={16}
-                height={16}
-                style={
-                  retrying
-                    ? { animation: "spin 1s linear infinite reverse" }
-                    : undefined
-                }
-              />
-            </IconButton>
-          )}
           <IconButton
             onClick={handleDeleteEntry}
             disabled={retrying}
@@ -577,6 +697,10 @@ const HistoryEntryComponent: React.FC<HistoryEntryProps> = ({
           >
             <Trash2 width={16} height={16} />
           </IconButton>
+          <RowActionsMenu
+            label={t("settings.history.moreActions")}
+            actions={overflowActions}
+          />
         </div>
       </div>
 
@@ -587,7 +711,7 @@ const HistoryEntryComponent: React.FC<HistoryEntryProps> = ({
             onChange={(event) => setCorrectedText(event.target.value)}
             disabled={learningCorrection}
             aria-label={t("settings.history.correctedText")}
-            className="w-full min-h-24 rounded-md border border-mid-gray/20 bg-background p-2 text-sm text-text/90 outline-none focus:border-logo-primary disabled:opacity-60"
+            className="w-full min-h-24 rounded-md border border-mid-gray/20 bg-background p-2 text-sm text-text/90 outline-none focus:border-accent disabled:opacity-60"
           />
           <div className="flex justify-end gap-1">
             <IconButton

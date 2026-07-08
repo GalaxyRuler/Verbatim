@@ -19,26 +19,26 @@ export const Button: React.FC<ButtonProps> = ({
   ...props
 }) => {
   const baseClasses =
-    "font-medium rounded-lg border focus:outline-none transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer";
+    "font-medium rounded-lg border focus-visible:outline-none transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer";
 
   const variantClasses = {
     primary:
-      "text-white bg-background-ui border-background-ui hover:bg-background-ui/80 hover:border-background-ui/80 focus:ring-1 focus:ring-background-ui",
+      "text-accent-fg bg-accent border-accent hover:bg-accent/85 focus-visible:ring-2 focus-visible:ring-accent",
     "primary-soft":
-      "text-text bg-logo-primary/20 border-transparent hover:bg-logo-primary/30 focus:ring-1 focus:ring-logo-primary",
+      "text-text bg-accent/15 border-transparent hover:bg-accent/25 focus-visible:ring-2 focus-visible:ring-accent",
     secondary:
-      "bg-mid-gray/10 border-mid-gray/20 hover:bg-background-ui/30 hover:border-logo-primary focus:outline-none",
+      "text-text bg-surface border-border hover:bg-mid-gray/20 hover:border-border-strong focus-visible:ring-2 focus-visible:ring-accent",
     danger:
-      "text-white bg-red-600 border-mid-gray/20 hover:bg-red-700 hover:border-red-700 focus:ring-1 focus:ring-red-500",
+      "text-white bg-danger border-danger hover:opacity-90 focus-visible:ring-2 focus-visible:ring-danger",
     "danger-ghost":
-      "text-red-700 dark:text-red-300 border-transparent hover:text-red-800 dark:hover:text-red-200 hover:bg-red-500/10 focus:bg-red-500/20",
+      "text-danger border-transparent hover:bg-danger-bg focus-visible:ring-2 focus-visible:ring-danger",
     ghost:
-      "text-current border-transparent hover:bg-mid-gray/10 hover:border-logo-primary focus:bg-mid-gray/20",
+      "text-current border-transparent hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent",
   };
 
   const sizeClasses = {
     sm: "px-2 py-1 text-xs",
-    md: "px-4 py-[5px] text-sm",
+    md: "px-4 py-1.5 text-sm",
     lg: "px-4 py-2 text-base",
   };
 

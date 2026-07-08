@@ -21,9 +21,14 @@ const DictationReadinessOnboarding: React.FC<
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const recordingRef = useRef(false);
+  const startPendingRef = useRef(false);
+  const abandonedRef = useRef(false);
 
   useEffect(() => {
     return () => {
+      // If a start is still in flight, tell it to cancel once it resolves;
+      // otherwise cancel an already-running recording directly.
+      abandonedRef.current = true;
       if (recordingRef.current) {
         void commands.cancelOnboardingDictationTest();
       }
@@ -35,16 +40,44 @@ const DictationReadinessOnboarding: React.FC<
     setCopied(false);
     setTranscript("");
 
-    const result = await commands.startOnboardingDictationTest();
-    if (result.status === "error") {
-      recordingRef.current = false;
-      setTestState("idle");
-      setError(String(result.error));
-      return;
-    }
+    // Fresh attempt: clear any abandonment left by a prior teardown (e.g. a
+    // StrictMode mount/unmount/remount cycle) before awaiting the backend.
+    abandonedRef.current = false;
+    startPendingRef.current = true;
+    try {
+      const result = await commands.startOnboardingDictationTest();
+      if (result.status === "error") {
+        recordingRef.current = false;
+        setTestState("idle");
+        setError(String(result.error));
+        return;
+      }
 
-    recordingRef.current = true;
-    setTestState("recording");
+      if (abandonedRef.current) {
+        // The user advanced (skip/continue) or the view unmounted while the
+        // start was pending. Cancel the recording the backend just began
+        // instead of leaving it running behind the next step.
+        recordingRef.current = false;
+        void commands.cancelOnboardingDictationTest();
+        return;
+      }
+
+      recordingRef.current = true;
+      setTestState("recording");
+    } finally {
+      startPendingRef.current = false;
+    }
+  };
+
+  const complete = async () => {
+    if (startPendingRef.current) {
+      // Start not resolved yet; startRecording will cancel when it does.
+      abandonedRef.current = true;
+    } else if (recordingRef.current) {
+      recordingRef.current = false;
+      await commands.cancelOnboardingDictationTest();
+    }
+    onComplete();
   };
 
   const stopRecording = async () => {
@@ -103,8 +136,8 @@ const DictationReadinessOnboarding: React.FC<
 
         <div className="rounded-lg border border-mid-gray/20 bg-white/5 p-4 flex flex-col gap-4">
           <div className="flex items-center gap-3">
-            <div className="p-2 rounded-full bg-logo-primary/20 shrink-0">
-              <Mic className="w-5 h-5 text-logo-primary" />
+            <div className="p-2 rounded-full bg-accent/20 shrink-0">
+              <Mic className="w-5 h-5 text-text" />
             </div>
             <div>
               <p className="text-sm font-medium text-text">
@@ -185,11 +218,21 @@ const DictationReadinessOnboarding: React.FC<
           </Alert>
         )}
 
-        <div className="flex justify-end">
+        <div className="flex justify-end gap-2">
+          <Button
+            variant="ghost"
+            onClick={() => {
+              void complete();
+            }}
+          >
+            {t("onboarding.skipForNow")}
+          </Button>
           <Button
             variant="primary"
             disabled={testState !== "ready"}
-            onClick={onComplete}
+            onClick={() => {
+              void complete();
+            }}
           >
             {t("onboarding.dictationTest.discardContinue")}
           </Button>

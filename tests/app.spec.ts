@@ -1563,16 +1563,16 @@ test.describe("Verbatim App", () => {
     await expect(page.getByText("To get started")).toBeVisible();
     await page.getByRole("button", { name: /Whisper Small/ }).click();
 
-    await expect(page.getByText("Set Recording Shortcut")).toBeVisible();
+    await expect(page.getByText("Set recording shortcut")).toBeVisible();
     await page.getByRole("button", { name: "Continue" }).click();
 
-    await expect(page.getByText("Test Microphone")).toBeVisible();
+    await expect(page.getByText("Test microphone")).toBeVisible();
     await expect(page.getByRole("button", { name: "Default" })).toBeVisible();
     await page.getByRole("button", { name: "Start test" }).click();
     await expect(page.getByText("Microphone input detected.")).toBeVisible();
     await page.getByRole("button", { name: "Continue" }).click();
 
-    await expect(page.getByText("Test Dictation")).toBeVisible();
+    await expect(page.getByText("Test dictation")).toBeVisible();
     await page.getByRole("button", { name: "Start recording" }).click();
     await page.getByRole("button", { name: /Stop recording/ }).click();
     await expect(page.getByText("Testing Verbatim setup.")).toBeVisible();
@@ -1608,9 +1608,9 @@ test.describe("Verbatim App", () => {
       "Dictionary",
       "Snippets",
       "Advanced",
-      "History",
-      "Post Process",
-      "Debug",
+      "History & Privacy",
+      "Post-processing",
+      "Troubleshooting",
       "About",
     ]) {
       const sectionButton = page.getByRole("button", {
@@ -2223,21 +2223,21 @@ test.describe("Verbatim App", () => {
 
     await page.getByRole("button", { name: "Settings" }).click();
     await page.getByRole("button", { name: "Advanced features" }).click();
-    await page.getByRole("button", { name: "Post Process" }).click();
+    await page.getByRole("button", { name: "Post-processing" }).click();
 
     await expect(
-      page.getByRole("heading", { name: "Post Process", exact: true }),
+      page.getByRole("heading", { name: "Post-processing", exact: true }),
     ).toBeVisible();
     await expect(page.getByRole("button", { name: "Home" })).toHaveCount(0);
     await expect(page.getByText("Apple Intelligence")).toHaveCount(0);
     await expect(page.getByRole("button", { name: /OpenAI/ })).toBeVisible();
-    await expect(page.getByLabel("API Key")).toHaveValue("test-openai-key");
+    await expect(page.getByLabel("API key")).toHaveValue("test-openai-key");
     const modelField = page.getByRole("combobox", {
       name: "Model",
       exact: true,
     });
     await expect(modelField).toHaveValue("gpt-4o-mini");
-    await expect(page.getByLabel("Selected Prompt")).toHaveValue(
+    await expect(page.getByLabel("Selected prompt")).toHaveValue(
       "prompt_clean",
     );
 
@@ -2245,19 +2245,19 @@ test.describe("Verbatim App", () => {
     await expect(modelField).toHaveValue("claude-3-5-haiku-latest");
     await page.getByRole("button", { name: "Refresh models" }).click();
     await modelField.fill("claude-3-5-sonnet-latest");
-    await page.getByLabel("API Key").click();
+    await page.getByLabel("API key").click();
     await expect(modelField).toHaveValue("claude-3-5-sonnet-latest");
 
-    await page.getByRole("button", { name: "Create New Prompt" }).click();
+    await page.getByRole("button", { name: "Create new prompt" }).click();
     await expect(
-      page.getByRole("heading", { name: "Create New Prompt" }),
+      page.getByRole("heading", { name: "Create new prompt" }),
     ).toBeVisible();
-    await page.getByLabel("Prompt Label").fill("Android polish");
+    await page.getByLabel("Prompt label").fill("Android polish");
     await page
-      .getByLabel("Prompt Instructions")
+      .getByLabel("Prompt instructions")
       .fill("Polish {transcription} for mobile.");
     await page.getByRole("button", { name: "Save" }).click();
-    await expect(page.getByLabel("Selected Prompt")).toHaveValue(
+    await expect(page.getByLabel("Selected prompt")).toHaveValue(
       "prompt_test_1",
     );
 
@@ -2304,7 +2304,7 @@ test.describe("Verbatim App", () => {
     ).toBeVisible();
     await page.getByRole("button", { name: "Advanced features" }).click();
     await expect(
-      page.getByRole("button", { name: "Post Process" }),
+      page.getByRole("button", { name: "Post-processing" }),
     ).toBeVisible();
   });
 
@@ -2356,9 +2356,9 @@ test.describe("Verbatim App", () => {
     await page.getByRole("button", { name: /Bottom right/ }).click();
     await expect(page.getByText("Bottom right")).toBeVisible();
 
-    await page.getByRole("button", { name: /Application Language/ }).click();
+    await page.getByRole("button", { name: /App display language/ }).click();
     const languageDialog = page.getByRole("dialog", {
-      name: "Application Language",
+      name: "App display language",
     });
     await expect(languageDialog).toBeVisible();
     await expect(
@@ -2367,16 +2367,16 @@ test.describe("Verbatim App", () => {
     await page.getByLabel("Cancel").click();
 
     await page.getByRole("button", { name: "Advanced features" }).click();
-    await page.getByRole("button", { name: /History Limit/ }).click();
-    await page.getByRole("spinbutton", { name: "History Limit" }).fill("250");
+    await page.getByRole("button", { name: /History limit/ }).click();
+    await page.getByRole("spinbutton", { name: "History limit" }).fill("250");
     await page.getByRole("button", { name: "Save" }).click();
     await expect(page.getByText("250 entries")).toBeVisible();
 
-    await page.getByRole("button", { name: /Auto-Delete Recordings/ }).click();
+    await page.getByRole("button", { name: /Auto-delete recordings/ }).click();
     await page.getByRole("button", { name: "After 3 days" }).click();
     await expect(page.getByText("After 3 days")).toBeVisible();
 
-    await page.getByRole("button", { name: /Sound Theme/ }).click();
+    await page.getByRole("button", { name: /Sound theme/ }).click();
     await page.getByRole("button", { name: "Pop" }).click();
     await expect(page.getByText("Pop")).toBeVisible();
 
@@ -2592,17 +2592,17 @@ test.describe("Verbatim App", () => {
       .toEqual([]);
     await expect(page.getByTitle("General")).toBeVisible();
     await page.getByText("Advanced").click();
-    await expect(page.getByText("Adaptive Profiles")).toHaveCount(0);
+    await expect(page.getByText("Adaptive profiles")).toHaveCount(0);
 
-    await settingRow(page, "Experimental Features")
+    await settingRow(page, "Experimental features")
       .getByRole("checkbox")
       .check({ force: true });
 
-    const adaptiveRow = settingRow(page, "Adaptive Profiles");
+    const adaptiveRow = settingRow(page, "Adaptive profiles");
     await expect(adaptiveRow).toBeVisible();
-    await expect(page.getByText("Default Profile")).toBeVisible();
+    await expect(page.getByText("Default profile")).toBeVisible();
     await expect(
-      page.getByRole("button", { name: "Reprocess Last" }),
+      page.getByRole("button", { name: "Reprocess last" }),
     ).toBeVisible();
 
     const adaptiveToggle = adaptiveRow.getByRole("checkbox");
@@ -2619,37 +2619,37 @@ test.describe("Verbatim App", () => {
     await expect(page.getByTitle("General")).toBeVisible();
     await page.getByText("Advanced").click();
 
-    await settingRow(page, "Experimental Features")
+    await settingRow(page, "Experimental features")
       .getByRole("checkbox")
       .check({ force: true });
 
-    await expect(page.getByText("Context Awareness")).toBeVisible();
-    await expect(page.getByText("Nearby Text")).toBeVisible();
+    await expect(page.getByText("Context awareness")).toBeVisible();
+    await expect(page.getByText("Nearby text")).toBeVisible();
     await expect(
-      settingRow(page, "Nearby Text").getByRole("checkbox"),
+      settingRow(page, "Nearby text").getByRole("checkbox"),
     ).toBeDisabled();
 
-    await settingRow(page, "Context Awareness")
+    await settingRow(page, "Context awareness")
       .getByRole("checkbox")
       .check({ force: true });
     await expect(
-      settingRow(page, "Nearby Text").getByRole("checkbox"),
+      settingRow(page, "Nearby text").getByRole("checkbox"),
     ).toBeEnabled();
-    await settingRow(page, "Nearby Text")
+    await settingRow(page, "Nearby text")
       .getByRole("checkbox")
       .check({ force: true });
     await expect(
-      settingRow(page, "Nearby Text").getByRole("checkbox"),
+      settingRow(page, "Nearby text").getByRole("checkbox"),
     ).toBeChecked();
 
-    await settingRow(page, "Context Awareness")
+    await settingRow(page, "Context awareness")
       .getByRole("checkbox")
       .uncheck({ force: true });
     await expect(
-      settingRow(page, "Nearby Text").getByRole("checkbox"),
+      settingRow(page, "Nearby text").getByRole("checkbox"),
     ).toBeDisabled();
     await expect(
-      settingRow(page, "Nearby Text").getByRole("checkbox"),
+      settingRow(page, "Nearby text").getByRole("checkbox"),
     ).not.toBeChecked();
 
     const invokes = await page.evaluate(() => {
@@ -2685,7 +2685,7 @@ test.describe("Verbatim App", () => {
     await page.goto("/");
 
     await expect(
-      page.getByRole("heading", { name: "Transform Selected Text" }),
+      page.getByRole("heading", { name: "Transform selected text" }),
     ).toBeVisible();
     await expect(
       page.getByText(
@@ -2720,7 +2720,7 @@ test.describe("Verbatim App", () => {
     await page.goto("/");
 
     await expect(
-      page.getByRole("heading", { name: "Transform Selected Text" }),
+      page.getByRole("heading", { name: "Transform selected text" }),
     ).toBeVisible();
     await expect(page.getByText("Polish selected text")).toBeVisible();
   });
@@ -2734,7 +2734,7 @@ test.describe("Verbatim App", () => {
     await expect(page.getByTitle("General")).toBeVisible();
     await page.getByText("Advanced").click();
 
-    const formattingRow = settingRow(page, "Smart Formatting");
+    const formattingRow = settingRow(page, "Smart formatting");
     await expect(formattingRow).toBeVisible();
     await formattingRow.getByRole("button", { name: "Light" }).click();
     await page.getByRole("button", { name: "Medium" }).click();
@@ -2763,7 +2763,7 @@ test.describe("Verbatim App", () => {
     await expect(page.getByTitle("General")).toBeVisible();
     await page.getByText("Advanced").click();
 
-    const formattingRow = settingRow(page, "Smart Formatting");
+    const formattingRow = settingRow(page, "Smart formatting");
     await expect(formattingRow).toBeVisible();
     await expect(
       formattingRow.getByText("Safe spacing and spoken corrections."),
@@ -2806,8 +2806,13 @@ test.describe("Verbatim App", () => {
     await page.goto("/");
 
     await expect(page.getByTitle("General")).toBeVisible();
-    await expect(page.getByTitle("Post Process")).toHaveCount(0);
-    await expect(page.getByText("Managed Local Model")).toHaveCount(0);
+    await page.getByTitle("Post-processing").click();
+
+    await expect(
+      page.getByText("Enable post-processing", { exact: true }),
+    ).toBeVisible();
+    await expect(page.getByText("Hotkey", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("Managed local model")).toHaveCount(0);
   });
 
   test("local post-processing model can be downloaded selected and enabled", async ({
@@ -2817,7 +2822,7 @@ test.describe("Verbatim App", () => {
     await page.goto("/");
 
     await expect(page.getByTitle("General")).toBeVisible();
-    await page.getByTitle("Post Process").click();
+    await page.getByTitle("Post-processing").click();
     await page.getByRole("button", { name: "Download" }).click();
     await page.getByRole("button", { name: "Select", exact: true }).click();
     await page.getByRole("button", { name: "Enable" }).click();
@@ -2855,9 +2860,9 @@ test.describe("Verbatim App", () => {
     await page.goto("/");
 
     await expect(page.getByTitle("General")).toBeVisible();
-    await page.getByTitle("Post Process").click();
+    await page.getByTitle("Post-processing").click();
 
-    await expect(page.getByText("Processing Engine")).toBeVisible();
+    await expect(page.getByText("Processing engine")).toBeVisible();
     await expect(
       page.getByRole("button", { name: "API provider" }),
     ).toHaveAttribute("aria-pressed", "true");
@@ -3098,7 +3103,7 @@ test.describe("Verbatim App", () => {
     await page.goto("/");
 
     await page.getByText("Advanced").click();
-    await expect(page.getByText("Custom Words")).toHaveCount(0);
+    await expect(page.getByText("Custom words")).toHaveCount(0);
     await expect(page.getByText("Dictionary")).toBeVisible();
   });
 
@@ -3134,17 +3139,28 @@ test.describe("Verbatim App", () => {
     ]);
     await page.goto("/");
 
-    await page.getByText("History").click();
+    await page.getByText("History & Privacy").click();
 
     await expect(page.getByText("Polished transform result")).toBeVisible();
     await expect(page.getByText("Raw selected text")).toHaveCount(0);
-    await expect(
-      page.getByTitle("Copy transcription to clipboard"),
-    ).toBeVisible();
-    await expect(page.getByTitle("Save transcription")).toBeVisible();
+    await expect(page.getByTitle("Copy transcript to clipboard")).toBeVisible();
     await expect(page.getByTitle("Delete entry")).toBeVisible();
-    await expect(page.getByTitle("Learn dictionary correction")).toHaveCount(0);
-    await expect(page.getByTitle("Re-transcribe")).toHaveCount(0);
+
+    // Remaining actions live behind the overflow menu.
+    await page.getByRole("button", { name: "More actions" }).click();
+    await expect(
+      page.getByRole("button", { name: "Save transcript" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Learn dictionary correction" }),
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: "Re-transcribe" }),
+    ).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    await expect(
+      page.getByRole("button", { name: "Save transcript" }),
+    ).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Play" })).toHaveCount(0);
 
     const commandsInvoked = await page.evaluate(() => {
@@ -3318,7 +3334,7 @@ test.describe("Verbatim App", () => {
     await expect(page.getByTitle("General")).toBeVisible();
 
     await page.getByTitle("Advanced").click();
-    await settingRow(page, "Docked Pill")
+    await settingRow(page, "Docked pill")
       .getByRole("checkbox")
       .check({ force: true });
 

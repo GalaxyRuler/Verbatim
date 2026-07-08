@@ -65,7 +65,7 @@ test.describe("accessibility gates", () => {
     await page.goto("/");
 
     await expect(
-      page.getByRole("heading", { name: "Permissions Required" }),
+      page.getByRole("heading", { name: "Permissions required" }),
     ).toBeVisible();
     await expectNoAxeViolations(page, "onboarding permissions");
   });
@@ -80,9 +80,9 @@ test.describe("accessibility gates", () => {
     for (const sectionName of [
       "General",
       "Models",
-      "History",
-      "Post Process",
-      "Debug",
+      "History & Privacy",
+      "Post-processing",
+      "Troubleshooting",
     ]) {
       const sectionButton = page.getByRole("button", {
         name: sectionName,
@@ -92,6 +92,20 @@ test.describe("accessibility gates", () => {
       await expect(sectionButton).toHaveAttribute("aria-current", "page");
       await expectNoAxeViolations(page, sectionName);
     }
+  });
+
+  test("setting info tooltips are keyboard reachable", async ({ page }) => {
+    await installA11yTauriMocks(page);
+    await page.goto("/");
+    await expect(page.getByRole("button", { name: "General" })).toBeVisible();
+
+    const trigger = page
+      .locator('[data-testid="setting-info-trigger"]')
+      .first();
+    await trigger.focus();
+    await expect(trigger).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(page.locator('[role="tooltip"]').first()).toBeVisible();
   });
 
   test("recording overlay has no axe violations", async ({ page }) => {

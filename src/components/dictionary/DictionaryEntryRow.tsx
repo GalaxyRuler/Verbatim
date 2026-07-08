@@ -53,7 +53,7 @@ export const DictionaryEntryRow: React.FC<DictionaryEntryRowProps> = ({
             : "settings.dictionary.starEntry",
           { phrase: entry.phrase },
         )}
-        className={isStarred ? "text-logo-primary" : ""}
+        className={isStarred ? "text-accent" : ""}
       >
         <Star className={`h-4 w-4 ${isStarred ? "fill-current" : ""}`} />
       </Button>

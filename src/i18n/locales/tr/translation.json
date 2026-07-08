@@ -13,14 +13,17 @@
     "models": "Modeller",
     "advanced": "Gelişmiş",
     "postProcessing": "Son İşlem",
-    "history": "Geçmiş",
-    "debug": "Hata Ayıklama",
+    "history": "Geçmiş ve Gizlilik",
+    "debug": "Sorun Giderme",
     "about": "Hakkında",
     "dictionary": "Dictionary",
     "snippets": "Snippets"
   },
   "onboarding": {
+    "skipForNow": "Şimdilik atla",
     "subtitle": "Başlamak için bir transkripsiyon modeli seçin",
+    "privacyNote": "Transkripsiyon tamamen bu bilgisayarda çalışır. Ses kaydınız hiçbir zaman internete yüklenmez.",
+    "privacyNoteNetwork": "Verbatim ağı yalnızca güncelleme denetimleri, model indirmeleri ve yapılandırdığınız isteğe bağlı hizmetler için kullanır.",
     "recommended": "Önerilen",
     "download": "İndir",
     "downloading": "İndiriliyor...",
@@ -118,7 +121,11 @@
       "allGranted": "Her şey hazır!",
       "errors": {
         "checkFailed": "İzinler kontrol edilemedi. Lütfen tekrar deneyin.",
-        "requestFailed": "İzin isteği başarısız oldu. Lütfen tekrar deneyin."
+        "requestFailed": "İzin isteği başarısız oldu. Lütfen tekrar deneyin.",
+        "manualFallbackTitle": "Otomatik olarak doğrulanamıyor",
+        "manualFallbackMacos": "Sistem Ayarları → Gizlilik ve Güvenlik → Mikrofon (ve Erişilebilirlik) bölümünü açın, Verbatim'i etkinleştirin, ardından \"Tekrar kontrol et\"i seçin.",
+        "manualFallbackWindows": "Ayarlar → Gizlilik ve güvenlik → Mikrofon bölümünü açın, uygulamaların mikrofonunuza erişmesine izin verin, ardından \"Tekrar kontrol et\"i seçin.",
+        "checkAgain": "Tekrar kontrol et"
       }
     },
     "shortcut": {
@@ -268,7 +275,7 @@
         "unassigned": "Unassigned"
       },
       "language": {
-        "title": "Dil",
+        "title": "Dikte Dilleri",
         "description": "Konuşma tanıma dilini seçin. 'Otomatik' seçeneği dili kendisi belirler, ancak belirli bir dil seçmek o dildeki doğruluğu artırabilir.",
         "descriptionUnsupported": "Parakeet modeli dili otomatik algılar. Manuel seçim gerekmez.",
         "searchPlaceholder": "Dil ara...",
@@ -313,8 +320,8 @@
         "app": "Uygulama",
         "output": "Çıktı",
         "transcription": "Transkripsiyon",
-        "history": "Geçmiş",
-        "experimental": "Deneysel"
+        "experimental": "Deneysel",
+        "performance": "Performans"
       },
       "experimentalToggle": {
         "label": "Deneysel Özellikler",
@@ -492,11 +499,15 @@
     },
     "postProcessing": {
       "title": "Son İşlem",
+      "groups": {
+        "enable": "Son İşlem"
+      },
       "hotkey": {
         "title": "Kısayol Tuşu"
       },
       "api": {
         "title": "API (OpenAI Uyumlu)",
+        "dataFlowNotice": "Son işlem çalıştığında, tamamlanan transkript {{provider}} hizmetine gönderilir. Ses hiçbir zaman bu bilgisayardan ayrılmaz.",
         "provider": {
           "title": "Sağlayıcı",
           "description": "OpenAI uyumlu bir sağlayıcı seçin."
@@ -615,7 +626,9 @@
       "clearRecordingsConfirm": "Delete unsaved dictation recordings while keeping saved entries and transform-only text?",
       "clearRecordingsError": "Failed to clear recordings.",
       "clearRecordingsSuccess": "Recordings cleared.",
-      "retentionNote": "History can include raw transcripts, refined text, transform text, and linked WAV files. Saved entries are kept until you delete them."
+      "retentionNote": "History can include raw transcripts, refined text, transform text, and linked WAV files. Saved entries are kept until you delete them.",
+      "storageGroup": "Depolama",
+      "moreActions": "Diğer işlemler"
     },
     "debug": {
       "title": "Hata Ayıklama",
@@ -642,7 +655,8 @@
       "historyLimit": {
         "title": "Geçmiş Limiti",
         "description": "Saklanacak maksimum geçmiş kaydı sayısı",
-        "entries": "kayıt"
+        "entries": "kayıt",
+        "invalid": "0 ile 1000 arasında bir sayı girin."
       },
       "recordingRetention": {
         "title": "Kayıtları Otomatik Sil",
@@ -756,6 +770,9 @@
           "credentialStore": "{{platform}} credential backend",
           "credentialStoreRetainedLegacy": "Credential store is unavailable; {{count}} legacy API-key value remains in settings so it is not lost."
         }
+      },
+      "groups": {
+        "logs": "Loglar"
       }
     },
     "about": {
@@ -958,7 +975,9 @@
     "off": "Kapalı",
     "yes": "Evet",
     "no": "Hayır",
+    "starting": "Başlatılıyor…",
     "noOptionsFound": "Seçenek bulunamadı",
+    "moreInfo": "Daha fazla bilgi",
     "appName": "Verbatim"
   },
   "accessibility": {
@@ -1013,7 +1032,7 @@
     "targetPrivacyExcludedDescription": "The active app matches a private-app exclusion. Verbatim did not start recording."
   },
   "appLanguage": {
-    "title": "Uygulama Dili",
+    "title": "Uygulama Görüntüleme Dili",
     "description": "Verbatim arayüzünün dilini değiştirin"
   },
   "overlay": {

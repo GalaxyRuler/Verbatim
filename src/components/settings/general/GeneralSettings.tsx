@@ -2,14 +2,18 @@ import React from "react";
 import { useTranslation } from "react-i18next";
 import { type } from "@tauri-apps/plugin-os";
 import { MicrophoneSelector } from "../MicrophoneSelector";
+import { AlwaysOnMicrophone } from "../AlwaysOnMicrophone";
+import { ClamshellMicrophoneSelector } from "../ClamshellMicrophoneSelector";
 import { ShortcutInput } from "../ShortcutInput";
 import { SettingsGroup } from "../../ui/SettingsGroup";
 import { OutputDeviceSelector } from "../OutputDeviceSelector";
 import { PushToTalk } from "../PushToTalk";
 import { AudioFeedback } from "../AudioFeedback";
+import { SoundPicker } from "../SoundPicker";
 import { useSettings } from "../../../hooks/useSettings";
 import { VolumeSlider } from "../VolumeSlider";
 import { MuteWhileRecording } from "../MuteWhileRecording";
+import { AppLanguageSelector } from "../AppLanguageSelector";
 import { ModelSettingsCard } from "./ModelSettingsCard";
 
 export const GeneralSettings: React.FC = () => {
@@ -22,6 +26,9 @@ export const GeneralSettings: React.FC = () => {
     osType === "windows" || osType === "macos" || osType === "linux";
   return (
     <div className="max-w-3xl w-full mx-auto space-y-6">
+      <SettingsGroup title={t("settings.advanced.groups.app")}>
+        <AppLanguageSelector descriptionMode="tooltip" grouped={true} />
+      </SettingsGroup>
       <SettingsGroup title={t("settings.general.title")}>
         <ShortcutInput shortcutId="transcribe" grouped={true} />
         <PushToTalk descriptionMode="tooltip" grouped={true} />
@@ -48,8 +55,14 @@ export const GeneralSettings: React.FC = () => {
       <ModelSettingsCard />
       <SettingsGroup title={t("settings.sound.title")}>
         <MicrophoneSelector descriptionMode="tooltip" grouped={true} />
+        <AlwaysOnMicrophone descriptionMode="tooltip" grouped={true} />
+        <ClamshellMicrophoneSelector descriptionMode="tooltip" grouped={true} />
         <MuteWhileRecording descriptionMode="tooltip" grouped={true} />
         <AudioFeedback descriptionMode="tooltip" grouped={true} />
+        <SoundPicker
+          label={t("settings.debug.soundTheme.label")}
+          description={t("settings.debug.soundTheme.description")}
+        />
         <OutputDeviceSelector
           descriptionMode="tooltip"
           grouped={true}

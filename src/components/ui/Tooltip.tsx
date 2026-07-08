@@ -93,6 +93,7 @@ export const Tooltip: React.FC<TooltipProps> = ({
   return createPortal(
     <div
       ref={tooltipRef}
+      role="tooltip"
       style={{
         position: "fixed",
         top: coords?.top ?? -9999,

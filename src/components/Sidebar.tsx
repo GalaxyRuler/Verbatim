@@ -3,15 +3,14 @@ import { useTranslation } from "react-i18next";
 import {
   BookOpen,
   Cog,
-  FlaskConical,
   History,
+  House,
   Info,
-  Sparkles,
+  Wand2,
+  Wrench,
   Cpu,
   TextQuote,
 } from "lucide-react";
-import VerbatimMark from "./icons/VerbatimMark";
-import { useSettings } from "../hooks/useSettings";
 import {
   GeneralSettings,
   AdvancedSettings,
@@ -39,13 +38,13 @@ interface SectionConfig {
   labelKey: string;
   icon: React.ComponentType<IconProps>;
   component: React.ComponentType;
-  enabled: (settings: any) => boolean;
+  enabled: () => boolean;
 }
 
 export const SECTIONS_CONFIG = {
   general: {
     labelKey: "sidebar.general",
-    icon: VerbatimMark,
+    icon: House,
     component: GeneralSettings,
     enabled: () => true,
   },
@@ -81,13 +80,13 @@ export const SECTIONS_CONFIG = {
   },
   postprocessing: {
     labelKey: "sidebar.postProcessing",
-    icon: Sparkles,
+    icon: Wand2,
     component: PostProcessingSettings,
-    enabled: (settings) => settings?.post_process_enabled ?? false,
+    enabled: () => true,
   },
   debug: {
     labelKey: "sidebar.debug",
-    icon: FlaskConical,
+    icon: Wrench,
     component: DebugSettings,
     enabled: () => true,
   },
@@ -109,10 +108,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onSectionChange,
 }) => {
   const { t } = useTranslation();
-  const { settings } = useSettings();
 
   const availableSections = Object.entries(SECTIONS_CONFIG)
-    .filter(([_, config]) => config.enabled(settings))
+    .filter(([_, config]) => config.enabled())
     .map(([id, config]) => ({ id: id as SidebarSection, ...config }));
 
   return (
@@ -134,16 +132,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
               type="button"
               key={section.id}
               aria-current={isActive ? "page" : undefined}
-              className={`flex gap-2 items-center p-2 w-full rounded-lg cursor-pointer transition-colors text-start focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-logo-primary ${
+              className={`flex gap-2 items-center p-2 w-full rounded-lg cursor-pointer transition-colors text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
                 isActive
-                  ? "bg-logo-primary/80"
-                  : "hover:bg-mid-gray/20 hover:opacity-100 opacity-85"
+                  ? "bg-accent/15"
+                  : "hover:bg-surface opacity-85 hover:opacity-100"
               }`}
               onClick={() => onSectionChange(section.id)}
             >
-              <Icon width={24} height={24} className="shrink-0" />
+              <Icon
+                width={24}
+                height={24}
+                className={`shrink-0 ${isActive ? "text-accent" : ""}`}
+              />
               <p
-                className="text-sm font-medium truncate"
+                className={`text-sm truncate ${isActive ? "font-semibold" : "font-medium"}`}
                 title={t(section.labelKey)}
               >
                 {t(section.labelKey)}

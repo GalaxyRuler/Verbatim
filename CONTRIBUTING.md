@@ -262,6 +262,7 @@ In your PR description, please include:
 - Use functional components
 - Keep components small and focused
 - Use Tailwind CSS for styling
+- UI changes must follow [docs/DESIGN.md](docs/DESIGN.md) (tokens, contrast, focus, feedback, and copy rules)
 
 **General:**
 

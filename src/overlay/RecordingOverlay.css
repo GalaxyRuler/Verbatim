@@ -333,3 +333,27 @@
     box-shadow: 0 8px 20px #1118271f;
   }
 }
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  .transcribing-text {
+    animation: none !important;
+  }
+
+  /* Level bars convey mic level via height (information, not decoration —
+     permitted by WCAG SC 2.3.3). Kill only the easing so height updates are
+     instant. `!important` here overrides the inline transition strings set
+     in RecordingOverlay.tsx (important author declarations beat normal
+     inline styles in the cascade). */
+  .bar,
+  .docked-waveform-bar {
+    transition: none !important;
+  }
+}
