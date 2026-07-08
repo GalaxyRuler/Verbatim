@@ -97,6 +97,10 @@
       "cohere-int8": {
         "name": "Cohere",
         "description": "大型模型，速度較慢，但多語言辨識非常準確。"
+      },
+      "cohere-arabic-int8": {
+        "name": "Cohere Arabic",
+        "description": "針對阿拉伯語方言最佳化。也支援英語。"
       }
     },
     "errors": {

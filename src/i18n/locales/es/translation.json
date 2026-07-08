@@ -97,6 +97,10 @@
       "cohere-int8": {
         "name": "Cohere",
         "description": "Un modelo grande, más lento, pero muy preciso y multilingüe."
+      },
+      "cohere-arabic-int8": {
+        "name": "Cohere Arabic",
+        "description": "Optimizado para dialectos árabes. También admite inglés."
       }
     },
     "errors": {
