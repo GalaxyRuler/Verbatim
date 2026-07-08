@@ -18,7 +18,16 @@ val sherpaOnnxAndroidAbi = System.getenv("SHERPA_ONNX_ANDROID_ABI")
     ?: inferSherpaOnnxAndroidAbi(sherpaOnnxLibDir)
 val stagedSherpaOnnxAndroidAbi = sherpaOnnxAndroidAbi ?: "unused"
 val stagedSherpaOnnxJniLibsDir = layout.buildDirectory.dir("generated/sherpa-onnx-jniLibs")
+val sherpaOnnxJniLibsDir = System.getenv("SHERPA_ONNX_JNILIBS_DIR")
 val debugKeystoreFile = rootProject.file("debug.keystore")
+val releaseKeystoreFile = System.getenv("VERBATIM_ANDROID_KEYSTORE_FILE")
+val releaseKeystorePassword = System.getenv("VERBATIM_ANDROID_KEYSTORE_PASSWORD")
+val releaseKeyAlias = System.getenv("VERBATIM_ANDROID_KEY_ALIAS")
+val releaseKeyPassword = System.getenv("VERBATIM_ANDROID_KEY_PASSWORD") ?: releaseKeystorePassword
+val isReleaseSigningConfigured = !releaseKeystoreFile.isNullOrBlank() &&
+    !releaseKeystorePassword.isNullOrBlank() &&
+    !releaseKeyAlias.isNullOrBlank() &&
+    !releaseKeyPassword.isNullOrBlank()
 
 android {
     compileSdk = 36
@@ -39,6 +48,14 @@ android {
             keyAlias = "androiddebugkey"
             keyPassword = "android"
         }
+        if (isReleaseSigningConfigured) {
+            create("release") {
+                storeFile = file(releaseKeystoreFile!!)
+                storePassword = releaseKeystorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
     }
     buildTypes {
         getByName("debug") {
@@ -55,6 +72,9 @@ android {
             }
         }
         getByName("release") {
+            if (isReleaseSigningConfigured) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             isMinifyEnabled = true
             proguardFiles(
                 *fileTree(".") { include("**/*.pro") }
@@ -81,12 +101,22 @@ android {
 }
 
 val stageSherpaOnnxJniLibs by tasks.registering(Copy::class) {
-    onlyIf { !sherpaOnnxLibDir.isNullOrBlank() && !sherpaOnnxAndroidAbi.isNullOrBlank() }
-    if (!sherpaOnnxLibDir.isNullOrBlank()) {
-        from(file(sherpaOnnxLibDir))
+    onlyIf {
+        !sherpaOnnxJniLibsDir.isNullOrBlank() ||
+            (!sherpaOnnxLibDir.isNullOrBlank() && !sherpaOnnxAndroidAbi.isNullOrBlank())
     }
-    include("*.so")
-    into(stagedSherpaOnnxJniLibsDir.map { it.dir(stagedSherpaOnnxAndroidAbi) })
+    if (!sherpaOnnxJniLibsDir.isNullOrBlank()) {
+        from(file(sherpaOnnxJniLibsDir)) {
+            include("**/*.so")
+        }
+        into(stagedSherpaOnnxJniLibsDir)
+    } else {
+        if (!sherpaOnnxLibDir.isNullOrBlank()) {
+            from(file(sherpaOnnxLibDir))
+        }
+        include("*.so")
+        into(stagedSherpaOnnxJniLibsDir.map { it.dir(stagedSherpaOnnxAndroidAbi) })
+    }
 }
 
 tasks.matching { it.name == "preBuild" }.configureEach {

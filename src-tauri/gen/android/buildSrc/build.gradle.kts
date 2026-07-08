@@ -18,5 +18,6 @@ repositories {
 
 dependencies {
     compileOnly(gradleApi())
+    compileOnly(localGroovy())
     implementation("com.android.tools.build:gradle:8.11.0")
 }

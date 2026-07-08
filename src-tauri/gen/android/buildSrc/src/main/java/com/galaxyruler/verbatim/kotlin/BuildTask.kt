@@ -84,6 +84,11 @@ open class BuildTask : DefaultTask() {
         val (rustTarget, androidAbi) = androidRustTarget(target)
         val cargoProfile = if (release) "release" else "debug"
         val rootDir = File(project.projectDir, rootDirRel)
+        val sherpaOnnxLibDir = sherpaOnnxLibDirForTarget(rustTarget, androidAbi)
+        // Release libraries must serve the bundled frontend, not build.devUrl.
+        // The generated Gradle feature list only carries app features, so enable
+        // tauri/custom-protocol here and null out devUrl at Rust compile time.
+        val effectiveFeatures = if (release) releaseFeatures(features) else features
 
         project.exec {
             workingDir(rootDir)
@@ -92,8 +97,11 @@ open class BuildTask : DefaultTask() {
             androidCxxEnv(rustTarget)?.let { (cxxEnv, cxxPath) -> environment(cxxEnv, cxxPath) }
             androidArEnv(rustTarget)?.let { (arEnv, arPath) -> environment(arEnv, arPath) }
             androidRanlibEnv(rustTarget)?.let { (ranlibEnv, ranlibPath) -> environment(ranlibEnv, ranlibPath) }
-            args("build", "--lib", "--target", rustTarget, "--features", features)
+            sherpaOnnxLibDir?.let { environment("SHERPA_ONNX_LIB_DIR", it) }
+            environment("SHERPA_ONNX_ANDROID_ABI", androidAbi)
+            args("build", "--lib", "--target", rustTarget, "--features", effectiveFeatures)
             if (release) {
+                environment("TAURI_CONFIG", releaseTauriConfig())
                 args("--release")
             }
         }.assertNormalExitValue()
@@ -120,6 +128,41 @@ open class BuildTask : DefaultTask() {
             "x86_64" -> "x86_64-linux-android" to "x86_64"
             else -> throw GradleException("Unsupported Android Rust target: $target")
         }
+
+    private fun releaseFeatures(features: String): String {
+        val list = features.split(Regex("[,\\s]+")).filter { it.isNotBlank() }
+        if (RELEASE_BUNDLED_FRONTEND_FEATURE in list) {
+            return features
+        }
+        return (list + RELEASE_BUNDLED_FRONTEND_FEATURE).joinToString(" ")
+    }
+
+    // tauri-build/tauri-codegen merge the TAURI_CONFIG env var (JSON merge patch)
+    // into tauri.conf.json at compile time; a null devUrl removes the key, so the
+    // dev-server URL never reaches the release library.
+    private fun releaseTauriConfig(): String {
+        val existing = System.getenv("TAURI_CONFIG")
+        if (existing.isNullOrBlank()) {
+            return """{"build":{"devUrl":null}}"""
+        }
+        @Suppress("UNCHECKED_CAST")
+        val root = groovy.json.JsonSlurper().parseText(existing) as? MutableMap<Any?, Any?>
+            ?: throw GradleException("TAURI_CONFIG must be a JSON object so release builds can null out build.devUrl")
+        @Suppress("UNCHECKED_CAST")
+        val build = root["build"] as? MutableMap<Any?, Any?>
+            ?: mutableMapOf<Any?, Any?>().also { root["build"] = it }
+        build["devUrl"] = null
+        return groovy.json.JsonOutput.toJson(root)
+    }
+
+    private fun sherpaOnnxLibDirForTarget(rustTarget: String, androidAbi: String): String? {
+        val rustTargetEnv = "SHERPA_ONNX_LIB_DIR_${rustTarget.uppercase().replace('-', '_')}"
+        val androidAbiEnv = "SHERPA_ONNX_LIB_DIR_${androidAbi.uppercase().replace('-', '_')}"
+        return listOf(rustTargetEnv, androidAbiEnv, "SHERPA_ONNX_LIB_DIR")
+            .asSequence()
+            .mapNotNull { System.getenv(it) }
+            .firstOrNull { it.isNotBlank() }
+    }
 
     private fun cargoExecutable(): String {
         System.getenv("CARGO")
@@ -228,5 +271,6 @@ open class BuildTask : DefaultTask() {
 
     private companion object {
         const val ANDROID_API_LEVEL = 26
+        const val RELEASE_BUNDLED_FRONTEND_FEATURE = "tauri/custom-protocol"
     }
 }

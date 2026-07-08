@@ -70,6 +70,34 @@ Use this checklist before publishing a desktop release.
 - Confirm Arabic and Hebrew UI smoke paths preserve readable mixed-direction labels, buttons, and recovery text.
 - Retain `accessibility-smoke*.json` for Windows, macOS, and Linux, then run `bun run check:accessibility-smoke-release-evidence -- --dir <accessibility-smoke-evidence-dir>`.
 
+## Android Release (APK/AAB)
+
+Release Android builds must serve the bundled frontend. `BuildTask.kt` enforces
+this for the Rust library: any `--release` cargo build automatically adds the
+`tauri/custom-protocol` feature and nulls out `build.devUrl` via the
+`TAURI_CONFIG` merge patch, so the dev-server URL (`http://localhost:1420`)
+never reaches a release artifact. Do not bypass Gradle/`tauri android build`
+with a hand-rolled cargo invocation for release artifacts.
+
+Build recipe:
+
+1. Bump `bundle.android.versionCode` in `src-tauri/tauri.android.conf.json`.
+   Version codes are consumed forever once uploaded to a Play draft, even a
+   discarded one (11000 is burned; shipped fixes start at 11001).
+2. Set release signing environment variables before building:
+   `VERBATIM_ANDROID_KEYSTORE_FILE`, `VERBATIM_ANDROID_KEYSTORE_PASSWORD`,
+   `VERBATIM_ANDROID_KEY_ALIAS`, and optionally `VERBATIM_ANDROID_KEY_PASSWORD`
+   (defaults to the keystore password). Without them the release build falls
+   back to unsigned output.
+3. Build: `bun run tauri android build` (AAB for Play) and
+   `bun run tauri android build --apk` (sideload APK).
+4. Verify every artifact before distributing:
+   `bun run check:android-release-bundle <path-to-apk-or-aab> [...]`.
+   This fails if `libverbatim_app_lib.so` contains `localhost:1420` or lacks
+   the embedded frontend HTML document.
+5. Run the artifact on a device or emulator and confirm the app UI loads
+   (not a browser error page).
+
 ## Do Not Publish If
 
 - Any expected asset is missing.
@@ -78,3 +106,4 @@ Use this checklist before publishing a desktop release.
 - Any signed-release CI signing verification step is skipped or failed.
 - Windows SmartScreen, macOS Gatekeeper, or Linux package installation behavior differs from the release notes.
 - The release body does not distinguish desktop downloads from any other platform downloads.
+- Any Android artifact fails `bun run check:android-release-bundle`.
