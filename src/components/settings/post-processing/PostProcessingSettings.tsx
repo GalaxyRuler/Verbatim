@@ -149,7 +149,7 @@ const PostProcessingSettingsApiComponent: React.FC = () => {
                   setSessionOnlyApiKey(event.currentTarget.checked)
                 }
                 disabled={state.isApiKeyUpdating}
-                className="mt-0.5 h-4 w-4 rounded border-mid-gray/50 accent-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                className="mt-0.5 h-4 w-4 rounded-md border-mid-gray/50 accent-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
               />
               <span>{t("settings.postProcessing.api.apiKey.sessionOnly")}</span>
             </label>
@@ -412,11 +412,11 @@ const PostProcessingLocalModelComponent: React.FC = () => {
                           {model.label}
                         </span>
                         {isSelected && (
-                          <span className="rounded bg-accent/15 px-2 py-0.5 text-xs font-medium text-text">
+                          <span className="rounded-md bg-accent/15 px-2 py-0.5 text-xs font-medium text-text">
                             {t("settings.postProcessing.localModel.selected")}
                           </span>
                         )}
-                        <span className="rounded bg-mid-gray/10 px-2 py-0.5 text-xs text-mid-gray">
+                        <span className="rounded-md bg-mid-gray/10 px-2 py-0.5 text-xs text-mid-gray">
                           {t(
                             `settings.postProcessing.localModel.roles.${model.recommended_role}`,
                             model.recommended_role,
@@ -434,9 +434,9 @@ const PostProcessingLocalModelComponent: React.FC = () => {
                         {model.supported_language_notes}
                       </p>
                       {model.is_downloading && (
-                        <div className="h-1.5 overflow-hidden rounded bg-mid-gray/20">
+                        <div className="h-1.5 overflow-hidden rounded-full bg-mid-gray/20">
                           <div
-                            className="h-full rounded bg-accent"
+                            className="h-full rounded-full bg-accent"
                             style={{
                               width: `${Math.min(100, Math.max(0, modelProgress))}%`,
                             }}

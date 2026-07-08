@@ -195,13 +195,13 @@ const UpdateChecker: React.FC<UpdateCheckerProps> = ({ className = "" }) => {
             </p>
             <div className="flex gap-2 justify-end">
               <button
-                className="px-3 py-1.5 text-sm rounded border border-border hover:bg-border/50 transition-colors"
+                className="px-3 py-1.5 text-sm rounded-lg border border-border hover:bg-border/50 transition-colors"
                 onClick={() => setShowPortableUpdateDialog(false)}
               >
                 {t("common.close")}
               </button>
               <button
-                className="px-3 py-1.5 text-sm rounded bg-accent text-accent-fg hover:bg-accent/80 transition-colors"
+                className="px-3 py-1.5 text-sm rounded-lg bg-accent text-accent-fg hover:bg-accent/80 transition-colors"
                 onClick={() => {
                   openUrl(
                     "https://github.com/GalaxyRuler/Verbatim/releases/latest",

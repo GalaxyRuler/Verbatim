@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
+import { ChevronDown } from "lucide-react";
 import { SettingContainer } from "../ui/SettingContainer";
 import { ResetButton } from "../ui/ResetButton";
 import { useSettings } from "../../hooks/useSettings";
@@ -148,7 +149,7 @@ export const LanguageSelector: React.FC<LanguageSelectorProps> = ({
         <div className="relative" ref={dropdownRef}>
           <button
             type="button"
-            className={`px-2 py-1 text-sm font-semibold bg-mid-gray/10 border border-mid-gray/80 rounded min-w-[200px] text-start flex items-center justify-between transition-all duration-150 ${
+            className={`px-2 py-1 text-sm font-semibold bg-mid-gray/10 border border-mid-gray/80 rounded-md min-w-[200px] text-start flex items-center justify-between transition-all duration-150 ${
               isLanguageUpdating
                 ? "opacity-50 cursor-not-allowed"
                 : "hover:bg-accent/10 cursor-pointer hover:border-accent"
@@ -157,25 +158,17 @@ export const LanguageSelector: React.FC<LanguageSelectorProps> = ({
             disabled={isLanguageUpdating}
           >
             <span className="truncate">{selectedLanguageName}</span>
-            <svg
-              className={`w-4 h-4 ms-2 transition-transform duration-200 ${
-                isOpen ? "transform rotate-180" : ""
+            <ChevronDown
+              size={16}
+              aria-hidden
+              className={`shrink-0 ms-2 transition-transform duration-200 ${
+                isOpen ? "rotate-180" : ""
               }`}
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M19 9l-7 7-7-7"
-              />
-            </svg>
+            />
           </button>
 
           {isOpen && !isLanguageUpdating && (
-            <div className="absolute top-full left-0 right-0 mt-1 bg-background border border-mid-gray/80 rounded shadow-lg z-50 max-h-60 overflow-hidden">
+            <div className="absolute top-full left-0 right-0 mt-1 bg-background border border-mid-gray/80 rounded-lg shadow-menu z-50 max-h-60 overflow-hidden">
               {/* Search input */}
               <div className="p-2 border-b border-mid-gray/80">
                 <input
@@ -185,7 +178,7 @@ export const LanguageSelector: React.FC<LanguageSelectorProps> = ({
                   onChange={handleSearchChange}
                   onKeyDown={handleKeyDown}
                   placeholder={t("settings.general.language.searchPlaceholder")}
-                  className="w-full px-2 py-1 text-sm bg-mid-gray/10 border border-mid-gray/40 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:border-accent"
+                  className="w-full px-2 py-1 text-sm bg-mid-gray/10 border border-mid-gray/40 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:border-accent"
                 />
               </div>
 
@@ -234,7 +227,7 @@ export const LanguageSelector: React.FC<LanguageSelectorProps> = ({
         <ResetButton onClick={handleReset} disabled={isLanguageUpdating} />
       </div>
       {isLanguageUpdating && (
-        <div className="absolute inset-0 bg-mid-gray/10 rounded flex items-center justify-center">
+        <div className="absolute inset-0 bg-mid-gray/10 rounded-md flex items-center justify-center">
           <div className="w-4 h-4 border-2 border-accent border-t-transparent rounded-full animate-spin"></div>
         </div>
       )}

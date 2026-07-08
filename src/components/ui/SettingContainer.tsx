@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Info } from "lucide-react";
 import { Tooltip } from "./Tooltip";
 
 interface SettingContainerProps {
@@ -66,22 +67,9 @@ export const SettingContainer: React.FC<SettingContainerProps> = ({
         aria-expanded={showTooltip}
         onClick={toggleTooltip}
         onBlur={() => setShowTooltip(false)}
-        className="flex items-center text-mid-gray hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded transition-colors duration-200"
+        className="flex items-center text-mid-gray hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-md transition-colors duration-200"
       >
-        <svg
-          aria-hidden="true"
-          className="w-4 h-4 cursor-help select-none"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-          />
-        </svg>
+        <Info size={16} aria-hidden />
       </button>
       {showTooltip && (
         <Tooltip targetRef={tooltipRef} position={effectiveTooltipPosition}>

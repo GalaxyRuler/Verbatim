@@ -20,7 +20,7 @@ export const DebugPaths: React.FC<DebugPathsProps> = ({
       descriptionMode={descriptionMode}
       grouped={grouped}
     >
-      <div className="text-sm text-gray-600 space-y-2">
+      <div className="text-sm text-text-secondary space-y-2">
         <div>
           <span className="font-medium">
             {t("settings.debug.paths.appData")}

@@ -72,12 +72,12 @@ const AccessibilityPermissions: React.FC = () => {
     request: {
       text: t("accessibility.openSettings"),
       className:
-        "px-2 py-1 text-sm font-semibold bg-mid-gray/10 border border-mid-gray/80 hover:bg-accent/10 rounded cursor-pointer hover:border-accent",
+        "px-2 py-1 text-sm font-semibold bg-mid-gray/10 border border-mid-gray/80 hover:bg-accent/10 rounded-md cursor-pointer hover:border-accent",
     },
     verify: {
       text: t("accessibility.openSettings"),
       className:
-        "bg-gray-100 hover:bg-gray-200 text-gray-800 font-medium py-1 px-3 rounded-md text-sm flex items-center justify-center cursor-pointer",
+        "bg-surface hover:bg-border text-text font-medium py-1 px-3 rounded-md text-sm flex items-center justify-center cursor-pointer",
     },
     granted: null,
   };
@@ -94,7 +94,7 @@ const AccessibilityPermissions: React.FC = () => {
         </div>
         <button
           onClick={handleButtonClick}
-          className={`min-h-10 ${config.className}`}
+          className={`min-h-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${config.className}`}
         >
           {config.text}
         </button>

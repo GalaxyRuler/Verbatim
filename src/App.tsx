@@ -560,7 +560,7 @@ function DesktopApp() {
         className="h-screen flex flex-col items-center justify-center gap-3 select-none cursor-default bg-background text-text"
       >
         <VerbatimMark width={40} height={40} aria-hidden />
-        <p className="text-sm text-mid-gray">{t("common.starting")}</p>
+        <p className="text-sm text-text-secondary">{t("common.starting")}</p>
       </div>
     );
   }
@@ -577,7 +577,7 @@ function DesktopApp() {
               <h1 className="text-xl font-semibold">
                 {t("errors.startupFailedTitle")}
               </h1>
-              <p className="mt-2 text-sm text-mid-gray">
+              <p className="mt-2 text-sm text-text-secondary">
                 {t("errors.startupFailedDescription")}
               </p>
             </div>
@@ -586,7 +586,7 @@ function DesktopApp() {
                 step: startupStatus.step,
               })}
             </Alert>
-            <p className="text-sm text-mid-gray break-words">
+            <p className="text-sm text-text-secondary break-words">
               {startupStatus.message}
             </p>
             <div className="flex flex-wrap gap-2">
@@ -675,11 +675,11 @@ function DesktopApp() {
           unstyled: true,
           classNames: {
             toast:
-              "bg-background border border-mid-gray/20 rounded-lg shadow-lg px-4 py-3 flex items-center gap-3 text-sm",
+              "bg-background border border-border rounded-lg shadow-lg px-4 py-3 flex items-center gap-3 text-sm",
             title: "font-medium",
-            description: "text-mid-gray",
+            description: "text-text-secondary",
             closeButton:
-              "text-mid-gray hover:text-text border border-mid-gray/20 rounded-full bg-background",
+              "text-text-secondary hover:text-text border border-border rounded-full bg-background",
           },
         }}
       />

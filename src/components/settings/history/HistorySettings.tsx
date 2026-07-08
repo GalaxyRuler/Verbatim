@@ -116,7 +116,7 @@ const RowActionsMenu: React.FC<{
         onClick={() => setIsOpen((open) => !open)}
         title={label}
         aria-label={label}
-        aria-haspopup="menu"
+        aria-haspopup="true"
         aria-expanded={isOpen}
         className="p-1.5 rounded-md flex items-center justify-center transition-colors cursor-pointer text-text/50 hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
       >

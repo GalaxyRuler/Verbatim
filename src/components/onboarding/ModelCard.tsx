@@ -161,7 +161,7 @@ const ModelCard: React.FC<ModelCardProps> = ({
             {displayDescription}
           </p>
           {model.is_custom && (
-            <p className="text-amber-700 text-xs leading-relaxed">
+            <p className="text-warning text-xs leading-relaxed">
               {t("modelSelector.customUnverifiedDescription")}
             </p>
           )}
