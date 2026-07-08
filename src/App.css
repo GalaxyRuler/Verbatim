@@ -29,11 +29,10 @@
   --color-info: #1d4ed8;
   --color-info-bg: #1d4ed81a;
 
-  /* Menu shadow (replaces inline boxShadow in Select.tsx later) */
+  /* Menu shadow — consumed by Select.tsx and dropdown/menu panels */
   --shadow-menu: 0 10px 30px rgba(15, 15, 15, 0.2);
 
-  /* Legacy aliases — components migrate off these in Task 9 */
-  --color-background-ui: var(--color-accent);
+  /* Legacy alias, still consumed — do not use in new code */
   --color-mid-gray: #5f6368;
 }
 

@@ -31,9 +31,10 @@ Rules:
   `amber-600`, `gray-300`, ...). Use the semantic tokens above. Status tints
   come from the `*-bg` tokens (`bg-danger-bg`), not from opacity hacks on
   palette colors.
-- The legacy aliases `background-ui` and `mid-gray` still exist for older
-  components. New code must not use them; migrate them away when touching a
-  file that does.
+- The `background-ui` alias has been deleted from `@theme`; it has no
+  consumers. `mid-gray` is a legacy alias that still has consumers across
+  older components. It is forbidden in new code — migrate a file off it when
+  touching it.
 
 ## Contrast rules
 
@@ -62,22 +63,27 @@ Type steps (no arbitrary values like `text-[10px]`):
 
 Radius scale:
 
-- `rounded-md` — compact controls: inputs, textareas, dropdown triggers and
-  menu items, small icon buttons, key chips, mic level bars.
-- `rounded-lg` — buttons and containers: setting rows and groups, cards,
-  alerts, tooltips, panels.
-- `rounded-full` — toggle switch track and thumb, badges, progress bars, and
-  status dots only.
-- Nothing else (`rounded-sm`, `rounded-xl`, arbitrary radii) without updating
-  this document.
+- `rounded-md` — compact controls: inputs, textareas, checkboxes, dropdown
+  triggers and menu items, small icon buttons, chips and key chips, mic level
+  bars, bar-shaped skeleton placeholders.
+- `rounded-lg` — buttons and containers: setting rows and groups, cards
+  (including card-shaped skeleton placeholders), alerts, tooltips, dropdown
+  panels.
+- `rounded-full` — toggle switch track and thumb, badges, progress tracks and
+  fills, and status dots only.
+- Nothing else. The bare `rounded` utility (4px) is off-scale and no longer
+  used; `rounded-sm`, `rounded-xl`, and arbitrary radii require updating this
+  document first.
 
 Spacing: 4px base unit. Settings rows are `px-4 py-2`; internals of a control
 use `gap-2`; page-level groups are separated with `space-y-6`.
 
 Icons: **lucide-react only** in app chrome, sized 16/20/24 px
-(`w-4 h-4` / `w-5 h-5` / `w-6 h-6`), `aria-hidden` when decorative. Custom
-SVGs are reserved for the brand mark (`VerbatimMark`, `VerbatimTextLogo`) and
-the recording-overlay glyphs.
+(`w-4 h-4` / `w-5 h-5` / `w-6 h-6` or `size={16|20|24}`), `aria-hidden` when
+decorative. The only custom SVGs live in `src/components/icons/` — the brand
+marks (`VerbatimMark`, `VerbatimTextLogo`) and the recording-overlay glyphs.
+The desktop settings UI contains no other hand-rolled inline SVGs; do not add
+new ones.
 
 ## Focus
 
