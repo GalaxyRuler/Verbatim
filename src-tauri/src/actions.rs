@@ -85,7 +85,7 @@ fn build_system_prompt(prompt_template: &str) -> String {
 }
 
 fn validate_post_processed_text(transcription: &str, processed_text: &str) -> Result<(), String> {
-    crate::text_processing::validate_no_unrequested_translation(transcription, processed_text)
+    crate::text_processing::validate_preserved_text(transcription, processed_text)
         .map_err(|err| err.to_string())
 }
 
@@ -425,18 +425,12 @@ fn accept_post_processed_text(
     processed_text: String,
     provider_id: &str,
 ) -> Option<String> {
-    if provider_id == crate::local_llm::runtime::VERBATIM_LOCAL_PROVIDER_ID {
-        if let Err(err) =
-            crate::text_processing::validate_preserved_text(transcription, &processed_text)
-        {
-            warn!(
-                "Managed local post-processing output rejected for provider '{}': {}. Falling back to raw transcript.",
-                provider_id, err
-            );
-            return None;
-        }
-
-        return Some(processed_text);
+    if crate::text_processing::looks_like_llm_noise(&processed_text) {
+        warn!(
+            "Post-processing output rejected for provider '{}': model envelope noise. Falling back to raw transcript.",
+            provider_id
+        );
+        return None;
     }
 
     match validate_post_processed_text(transcription, &processed_text) {
@@ -445,6 +439,30 @@ fn accept_post_processed_text(
             warn!(
                 "Post-processing output rejected for provider '{}': {}. Falling back to raw transcript.",
                 provider_id, err
+            );
+            None
+        }
+    }
+}
+
+fn accept_structured_post_processed_text(
+    transcription: &str,
+    content: &str,
+    provider_id: &str,
+) -> Option<String> {
+    match crate::text_processing::extract_structured_text(content, TRANSCRIPTION_FIELD) {
+        Ok(result) => {
+            debug!(
+                "Structured output post-processing succeeded for provider '{}'. Output length: {} chars",
+                provider_id,
+                result.len()
+            );
+            accept_post_processed_text(transcription, result, provider_id)
+        }
+        Err(err) => {
+            error!(
+                "Structured output parse failed: {}. Falling back to raw transcript.",
+                err
             );
             None
         }
@@ -657,29 +675,11 @@ async fn post_process_transcription(
         .await
         {
             Ok(Some(content)) => {
-                // Parse the JSON response to extract the transcription field.
-                match crate::text_processing::extract_structured_text(&content, TRANSCRIPTION_FIELD)
-                {
-                    Ok(result) => {
-                        debug!(
-                            "Structured output post-processing succeeded for provider '{}'. Output length: {} chars",
-                            provider.id,
-                            result.len()
-                        );
-                        return accept_post_processed_text(transcription, result, &provider.id);
-                    }
-                    Err(err) => {
-                        error!(
-                            "Structured output parse failed: {}. Returning raw content.",
-                            err
-                        );
-                        return accept_post_processed_text(
-                            transcription,
-                            crate::text_processing::strip_invisible_chars(&content),
-                            &provider.id,
-                        );
-                    }
-                }
+                return accept_structured_post_processed_text(
+                    transcription,
+                    &content,
+                    &provider.id,
+                );
             }
             Ok(None) => {
                 error!("LLM API response has no content");
@@ -1262,6 +1262,50 @@ mod adaptive_action_tests {
             "email signature",
             "Regards,\nAbdullah".to_string(),
             crate::local_llm::runtime::VERBATIM_LOCAL_PROVIDER_ID,
+        );
+
+        assert!(accepted.is_none());
+    }
+
+    #[test]
+    fn remote_post_processing_rejects_excessive_expansion() {
+        let accepted = accept_post_processed_text(
+            "send the invoice",
+            "send the invoice ".repeat(80),
+            "openai",
+        );
+
+        assert!(accepted.is_none());
+    }
+
+    #[test]
+    fn remote_post_processing_rejects_short_source_term_loss() {
+        let accepted = accept_post_processed_text(
+            "email signature",
+            "Regards,\nAbdullah".to_string(),
+            "openai",
+        );
+
+        assert!(accepted.is_none());
+    }
+
+    #[test]
+    fn remote_post_processing_rejects_llm_noise() {
+        let accepted = accept_post_processed_text(
+            "hello world",
+            "Sure, here's the cleaned text: hello world".to_string(),
+            "openai",
+        );
+
+        assert!(accepted.is_none());
+    }
+
+    #[test]
+    fn structured_post_processing_parse_failure_falls_back_to_transcript() {
+        let accepted = accept_structured_post_processed_text(
+            "hello world",
+            r#"{"message":"Sure, here's the cleaned text: hello world"}"#,
+            "openai",
         );
 
         assert!(accepted.is_none());
