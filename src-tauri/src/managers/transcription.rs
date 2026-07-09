@@ -1452,6 +1452,8 @@ impl Drop for TranscriptionManager {
 mod tests {
     use super::*;
 
+    static ABANDONED_COUNTER_TEST_LOCK: Mutex<()> = Mutex::new(());
+
     #[test]
     fn english_translation_requires_user_toggle_and_model_support() {
         assert!(effective_english_translation(true, true));
@@ -1493,6 +1495,9 @@ mod tests {
 
     #[test]
     fn abandoned_inference_counter_tracks_timeout_then_return() {
+        let _guard = ABANDONED_COUNTER_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         reset_abandoned_inference_threads_for_test();
         let run_state = new_inference_run_state();
 
@@ -1505,6 +1510,9 @@ mod tests {
 
     #[test]
     fn abandoned_inference_counter_ignores_return_before_timeout() {
+        let _guard = ABANDONED_COUNTER_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         reset_abandoned_inference_threads_for_test();
         let run_state = new_inference_run_state();
 
@@ -1516,6 +1524,9 @@ mod tests {
 
     #[test]
     fn abandoned_inference_exit_guard_decrements_once_after_timeout_panic() {
+        let _guard = ABANDONED_COUNTER_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         reset_abandoned_inference_threads_for_test();
         let run_state = new_inference_run_state();
         let guard = InferenceRunExitGuard::new(Arc::clone(&run_state));
@@ -1532,6 +1543,9 @@ mod tests {
 
     #[test]
     fn abandoned_inference_requires_restart_until_thread_exits() {
+        let _guard = ABANDONED_COUNTER_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         reset_abandoned_inference_threads_for_test();
 
         assert!(!engine_wedged_restart_required());
