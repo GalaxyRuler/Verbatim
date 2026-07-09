@@ -20,6 +20,7 @@ const CLIPBOARD_PAYLOAD_POLL_INTERVAL_MS: u64 = 10;
 const FOCUSED_TEXT_READ_CAP: usize = MAX_FOCUSED_TEXT_CHARS;
 const PASTE_VERIFY_TOTAL_MS: u64 = 600;
 const PASTE_VERIFY_POLL_MS: u64 = 75;
+const TARGET_CHANGED_BEFORE_INSERTION: &str = "target changed before insertion";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct ClipboardPayloadMarker {
@@ -817,6 +818,7 @@ pub(crate) fn paste_exact_preserving_clipboard_with_cancellation(
                 app_handle,
                 &paste_method,
                 paste_delay_ms,
+                None,
                 is_cancelled,
             )?;
             std::thread::sleep(Duration::from_millis(50));
@@ -842,6 +844,7 @@ fn paste_via_clipboard(
     app_handle: &AppHandle,
     paste_method: &PasteMethod,
     paste_delay_ms: u64,
+    expected_target: Option<&str>,
     is_cancelled: CancellationCheck<'_>,
 ) -> Result<ClipboardPasteSession, String> {
     let clipboard_snapshot = ClipboardSnapshot::capture(app_handle);
@@ -863,6 +866,7 @@ fn paste_via_clipboard(
     }
 
     ensure_not_cancelled(is_cancelled, "clipboard paste")?;
+    ensure_dispatch_target(expected_target)?;
 
     // Send paste key combo
     #[cfg(target_os = "linux")]
@@ -1547,6 +1551,28 @@ fn should_send_auto_submit(auto_submit: bool, paste_method: PasteMethod) -> bool
     auto_submit && paste_method != PasteMethod::None
 }
 
+fn should_dispatch_paste(expected_target: Option<&str>, current_target: Option<&str>) -> bool {
+    expected_target.is_none() || expected_target == current_target
+}
+
+fn target_still_focused(expected_target: &str) -> bool {
+    let current_context = crate::adaptive::context::capture_context(&[]);
+    should_dispatch_paste(
+        Some(expected_target),
+        current_context.target_fingerprint.as_deref(),
+    )
+}
+
+fn ensure_dispatch_target(expected_target: Option<&str>) -> Result<(), String> {
+    if let Some(expected_target) = expected_target {
+        if !target_still_focused(expected_target) {
+            warn!("Paste skipped because the foreground target changed before insertion");
+            return Err(TARGET_CHANGED_BEFORE_INSERTION.to_string());
+        }
+    }
+    Ok(())
+}
+
 fn is_clipboard_paste_method(paste_method: PasteMethod) -> bool {
     matches!(
         paste_method,
@@ -1570,19 +1596,27 @@ fn receipt_from_result(
     target_verified: bool,
     result: Result<(), String>,
 ) -> InsertionReceipt {
-    let attempted = paste_method != PasteMethod::None;
+    let target_changed_before_dispatch =
+        matches!(result.as_ref(), Err(error) if error == TARGET_CHANGED_BEFORE_INSERTION);
+    let attempted = paste_method != PasteMethod::None && !target_changed_before_dispatch;
+    let method = if target_changed_before_dispatch {
+        InsertionMethod::None
+    } else {
+        insertion_method_for_paste_method(paste_method)
+    };
+    let target_verified = target_verified && !target_changed_before_dispatch;
     match result {
         Ok(()) => InsertionReceipt {
             attempted,
             succeeded: true,
-            method: insertion_method_for_paste_method(paste_method),
+            method,
             target_verified,
             error: None,
         },
         Err(error) => InsertionReceipt {
             attempted,
             succeeded: false,
-            method: insertion_method_for_paste_method(paste_method),
+            method,
             target_verified,
             error: Some(error),
         },
@@ -1600,12 +1634,13 @@ pub(crate) fn receipt_from_current_paste_method(
 
 #[allow(dead_code)]
 pub fn paste(text: String, app_handle: AppHandle) -> Result<(), String> {
-    paste_with_auto_learn(text, app_handle, true, None)
+    paste_with_auto_learn(text, app_handle, None, true, None)
 }
 
 fn paste_with_auto_learn(
     text: String,
     app_handle: AppHandle,
+    expected_target: Option<&str>,
     auto_learn_eligible: bool,
     is_cancelled: CancellationCheck<'_>,
 ) -> Result<(), String> {
@@ -1655,6 +1690,7 @@ fn paste_with_auto_learn(
         }
         PasteMethod::Direct => {
             ensure_not_cancelled(is_cancelled, "direct typing")?;
+            ensure_dispatch_target(expected_target)?;
             paste_direct(
                 &mut enigo,
                 &text,
@@ -1670,6 +1706,7 @@ fn paste_with_auto_learn(
                 &app_handle,
                 &paste_method,
                 paste_delay_ms,
+                expected_target,
                 is_cancelled,
             )?)
         }
@@ -1679,6 +1716,8 @@ fn paste_with_auto_learn(
                 .as_ref()
                 .filter(|p| !p.is_empty())
                 .ok_or("External script path is not configured")?;
+            ensure_not_cancelled(is_cancelled, "external script")?;
+            ensure_dispatch_target(expected_target)?;
             paste_via_external_script(&text, script_path, is_cancelled)?;
             None
         }
@@ -1728,19 +1767,21 @@ pub fn paste_with_receipt(
     app_handle: AppHandle,
     target_verified: bool,
 ) -> InsertionReceipt {
-    paste_with_receipt_with_auto_learn(text, app_handle, target_verified, true)
+    paste_with_receipt_with_auto_learn(text, app_handle, target_verified, None, true)
 }
 
 pub fn paste_with_receipt_with_auto_learn(
     text: String,
     app_handle: AppHandle,
     target_verified: bool,
+    expected_target: Option<String>,
     auto_learn_eligible: bool,
 ) -> InsertionReceipt {
     paste_with_receipt_with_auto_learn_and_cancellation(
         text,
         app_handle,
         target_verified,
+        expected_target,
         auto_learn_eligible,
         None,
     )
@@ -1750,12 +1791,19 @@ pub fn paste_with_receipt_with_auto_learn_and_cancellation(
     text: String,
     app_handle: AppHandle,
     target_verified: bool,
+    expected_target: Option<String>,
     auto_learn_eligible: bool,
     is_cancelled: CancellationCheck<'_>,
 ) -> InsertionReceipt {
     let settings = get_settings(&app_handle);
     let paste_method = settings.paste_method;
-    let result = paste_with_auto_learn(text, app_handle, auto_learn_eligible, is_cancelled);
+    let result = paste_with_auto_learn(
+        text,
+        app_handle,
+        expected_target.as_deref(),
+        auto_learn_eligible,
+        is_cancelled,
+    );
     receipt_from_result(paste_method, target_verified, result)
 }
 
@@ -1781,6 +1829,14 @@ mod tests {
             guard.disarm();
         }
         assert!(!restored.get());
+    }
+
+    #[test]
+    fn paste_gate_decision_matrix() {
+        assert!(should_dispatch_paste(None, None));
+        assert!(should_dispatch_paste(Some("a"), Some("a")));
+        assert!(!should_dispatch_paste(Some("a"), Some("b")));
+        assert!(!should_dispatch_paste(Some("a"), None));
     }
 
     mod paste_verify_tests {

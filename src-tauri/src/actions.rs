@@ -288,6 +288,11 @@ fn complete_adaptive_insertion(request: AdaptiveInsertionRequest) {
     } else {
         true
     };
+    let expected_target = if target_verified && verify_adaptive_target {
+        context.target_fingerprint.clone()
+    } else {
+        None
+    };
     let attempt = if target_verified {
         if language_guard_blocks(&app, &settings, &final_text) {
             crate::insertion::InsertionAttempt::adaptive_guard_blocked()
@@ -295,6 +300,7 @@ fn complete_adaptive_insertion(request: AdaptiveInsertionRequest) {
             let paste_text = prepare_adaptive_paste_text(&final_text, &context);
             force_ltr_input_direction_before_paste(&app, &final_text, &context);
             crate::insertion::InsertionAttempt::adaptive_ready(paste_text)
+                .with_expected_target(expected_target)
         }
     } else {
         error!("Adaptive paste skipped because the foreground target changed before insertion");
@@ -307,6 +313,7 @@ fn complete_adaptive_insertion(request: AdaptiveInsertionRequest) {
             request.text,
             app.clone(),
             request.target_verified,
+            request.expected_target,
             request.auto_learn_eligible,
             Some(&cancellation_check),
         )
@@ -361,7 +368,15 @@ fn complete_classic_insertion(
         return;
     }
 
+    let verify_classic_target = should_verify_classic_target(&settings, context.as_ref());
     let target_verified = classic_target_verified(&settings, context.as_ref());
+    let expected_target = if target_verified && verify_classic_target {
+        context
+            .as_ref()
+            .and_then(|context| context.target_fingerprint.clone())
+    } else {
+        None
+    };
     let attempt = if !target_verified {
         error!("Classic paste skipped because the foreground target changed before insertion");
         crate::insertion::InsertionAttempt::classic_target_changed()
@@ -369,6 +384,7 @@ fn complete_classic_insertion(
         crate::insertion::InsertionAttempt::classic_guard_blocked()
     } else {
         crate::insertion::InsertionAttempt::classic_ready(final_text)
+            .with_expected_target(expected_target)
     };
     let mut insertion_transaction = crate::insertion::InsertionTransaction::new(|request| {
         let cancellation_check = || operation_is_cancelled(&app, operation_token.as_ref());
@@ -376,6 +392,7 @@ fn complete_classic_insertion(
             request.text,
             app.clone(),
             request.target_verified,
+            request.expected_target,
             request.auto_learn_eligible,
             Some(&cancellation_check),
         )

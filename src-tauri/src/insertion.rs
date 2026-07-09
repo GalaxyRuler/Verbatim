@@ -20,6 +20,7 @@ pub struct InsertionAttempt {
     kind: InsertionKind,
     block: Option<InsertionBlock>,
     text: Option<String>,
+    expected_target: Option<String>,
     auto_learn_eligible: bool,
 }
 
@@ -57,6 +58,7 @@ pub struct PasteRecoveryEvent {
 pub struct InsertionPasteRequest {
     pub text: String,
     pub target_verified: bool,
+    pub expected_target: Option<String>,
     pub auto_learn_eligible: bool,
 }
 
@@ -105,6 +107,7 @@ impl InsertionAttempt {
             kind: InsertionKind::Adaptive,
             block: Some(InsertionBlock::LanguageGuard),
             text: None,
+            expected_target: None,
             auto_learn_eligible: false,
         }
     }
@@ -114,6 +117,7 @@ impl InsertionAttempt {
             kind: InsertionKind::Adaptive,
             block: Some(InsertionBlock::TargetChanged),
             text: None,
+            expected_target: None,
             auto_learn_eligible: false,
         }
     }
@@ -123,6 +127,7 @@ impl InsertionAttempt {
             kind: InsertionKind::Adaptive,
             block: None,
             text: Some(text.into()),
+            expected_target: None,
             auto_learn_eligible: true,
         }
     }
@@ -132,6 +137,7 @@ impl InsertionAttempt {
             kind: InsertionKind::Classic,
             block: Some(InsertionBlock::LanguageGuard),
             text: None,
+            expected_target: None,
             auto_learn_eligible: false,
         }
     }
@@ -141,6 +147,7 @@ impl InsertionAttempt {
             kind: InsertionKind::Classic,
             block: Some(InsertionBlock::TargetChanged),
             text: None,
+            expected_target: None,
             auto_learn_eligible: false,
         }
     }
@@ -150,6 +157,7 @@ impl InsertionAttempt {
             kind: InsertionKind::Classic,
             block: None,
             text: Some(text.into()),
+            expected_target: None,
             auto_learn_eligible: true,
         }
     }
@@ -159,6 +167,7 @@ impl InsertionAttempt {
             kind: InsertionKind::PasteLastTranscript,
             block: None,
             text: Some(text.into()),
+            expected_target: None,
             auto_learn_eligible: false,
         }
     }
@@ -168,8 +177,14 @@ impl InsertionAttempt {
             kind: InsertionKind::TransformReplacement,
             block: None,
             text: Some(text.into()),
+            expected_target: None,
             auto_learn_eligible: false,
         }
+    }
+
+    pub fn with_expected_target(mut self, expected_target: Option<String>) -> Self {
+        self.expected_target = expected_target;
+        self
     }
 }
 
@@ -181,90 +196,117 @@ where
         attempt.kind,
         attempt.block,
         attempt.text,
+        attempt.expected_target,
         attempt.auto_learn_eligible,
     ) {
-        (InsertionKind::Adaptive, Some(InsertionBlock::LanguageGuard), _, _) => InsertionOutcome {
-            receipt: InsertionReceipt {
-                attempted: false,
-                succeeded: false,
-                method: InsertionMethod::None,
-                target_verified: true,
-                error: Some("language guard blocked paste".to_string()),
-            },
-            recovery_copy: None,
-            auto_learn_eligible: false,
-            emit_paste_error: true,
-            emit_inserted: false,
-        },
-        (InsertionKind::Adaptive, Some(InsertionBlock::TargetChanged), _, _) => InsertionOutcome {
-            receipt: InsertionReceipt {
-                attempted: false,
-                succeeded: false,
-                method: InsertionMethod::None,
-                target_verified: false,
-                error: Some("target changed before insertion".to_string()),
-            },
-            recovery_copy: None,
-            auto_learn_eligible: false,
-            emit_paste_error: true,
-            emit_inserted: false,
-        },
-        (InsertionKind::Classic, Some(InsertionBlock::LanguageGuard), _, _) => InsertionOutcome {
-            receipt: InsertionReceipt {
-                attempted: false,
-                succeeded: false,
-                method: InsertionMethod::None,
-                target_verified: true,
-                error: Some("language guard blocked paste".to_string()),
-            },
-            recovery_copy: None,
-            auto_learn_eligible: false,
-            emit_paste_error: false,
-            emit_inserted: false,
-        },
-        (InsertionKind::Classic, Some(InsertionBlock::TargetChanged), _, _) => InsertionOutcome {
-            receipt: InsertionReceipt {
-                attempted: false,
-                succeeded: false,
-                method: InsertionMethod::None,
-                target_verified: false,
-                error: Some("target changed before insertion".to_string()),
-            },
-            recovery_copy: None,
-            auto_learn_eligible: false,
-            emit_paste_error: true,
-            emit_inserted: false,
-        },
-        (InsertionKind::Adaptive, None, Some(text), auto_learn_eligible) => {
+        (InsertionKind::Adaptive, Some(InsertionBlock::LanguageGuard), _, _, _) => {
+            InsertionOutcome {
+                receipt: InsertionReceipt {
+                    attempted: false,
+                    succeeded: false,
+                    method: InsertionMethod::None,
+                    target_verified: true,
+                    error: Some("language guard blocked paste".to_string()),
+                },
+                recovery_copy: None,
+                auto_learn_eligible: false,
+                emit_paste_error: true,
+                emit_inserted: false,
+            }
+        }
+        (InsertionKind::Adaptive, Some(InsertionBlock::TargetChanged), _, _, _) => {
+            InsertionOutcome {
+                receipt: InsertionReceipt {
+                    attempted: false,
+                    succeeded: false,
+                    method: InsertionMethod::None,
+                    target_verified: false,
+                    error: Some("target changed before insertion".to_string()),
+                },
+                recovery_copy: None,
+                auto_learn_eligible: false,
+                emit_paste_error: true,
+                emit_inserted: false,
+            }
+        }
+        (InsertionKind::Classic, Some(InsertionBlock::LanguageGuard), _, _, _) => {
+            InsertionOutcome {
+                receipt: InsertionReceipt {
+                    attempted: false,
+                    succeeded: false,
+                    method: InsertionMethod::None,
+                    target_verified: true,
+                    error: Some("language guard blocked paste".to_string()),
+                },
+                recovery_copy: None,
+                auto_learn_eligible: false,
+                emit_paste_error: false,
+                emit_inserted: false,
+            }
+        }
+        (InsertionKind::Classic, Some(InsertionBlock::TargetChanged), _, _, _) => {
+            InsertionOutcome {
+                receipt: InsertionReceipt {
+                    attempted: false,
+                    succeeded: false,
+                    method: InsertionMethod::None,
+                    target_verified: false,
+                    error: Some("target changed before insertion".to_string()),
+                },
+                recovery_copy: None,
+                auto_learn_eligible: false,
+                emit_paste_error: true,
+                emit_inserted: false,
+            }
+        }
+        (InsertionKind::Adaptive, None, Some(text), expected_target, auto_learn_eligible) => {
             resolve_ready_insertion(
                 text,
                 true,
+                expected_target,
                 auto_learn_eligible,
                 "adaptive paste failure",
                 paste,
             )
         }
-        (InsertionKind::Classic, None, Some(text), auto_learn_eligible) => {
-            resolve_ready_insertion(text, true, auto_learn_eligible, "paste failure", paste)
-        }
-        (InsertionKind::PasteLastTranscript, None, Some(text), auto_learn_eligible) => {
+        (InsertionKind::Classic, None, Some(text), expected_target, auto_learn_eligible) => {
             resolve_ready_insertion(
                 text,
                 true,
+                expected_target,
                 auto_learn_eligible,
-                "paste last transcript failure",
+                "paste failure",
                 paste,
             )
         }
-        (InsertionKind::TransformReplacement, None, Some(text), auto_learn_eligible) => {
-            resolve_ready_insertion(
-                text,
-                true,
-                auto_learn_eligible,
-                "transform replacement failure",
-                paste,
-            )
-        }
+        (
+            InsertionKind::PasteLastTranscript,
+            None,
+            Some(text),
+            expected_target,
+            auto_learn_eligible,
+        ) => resolve_ready_insertion(
+            text,
+            true,
+            expected_target,
+            auto_learn_eligible,
+            "paste last transcript failure",
+            paste,
+        ),
+        (
+            InsertionKind::TransformReplacement,
+            None,
+            Some(text),
+            expected_target,
+            auto_learn_eligible,
+        ) => resolve_ready_insertion(
+            text,
+            true,
+            expected_target,
+            auto_learn_eligible,
+            "transform replacement failure",
+            paste,
+        ),
         _ => unreachable!("invalid insertion attempt"),
     }
 }
@@ -272,6 +314,7 @@ where
 fn resolve_ready_insertion<F>(
     text: String,
     target_verified: bool,
+    expected_target: Option<String>,
     auto_learn_eligible: bool,
     recovery_reason: &'static str,
     paste: F,
@@ -282,6 +325,7 @@ where
     let receipt = paste(InsertionPasteRequest {
         text: text.clone(),
         target_verified,
+        expected_target,
         auto_learn_eligible,
     });
     let recovery_copy = if receipt.succeeded {

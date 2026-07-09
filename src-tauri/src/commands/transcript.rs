@@ -84,6 +84,7 @@ pub async fn paste_last_transcript(
                 request.text,
                 app_for_paste.clone(),
                 request.target_verified,
+                request.expected_target,
                 request.auto_learn_eligible,
             )
         });
