@@ -97,6 +97,23 @@ fn find_best_match<'a>(
     best_match.map(|m| (m, best_score))
 }
 
+/// Gate for non-exact dictionary replacements. Tightens the blind fuzzy
+/// replace that could rewrite correct words (audit P0).
+const FUZZY_MIN_TOKEN_LEN: usize = 4;
+const FUZZY_STRICT_SCORE: f64 = 0.14;
+
+fn fuzzy_replacement_allowed(original: &str, candidate: &str, score: f64) -> bool {
+    if original.eq_ignore_ascii_case(candidate)
+        || original.to_lowercase() == candidate.to_lowercase()
+    {
+        return true;
+    }
+    if original.chars().count() < FUZZY_MIN_TOKEN_LEN {
+        return false;
+    }
+    score <= FUZZY_STRICT_SCORE
+}
+
 /// Applies custom word corrections to transcribed text using fuzzy matching
 ///
 /// This function corrects words in the input text by finding the best matches
@@ -142,9 +159,13 @@ pub fn apply_custom_words(text: &str, custom_words: &[String], threshold: f64) -
             let ngram_words = &words[i..i + n];
             let ngram = build_ngram(ngram_words);
 
-            if let Some((replacement, _score)) =
+            if let Some((replacement, score)) =
                 find_best_match(&ngram, custom_words, &custom_words_nospace, threshold)
             {
+                if !fuzzy_replacement_allowed(&ngram, replacement, score) {
+                    continue;
+                }
+
                 // Extract punctuation from first and last words of the n-gram
                 let (prefix, _) = extract_punctuation(ngram_words[0]);
                 let (_, suffix) = extract_punctuation(ngram_words[n - 1]);
@@ -299,7 +320,15 @@ fn apply_dictionary_replacement_rules_ranked(text: &str, active: &[&DictionaryEn
 
 /// Preserves the case pattern of the original word when applying a replacement
 fn preserve_case_pattern(original: &str, replacement: &str) -> String {
-    if original.chars().all(|c| c.is_uppercase()) {
+    let has_cased = original
+        .chars()
+        .any(|c| c.is_uppercase() || c.is_lowercase());
+    if has_cased
+        && original
+            .chars()
+            .filter(|c| c.is_alphabetic())
+            .all(|c| c.is_uppercase())
+    {
         replacement.to_uppercase()
     } else if original.chars().next().map_or(false, |c| c.is_uppercase()) {
         let mut chars: Vec<char> = replacement.chars().collect();
@@ -480,6 +509,25 @@ mod tests {
         let custom_words = vec!["hello".to_string(), "world".to_string()];
         let result = apply_custom_words(text, &custom_words, 0.5);
         assert_eq!(result, "hello world");
+    }
+
+    #[test]
+    fn short_tokens_require_exact_match() {
+        assert!(!fuzzy_replacement_allowed("the", "Théa", 0.10));
+        assert!(fuzzy_replacement_allowed("thea", "Théa", 0.0));
+    }
+
+    #[test]
+    fn fuzzy_gate_requires_min_length_and_score() {
+        assert!(fuzzy_replacement_allowed("kubernets", "kubernetes", 0.11));
+        assert!(!fuzzy_replacement_allowed("robin", "Robyn", 0.17));
+    }
+
+    #[test]
+    fn preserve_case_handles_caseless_tokens() {
+        assert_eq!(preserve_case_pattern("123", "Robyn"), "Robyn");
+        assert_eq!(preserve_case_pattern("HELLO", "robyn"), "ROBYN");
+        assert_eq!(preserve_case_pattern("Hello", "robyn"), "Robyn");
     }
 
     #[test]
@@ -802,11 +850,10 @@ mod tests {
 
     #[test]
     fn test_apply_custom_words_ngram_two_words() {
-        let text = "il cui nome è Charge B, che permette";
+        let text = "il cui nome è Charge B,";
         let custom_words = vec!["ChargeBee".to_string()];
         let result = apply_custom_words(text, &custom_words, 0.5);
-        assert!(result.contains("ChargeBee,"));
-        assert!(!result.contains("Charge B"));
+        assert_eq!(result, "il cui nome è ChargeBee,");
     }
 
     #[test]
