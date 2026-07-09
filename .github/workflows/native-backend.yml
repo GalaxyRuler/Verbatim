@@ -2,12 +2,13 @@ name: "native backend"
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - "src-tauri/**"
-      - "scripts/cargo-*.ps1"
-      - ".github/workflows/native-backend.yml"
+  # Runs on PRs only: the pull_request event builds the test merge commit
+  # (PR head merged into main), so a passing PR already validated the native
+  # build against main. The ruleset has strict=false and this is a solo repo,
+  # so a post-merge rebuild on push:main is near-pure duplication of the most
+  # expensive job (macOS 10x + Windows 2x native whisper.cpp compile). Trimmed
+  # to cut Actions spend; direct pushes to main are only lint-gated by
+  # code-quality — open a PR to get native coverage.
   pull_request:
     paths:
       - "src-tauri/**"
