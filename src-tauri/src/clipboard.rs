@@ -110,6 +110,68 @@ impl ClipboardSnapshot {
     }
 }
 
+/// Restores the pre-paste clipboard on every exit path unless explicitly disarmed.
+struct RestoreOnDrop<F: FnMut()> {
+    restore: F,
+    armed: bool,
+}
+
+impl<F: FnMut()> RestoreOnDrop<F> {
+    fn new(restore: F) -> Self {
+        Self {
+            restore,
+            armed: true,
+        }
+    }
+
+    #[cfg_attr(not(test), allow(dead_code))]
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl<F: FnMut()> Drop for RestoreOnDrop<F> {
+    fn drop(&mut self) {
+        if self.armed {
+            (self.restore)();
+        }
+    }
+}
+
+/// Owns the pre-paste clipboard snapshot and payload marker. Created inside
+/// paste_via_clipboard; on success ownership moves to the caller so restore
+/// happens after the caller finishes post-paste handling.
+struct ClipboardPasteSession {
+    _marker: ClipboardPayloadMarker,
+    _restore_guard: RestoreOnDrop<Box<dyn FnMut()>>,
+}
+
+impl ClipboardPasteSession {
+    fn new(
+        app_handle: &AppHandle,
+        payload: &str,
+        snapshot: ClipboardSnapshot,
+        marker: ClipboardPayloadMarker,
+    ) -> Self {
+        let app_handle = app_handle.clone();
+        let payload = payload.to_string();
+        let restore_guard = RestoreOnDrop::new(Box::new(move || {
+            if clipboard_still_contains_verbatim_payload(&app_handle, &payload, Some(marker)) {
+                if let Err(err) = snapshot.restore(&app_handle) {
+                    warn!("Failed to restore clipboard on exit path: {err}");
+                }
+            } else {
+                warn!("Skipping clipboard restore: clipboard changed after payload write");
+            }
+        }) as Box<dyn FnMut()>);
+
+        Self {
+            _marker: marker,
+            _restore_guard: restore_guard,
+        }
+    }
+}
+
 #[cfg(target_os = "windows")]
 #[derive(Clone, Debug)]
 struct NativeClipboardSnapshot {
@@ -745,14 +807,15 @@ pub(crate) fn paste_exact_preserving_clipboard_with_cancellation(
             )
         }
         PasteMethod::CtrlV | PasteMethod::CtrlShiftV | PasteMethod::ShiftInsert => {
-            paste_via_clipboard(
+            let _session = paste_via_clipboard(
                 &mut enigo,
                 text,
                 app_handle,
                 &paste_method,
                 paste_delay_ms,
                 is_cancelled,
-            )
+            )?;
+            Ok(())
         }
         PasteMethod::ExternalScript => {
             let script_path = settings
@@ -765,7 +828,8 @@ pub(crate) fn paste_exact_preserving_clipboard_with_cancellation(
     }
 }
 
-/// Pastes text using the clipboard: saves current content, writes text, sends paste keystroke, restores clipboard.
+/// Pastes text using the clipboard: saves current content, writes text, sends paste keystroke.
+/// The returned session restores the original clipboard on drop.
 fn paste_via_clipboard(
     enigo: &mut Enigo,
     text: &str,
@@ -773,13 +837,14 @@ fn paste_via_clipboard(
     paste_method: &PasteMethod,
     paste_delay_ms: u64,
     is_cancelled: CancellationCheck<'_>,
-) -> Result<(), String> {
+) -> Result<ClipboardPasteSession, String> {
     let clipboard_snapshot = ClipboardSnapshot::capture(app_handle);
 
     // Write text to clipboard first
     ensure_not_cancelled(is_cancelled, "clipboard write")?;
     write_text_clipboard(app_handle, text)?;
     let payload_marker = ClipboardPayloadMarker::capture_current();
+    let session = ClipboardPasteSession::new(app_handle, text, clipboard_snapshot, payload_marker);
 
     if let Err(err) = wait_until_clipboard_owns_payload(
         app_handle,
@@ -788,9 +853,6 @@ fn paste_via_clipboard(
         paste_delay_ms,
         is_cancelled,
     ) {
-        if clipboard_still_contains_verbatim_payload(app_handle, text, Some(payload_marker)) {
-            clipboard_snapshot.restore(app_handle)?;
-        }
         return Err(err);
     }
 
@@ -815,14 +877,7 @@ fn paste_via_clipboard(
 
     std::thread::sleep(std::time::Duration::from_millis(50));
 
-    // Restore original clipboard content only if our temporary payload is still present.
-    if clipboard_still_contains_verbatim_payload(app_handle, text, Some(payload_marker)) {
-        clipboard_snapshot.restore(app_handle)?;
-    } else {
-        warn!("Skipping clipboard restore because clipboard changed after paste payload write");
-    }
-
-    Ok(())
+    Ok(session)
 }
 
 /// Attempts to send a key combination using Linux-native tools.
@@ -1503,9 +1558,10 @@ fn paste_with_auto_learn(
         .map_err(|e| format!("Failed to lock Enigo: {}", e))?;
 
     // Perform the paste operation
-    match paste_method {
+    let clipboard_session = match paste_method {
         PasteMethod::None => {
             info!("PasteMethod::None selected - skipping paste action");
+            None
         }
         PasteMethod::Direct => {
             ensure_not_cancelled(is_cancelled, "direct typing")?;
@@ -1515,16 +1571,17 @@ fn paste_with_auto_learn(
                 #[cfg(target_os = "linux")]
                 settings.typing_tool,
             )?;
+            None
         }
         PasteMethod::CtrlV | PasteMethod::CtrlShiftV | PasteMethod::ShiftInsert => {
-            paste_via_clipboard(
+            Some(paste_via_clipboard(
                 &mut enigo,
                 &text,
                 &app_handle,
                 &paste_method,
                 paste_delay_ms,
                 is_cancelled,
-            )?
+            )?)
         }
         PasteMethod::ExternalScript => {
             let script_path = settings
@@ -1533,8 +1590,10 @@ fn paste_with_auto_learn(
                 .filter(|p| !p.is_empty())
                 .ok_or("External script path is not configured")?;
             paste_via_external_script(&text, script_path, is_cancelled)?;
+            None
         }
-    }
+    };
+    drop(clipboard_session);
 
     if should_send_auto_submit(settings.auto_submit, paste_method) {
         std::thread::sleep(Duration::from_millis(50));
@@ -1606,6 +1665,26 @@ pub fn paste_with_receipt_with_auto_learn_and_cancellation(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::Cell;
+
+    #[test]
+    fn restore_guard_restores_on_drop_when_armed() {
+        let restored = Cell::new(false);
+        {
+            let _guard = RestoreOnDrop::new(|| restored.set(true));
+        }
+        assert!(restored.get());
+    }
+
+    #[test]
+    fn restore_guard_does_not_restore_after_disarm() {
+        let restored = Cell::new(false);
+        {
+            let mut guard = RestoreOnDrop::new(|| restored.set(true));
+            guard.disarm();
+        }
+        assert!(!restored.get());
+    }
 
     #[test]
     fn auto_submit_requires_setting_enabled() {
