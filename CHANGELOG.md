@@ -12,6 +12,31 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/). Version
 
 ---
 
+## [0.12.0] — 2026-07-09
+
+### Added
+
+- **Cohere Arabic transcription model (desktop).** New downloadable "Cohere Arabic" model in Settings → Models — an Arabic-dialect-optimized 2B model (INT8, Apache-2.0) based on Cohere Transcribe Arabic 07-2026, supporting Arabic and English. Desktop only.
+- **Dictionary learning review queue.** Auto-learn candidates now land in a pending-review queue with variant grouping, approve/reject actions, and entry quarantine controls; auto-learned rules use stricter matching thresholds and produced-output feedback can quarantine reversed rules.
+- **Dictionary learning diagnostics.** A diagnostics panel shows learn outcomes and skip reasons, with reset support.
+- Auto-learn candidate queue is aged and capped (30 days / 50 candidates).
+
+### Changed
+
+- **Settings redesign.** Trust-focused UX overhaul: restructured settings navigation, semantic design tokens with full light/dark support, clearer copy, and accessibility polish.
+
+### Fixed
+
+- Settings writes are serialized under a single write lock, eliminating racy concurrent mutations from domain writers.
+- Dictation capture now skips password and secure text fields on Windows, macOS (`AXSecureTextField`), and Linux (fail-closed), and enforces a global focused-text capture cap.
+- Android: the privacy-policy URL is allowed in the external-URL allowlists.
+
+### Internal (CI)
+
+- Packaged smoke tolerates the single-instance primary taking up to 30s to exit; transitive `quick-xml` RUSTSEC advisories (2026-0194/0195) acknowledged pending upstream bumps.
+
+---
+
 ## [0.11.0] — 2026-07-01
 
 ### Added
