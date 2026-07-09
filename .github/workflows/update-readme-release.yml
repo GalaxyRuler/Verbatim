@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 concurrency:
   group: update-readme-release
@@ -35,16 +36,25 @@ jobs:
       - name: Check formatting
         run: bunx prettier --check README.md scripts/update-readme-release.ts .github/workflows/update-readme-release.yml
 
-      - name: Commit README update
+      - name: Open auto-merge PR with README update
         shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           if git diff --quiet -- README.md; then
             echo "README latest release block is already current."
             exit 0
           fi
 
+          BRANCH="bot/update-readme-release-${{ github.run_id }}"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
           git add README.md
           git commit -m "docs: update latest release links"
-          git push origin HEAD:main
+          git push origin "$BRANCH"
+
+          gh pr create --base main --head "$BRANCH" \
+            --title "docs: update latest release links" \
+            --body "Automated update of the README latest-release block to the newest published release."
+          gh pr merge "$BRANCH" --auto --squash --delete-branch
