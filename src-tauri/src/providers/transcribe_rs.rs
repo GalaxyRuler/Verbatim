@@ -145,10 +145,13 @@ fn transcription_language_candidates(
 }
 
 fn whisper_language_hint(
-    _selected_language: &str,
+    selected_language: &str,
     _language_shortlist: &[String],
 ) -> Option<String> {
-    None
+    match selected_language {
+        "" | "auto" => None,
+        language => Some(language.to_string()),
+    }
 }
 
 fn score_text_for_language(text: &str, language: &str) -> f32 {
@@ -588,8 +591,25 @@ mod tests {
     }
 
     #[test]
-    fn whisper_locked_transcription_uses_native_auto_detect() {
-        assert_eq!(whisper_language_hint("ar", &["en".to_string()]), None);
+    fn locked_language_reaches_whisper_params() {
+        let no_shortlist: Vec<String> = vec![];
+        assert_eq!(
+            whisper_language_hint("ar", &no_shortlist),
+            Some("ar".to_string())
+        );
+        assert_eq!(
+            whisper_language_hint("en", &no_shortlist),
+            Some("en".to_string())
+        );
+        assert_eq!(whisper_language_hint("auto", &no_shortlist), None);
+        assert_eq!(whisper_language_hint("", &no_shortlist), None);
+
+        let shortlist = vec!["ar".to_string(), "en".to_string()];
+        assert_eq!(
+            whisper_language_hint("ar", &shortlist),
+            Some("ar".to_string())
+        );
+        assert_eq!(whisper_language_hint("auto", &shortlist), None);
     }
 
     #[test]
