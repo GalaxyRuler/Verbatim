@@ -38,6 +38,16 @@ impl ShortcutRuntime {
         }
     }
 
+    pub fn as_toggle(&self) -> Self {
+        Self {
+            push_to_talk: false,
+            latch_enabled: false,
+            debounce: self.debounce,
+            double_tap_window: self.double_tap_window,
+            max_latch_tap_duration: self.max_latch_tap_duration,
+        }
+    }
+
     pub fn push_to_talk(&self) -> bool {
         self.push_to_talk
     }

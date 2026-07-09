@@ -145,9 +145,19 @@ pub async fn send_text_provider_request(
     model: &str,
     request: TextProviderRequest,
 ) -> Result<Option<String>, String> {
+    send_text_provider_request_with_cancellation(provider, api_key, model, request, None).await
+}
+
+pub async fn send_text_provider_request_with_cancellation(
+    provider: &crate::settings::PostProcessProvider,
+    api_key: String,
+    model: &str,
+    request: TextProviderRequest,
+    cancellation: Option<&crate::providers::CancellationToken>,
+) -> Result<Option<String>, String> {
     let request_config = provider_reasoning_config(&provider.id);
     let json_schema = request.json_schema();
-    crate::llm_client::send_chat_completion_with_schema(
+    crate::llm_client::send_chat_completion_with_schema_and_cancellation(
         provider,
         api_key,
         model,
@@ -156,6 +166,7 @@ pub async fn send_text_provider_request(
         json_schema,
         request_config.reasoning_effort,
         request_config.reasoning,
+        cancellation,
     )
     .await
 }

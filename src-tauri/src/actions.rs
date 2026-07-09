@@ -51,11 +51,11 @@ struct LanguageGuardEvent {
 
 /// Drop guard that notifies the [`TranscriptionCoordinator`] when the
 /// transcription pipeline finishes — whether it completes normally or panics.
-struct FinishGuard(AppHandle);
+struct FinishGuard(AppHandle, u64);
 impl Drop for FinishGuard {
     fn drop(&mut self) {
         if let Some(c) = self.0.try_state::<TranscriptionCoordinator>() {
-            c.notify_processing_finished();
+            c.notify_processing_finished(self.1);
         }
     }
 }
@@ -63,7 +63,7 @@ impl Drop for FinishGuard {
 // Shortcut Action Trait
 pub trait ShortcutAction: Send + Sync {
     fn start(&self, app: &AppHandle, binding_id: &str, shortcut_str: &str);
-    fn stop(&self, app: &AppHandle, binding_id: &str, shortcut_str: &str);
+    fn stop(&self, app: &AppHandle, binding_id: &str, shortcut_str: &str, generation: u64);
 }
 
 // Transcribe Action
@@ -483,7 +483,8 @@ async fn post_process_with_managed_local_llm(
         return None;
     }
 
-    match crate::llm_client::send_chat_completion_with_schema(
+    let provider_cancellation = operation_token.map(|token| token.provider_cancellation());
+    match crate::llm_client::send_chat_completion_with_schema_and_cancellation(
         &endpoint.provider,
         String::new(),
         &endpoint.model,
@@ -492,6 +493,7 @@ async fn post_process_with_managed_local_llm(
         None,
         None,
         None,
+        provider_cancellation.as_ref(),
     )
     .await
     {
@@ -569,6 +571,8 @@ async fn post_process_transcription(
         return None;
     }
 
+    let provider_cancellation = operation_token.map(|token| token.provider_cancellation());
+
     if provider.supports_structured_output {
         debug!("Using structured outputs for provider '{}'", provider.id);
 
@@ -626,11 +630,12 @@ async fn post_process_transcription(
             "The cleaned and processed transcription text",
         );
 
-        match crate::text_processing::send_text_provider_request(
+        match crate::text_processing::send_text_provider_request_with_cancellation(
             &provider,
             api_key.clone(),
             &model,
             request,
+            provider_cancellation.as_ref(),
         )
         .await
         {
@@ -683,8 +688,14 @@ async fn post_process_transcription(
         return None;
     }
 
-    match crate::text_processing::send_text_provider_request(&provider, api_key, &model, request)
-        .await
+    match crate::text_processing::send_text_provider_request_with_cancellation(
+        &provider,
+        api_key,
+        &model,
+        request,
+        provider_cancellation.as_ref(),
+    )
+    .await
     {
         Ok(Some(content)) => {
             let content = crate::text_processing::strip_invisible_chars(&content);
@@ -1679,7 +1690,7 @@ impl ShortcutAction for TranscribeAction {
         );
     }
 
-    fn stop(&self, app: &AppHandle, binding_id: &str, _shortcut_str: &str) {
+    fn stop(&self, app: &AppHandle, binding_id: &str, _shortcut_str: &str, generation: u64) {
         // Unregister the cancel shortcut when transcription stops
         shortcut::unregister_cancel_shortcut(app);
 
@@ -1705,7 +1716,7 @@ impl ShortcutAction for TranscribeAction {
         let operation_token = current_or_new_operation_token(app);
 
         tauri::async_runtime::spawn(async move {
-            let _guard = FinishGuard(ah.clone());
+            let _guard = FinishGuard(ah.clone(), generation);
             debug!(
                 "Starting async transcription task for binding: {}",
                 binding_id
@@ -2076,7 +2087,7 @@ impl ShortcutAction for CancelAction {
         }
     }
 
-    fn stop(&self, _app: &AppHandle, _binding_id: &str, _shortcut_str: &str) {
+    fn stop(&self, _app: &AppHandle, _binding_id: &str, _shortcut_str: &str, _generation: u64) {
         // Nothing to do on stop for cancel
     }
 }
@@ -2117,7 +2128,7 @@ impl ShortcutAction for TransformShortcutAction {
         });
     }
 
-    fn stop(&self, _app: &AppHandle, _binding_id: &str, _shortcut_str: &str) {
+    fn stop(&self, _app: &AppHandle, _binding_id: &str, _shortcut_str: &str, _generation: u64) {
         // Transform shortcuts run once on key press.
     }
 }
@@ -2135,7 +2146,7 @@ impl ShortcutAction for TestAction {
         );
     }
 
-    fn stop(&self, app: &AppHandle, binding_id: &str, shortcut_str: &str) {
+    fn stop(&self, app: &AppHandle, binding_id: &str, shortcut_str: &str, _generation: u64) {
         log::info!(
             "Shortcut ID '{}': Stopped - {} (App: {})", // Changed "Released" to "Stopped" for consistency
             binding_id,
