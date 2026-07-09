@@ -189,6 +189,56 @@ fn finish_dictation_transaction(app: &AppHandle, terminal: DictationTransactionT
     }
 }
 
+trait TranscriptionFailureContext {
+    fn history_enabled(&self) -> bool;
+    fn wav_saved(&self) -> bool;
+    fn save_failed_history(&mut self);
+    fn finish_transaction(&mut self, terminal: DictationTransactionTerminal);
+}
+
+fn finish_transcription_failed(context: &mut impl TranscriptionFailureContext) {
+    let terminal = DictationTransactionTerminal::TranscriptionFailed;
+    if context.history_enabled() && terminal.should_save_failed_history(context.wav_saved()) {
+        context.save_failed_history();
+    }
+    context.finish_transaction(terminal);
+}
+
+struct ActionTranscriptionFailureContext<'a> {
+    app: &'a AppHandle,
+    history_manager: &'a HistoryManager,
+    history_enabled: bool,
+    wav_saved: bool,
+    file_name: String,
+    post_process: bool,
+}
+
+impl TranscriptionFailureContext for ActionTranscriptionFailureContext<'_> {
+    fn history_enabled(&self) -> bool {
+        self.history_enabled
+    }
+
+    fn wav_saved(&self) -> bool {
+        self.wav_saved
+    }
+
+    fn save_failed_history(&mut self) {
+        if let Err(save_err) = self.history_manager.save_entry(
+            std::mem::take(&mut self.file_name),
+            String::new(),
+            self.post_process,
+            None,
+            None,
+        ) {
+            error!("Failed to save failed history entry: {}", save_err);
+        }
+    }
+
+    fn finish_transaction(&mut self, terminal: DictationTransactionTerminal) {
+        finish_dictation_transaction(self.app, terminal);
+    }
+}
+
 fn current_or_new_operation_token(app: &AppHandle) -> Option<OperationToken> {
     app.try_state::<OperationCancellationState>().map(|state| {
         state
@@ -1311,6 +1361,60 @@ mod adaptive_action_tests {
         assert!(accepted.is_none());
     }
 
+    #[derive(Default)]
+    struct CountingTranscriptionFailureContext {
+        failed_history_rows: usize,
+        finished: Vec<DictationTransactionTerminal>,
+    }
+
+    impl TranscriptionFailureContext for CountingTranscriptionFailureContext {
+        fn history_enabled(&self) -> bool {
+            true
+        }
+
+        fn wav_saved(&self) -> bool {
+            true
+        }
+
+        fn save_failed_history(&mut self) {
+            self.failed_history_rows += 1;
+        }
+
+        fn finish_transaction(&mut self, terminal: DictationTransactionTerminal) {
+            self.finished.push(terminal);
+        }
+    }
+
+    fn failed_history_rows_for(
+        transcription_result: Result<String, ()>,
+        observed_active_signal: bool,
+    ) -> usize {
+        let mut context = CountingTranscriptionFailureContext::default();
+        let terminal = match transcription_result {
+            Err(()) => DictationTransactionTerminal::TranscriptionFailed,
+            Ok(final_text) => match classify_final_text(final_text, observed_active_signal) {
+                FinalTextDecision::Terminal(terminal) => terminal,
+                FinalTextDecision::Continue(_) => DictationTransactionTerminal::InsertionCompleted,
+            },
+        };
+
+        if terminal == DictationTransactionTerminal::TranscriptionFailed {
+            finish_transcription_failed(&mut context);
+        } else {
+            context.finish_transaction(terminal);
+        }
+
+        assert_eq!(context.finished, vec![terminal]);
+        context.failed_history_rows
+    }
+
+    #[test]
+    fn failed_history_rows_are_exactly_once_for_failure_terminals() {
+        assert_eq!(failed_history_rows_for(Err(()), false), 1);
+        assert_eq!(failed_history_rows_for(Ok(String::new()), true), 1);
+        assert_eq!(failed_history_rows_for(Ok(String::new()), false), 0);
+    }
+
     #[test]
     fn transcription_completed_log_message_does_not_include_transcript_text() {
         let transcript = "Confidential dictated sentence.";
@@ -1803,6 +1907,7 @@ impl ShortcutAction for TranscribeAction {
                         return;
                     }
 
+                    let observed_active_signal = stop_result.observed_active_signal;
                     let samples = stop_result.samples;
                     let history_settings = get_settings(&ah);
                     let private_session_enabled = crate::private_session::is_enabled(&ah);
@@ -1924,6 +2029,35 @@ impl ShortcutAction for TranscribeAction {
                                     return;
                                 }
 
+                                let final_text = match classify_final_text(
+                                    processed.final_text,
+                                    observed_active_signal,
+                                ) {
+                                    FinalTextDecision::Continue(final_text) => final_text,
+                                    FinalTextDecision::Terminal(
+                                        DictationTransactionTerminal::TranscriptionFailed,
+                                    ) => {
+                                        warn!(
+                                            "Transcription returned empty output despite observed active signal; saving failed history entry"
+                                        );
+                                        let mut failure_context =
+                                            ActionTranscriptionFailureContext {
+                                                app: &ah,
+                                                history_manager: hm.as_ref(),
+                                                history_enabled,
+                                                wav_saved,
+                                                file_name: file_name.clone(),
+                                                post_process,
+                                            };
+                                        finish_transcription_failed(&mut failure_context);
+                                        return;
+                                    }
+                                    FinalTextDecision::Terminal(terminal) => {
+                                        finish_dictation_transaction(&ah, terminal);
+                                        return;
+                                    }
+                                };
+
                                 let profile = crate::adaptive::profile::find_profile_or_default(
                                     &settings.adaptive_profiles,
                                     &processed.routing.profile_id,
@@ -1975,34 +2109,27 @@ impl ShortcutAction for TranscribeAction {
                                     return;
                                 }
 
-                                match classify_final_text(processed.final_text) {
-                                    FinalTextDecision::Terminal(terminal) => {
-                                        finish_dictation_transaction(&ah, terminal);
-                                    }
-                                    FinalTextDecision::Continue(final_text) => {
-                                        let insertion = AdaptiveInsertionRequest {
-                                            app: ah.clone(),
-                                            history_manager: Arc::clone(&hm),
-                                            settings: settings.clone(),
-                                            final_text,
-                                            context: context.clone(),
-                                            saved_entry_id,
-                                            cancelled_wav_path,
-                                            operation_token: operation_token.clone(),
-                                            paste_started_at: Instant::now(),
-                                        };
-                                        ah.run_on_main_thread(move || {
-                                            complete_adaptive_insertion(insertion);
-                                        })
-                                        .unwrap_or_else(|e| {
-                                            error!("Failed to run paste on main thread: {:?}", e);
-                                            finish_dictation_transaction(
-                                                &ah,
-                                                DictationTransactionTerminal::InsertionSchedulingFailed,
-                                            );
-                                        });
-                                    }
-                                }
+                                let insertion = AdaptiveInsertionRequest {
+                                    app: ah.clone(),
+                                    history_manager: Arc::clone(&hm),
+                                    settings: settings.clone(),
+                                    final_text,
+                                    context: context.clone(),
+                                    saved_entry_id,
+                                    cancelled_wav_path,
+                                    operation_token: operation_token.clone(),
+                                    paste_started_at: Instant::now(),
+                                };
+                                ah.run_on_main_thread(move || {
+                                    complete_adaptive_insertion(insertion);
+                                })
+                                .unwrap_or_else(|e| {
+                                    error!("Failed to run paste on main thread: {:?}", e);
+                                    finish_dictation_transaction(
+                                        &ah,
+                                        DictationTransactionTerminal::InsertionSchedulingFailed,
+                                    );
+                                });
                             } else {
                                 let processed = process_transcription_output(
                                     &ah,
@@ -2019,6 +2146,35 @@ impl ShortcutAction for TranscribeAction {
                                     finish_cancelled_operation(&ah);
                                     return;
                                 }
+
+                                let final_text = match classify_final_text(
+                                    processed.final_text,
+                                    observed_active_signal,
+                                ) {
+                                    FinalTextDecision::Continue(final_text) => final_text,
+                                    FinalTextDecision::Terminal(
+                                        DictationTransactionTerminal::TranscriptionFailed,
+                                    ) => {
+                                        warn!(
+                                            "Transcription returned empty output despite observed active signal; saving failed history entry"
+                                        );
+                                        let mut failure_context =
+                                            ActionTranscriptionFailureContext {
+                                                app: &ah,
+                                                history_manager: hm.as_ref(),
+                                                history_enabled,
+                                                wav_saved,
+                                                file_name: file_name.clone(),
+                                                post_process,
+                                            };
+                                        finish_transcription_failed(&mut failure_context);
+                                        return;
+                                    }
+                                    FinalTextDecision::Terminal(terminal) => {
+                                        finish_dictation_transaction(&ah, terminal);
+                                        return;
+                                    }
+                                };
 
                                 let saved_entry_id = if history_enabled {
                                     match hm.save_entry(
@@ -2049,40 +2205,33 @@ impl ShortcutAction for TranscribeAction {
                                     return;
                                 }
 
-                                match classify_final_text(processed.final_text) {
-                                    FinalTextDecision::Terminal(terminal) => {
-                                        finish_dictation_transaction(&ah, terminal);
-                                    }
-                                    FinalTextDecision::Continue(final_text) => {
-                                        let app_for_insertion = ah.clone();
-                                        let settings_for_insertion = settings.clone();
-                                        let paste_started_at = Instant::now();
-                                        ah.run_on_main_thread(move || {
-                                            complete_classic_insertion(
-                                                app_for_insertion,
-                                                Arc::clone(&hm),
-                                                settings_for_insertion,
-                                                final_text,
-                                                saved_entry_id,
-                                                cancelled_wav_path,
-                                                operation_token.clone(),
-                                                classic_context,
-                                                paste_started_at,
-                                            );
-                                        })
-                                        .unwrap_or_else(|e| {
-                                            error!("Failed to run paste on main thread: {:?}", e);
-                                            finish_dictation_transaction(
-                                                &ah,
-                                                DictationTransactionTerminal::InsertionSchedulingFailed,
-                                            );
-                                        });
-                                    }
-                                }
+                                let app_for_insertion = ah.clone();
+                                let settings_for_insertion = settings.clone();
+                                let paste_started_at = Instant::now();
+                                ah.run_on_main_thread(move || {
+                                    complete_classic_insertion(
+                                        app_for_insertion,
+                                        Arc::clone(&hm),
+                                        settings_for_insertion,
+                                        final_text,
+                                        saved_entry_id,
+                                        cancelled_wav_path,
+                                        operation_token.clone(),
+                                        classic_context,
+                                        paste_started_at,
+                                    );
+                                })
+                                .unwrap_or_else(|e| {
+                                    error!("Failed to run paste on main thread: {:?}", e);
+                                    finish_dictation_transaction(
+                                        &ah,
+                                        DictationTransactionTerminal::InsertionSchedulingFailed,
+                                    );
+                                });
                             }
                         }
                         Err(err) => {
-                            debug!("Global Shortcut Transcription error: {}", err);
+                            error!("Global Shortcut Transcription error: {}", err);
                             if operation_is_cancelled(&ah, operation_token.as_ref()) {
                                 if let Some(wav_path) = &saved_wav_path {
                                     cleanup_cancelled_wav(wav_path);
@@ -2091,20 +2240,15 @@ impl ShortcutAction for TranscribeAction {
                                 return;
                             }
 
-                            // Save entry with empty text so user can retry
-                            let terminal = DictationTransactionTerminal::TranscriptionFailed;
-                            if history_enabled && terminal.should_save_failed_history(wav_saved) {
-                                if let Err(save_err) = hm.save_entry(
-                                    file_name,
-                                    String::new(),
-                                    post_process,
-                                    None,
-                                    None,
-                                ) {
-                                    error!("Failed to save failed history entry: {}", save_err);
-                                }
-                            }
-                            finish_dictation_transaction(&ah, terminal);
+                            let mut failure_context = ActionTranscriptionFailureContext {
+                                app: &ah,
+                                history_manager: hm.as_ref(),
+                                history_enabled,
+                                wav_saved,
+                                file_name,
+                                post_process,
+                            };
+                            finish_transcription_failed(&mut failure_context);
                         }
                     }
                 }
