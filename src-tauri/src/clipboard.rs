@@ -1,5 +1,6 @@
 use crate::adaptive::types::{InsertionMethod, InsertionReceipt};
 use crate::input::{self, EnigoState};
+use crate::post_paste_learning::{FocusedTextSnapshot, MAX_FOCUSED_TEXT_CHARS};
 #[cfg(target_os = "linux")]
 use crate::settings::TypingTool;
 use crate::settings::{get_settings, AutoSubmitKey, ClipboardHandling, PasteMethod};
@@ -16,6 +17,9 @@ use crate::utils::{is_kde_wayland, is_wayland};
 
 pub(crate) type CancellationCheck<'a> = Option<&'a dyn Fn() -> bool>;
 const CLIPBOARD_PAYLOAD_POLL_INTERVAL_MS: u64 = 10;
+const FOCUSED_TEXT_READ_CAP: usize = MAX_FOCUSED_TEXT_CHARS;
+const PASTE_VERIFY_TOTAL_MS: u64 = 600;
+const PASTE_VERIFY_POLL_MS: u64 = 75;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct ClipboardPayloadMarker {
@@ -807,7 +811,7 @@ pub(crate) fn paste_exact_preserving_clipboard_with_cancellation(
             )
         }
         PasteMethod::CtrlV | PasteMethod::CtrlShiftV | PasteMethod::ShiftInsert => {
-            let _session = paste_via_clipboard(
+            let session = paste_via_clipboard(
                 &mut enigo,
                 text,
                 app_handle,
@@ -815,6 +819,8 @@ pub(crate) fn paste_exact_preserving_clipboard_with_cancellation(
                 paste_delay_ms,
                 is_cancelled,
             )?;
+            std::thread::sleep(Duration::from_millis(50));
+            drop(session);
             Ok(())
         }
         PasteMethod::ExternalScript => {
@@ -874,8 +880,6 @@ fn paste_via_clipboard(
             _ => return Err("Invalid paste method for clipboard paste".into()),
         }
     }
-
-    std::thread::sleep(std::time::Duration::from_millis(50));
 
     Ok(session)
 }
@@ -1419,6 +1423,83 @@ fn paste_direct(
     input::paste_text_direct(enigo, text)
 }
 
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum PasteVerification {
+    Landed,
+    /// Target was readable and the payload is demonstrably absent.
+    NotFound,
+    /// Target exposes no readable text; keep legacy sent==success behavior.
+    Unsupported,
+    /// Target was readable but inconclusive; never fabricate a failure.
+    Unverified,
+}
+
+fn normalize_for_verification(text: &str) -> String {
+    text.chars()
+        .filter(|c| !matches!(c, '\u{200E}' | '\u{200F}' | '\u{202A}'..='\u{202E}'))
+        .map(|c| if c.is_whitespace() { ' ' } else { c })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn verification_needle(payload: &str) -> String {
+    let normalized = normalize_for_verification(payload);
+    let chars = normalized.chars().collect::<Vec<_>>();
+    if chars.len() > 120 {
+        chars[chars.len() - 60..].iter().collect()
+    } else {
+        normalized
+    }
+}
+
+fn verify_paste_outcome(
+    before: Option<&FocusedTextSnapshot>,
+    after: Option<&FocusedTextSnapshot>,
+    payload: &str,
+) -> PasteVerification {
+    let (Some(before), Some(after)) = (before, after) else {
+        return if before.is_none() && after.is_none() {
+            PasteVerification::Unsupported
+        } else {
+            PasteVerification::Unverified
+        };
+    };
+
+    if before.target_id != after.target_id {
+        return PasteVerification::Unverified;
+    }
+
+    let needle = verification_needle(payload);
+    if !needle.is_empty() && normalize_for_verification(&after.text).contains(&needle) {
+        return PasteVerification::Landed;
+    }
+
+    if after.text.chars().count() >= FOCUSED_TEXT_READ_CAP {
+        return PasteVerification::Unverified;
+    }
+
+    PasteVerification::NotFound
+}
+
+fn wait_for_paste_landing(
+    before: Option<&FocusedTextSnapshot>,
+    payload: &str,
+) -> PasteVerification {
+    let deadline = Instant::now() + Duration::from_millis(PASTE_VERIFY_TOTAL_MS);
+    loop {
+        let after = crate::post_paste_learning::capture_focused_text_snapshot();
+        let outcome = verify_paste_outcome(before, after.as_ref(), payload);
+        match outcome {
+            PasteVerification::NotFound if Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(PASTE_VERIFY_POLL_MS));
+            }
+            outcome => return outcome,
+        }
+    }
+}
+
 fn send_return_key(enigo: &mut Enigo, key_type: AutoSubmitKey) -> Result<(), String> {
     match key_type {
         AutoSubmitKey::Enter => {
@@ -1464,6 +1545,13 @@ fn send_return_key(enigo: &mut Enigo, key_type: AutoSubmitKey) -> Result<(), Str
 
 fn should_send_auto_submit(auto_submit: bool, paste_method: PasteMethod) -> bool {
     auto_submit && paste_method != PasteMethod::None
+}
+
+fn is_clipboard_paste_method(paste_method: PasteMethod) -> bool {
+    matches!(
+        paste_method,
+        PasteMethod::CtrlV | PasteMethod::CtrlShiftV | PasteMethod::ShiftInsert
+    )
 }
 
 fn insertion_method_for_paste_method(paste_method: PasteMethod) -> InsertionMethod {
@@ -1533,10 +1621,12 @@ fn paste_with_auto_learn(
         text
     };
 
-    let before_paste_snapshot = if auto_learn_eligible
+    let should_capture_for_auto_learn = auto_learn_eligible
         && !private_session_enabled
         && settings.auto_add_dictionary_words
-        && paste_method != PasteMethod::None
+        && paste_method != PasteMethod::None;
+    let should_capture_for_verification = is_clipboard_paste_method(paste_method);
+    let before_paste_snapshot = if should_capture_for_auto_learn || should_capture_for_verification
     {
         crate::post_paste_learning::capture_focused_text_snapshot()
     } else {
@@ -1593,10 +1683,21 @@ fn paste_with_auto_learn(
             None
         }
     };
+    let verification = if clipboard_session.is_some() {
+        wait_for_paste_landing(before_paste_snapshot.as_ref(), &text)
+    } else {
+        PasteVerification::Unsupported
+    };
     drop(clipboard_session);
 
+    if verification == PasteVerification::NotFound {
+        info!("Skipping auto-submit: paste not verified");
+        warn!("Paste keystroke sent but payload not observed in focused element");
+        return Err("Paste keystroke sent but payload not observed in focused element".to_string());
+    }
+
     if should_send_auto_submit(settings.auto_submit, paste_method) {
-        std::thread::sleep(Duration::from_millis(50));
+        std::thread::sleep(Duration::from_millis(settings.paste_delay_ms.max(50)));
         ensure_not_cancelled(is_cancelled, "auto-submit")?;
         send_return_key(&mut enigo, settings.auto_submit_key)?;
     }
@@ -1610,11 +1711,7 @@ fn paste_with_auto_learn(
             .map_err(|e| format!("Failed to copy to clipboard: {}", e))?;
     }
 
-    if auto_learn_eligible
-        && !private_session_enabled
-        && settings.auto_add_dictionary_words
-        && paste_method != PasteMethod::None
-    {
+    if should_capture_for_auto_learn {
         crate::post_paste_learning::maybe_spawn_auto_add_watcher(
             app_handle.clone(),
             text,
@@ -1684,6 +1781,95 @@ mod tests {
             guard.disarm();
         }
         assert!(!restored.get());
+    }
+
+    mod paste_verify_tests {
+        use super::*;
+        use crate::post_paste_learning::FocusedTextSnapshot;
+
+        fn snap(target_id: &str, text: &str) -> FocusedTextSnapshot {
+            FocusedTextSnapshot {
+                target_id: target_id.to_string(),
+                text: text.to_string(),
+            }
+        }
+
+        #[test]
+        fn verification_passes_when_payload_present() {
+            assert_eq!(
+                verify_paste_outcome(
+                    Some(&snap("a", "hello")),
+                    Some(&snap("a", "hello dictated text")),
+                    "dictated text"
+                ),
+                PasteVerification::Landed
+            );
+        }
+
+        #[test]
+        fn same_target_unchanged_is_not_found() {
+            assert_eq!(
+                verify_paste_outcome(
+                    Some(&snap("a", "hello world")),
+                    Some(&snap("a", "hello world")),
+                    "dictated text"
+                ),
+                PasteVerification::NotFound
+            );
+        }
+
+        #[test]
+        fn target_changed_between_reads_is_unverified() {
+            assert_eq!(
+                verify_paste_outcome(
+                    Some(&snap("a", "x")),
+                    Some(&snap("b", "y")),
+                    "dictated text"
+                ),
+                PasteVerification::Unverified
+            );
+        }
+
+        #[test]
+        fn unreadable_target_is_unsupported() {
+            assert_eq!(
+                verify_paste_outcome(None, None, "dictated text"),
+                PasteVerification::Unsupported
+            );
+        }
+
+        #[test]
+        fn readable_before_unreadable_after_is_unverified() {
+            assert_eq!(
+                verify_paste_outcome(Some(&snap("a", "x")), None, "dictated text"),
+                PasteVerification::Unverified
+            );
+        }
+
+        #[test]
+        fn verification_ignores_direction_marks_and_whitespace() {
+            assert_eq!(
+                verify_paste_outcome(
+                    Some(&snap("a", "x")),
+                    Some(&snap("a", "x \u{200E}dictated\u{00A0}text")),
+                    "dictated text"
+                ),
+                PasteVerification::Landed
+            );
+        }
+
+        #[test]
+        fn truncated_read_is_unverified_not_failure() {
+            let capped = "z".repeat(FOCUSED_TEXT_READ_CAP);
+            assert_eq!(
+                verify_paste_outcome(
+                    Some(&snap("a", "x")),
+                    Some(&snap("a", &capped)),
+                    "dictated text"
+                ),
+                PasteVerification::Unverified
+            );
+        }
     }
 
     #[test]
