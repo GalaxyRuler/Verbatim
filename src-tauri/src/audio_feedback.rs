@@ -1,3 +1,4 @@
+use crate::audio_toolkit::device_names_match;
 use crate::settings::SoundTheme;
 use crate::settings::{self, AppSettings};
 use log::{debug, error, warn};
@@ -110,13 +111,21 @@ fn play_audio_file(
             let host = rodio::cpal::default_host();
             let devices = host.output_devices()?;
 
-            let mut found_device = None;
+            let mut exact_device = None;
+            let mut compatible_device = None;
             for device in devices {
-                if device.name()? == device_name {
-                    found_device = Some(device);
+                let enumerated_name = device.name()?;
+                if enumerated_name == device_name {
+                    exact_device = Some(device);
                     break;
                 }
+
+                if compatible_device.is_none() && device_names_match(&enumerated_name, &device_name)
+                {
+                    compatible_device = Some(device);
+                }
             }
+            let found_device = exact_device.or(compatible_device);
 
             match found_device {
                 Some(device) => OutputStreamBuilder::from_device(device)?,

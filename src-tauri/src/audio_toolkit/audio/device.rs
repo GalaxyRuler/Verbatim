@@ -8,6 +8,20 @@ pub struct CpalDeviceInfo {
     pub device: cpal::Device,
 }
 
+fn has_legacy_driver_suffix(short_name: &str, legacy_name: &str) -> bool {
+    legacy_name
+        .strip_prefix(short_name)
+        .is_some_and(|suffix| suffix.starts_with(" ("))
+}
+
+/// Matches the short cpal 0.17 device description with cpal 0.16's legacy
+/// `"<name> (<driver>)"` representation in either direction.
+pub fn device_names_match(first_name: &str, second_name: &str) -> bool {
+    first_name == second_name
+        || has_legacy_driver_suffix(first_name, second_name)
+        || has_legacy_driver_suffix(second_name, first_name)
+}
+
 fn device_name(device: &cpal::Device) -> Result<String, cpal::DeviceNameError> {
     device
         .description()

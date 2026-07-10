@@ -1,5 +1,7 @@
 use super::mic_diagnostics::{MicDiagnosticState, SilenceDiagnostic};
-use crate::audio_toolkit::{list_input_devices, vad::SmoothedVad, AudioRecorder, SileroVad};
+use crate::audio_toolkit::{
+    device_names_match, list_input_devices, vad::SmoothedVad, AudioRecorder, SileroVad,
+};
 use crate::helpers::clamshell;
 use crate::settings::{get_settings, write_settings_domain, AppSettings, SettingsWriteDomain};
 use crate::utils;
@@ -211,7 +213,16 @@ fn resolve_device(
         }
     }
 
-    stored_name.and_then(|stored_name| devices.iter().position(|device| device.name == stored_name))
+    stored_name.and_then(|stored_name| {
+        devices
+            .iter()
+            .position(|device| device.name == stored_name)
+            .or_else(|| {
+                devices
+                    .iter()
+                    .position(|device| device_names_match(device.name, stored_name))
+            })
+    })
 }
 
 fn stable_id_write_back_is_current(
@@ -981,6 +992,74 @@ mod tests {
         assert_eq!(
             resolve_device(&devices, None, Some("USB Audio Device")),
             Some(0)
+        );
+    }
+
+    #[test]
+    fn device_resolution_keeps_exact_name_match() {
+        let devices = vec![
+            dev(Some("wasapi:CABLE"), "CABLE Output"),
+            dev(Some("wasapi:CABLE-X"), "CABLE Output X"),
+        ];
+
+        assert_eq!(
+            resolve_device(&devices, None, Some("CABLE Output")),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn device_resolution_accepts_legacy_parenthesized_driver_suffix() {
+        let devices = vec![dev(Some("wasapi:CABLE"), "CABLE Output")];
+
+        assert_eq!(
+            resolve_device(
+                &devices,
+                None,
+                Some("CABLE Output (VB-Audio Virtual Cable)")
+            ),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn device_resolution_rejects_non_parenthesized_name_prefix() {
+        let devices = vec![dev(Some("wasapi:CABLE"), "CABLE Output")];
+
+        assert_eq!(resolve_device(&devices, None, Some("CABLE Output X")), None);
+    }
+
+    #[test]
+    fn device_resolution_accepts_short_selection_against_legacy_output_name() {
+        let devices = vec![dev(
+            Some("wasapi:CABLE"),
+            "CABLE Output (VB-Audio Virtual Cable)",
+        )];
+
+        assert_eq!(
+            resolve_device(&devices, None, Some("CABLE Output")),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn device_resolution_prefers_exact_match_over_duplicate_legacy_short_names() {
+        let devices = vec![
+            dev(Some("wasapi:SHORT-A"), "CABLE Output"),
+            dev(
+                Some("wasapi:EXACT"),
+                "CABLE Output (VB-Audio Virtual Cable)",
+            ),
+            dev(Some("wasapi:SHORT-B"), "CABLE Output"),
+        ];
+
+        assert_eq!(
+            resolve_device(
+                &devices,
+                None,
+                Some("CABLE Output (VB-Audio Virtual Cable)")
+            ),
+            Some(1)
         );
     }
 
