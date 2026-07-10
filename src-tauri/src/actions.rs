@@ -96,7 +96,7 @@ fn copy_text_to_clipboard(app: &AppHandle, text: &str, reason: &str) {
 }
 
 fn recording_has_usable_speech(result: &RecordingStopResult) -> bool {
-    if result.samples.is_empty() || result.captured_sample_count == 0 {
+    if result.device_error || result.samples.is_empty() || result.captured_sample_count == 0 {
         return false;
     }
 
@@ -1567,6 +1567,7 @@ mod adaptive_action_tests {
             captured_sample_count: 4_000,
             observed_active_signal: false,
             diagnostic_state: crate::managers::mic_diagnostics::MicDiagnosticState::Recording,
+            device_error: false,
         };
 
         assert!(!recording_has_usable_speech(&result));
@@ -1579,6 +1580,7 @@ mod adaptive_action_tests {
             captured_sample_count: 3_200,
             observed_active_signal: true,
             diagnostic_state: crate::managers::mic_diagnostics::MicDiagnosticState::Recording,
+            device_error: false,
         };
 
         assert!(!recording_has_usable_speech(&result));
@@ -1591,9 +1593,23 @@ mod adaptive_action_tests {
             captured_sample_count: 8_000,
             observed_active_signal: true,
             diagnostic_state: crate::managers::mic_diagnostics::MicDiagnosticState::Recording,
+            device_error: false,
         };
 
         assert!(recording_has_usable_speech(&result));
+    }
+
+    #[test]
+    fn recording_with_device_error_is_not_usable_speech() {
+        let result = crate::managers::audio::RecordingStopResult {
+            samples: vec![0.01; 20_000],
+            captured_sample_count: 8_000,
+            observed_active_signal: true,
+            diagnostic_state: crate::managers::mic_diagnostics::MicDiagnosticState::MicFailed,
+            device_error: true,
+        };
+
+        assert!(!recording_has_usable_speech(&result));
     }
 
     #[test]
@@ -1603,6 +1619,7 @@ mod adaptive_action_tests {
             captured_sample_count: 24_000,
             observed_active_signal: true,
             diagnostic_state: crate::managers::mic_diagnostics::MicDiagnosticState::Recording,
+            device_error: false,
         };
 
         assert!(recording_has_usable_speech(&result));
@@ -1615,6 +1632,7 @@ mod adaptive_action_tests {
             captured_sample_count: 24_000,
             observed_active_signal: false,
             diagnostic_state: crate::managers::mic_diagnostics::MicDiagnosticState::Silence,
+            device_error: false,
         };
 
         assert!(!recording_has_usable_speech(&result));
@@ -1631,6 +1649,7 @@ mod adaptive_action_tests {
             captured_sample_count: 24_000,
             observed_active_signal: false,
             diagnostic_state: crate::managers::mic_diagnostics::MicDiagnosticState::Recording,
+            device_error: false,
         };
 
         assert!(recording_has_usable_speech(&result));
@@ -1888,10 +1907,21 @@ impl ShortcutAction for TranscribeAction {
             );
 
             let stop_recording_time = Instant::now();
-            match classify_recording_stop(
-                rm.stop_recording(&binding_id),
-                recording_has_usable_speech,
-            ) {
+            let stop_result = rm.stop_recording(&binding_id);
+            if stop_result
+                .as_ref()
+                .is_some_and(|result| result.device_error)
+            {
+                debug!("Microphone disconnected; preserving mic-failed overlay state");
+                if operation_is_cancelled(&ah, operation_token.as_ref()) {
+                    finish_cancelled_operation(&ah);
+                } else {
+                    change_tray_icon(&ah, TrayIconState::Idle);
+                }
+                return;
+            }
+
+            match classify_recording_stop(stop_result, recording_has_usable_speech) {
                 RecordingStopDecision::Continue(stop_result) => {
                     debug!(
                         "Recording stopped and samples retrieved in {:?}, sample count: {}, captured sample count: {}, active signal observed: {}, diagnostic state: {:?}",

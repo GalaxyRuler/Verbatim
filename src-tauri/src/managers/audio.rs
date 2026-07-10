@@ -4,10 +4,11 @@ use crate::helpers::clamshell;
 use crate::settings::{get_settings, AppSettings};
 use crate::utils;
 use log::{debug, error, info};
+use serde::Serialize;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 const STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 const SELECTED_MICROPHONE_UNAVAILABLE_PREFIX: &str = "Selected microphone unavailable";
@@ -113,6 +114,30 @@ pub(crate) struct RecordingStopResult {
     pub(crate) captured_sample_count: usize,
     pub(crate) observed_active_signal: bool,
     pub(crate) diagnostic_state: MicDiagnosticState,
+    pub(crate) device_error: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum RecordingStopOutcome {
+    Complete,
+    Empty,
+    DeviceError,
+}
+
+fn stop_result_outcome(device_error: bool, samples_len: usize) -> RecordingStopOutcome {
+    if device_error {
+        RecordingStopOutcome::DeviceError
+    } else if samples_len == 0 {
+        RecordingStopOutcome::Empty
+    } else {
+        RecordingStopOutcome::Complete
+    }
+}
+
+#[derive(Clone, Serialize)]
+struct RecordingErrorEvent {
+    error_type: String,
+    detail: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -534,21 +559,44 @@ impl AudioRecordingManager {
                     std::thread::sleep(Duration::from_millis(settings.extra_recording_buffer_ms));
                 }
 
-                let samples = if let Some(rec) = self.recorder.lock().unwrap().as_ref() {
+                let stop_output = if let Some(rec) = self.recorder.lock().unwrap().as_ref() {
                     match rec.stop() {
-                        Ok(buf) => buf,
+                        Ok(output) => output,
                         Err(e) => {
                             error!("stop() failed: {e}");
-                            Vec::new()
+                            crate::audio_toolkit::audio::RecorderStopOutput {
+                                samples: Vec::new(),
+                                device_error: false,
+                            }
                         }
                     }
                 } else {
                     error!("Recorder not available");
-                    Vec::new()
+                    crate::audio_toolkit::audio::RecorderStopOutput {
+                        samples: Vec::new(),
+                        device_error: false,
+                    }
                 };
 
                 *self.is_recording.lock().unwrap() = false;
                 self.reset_mic_diagnostic();
+                let stop_outcome =
+                    stop_result_outcome(stop_output.device_error, stop_output.samples.len());
+                let device_error = matches!(stop_outcome, RecordingStopOutcome::DeviceError);
+                if device_error {
+                    error!("Recording stopped after microphone stream error");
+                    let _ = self.app_handle.emit(
+                        "recording-error",
+                        RecordingErrorEvent {
+                            error_type: "microphone_disconnected".to_string(),
+                            detail: Some("Microphone disconnected during recording".to_string()),
+                        },
+                    );
+                    utils::emit_overlay_state_changed(
+                        &self.app_handle,
+                        crate::overlay::OverlayState::MicFailed,
+                    );
+                }
 
                 // In on-demand mode, close the mic (lazily if the setting is enabled)
                 if matches!(*self.mode.lock().unwrap(), MicrophoneMode::OnDemand) {
@@ -560,22 +608,28 @@ impl AudioRecordingManager {
                 }
 
                 // Pad if very short
-                let captured_sample_count = samples.len();
+                let captured_sample_count = stop_output.samples.len();
                 // debug!("Got {} samples", s_len);
-                let samples =
-                    if captured_sample_count < WHISPER_SAMPLE_RATE && captured_sample_count > 0 {
-                        let mut padded = samples;
-                        padded.resize(WHISPER_SAMPLE_RATE * 5 / 4, 0.0);
-                        padded
-                    } else {
-                        samples
-                    };
+                let samples = if device_error {
+                    Vec::new()
+                } else if captured_sample_count < WHISPER_SAMPLE_RATE && captured_sample_count > 0 {
+                    let mut padded = stop_output.samples;
+                    padded.resize(WHISPER_SAMPLE_RATE * 5 / 4, 0.0);
+                    padded
+                } else {
+                    stop_output.samples
+                };
 
                 Some(RecordingStopResult {
                     samples,
                     captured_sample_count,
                     observed_active_signal,
-                    diagnostic_state,
+                    diagnostic_state: if device_error {
+                        MicDiagnosticState::MicFailed
+                    } else {
+                        diagnostic_state
+                    },
+                    device_error,
                 })
             }
             _ => None,
@@ -657,6 +711,23 @@ impl AudioRecordingManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stop_result_outcome_prioritizes_device_error_then_sample_presence() {
+        assert_eq!(
+            stop_result_outcome(true, 8_000),
+            RecordingStopOutcome::DeviceError
+        );
+        assert_eq!(
+            stop_result_outcome(true, 0),
+            RecordingStopOutcome::DeviceError
+        );
+        assert_eq!(stop_result_outcome(false, 0), RecordingStopOutcome::Empty);
+        assert_eq!(
+            stop_result_outcome(false, 8_000),
+            RecordingStopOutcome::Complete
+        );
+    }
 
     #[test]
     fn selected_microphone_unavailable_error_names_missing_device() {
