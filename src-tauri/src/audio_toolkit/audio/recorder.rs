@@ -5,7 +5,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
         mpsc, Arc, Mutex,
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use cpal::{
@@ -34,11 +34,32 @@ enum AudioChunk {
 const RAW_FALLBACK_MAX_SECS: usize = 300;
 const RAW_FALLBACK_MAX_SAMPLES: usize =
     RAW_FALLBACK_MAX_SECS * constants::WHISPER_SAMPLE_RATE as usize;
+const WORKER_JOIN_TIMEOUT: Duration = Duration::from_secs(3);
+
+fn join_worker_with_timeout(worker: std::thread::JoinHandle<()>, timeout: Duration) -> bool {
+    let deadline = Instant::now() + timeout;
+    while !worker.is_finished() {
+        let now = Instant::now();
+        if now >= deadline {
+            drop(worker);
+            return false;
+        }
+        std::thread::sleep(
+            deadline
+                .saturating_duration_since(now)
+                .min(Duration::from_millis(10)),
+        );
+    }
+
+    let _ = worker.join();
+    true
+}
 
 pub struct RecorderStopOutput {
     pub samples: Vec<f32>,
     pub raw_samples: Vec<f32>,
     pub device_error: bool,
+    pub dropped_resampler_chunks: usize,
 }
 
 pub struct AudioRecorder {
@@ -83,7 +104,6 @@ impl AudioRecorder {
         let (sample_tx, sample_rx) = mpsc::channel::<AudioChunk>();
         let (cmd_tx, cmd_rx) = mpsc::channel::<Cmd>();
         let (init_tx, init_rx) = mpsc::sync_channel::<Result<(), String>>(1);
-        self.device_error.store(false, Ordering::SeqCst);
 
         let host = crate::audio_toolkit::get_cpal_host();
         let device = match device {
@@ -92,21 +112,28 @@ impl AudioRecorder {
                 .default_input_device()
                 .ok_or_else(|| Error::new(std::io::ErrorKind::NotFound, "No input device found"))?,
         };
+        let device_error = Arc::new(AtomicBool::new(false));
+        self.device_error = Arc::clone(&device_error);
 
         let thread_device = device.clone();
         let vad = self.vad.clone();
         // Move the optional level callback into the worker thread
         let level_cb = self.level_cb.clone();
-        let device_error = self.device_error.clone();
 
         let worker = std::thread::spawn(move || {
             let stop_flag = Arc::new(AtomicBool::new(false));
-            let init_result = (|| -> Result<(cpal::Stream, u32), String> {
+            let init_result = (|| -> Result<(cpal::Stream, u32, FrameResampler), String> {
                 let config = AudioRecorder::get_preferred_config(&thread_device)
                     .map_err(|e| format!("Failed to fetch preferred config: {e}"))?;
 
                 let sample_rate = config.sample_rate().0;
                 let channels = config.channels() as usize;
+                let frame_resampler = FrameResampler::new(
+                    sample_rate as usize,
+                    constants::WHISPER_SAMPLE_RATE as usize,
+                    Duration::from_millis(30),
+                )
+                .map_err(|e| format!("Failed to create microphone resampler: {e}"))?;
 
                 log::info!(
                     "Using device: {:?}\nSample rate: {}\nChannels: {}\nFormat: {:?}",
@@ -171,14 +198,22 @@ impl AudioRecorder {
                     .play()
                     .map_err(|e| format!("Failed to start microphone stream: {e}"))?;
 
-                Ok((stream, sample_rate))
+                Ok((stream, sample_rate, frame_resampler))
             })();
 
             match init_result {
-                Ok((stream, sample_rate)) => {
+                Ok((stream, sample_rate, frame_resampler)) => {
                     let _ = init_tx.send(Ok(()));
                     // Keep the stream alive while we process samples.
-                    run_consumer(sample_rate, vad, sample_rx, cmd_rx, level_cb, stop_flag);
+                    run_consumer(
+                        sample_rate,
+                        frame_resampler,
+                        vad,
+                        sample_rx,
+                        cmd_rx,
+                        level_cb,
+                        stop_flag,
+                    );
                     drop(stream);
                 }
                 Err(error_message) => {
@@ -188,7 +223,7 @@ impl AudioRecorder {
             }
         });
 
-        match init_rx.recv() {
+        match init_rx.recv_timeout(Duration::from_secs(5)) {
             Ok(Ok(())) => {
                 self.device = Some(device);
                 self.cmd_tx = Some(cmd_tx);
@@ -204,11 +239,19 @@ impl AudioRecorder {
                 };
                 Err(Box::new(Error::new(kind, error_message)))
             }
-            Err(recv_error) => {
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                let _ = cmd_tx.send(Cmd::Shutdown);
+                drop(worker);
+                Err(Box::new(Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "audio stream init timed out",
+                )))
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
                 let _ = worker.join();
                 Err(Box::new(Error::new(
                     std::io::ErrorKind::Other,
-                    format!("Failed to initialize microphone worker: {recv_error}"),
+                    "Failed to initialize microphone worker: channel disconnected",
                 )))
             }
         }
@@ -218,17 +261,49 @@ impl AudioRecorder {
         if let Some(tx) = &self.cmd_tx {
             let (ack_tx, ack_rx) = mpsc::channel();
             tx.send(Cmd::Start(ack_tx))?;
-            ack_rx.recv()?;
+            match ack_rx.recv_timeout(Duration::from_secs(3)) {
+                Ok(()) => {}
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    return Err(Box::new(Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        "audio recorder start timed out",
+                    )));
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    return Err(Box::new(Error::new(
+                        std::io::ErrorKind::BrokenPipe,
+                        "audio recorder worker disconnected before start acknowledgement",
+                    )));
+                }
+            }
         }
         Ok(())
     }
 
     pub fn stop(&self) -> Result<RecorderStopOutput, Box<dyn std::error::Error>> {
         let (resp_tx, resp_rx) = mpsc::channel();
-        if let Some(tx) = &self.cmd_tx {
-            tx.send(Cmd::Stop(resp_tx))?;
-        }
-        let mut output = resp_rx.recv()?; // wait for the samples
+        let tx = self.cmd_tx.as_ref().ok_or_else(|| {
+            Error::new(
+                std::io::ErrorKind::NotConnected,
+                "audio recorder is not open",
+            )
+        })?;
+        tx.send(Cmd::Stop(resp_tx))?;
+        let mut output = match resp_rx.recv_timeout(Duration::from_secs(3)) {
+            Ok(output) => output,
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                return Err(Box::new(Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "audio recorder stop timed out",
+                )));
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                return Err(Box::new(Error::new(
+                    std::io::ErrorKind::BrokenPipe,
+                    "audio recorder worker disconnected before stop acknowledgement",
+                )));
+            }
+        };
         output.device_error |= self.device_error.load(Ordering::SeqCst);
         Ok(output)
     }
@@ -238,7 +313,11 @@ impl AudioRecorder {
             let _ = tx.send(Cmd::Shutdown);
         }
         if let Some(h) = self.worker_handle.take() {
-            let _ = h.join();
+            if !join_worker_with_timeout(h, WORKER_JOIN_TIMEOUT) {
+                log::warn!(
+                    "Timed out waiting for audio recorder worker shutdown; detaching worker"
+                );
+            }
         }
         self.device = None;
         Ok(())
@@ -381,11 +460,17 @@ pub fn is_no_input_device_error(error_message: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        is_microphone_access_denied, is_no_input_device_error, run_consumer, AudioChunk, Cmd,
+        is_microphone_access_denied, is_no_input_device_error, join_worker_with_timeout,
+        run_consumer, AudioChunk, Cmd, FrameResampler,
     };
     use std::sync::atomic::AtomicBool;
     use std::sync::{mpsc, Arc};
     use std::time::Duration;
+
+    fn test_resampler() -> FrameResampler {
+        FrameResampler::new(16_000, 16_000, Duration::from_millis(30))
+            .expect("test resampler should be valid")
+    }
 
     #[test]
     fn detects_access_is_denied() {
@@ -426,13 +511,30 @@ mod tests {
     }
 
     #[test]
+    fn worker_join_timeout_detaches_stuck_worker() {
+        let worker = std::thread::spawn(|| std::thread::sleep(Duration::from_millis(500)));
+        let started_at = std::time::Instant::now();
+
+        assert!(!join_worker_with_timeout(worker, Duration::from_millis(20)));
+        assert!(started_at.elapsed() < Duration::from_millis(200));
+    }
+
+    #[test]
     fn start_command_applies_before_first_audio_chunk_after_start_request() {
         let (sample_tx, sample_rx) = mpsc::channel();
         let (cmd_tx, cmd_rx) = mpsc::channel();
         let stop_flag = Arc::new(AtomicBool::new(false));
 
         let consumer = std::thread::spawn(move || {
-            run_consumer(16_000, None, sample_rx, cmd_rx, None, stop_flag);
+            run_consumer(
+                16_000,
+                test_resampler(),
+                None,
+                sample_rx,
+                cmd_rx,
+                None,
+                stop_flag,
+            );
         });
 
         let (ack_tx, ack_rx) = mpsc::channel();
@@ -469,7 +571,15 @@ mod tests {
         });
 
         let consumer = std::thread::spawn(move || {
-            run_consumer(16_000, None, sample_rx, cmd_rx, Some(level_cb), stop_flag);
+            run_consumer(
+                16_000,
+                test_resampler(),
+                None,
+                sample_rx,
+                cmd_rx,
+                Some(level_cb),
+                stop_flag,
+            );
         });
 
         sample_tx.send(AudioChunk::EndOfStream).unwrap();
@@ -492,18 +602,13 @@ mod tests {
 
 fn run_consumer(
     in_sample_rate: u32,
+    mut frame_resampler: FrameResampler,
     vad: Option<Arc<Mutex<Box<dyn vad::VoiceActivityDetector>>>>,
     sample_rx: mpsc::Receiver<AudioChunk>,
     cmd_rx: mpsc::Receiver<Cmd>,
     level_cb: Option<Arc<dyn Fn(Vec<f32>) + Send + Sync + 'static>>,
     stop_flag: Arc<AtomicBool>,
 ) {
-    let mut frame_resampler = FrameResampler::new(
-        in_sample_rate as usize,
-        constants::WHISPER_SAMPLE_RATE as usize,
-        Duration::from_millis(30),
-    );
-
     let mut processed_samples = Vec::<f32>::new();
     let mut raw_samples = VecDeque::<f32>::new();
     let mut recording = false;
@@ -555,11 +660,13 @@ fn run_consumer(
             frame_resampler.finish(&mut |frame: &[f32]| {
                 handle_frame(frame, true, &vad, &mut processed_samples, &mut raw_samples)
             });
+            let dropped_resampler_chunks = frame_resampler.take_dropped_chunks();
 
             let _ = $reply_tx.send(RecorderStopOutput {
                 samples: std::mem::take(&mut processed_samples),
                 raw_samples: std::mem::take(&mut raw_samples).into_iter().collect(),
                 device_error: false,
+                dropped_resampler_chunks,
             });
 
             // Resume the audio callback so the consumer loop can continue
@@ -577,8 +684,9 @@ fn run_consumer(
                     raw_samples.clear();
                     recording = true;
                     visualizer.reset();
+                    let _ = frame_resampler.take_dropped_chunks();
                     if let Some(v) = &vad {
-                        v.lock().unwrap().reset();
+                        v.lock().unwrap_or_else(|e| e.into_inner()).reset();
                     }
                     let _ = ack_tx.send(());
                 }
@@ -620,7 +728,7 @@ fn run_consumer(
         }
 
         if let Some(vad_arc) = vad {
-            let mut det = vad_arc.lock().unwrap();
+            let mut det = vad_arc.lock().unwrap_or_else(|e| e.into_inner());
             match det.push_frame(samples).unwrap_or(VadFrame::Speech(samples)) {
                 VadFrame::Speech(buf) => out_buf.extend_from_slice(buf),
                 VadFrame::Noise => {}
