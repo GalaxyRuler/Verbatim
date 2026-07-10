@@ -3,15 +3,14 @@ import { execFileSync } from "node:child_process";
 const args = process.argv.slice(2);
 const repo = argValue("--repo") ?? "GalaxyRuler/Verbatim";
 const branch = argValue("--branch") ?? "main";
-const requiredContexts = [
-  "Windows x64 production backend",
-  "macOS ARM64 production backend",
-  "Ubuntu x64 production backend",
-];
+const requiredContext = "ci-required";
 
-type BranchProtection = {
-  required_status_checks?: {
-    contexts?: string[];
+type BranchRule = {
+  type?: unknown;
+  parameters?: {
+    required_status_checks?: Array<{
+      context?: unknown;
+    }>;
   } | null;
 };
 
@@ -22,18 +21,22 @@ function argValue(name: string): string | undefined {
   return args.find((arg) => arg.startsWith(prefix))?.slice(prefix.length);
 }
 
-function readBranchProtection(): BranchProtection {
+function readBranchRules(): BranchRule[] {
   try {
     const output = execFileSync(
       "gh",
-      ["api", `repos/${repo}/branches/${branch}/protection`],
+      ["api", `repos/${repo}/rules/branches/${branch}`],
       { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
     );
-    return JSON.parse(output) as BranchProtection;
+    const rules: unknown = JSON.parse(output);
+    if (!Array.isArray(rules)) {
+      throw new Error("GitHub returned an unexpected branch rules response.");
+    }
+    return rules as BranchRule[];
   } catch (error) {
     const message = errorMessage(error);
     console.error(
-      `Unable to read branch protection for ${repo}@${branch}. Ensure the branch is protected and gh is authenticated. ${message}`,
+      `Unable to read branch rules for ${repo}@${branch}. Ensure branch rulesets are configured and gh is authenticated. ${message}`,
     );
     process.exit(1);
   }
@@ -59,25 +62,28 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-const protection = readBranchProtection();
-const contexts = protection.required_status_checks?.contexts ?? [];
-const missing = requiredContexts.filter(
-  (context) => !contexts.includes(context),
-);
+function requiredStatusCheckContexts(rules: BranchRule[]): string[] {
+  return rules.flatMap((rule) => {
+    if (rule.type !== "required_status_checks") return [];
 
-if (missing.length > 0) {
+    return (rule.parameters?.required_status_checks ?? []).flatMap(
+      ({ context }) => (typeof context === "string" ? [context] : []),
+    );
+  });
+}
+
+const rules = readBranchRules();
+const contexts = requiredStatusCheckContexts(rules);
+
+if (!contexts.includes(requiredContext)) {
   console.error(
-    `Branch protection for ${repo}@${branch} is missing required native backend status checks:`,
+    `Branch rules for ${repo}@${branch} are missing required status check:`,
   );
-  for (const context of missing) {
-    console.error(`- ${context}`);
-  }
+  console.error(`- ${requiredContext}`);
   console.error(
-    `Configured contexts: ${contexts.length > 0 ? contexts.join(", ") : "(none)"}`,
+    `Configured required-status-check contexts: ${contexts.length > 0 ? contexts.join(", ") : "(none)"}`,
   );
   process.exit(1);
 }
 
-console.log(
-  `Branch protection for ${repo}@${branch} requires all native backend status checks.`,
-);
+console.log(`Branch rules for ${repo}@${branch} require ${requiredContext}.`);
