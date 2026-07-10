@@ -1,9 +1,9 @@
 use super::mic_diagnostics::{MicDiagnosticState, SilenceDiagnostic};
 use crate::audio_toolkit::{list_input_devices, vad::SmoothedVad, AudioRecorder, SileroVad};
 use crate::helpers::clamshell;
-use crate::settings::{get_settings, AppSettings};
+use crate::settings::{get_settings, write_settings_domain, AppSettings, SettingsWriteDomain};
 use crate::utils;
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use serde::Serialize;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -174,6 +174,7 @@ pub enum MicrophoneMode {
     OnDemand,
 }
 
+#[cfg(test)]
 pub fn selected_microphone_unavailable_error(device_name: &str) -> anyhow::Error {
     anyhow::anyhow!("{SELECTED_MICROPHONE_UNAVAILABLE_PREFIX}: {device_name}")
 }
@@ -184,6 +185,42 @@ pub fn is_selected_microphone_unavailable_error(message: &str) -> bool {
 
 fn is_default_microphone_selection(device_name: &str) -> bool {
     device_name.eq_ignore_ascii_case("default")
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct DeviceSelectionInfo<'a> {
+    stable_id: Option<&'a str>,
+    name: &'a str,
+}
+
+fn resolve_device(
+    devices: &[DeviceSelectionInfo<'_>],
+    stored_id: Option<&str>,
+    stored_name: Option<&str>,
+) -> Option<usize> {
+    if stored_name.is_some_and(is_default_microphone_selection) {
+        return None;
+    }
+
+    if let Some(stored_id) = stored_id {
+        if let Some(index) = devices
+            .iter()
+            .position(|device| device.stable_id == Some(stored_id))
+        {
+            return Some(index);
+        }
+    }
+
+    stored_name.and_then(|stored_name| devices.iter().position(|device| device.name == stored_name))
+}
+
+fn stable_id_write_back_is_current(
+    current_name: Option<&str>,
+    current_id: Option<&str>,
+    resolved_name: &str,
+    resolved_from_id: Option<&str>,
+) -> bool {
+    current_name == Some(resolved_name) && current_id == resolved_from_id
 }
 
 /* ──────────────────────────────────────────────────────────────── */
@@ -320,6 +357,11 @@ impl AudioRecordingManager {
         } else {
             settings.selected_microphone.as_deref()
         };
+        let stored_id = if use_clamshell_mic {
+            None
+        } else {
+            settings.selected_microphone_id.as_deref()
+        };
 
         let Some(device_name) = device_name else {
             return Ok(None);
@@ -328,21 +370,96 @@ impl AudioRecordingManager {
             return Ok(None);
         }
 
-        // Find the device by name
         match list_input_devices() {
-            Ok(devices) => {
-                if let Some(device) = devices
-                    .into_iter()
-                    .find(|d| d.name == device_name)
-                    .map(|d| d.device)
-                {
-                    Ok(Some(device))
+            Ok(mut devices) => {
+                let resolved_index = {
+                    let candidates = devices
+                        .iter()
+                        .map(|device| DeviceSelectionInfo {
+                            stable_id: device.stable_id.as_deref(),
+                            name: &device.name,
+                        })
+                        .collect::<Vec<_>>();
+                    resolve_device(&candidates, stored_id, Some(device_name))
+                };
+
+                if let Some(index) = resolved_index {
+                    let device = devices.swap_remove(index);
+
+                    if !use_clamshell_mic {
+                        if let Some(stable_id) = device.stable_id.clone() {
+                            if settings.selected_microphone_id.as_deref()
+                                != Some(stable_id.as_str())
+                            {
+                                let stored_stable_id = stable_id.clone();
+                                let mut did_persist = false;
+                                if let Err(err) = write_settings_domain(
+                                    &self.app_handle,
+                                    SettingsWriteDomain::Audio,
+                                    |current_settings| {
+                                        if stable_id_write_back_is_current(
+                                            current_settings.selected_microphone.as_deref(),
+                                            current_settings.selected_microphone_id.as_deref(),
+                                            device_name,
+                                            stored_id,
+                                        ) {
+                                            current_settings.selected_microphone_id =
+                                                Some(stored_stable_id);
+                                            did_persist = true;
+                                        }
+                                    },
+                                ) {
+                                    warn!(
+                                        "Failed to persist stable ID for microphone '{}': {}",
+                                        device_name, err
+                                    );
+                                } else if did_persist {
+                                    debug!(
+                                        "Persisted stable ID for microphone '{}': {}",
+                                        device_name, stable_id
+                                    );
+                                } else {
+                                    debug!(
+                                        "Skipped stable ID write-back because microphone selection changed from '{}'",
+                                        device_name
+                                    );
+                                }
+                            }
+                        }
+                    }
+
+                    Ok(Some(device.device))
                 } else {
-                    Err(selected_microphone_unavailable_error(device_name))
+                    warn!(
+                        "Selected microphone '{}' is unavailable; falling back to default",
+                        device_name
+                    );
+                    let _ = self.app_handle.emit(
+                        "recording-error",
+                        RecordingErrorEvent {
+                            error_type: "selected_microphone_unavailable".to_string(),
+                            detail: Some(format!(
+                                "selected_microphone={device_name}; fallback_to_default=true"
+                            )),
+                        },
+                    );
+                    Ok(None)
                 }
             }
             Err(e) => {
-                debug!("Failed to list devices, using default: {}", e);
+                warn!(
+                    "Failed to list devices while resolving '{}'; using default: {}",
+                    device_name, e
+                );
+                let _ = self.app_handle.emit(
+                    "recording-error",
+                    RecordingErrorEvent {
+                        error_type: "selected_microphone_unavailable".to_string(),
+                        detail: Some(format!(
+                            "selected_microphone={device_name}; fallback_to_default=true; error={e}"
+                        )),
+                    },
+                );
                 Ok(None)
             }
         }
@@ -832,6 +949,74 @@ impl AudioRecordingManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn dev<'a>(stable_id: Option<&'a str>, name: &'a str) -> DeviceSelectionInfo<'a> {
+        DeviceSelectionInfo { stable_id, name }
+    }
+
+    #[test]
+    fn device_resolution_prefers_stable_id_over_duplicate_name() {
+        let devices = vec![
+            dev(Some("wasapi:AAA"), "USB Audio Device"),
+            dev(Some("wasapi:BBB"), "USB Audio Device"),
+        ];
+
+        assert_eq!(
+            resolve_device(&devices, Some("wasapi:BBB"), Some("USB Audio Device")),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn device_resolution_permanently_falls_back_to_name_when_ids_do_not_match_or_error() {
+        let devices = vec![
+            dev(None, "USB Audio Device"),
+            dev(Some("wasapi:BBB"), "USB Audio Device"),
+        ];
+
+        assert_eq!(
+            resolve_device(&devices, Some("wasapi:GONE"), Some("USB Audio Device")),
+            Some(0)
+        );
+        assert_eq!(
+            resolve_device(&devices, None, Some("USB Audio Device")),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn device_resolution_returns_none_for_default_or_no_match() {
+        let devices = vec![dev(Some("wasapi:AAA"), "USB Audio Device")];
+
+        assert_eq!(resolve_device(&devices, None, Some("Default")), None);
+        assert_eq!(resolve_device(&devices, Some("wasapi:GONE"), None), None);
+        assert_eq!(
+            resolve_device(&devices, None, Some("Missing Microphone")),
+            None
+        );
+    }
+
+    #[test]
+    fn stable_id_write_back_requires_unchanged_name_and_id() {
+        assert!(stable_id_write_back_is_current(
+            Some("USB Audio Device"),
+            Some("wasapi:GONE"),
+            "USB Audio Device",
+            Some("wasapi:GONE")
+        ));
+        assert!(!stable_id_write_back_is_current(
+            Some("USB Audio Device"),
+            Some("wasapi:BBB"),
+            "USB Audio Device",
+            Some("wasapi:GONE")
+        ));
+        assert!(!stable_id_write_back_is_current(
+            Some("Other Microphone"),
+            Some("wasapi:GONE"),
+            "USB Audio Device",
+            Some("wasapi:GONE")
+        ));
+    }
 
     #[test]
     fn empty_vad_output_falls_back_to_raw_when_signal_observed() {

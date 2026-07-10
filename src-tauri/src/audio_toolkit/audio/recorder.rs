@@ -126,7 +126,7 @@ impl AudioRecorder {
                 let config = AudioRecorder::get_preferred_config(&thread_device)
                     .map_err(|e| format!("Failed to fetch preferred config: {e}"))?;
 
-                let sample_rate = config.sample_rate().0;
+                let sample_rate = config.sample_rate();
                 let channels = config.channels() as usize;
                 let frame_resampler = FrameResampler::new(
                     sample_rate as usize,
@@ -137,7 +137,9 @@ impl AudioRecorder {
 
                 log::info!(
                     "Using device: {:?}\nSample rate: {}\nChannels: {}\nFormat: {:?}",
-                    thread_device.name(),
+                    thread_device
+                        .description()
+                        .map(|description| description.name().to_string()),
                     sample_rate,
                     channels,
                     config.sample_format()
