@@ -323,6 +323,14 @@ export const HistorySettings: React.FC = () => {
       if (result.status !== "ok") {
         // Reload on failure
         loadPage();
+      } else if (result.data.failures.length > 0) {
+        await loadPage();
+        toast.warning(
+          t("settings.history.deletePartial", {
+            deleted: result.data.deleted_count,
+            requested: result.data.requested_count,
+          }),
+        );
       }
     } catch (error) {
       console.error("Failed to delete entry:", error);
@@ -360,7 +368,16 @@ export const HistorySettings: React.FC = () => {
         throw new Error(String(result.error));
       }
       await loadPage();
-      toast.success(t("settings.history.clearRecordingsSuccess"));
+      if (result.data.failures.length > 0) {
+        toast.warning(
+          t("settings.history.deletePartial", {
+            deleted: result.data.deleted_count,
+            requested: result.data.requested_count,
+          }),
+        );
+      } else {
+        toast.success(t("settings.history.clearRecordingsSuccess"));
+      }
     } catch (error) {
       console.error("Failed to clear recordings:", error);
       toast.error(t("settings.history.clearRecordingsError"));
@@ -380,9 +397,19 @@ export const HistorySettings: React.FC = () => {
       if (result.status !== "ok") {
         throw new Error(String(result.error));
       }
-      setEntries([]);
-      setHasMore(false);
-      toast.success(t("settings.history.clearHistorySuccess"));
+      if (result.data.failures.length > 0) {
+        await loadPage();
+        toast.warning(
+          t("settings.history.deletePartial", {
+            deleted: result.data.deleted_count,
+            requested: result.data.requested_count,
+          }),
+        );
+      } else {
+        setEntries([]);
+        setHasMore(false);
+        toast.success(t("settings.history.clearHistorySuccess"));
+      }
     } catch (error) {
       console.error("Failed to clear history:", error);
       toast.error(t("settings.history.clearHistoryError"));

@@ -611,6 +611,7 @@
       "unsave": "Ta bort från sparade",
       "delete": "Ta bort post",
       "deleteError": "Misslyckades med att ta bort post. Försök igen.",
+      "deletePartial": "{{deleted}} av {{requested}} borttagna; nytt försök väntar.",
       "retranscribe": "Transkribera igen",
       "retranscribeError": "Misslyckades med att transkribera igen. Försök igen.",
       "transcribing": "Transkriberar...",

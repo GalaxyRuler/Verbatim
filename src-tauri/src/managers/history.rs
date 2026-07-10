@@ -5,6 +5,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use rusqlite_migration::{Migrations, M};
 use serde::{Deserialize, Serialize};
 use specta::Type;
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -54,6 +55,27 @@ const HISTORY_COLUMNS: &str = "id, file_name, timestamp, saved, title, transcrip
 pub struct PaginatedHistory {
     pub entries: Vec<HistoryEntry>,
     pub has_more: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum HistoryDeletionFailureReason {
+    PermissionDenied,
+    FileSystem,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type, PartialEq, Eq)]
+pub struct HistoryDeletionFailure {
+    pub id: Option<i64>,
+    pub file_name: String,
+    pub reason: HistoryDeletionFailureReason,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, Type, PartialEq, Eq)]
+pub struct HistoryDeletionOutcome {
+    pub requested_count: usize,
+    pub deleted_count: usize,
+    pub failures: Vec<HistoryDeletionFailure>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type, tauri_specta::Event)]
@@ -171,6 +193,22 @@ impl HistoryManager {
 
         // Initialize database and run migrations synchronously
         manager.init_database()?;
+
+        match manager.reconcile_orphan_recordings() {
+            Ok(outcome) if !outcome.failures.is_empty() => {
+                warn!(
+                    "Deferred deletion for {} orphaned recording(s)",
+                    outcome.failures.len()
+                );
+            }
+            Ok(_) => {}
+            Err(error) => {
+                warn!(
+                    "Could not reconcile orphaned recordings at startup: {}",
+                    error
+                );
+            }
+        }
 
         Ok(manager)
     }
@@ -611,46 +649,153 @@ impl HistoryManager {
         }
     }
 
-    fn delete_entries_and_files(&self, entries: &[(i64, String)]) -> Result<usize> {
+    fn delete_entries_and_files(
+        &self,
+        entries: &[(i64, String)],
+    ) -> Result<HistoryDeletionOutcome> {
         if entries.is_empty() {
-            return Ok(0);
+            return Ok(HistoryDeletionOutcome::default());
         }
 
         let conn = self.get_connection()?;
-        let mut deleted_count = 0;
+        Self::delete_entries_and_files_with(&conn, &self.recordings_dir, entries, &|path| {
+            fs::remove_file(path)
+        })
+    }
+
+    fn delete_entries_and_files_with<F>(
+        conn: &Connection,
+        recordings_dir: &Path,
+        entries: &[(i64, String)],
+        delete_file: &F,
+    ) -> Result<HistoryDeletionOutcome>
+    where
+        F: Fn(&Path) -> std::io::Result<()>,
+    {
+        let mut outcome = HistoryDeletionOutcome {
+            requested_count: entries.len(),
+            ..HistoryDeletionOutcome::default()
+        };
 
         for (id, file_name) in entries {
-            // Delete database entry
-            deleted_count += conn.execute(
+            if !file_name.trim().is_empty() {
+                let file_path = recordings_dir.join(file_name);
+                match delete_file(&file_path) {
+                    Ok(()) => debug!("Deleted WAV file: {}", file_name),
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                        debug!("WAV file already absent: {}", file_name);
+                    }
+                    Err(error) => {
+                        error!("Failed to delete WAV file {}: {}", file_name, error);
+                        outcome.failures.push(HistoryDeletionFailure {
+                            id: Some(*id),
+                            file_name: file_name.clone(),
+                            reason: Self::deletion_failure_reason(&error),
+                        });
+                        continue;
+                    }
+                }
+            }
+
+            outcome.deleted_count += conn.execute(
                 "DELETE FROM transcription_history WHERE id = ?1",
                 params![id],
             )?;
+        }
 
-            if file_name.trim().is_empty() {
+        Ok(outcome)
+    }
+
+    fn deletion_failure_reason(error: &std::io::Error) -> HistoryDeletionFailureReason {
+        if error.kind() == std::io::ErrorKind::PermissionDenied {
+            HistoryDeletionFailureReason::PermissionDenied
+        } else {
+            HistoryDeletionFailureReason::FileSystem
+        }
+    }
+
+    fn reconcile_orphan_recordings(&self) -> Result<HistoryDeletionOutcome> {
+        let conn = self.get_connection()?;
+        Self::reconcile_orphan_recordings_with(&conn, &self.recordings_dir, &|path| {
+            fs::remove_file(path)
+        })
+    }
+
+    fn reconcile_orphan_recordings_with<F>(
+        conn: &Connection,
+        recordings_dir: &Path,
+        delete_file: &F,
+    ) -> Result<HistoryDeletionOutcome>
+    where
+        F: Fn(&Path) -> std::io::Result<()>,
+    {
+        let mut stmt =
+            conn.prepare("SELECT file_name FROM transcription_history WHERE file_name != ''")?;
+        let tracked_recordings = stmt
+            .query_map([], |row| row.get::<_, String>(0))?
+            .collect::<std::result::Result<HashSet<_>, _>>()?;
+
+        let mut outcome = HistoryDeletionOutcome::default();
+        for entry in fs::read_dir(recordings_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            let is_wav = path
+                .extension()
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("wav"));
+            if !is_wav || !path.is_file() {
                 continue;
             }
 
-            // Delete WAV file
-            let file_path = self.recordings_dir.join(file_name);
-            if file_path.exists() {
-                if let Err(e) = fs::remove_file(&file_path) {
-                    error!("Failed to delete WAV file {}: {}", file_name, e);
-                } else {
-                    debug!("Deleted old WAV file: {}", file_name);
+            let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+                continue;
+            };
+            if tracked_recordings.contains(file_name) {
+                continue;
+            }
+
+            outcome.requested_count += 1;
+            match delete_file(&path) {
+                Ok(()) => {
+                    debug!("Deleted orphaned WAV file: {}", file_name);
+                    outcome.deleted_count += 1;
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    debug!("Orphaned WAV file already absent: {}", file_name);
+                    outcome.deleted_count += 1;
+                }
+                Err(error) => {
+                    error!(
+                        "Failed to delete orphaned WAV file {}: {}",
+                        file_name, error
+                    );
+                    outcome.failures.push(HistoryDeletionFailure {
+                        id: None,
+                        file_name: file_name.to_string(),
+                        reason: Self::deletion_failure_reason(&error),
+                    });
                 }
             }
         }
 
-        Ok(deleted_count)
+        Ok(outcome)
     }
 
     fn cleanup_by_count(&self, limit: usize) -> Result<()> {
         let conn = self.get_connection()?;
         let entries_to_delete = Self::count_cleanup_candidates(&conn, limit)?;
-        let deleted_count = self.delete_entries_and_files(&entries_to_delete)?;
+        let outcome = self.delete_entries_and_files(&entries_to_delete)?;
 
-        if deleted_count > 0 {
-            debug!("Cleaned up {} old history entries by count", deleted_count);
+        if outcome.deleted_count > 0 {
+            debug!(
+                "Cleaned up {} old history entries by count",
+                outcome.deleted_count
+            );
+        }
+        if !outcome.failures.is_empty() {
+            warn!(
+                "{} history recording deletion(s) remain pending after count cleanup",
+                outcome.failures.len()
+            );
         }
 
         Ok(())
@@ -700,6 +845,24 @@ impl HistoryManager {
         Ok(entries)
     }
 
+    fn all_history_deletion_candidates(conn: &Connection) -> Result<Vec<(i64, String)>> {
+        let mut stmt = conn.prepare(
+            "SELECT id,
+                    CASE WHEN transform_action IS NULL THEN file_name ELSE '' END
+             FROM transcription_history",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })?;
+
+        let mut entries = Vec::new();
+        for row in rows {
+            entries.push(row?);
+        }
+
+        Ok(entries)
+    }
+
     fn cleanup_by_time(
         &self,
         retention_period: crate::settings::RecordingRetentionPeriod,
@@ -730,12 +893,18 @@ impl HistoryManager {
             entries_to_delete.push(row?);
         }
 
-        let deleted_count = self.delete_entries_and_files(&entries_to_delete)?;
+        let outcome = self.delete_entries_and_files(&entries_to_delete)?;
 
-        if deleted_count > 0 {
+        if outcome.deleted_count > 0 {
             debug!(
                 "Cleaned up {} old history entries based on retention period",
-                deleted_count
+                outcome.deleted_count
+            );
+        }
+        if !outcome.failures.is_empty() {
+            warn!(
+                "{} history recording deletion(s) remain pending after retention cleanup",
+                outcome.failures.len()
             );
         }
 
@@ -965,79 +1134,64 @@ impl HistoryManager {
         Ok(entry)
     }
 
-    pub async fn delete_entry(&self, id: i64) -> Result<()> {
+    pub async fn delete_entry(&self, id: i64) -> Result<HistoryDeletionOutcome> {
         let conn = self.get_connection()?;
+        let entry = conn
+            .query_row(
+                "SELECT file_name, transform_action FROM transcription_history WHERE id = ?1",
+                params![id],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+            )
+            .optional()?;
+        let Some((file_name, transform_action)) = entry else {
+            return Ok(HistoryDeletionOutcome::default());
+        };
 
-        // Get the entry to find the file name
-        if let Some(entry) = self.get_entry_by_id(id).await? {
-            // Delete the audio file first
-            if !entry.file_name.trim().is_empty() {
-                let file_path = self.get_audio_file_path(&entry.file_name);
-                if file_path.exists() {
-                    if let Err(e) = fs::remove_file(&file_path) {
-                        error!("Failed to delete audio file {}: {}", entry.file_name, e);
-                        // Continue with database deletion even if file deletion fails
-                    }
-                }
-            }
-        }
-
-        // Delete from database
-        conn.execute(
-            "DELETE FROM transcription_history WHERE id = ?1",
-            params![id],
+        let deletion_file_name = if transform_action.is_some() {
+            String::new()
+        } else {
+            file_name
+        };
+        let outcome = Self::delete_entries_and_files_with(
+            &conn,
+            &self.recordings_dir,
+            &[(id, deletion_file_name)],
+            &|path| fs::remove_file(path),
         )?;
 
-        debug!("Deleted history entry with id: {}", id);
-
-        // Emit history updated event
-        if let Err(e) = (HistoryUpdatePayload::Deleted { id }).emit(&self.app_handle) {
-            error!("Failed to emit history-updated event: {}", e);
+        if outcome.deleted_count > 0 {
+            debug!("Deleted history entry with id: {}", id);
+            if let Err(e) = (HistoryUpdatePayload::Deleted { id }).emit(&self.app_handle) {
+                error!("Failed to emit history-updated event: {}", e);
+            }
         }
 
-        Ok(())
+        Ok(outcome)
     }
 
-    pub async fn clear_history(&self) -> Result<usize> {
+    pub async fn clear_history(&self) -> Result<HistoryDeletionOutcome> {
         let conn = self.get_connection()?;
-        let mut stmt = conn.prepare(
-            "SELECT id, file_name
-             FROM transcription_history
-             WHERE transform_action IS NULL",
-        )?;
-        let rows = stmt.query_map([], |row| {
-            Ok((row.get::<_, i64>("id")?, row.get::<_, String>("file_name")?))
-        })?;
-
-        let mut recording_entries = Vec::new();
-        for row in rows {
-            recording_entries.push(row?);
-        }
-
-        for (_, file_name) in &recording_entries {
-            if file_name.trim().is_empty() {
-                continue;
-            }
-
-            let file_path = self.get_audio_file_path(file_name);
-            if file_path.exists() {
-                if let Err(e) = fs::remove_file(&file_path) {
-                    error!("Failed to delete audio file {}: {}", file_name, e);
-                }
-            }
-        }
-
-        let deleted = conn.execute("DELETE FROM transcription_history", [])?;
-        debug!("Cleared {} history entries", deleted);
-        Ok(deleted)
+        let entries = Self::all_history_deletion_candidates(&conn)?;
+        let outcome =
+            Self::delete_entries_and_files_with(&conn, &self.recordings_dir, &entries, &|path| {
+                fs::remove_file(path)
+            })?;
+        debug!("Cleared {} history entries", outcome.deleted_count);
+        Ok(outcome)
     }
 
-    pub async fn clear_unsaved_recordings(&self) -> Result<usize> {
+    pub async fn clear_unsaved_recordings(&self) -> Result<HistoryDeletionOutcome> {
         let conn = self.get_connection()?;
         let entries = Self::unsaved_recording_file_candidates(&conn)?;
-        let deleted = self.delete_entries_and_files(&entries)?;
-        debug!("Cleared {} unsaved recording entries", deleted);
-        Ok(deleted)
+        let outcome =
+            Self::delete_entries_and_files_with(&conn, &self.recordings_dir, &entries, &|path| {
+                fs::remove_file(path)
+            })?;
+        debug!(
+            "Cleared {} unsaved recording entries",
+            outcome.deleted_count
+        );
+        Ok(outcome)
     }
 
     fn format_timestamp_title(&self, timestamp: i64) -> String {
@@ -1452,6 +1606,107 @@ mod tests {
             HistoryManager::unsaved_recording_file_candidates(&conn).expect("recording candidates");
 
         assert_eq!(candidates, vec![(1, "verbatim-100.wav".to_string())]);
+    }
+
+    #[test]
+    fn delete_failure_preserves_row_and_reports_typed_retry_pending() {
+        let conn = setup_conn();
+        insert_entry_with_file_name(&conn, 100, "locked.wav", false, "retry me", None);
+        let entry_id = conn.last_insert_rowid();
+        let recordings_dir = tempfile::tempdir().expect("recordings tempdir");
+        let recording_path = recordings_dir.path().join("locked.wav");
+        std::fs::write(&recording_path, b"sensitive audio").expect("write recording");
+
+        let outcome = HistoryManager::delete_entries_and_files_with(
+            &conn,
+            recordings_dir.path(),
+            &[(entry_id, "locked.wav".to_string())],
+            &|_| {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "recording is locked",
+                ))
+            },
+        )
+        .expect("partial deletion outcome");
+
+        assert_eq!(outcome.requested_count, 1);
+        assert_eq!(outcome.deleted_count, 0);
+        assert_eq!(
+            outcome.failures,
+            vec![HistoryDeletionFailure {
+                id: Some(entry_id),
+                file_name: "locked.wav".to_string(),
+                reason: HistoryDeletionFailureReason::PermissionDenied,
+            }]
+        );
+        let row_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM transcription_history WHERE id = ?1",
+                [entry_id],
+                |row| row.get(0),
+            )
+            .expect("count preserved row");
+        assert_eq!(row_count, 1, "failed deletion must remain retryable");
+        assert!(
+            recording_path.exists(),
+            "failed deletion must not hide the file"
+        );
+    }
+
+    #[test]
+    fn already_absent_recording_is_treated_as_deleted() {
+        let conn = setup_conn();
+        insert_entry_with_file_name(&conn, 100, "missing.wav", false, "delete me", None);
+        let entry_id = conn.last_insert_rowid();
+        let recordings_dir = tempfile::tempdir().expect("recordings tempdir");
+
+        let outcome = HistoryManager::delete_entries_and_files_with(
+            &conn,
+            recordings_dir.path(),
+            &[(entry_id, "missing.wav".to_string())],
+            &|_| Err(std::io::Error::from(std::io::ErrorKind::NotFound)),
+        )
+        .expect("missing recording deletion outcome");
+
+        assert_eq!(outcome.requested_count, 1);
+        assert_eq!(outcome.deleted_count, 1);
+        assert!(outcome.failures.is_empty());
+        let row_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM transcription_history WHERE id = ?1",
+                [entry_id],
+                |row| row.get(0),
+            )
+            .expect("count deleted row");
+        assert_eq!(row_count, 0);
+    }
+
+    #[test]
+    fn orphan_reconciliation_removes_orphans_and_preserves_tracked_recordings() {
+        let conn = setup_conn();
+        insert_entry_with_file_name(&conn, 100, "tracked.wav", false, "keep me", None);
+        let recordings_dir = tempfile::tempdir().expect("recordings tempdir");
+        let tracked_path = recordings_dir.path().join("tracked.wav");
+        let orphan_path = recordings_dir.path().join("orphan.wav");
+        std::fs::write(&tracked_path, b"tracked audio").expect("write tracked recording");
+        std::fs::write(&orphan_path, b"orphaned audio").expect("write orphan recording");
+
+        let outcome = HistoryManager::reconcile_orphan_recordings_with(
+            &conn,
+            recordings_dir.path(),
+            &|path| std::fs::remove_file(path),
+        )
+        .expect("orphan reconciliation outcome");
+
+        assert_eq!(outcome.requested_count, 1);
+        assert_eq!(outcome.deleted_count, 1);
+        assert!(outcome.failures.is_empty());
+        assert!(
+            tracked_path.exists(),
+            "referenced recording must be preserved"
+        );
+        assert!(!orphan_path.exists(), "orphaned recording must be removed");
     }
 
     #[test]

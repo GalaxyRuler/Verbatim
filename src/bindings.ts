@@ -1282,7 +1282,7 @@ async getAudioFilePath(fileName: string) : Promise<Result<string, string>> {
     else return { status: "error", error: e  as any };
 }
 },
-async deleteHistoryEntry(id: number) : Promise<Result<null, string>> {
+async deleteHistoryEntry(id: number) : Promise<Result<HistoryDeletionOutcome, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("delete_history_entry", { id }) };
 } catch (e) {
@@ -1290,7 +1290,7 @@ async deleteHistoryEntry(id: number) : Promise<Result<null, string>> {
     else return { status: "error", error: e  as any };
 }
 },
-async clearHistory() : Promise<Result<number, string>> {
+async clearHistory() : Promise<Result<HistoryDeletionOutcome, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("clear_history") };
 } catch (e) {
@@ -1298,7 +1298,7 @@ async clearHistory() : Promise<Result<number, string>> {
     else return { status: "error", error: e  as any };
 }
 },
-async clearRecordings() : Promise<Result<number, string>> {
+async clearRecordings() : Promise<Result<HistoryDeletionOutcome, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("clear_recordings") };
 } catch (e) {
@@ -1430,6 +1430,9 @@ export type DictionaryEntryUpdate = { phrase?: string | null; replacement_of?: s
 export type EngineType = "Whisper" | "Parakeet" | "Moonshine" | "MoonshineStreaming" | "SenseVoice" | "GigaAM" | "Canary" | "Cohere"
 export type FormattingLevel = "none" | "light" | "medium" | "high"
 export type GpuDeviceOption = { id: number; name: string; total_vram_mb: number }
+export type HistoryDeletionFailure = { id: number | null; file_name: string; reason: HistoryDeletionFailureReason }
+export type HistoryDeletionFailureReason = "permission_denied" | "file_system"
+export type HistoryDeletionOutcome = { requested_count: number; deleted_count: number; failures: HistoryDeletionFailure[] }
 export type HistoryEntry = { id: number; file_name: string; timestamp: number; saved: boolean; title: string; transcription_text: string; post_processed_text: string | null; post_process_prompt: string | null; post_process_requested: boolean; adaptive_profile_id: string | null; adaptive_profile_name: string | null; adaptive_routing_json: string | null; adaptive_context_json: string | null; adaptive_language_json: string | null; adaptive_insertion_json: string | null; adaptive_parent_entry_id: number | null; transform_action: string | null; transform_original_text: string | null; transform_result_text: string | null; transform_target_language: string | null; transform_provider_id: string | null; transform_model: string | null; transform_recovery_status: string | null }
 export type HistoryUpdatePayload = { action: "added"; entry: HistoryEntry } | { action: "updated"; entry: HistoryEntry } | { action: "deleted"; id: number } | { action: "toggled"; id: number }
 /**

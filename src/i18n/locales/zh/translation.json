@@ -611,6 +611,7 @@
       "unsave": "从已保存中移除",
       "delete": "删除条目",
       "deleteError": "删除条目失败，请重试。",
+      "deletePartial": "{{requested}} 个中已删除 {{deleted}} 个；等待重试。",
       "retranscribe": "重新转录",
       "retranscribeError": "重新转录失败。请重试。",
       "transcribing": "转录中...",
