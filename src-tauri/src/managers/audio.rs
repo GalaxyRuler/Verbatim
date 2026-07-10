@@ -115,6 +115,7 @@ pub(crate) struct RecordingStopResult {
     pub(crate) observed_active_signal: bool,
     pub(crate) diagnostic_state: MicDiagnosticState,
     pub(crate) device_error: bool,
+    pub(crate) vad_fallback: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -131,6 +132,27 @@ fn stop_result_outcome(device_error: bool, samples_len: usize) -> RecordingStopO
         RecordingStopOutcome::Empty
     } else {
         RecordingStopOutcome::Complete
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum StopSamples {
+    Gated,
+    RawFallback,
+    Empty,
+}
+
+fn select_stop_samples(
+    gated: impl AsRef<[f32]>,
+    raw: impl AsRef<[f32]>,
+    observed_active_signal: bool,
+) -> StopSamples {
+    if !gated.as_ref().is_empty() {
+        StopSamples::Gated
+    } else if observed_active_signal && !raw.as_ref().is_empty() {
+        StopSamples::RawFallback
+    } else {
+        StopSamples::Empty
     }
 }
 
@@ -174,41 +196,51 @@ fn create_audio_recorder(
     mic_diagnostic: Arc<Mutex<SilenceDiagnostic>>,
     mic_diagnostic_state: Arc<Mutex<MicDiagnosticState>>,
 ) -> Result<AudioRecorder, anyhow::Error> {
-    let silero = SileroVad::new(vad_path, 0.3)
-        .map_err(|e| anyhow::anyhow!("Failed to create SileroVad: {}", e))?;
-    let smoothed_vad = SmoothedVad::new(Box::new(silero), 15, 15, 2);
+    let builder = AudioRecorder::new()
+        .map_err(|e| anyhow::anyhow!("Failed to create AudioRecorder: {}", e))?;
+    let builder = match SileroVad::new(vad_path, 0.3) {
+        Ok(silero) => builder.with_vad(Box::new(SmoothedVad::new(Box::new(silero), 15, 15, 2))),
+        Err(err) => {
+            error!("VAD init failed ({err}); recording WITHOUT VAD gating");
+            let _ = app_handle.emit(
+                "recording-error",
+                RecordingErrorEvent {
+                    error_type: "vad_unavailable_degraded".into(),
+                    detail: Some(err.to_string()),
+                },
+            );
+            builder
+        }
+    };
 
-    // Recorder with VAD plus a spectrum-level callback that forwards updates to
-    // the frontend.
-    let recorder = AudioRecorder::new()
-        .map_err(|e| anyhow::anyhow!("Failed to create AudioRecorder: {}", e))?
-        .with_vad(Box::new(smoothed_vad))
-        .with_level_callback({
-            let app_handle = app_handle.clone();
-            move |levels| {
-                utils::emit_levels(&app_handle, &levels);
+    // Recorder with optional VAD plus a spectrum-level callback that forwards
+    // updates to the frontend.
+    let recorder = builder.with_level_callback({
+        let app_handle = app_handle.clone();
+        move |levels| {
+            utils::emit_levels(&app_handle, &levels);
 
-                if !*is_recording.lock().unwrap() {
-                    return;
-                }
-
-                let elapsed = match *recording_started_at.lock().unwrap() {
-                    Some(started_at) => started_at.elapsed(),
-                    None => return,
-                };
-
-                let next_state = {
-                    let mut diagnostic = mic_diagnostic.lock().unwrap();
-                    diagnostic.observe_at(&levels, elapsed)
-                };
-
-                let mut last_state = mic_diagnostic_state.lock().unwrap();
-                if next_state != *last_state {
-                    *last_state = next_state;
-                    utils::emit_overlay_state_changed(&app_handle, next_state.overlay_state());
-                }
+            if !*is_recording.lock().unwrap() {
+                return;
             }
-        });
+
+            let elapsed = match *recording_started_at.lock().unwrap() {
+                Some(started_at) => started_at.elapsed(),
+                None => return,
+            };
+
+            let next_state = {
+                let mut diagnostic = mic_diagnostic.lock().unwrap();
+                diagnostic.observe_at(&levels, elapsed)
+            };
+
+            let mut last_state = mic_diagnostic_state.lock().unwrap();
+            if next_state != *last_state {
+                *last_state = next_state;
+                utils::emit_overlay_state_changed(&app_handle, next_state.overlay_state());
+            }
+        }
+    });
 
     Ok(recorder)
 }
@@ -540,14 +572,7 @@ impl AudioRecordingManager {
                 binding_id: ref active,
             } if active == binding_id => {
                 *state = RecordingState::Idle;
-                let diagnostic_state = *self.mic_diagnostic_state.lock().unwrap();
-                let observed_active_signal = self
-                    .mic_diagnostic
-                    .lock()
-                    .unwrap()
-                    .has_observed_active_signal();
                 drop(state);
-                self.reset_mic_diagnostic();
 
                 // Optionally keep recording for a bit longer to capture trailing audio
                 let settings = get_settings(&self.app_handle);
@@ -566,6 +591,7 @@ impl AudioRecordingManager {
                             error!("stop() failed: {e}");
                             crate::audio_toolkit::audio::RecorderStopOutput {
                                 samples: Vec::new(),
+                                raw_samples: Vec::new(),
                                 device_error: false,
                             }
                         }
@@ -574,14 +600,42 @@ impl AudioRecordingManager {
                     error!("Recorder not available");
                     crate::audio_toolkit::audio::RecorderStopOutput {
                         samples: Vec::new(),
+                        raw_samples: Vec::new(),
                         device_error: false,
                     }
                 };
 
+                let diagnostic_state = *self.mic_diagnostic_state.lock().unwrap();
+                let observed_active_signal = self
+                    .mic_diagnostic
+                    .lock()
+                    .unwrap()
+                    .has_observed_active_signal();
                 *self.is_recording.lock().unwrap() = false;
                 self.reset_mic_diagnostic();
-                let stop_outcome =
-                    stop_result_outcome(stop_output.device_error, stop_output.samples.len());
+                let crate::audio_toolkit::audio::RecorderStopOutput {
+                    samples: gated_samples,
+                    raw_samples,
+                    device_error,
+                } = stop_output;
+                let sample_selection = if device_error {
+                    StopSamples::Empty
+                } else {
+                    select_stop_samples(&gated_samples, &raw_samples, observed_active_signal)
+                };
+                let (selected_samples, vad_fallback) = match sample_selection {
+                    StopSamples::Gated => (gated_samples, false),
+                    StopSamples::RawFallback => {
+                        log::warn!(
+                            "VAD produced no gated samples despite active mic signal; using {} raw resampled samples",
+                            raw_samples.len()
+                        );
+                        (raw_samples, true)
+                    }
+                    StopSamples::Empty => (Vec::new(), false),
+                };
+                let captured_sample_count = selected_samples.len();
+                let stop_outcome = stop_result_outcome(device_error, captured_sample_count);
                 let device_error = matches!(stop_outcome, RecordingStopOutcome::DeviceError);
                 if device_error {
                     error!("Recording stopped after microphone stream error");
@@ -608,16 +662,15 @@ impl AudioRecordingManager {
                 }
 
                 // Pad if very short
-                let captured_sample_count = stop_output.samples.len();
                 // debug!("Got {} samples", s_len);
                 let samples = if device_error {
                     Vec::new()
                 } else if captured_sample_count < WHISPER_SAMPLE_RATE && captured_sample_count > 0 {
-                    let mut padded = stop_output.samples;
+                    let mut padded = selected_samples;
                     padded.resize(WHISPER_SAMPLE_RATE * 5 / 4, 0.0);
                     padded
                 } else {
-                    stop_output.samples
+                    selected_samples
                 };
 
                 Some(RecordingStopResult {
@@ -630,6 +683,7 @@ impl AudioRecordingManager {
                         diagnostic_state
                     },
                     device_error,
+                    vad_fallback,
                 })
             }
             _ => None,
@@ -711,6 +765,22 @@ impl AudioRecordingManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn empty_vad_output_falls_back_to_raw_when_signal_observed() {
+        assert_eq!(
+            select_stop_samples(vec![], vec![0.1, 0.2], true),
+            StopSamples::RawFallback
+        );
+        assert_eq!(
+            select_stop_samples(vec![], vec![0.1, 0.2], false),
+            StopSamples::Empty
+        );
+        assert_eq!(
+            select_stop_samples(vec![0.3], vec![0.1], true),
+            StopSamples::Gated
+        );
+    }
 
     #[test]
     fn stop_result_outcome_prioritizes_device_error_then_sample_presence() {

@@ -1,4 +1,5 @@
 use std::{
+    collections::VecDeque,
     io::Error,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -30,8 +31,13 @@ enum AudioChunk {
     EndOfStream,
 }
 
+const RAW_FALLBACK_MAX_SECS: usize = 300;
+const RAW_FALLBACK_MAX_SAMPLES: usize =
+    RAW_FALLBACK_MAX_SECS * constants::WHISPER_SAMPLE_RATE as usize;
+
 pub struct RecorderStopOutput {
     pub samples: Vec<f32>,
+    pub raw_samples: Vec<f32>,
     pub device_error: bool,
 }
 
@@ -499,6 +505,7 @@ fn run_consumer(
     );
 
     let mut processed_samples = Vec::<f32>::new();
+    let mut raw_samples = VecDeque::<f32>::new();
     let mut recording = false;
     let mut end_of_stream_received = false;
 
@@ -527,7 +534,13 @@ fn run_consumer(
                     match sample_rx.recv_timeout(Duration::from_secs(2)) {
                         Ok(AudioChunk::Samples(remaining)) => {
                             frame_resampler.push(&remaining, &mut |frame: &[f32]| {
-                                handle_frame(frame, true, &vad, &mut processed_samples)
+                                handle_frame(
+                                    frame,
+                                    true,
+                                    &vad,
+                                    &mut processed_samples,
+                                    &mut raw_samples,
+                                )
                             });
                         }
                         Ok(AudioChunk::EndOfStream) => break,
@@ -540,11 +553,12 @@ fn run_consumer(
             }
 
             frame_resampler.finish(&mut |frame: &[f32]| {
-                handle_frame(frame, true, &vad, &mut processed_samples)
+                handle_frame(frame, true, &vad, &mut processed_samples, &mut raw_samples)
             });
 
             let _ = $reply_tx.send(RecorderStopOutput {
                 samples: std::mem::take(&mut processed_samples),
+                raw_samples: std::mem::take(&mut raw_samples).into_iter().collect(),
                 device_error: false,
             });
 
@@ -560,6 +574,7 @@ fn run_consumer(
                 Cmd::Start(ack_tx) => {
                     stop_flag.store(false, Ordering::Relaxed);
                     processed_samples.clear();
+                    raw_samples.clear();
                     recording = true;
                     visualizer.reset();
                     if let Some(v) = &vad {
@@ -583,9 +598,25 @@ fn run_consumer(
         recording: bool,
         vad: &Option<Arc<Mutex<Box<dyn vad::VoiceActivityDetector>>>>,
         out_buf: &mut Vec<f32>,
+        raw_buf: &mut VecDeque<f32>,
     ) {
         if !recording {
             return;
+        }
+
+        if samples.len() >= RAW_FALLBACK_MAX_SAMPLES {
+            raw_buf.clear();
+            raw_buf.extend(
+                samples[samples.len() - RAW_FALLBACK_MAX_SAMPLES..]
+                    .iter()
+                    .copied(),
+            );
+        } else {
+            let overflow = (raw_buf.len() + samples.len()).saturating_sub(RAW_FALLBACK_MAX_SAMPLES);
+            if overflow > 0 {
+                raw_buf.drain(..overflow);
+            }
+            raw_buf.extend(samples.iter().copied());
         }
 
         if let Some(vad_arc) = vad {
@@ -641,7 +672,13 @@ fn run_consumer(
 
         // ---------- existing pipeline ------------------------------------ //
         frame_resampler.push(&raw, &mut |frame: &[f32]| {
-            handle_frame(frame, recording, &vad, &mut processed_samples)
+            handle_frame(
+                frame,
+                recording,
+                &vad,
+                &mut processed_samples,
+                &mut raw_samples,
+            )
         });
 
         for cmd in deferred_commands {

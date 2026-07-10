@@ -1568,6 +1568,7 @@ mod adaptive_action_tests {
             observed_active_signal: false,
             diagnostic_state: crate::managers::mic_diagnostics::MicDiagnosticState::Recording,
             device_error: false,
+            vad_fallback: false,
         };
 
         assert!(!recording_has_usable_speech(&result));
@@ -1581,6 +1582,7 @@ mod adaptive_action_tests {
             observed_active_signal: true,
             diagnostic_state: crate::managers::mic_diagnostics::MicDiagnosticState::Recording,
             device_error: false,
+            vad_fallback: false,
         };
 
         assert!(!recording_has_usable_speech(&result));
@@ -1594,6 +1596,7 @@ mod adaptive_action_tests {
             observed_active_signal: true,
             diagnostic_state: crate::managers::mic_diagnostics::MicDiagnosticState::Recording,
             device_error: false,
+            vad_fallback: false,
         };
 
         assert!(recording_has_usable_speech(&result));
@@ -1607,6 +1610,7 @@ mod adaptive_action_tests {
             observed_active_signal: true,
             diagnostic_state: crate::managers::mic_diagnostics::MicDiagnosticState::MicFailed,
             device_error: true,
+            vad_fallback: false,
         };
 
         assert!(!recording_has_usable_speech(&result));
@@ -1620,6 +1624,7 @@ mod adaptive_action_tests {
             observed_active_signal: true,
             diagnostic_state: crate::managers::mic_diagnostics::MicDiagnosticState::Recording,
             device_error: false,
+            vad_fallback: false,
         };
 
         assert!(recording_has_usable_speech(&result));
@@ -1633,6 +1638,7 @@ mod adaptive_action_tests {
             observed_active_signal: false,
             diagnostic_state: crate::managers::mic_diagnostics::MicDiagnosticState::Silence,
             device_error: false,
+            vad_fallback: false,
         };
 
         assert!(!recording_has_usable_speech(&result));
@@ -1650,6 +1656,7 @@ mod adaptive_action_tests {
             observed_active_signal: false,
             diagnostic_state: crate::managers::mic_diagnostics::MicDiagnosticState::Recording,
             device_error: false,
+            vad_fallback: false,
         };
 
         assert!(recording_has_usable_speech(&result));
@@ -1923,13 +1930,19 @@ impl ShortcutAction for TranscribeAction {
 
             match classify_recording_stop(stop_result, recording_has_usable_speech) {
                 RecordingStopDecision::Continue(stop_result) => {
+                    if stop_result.vad_fallback {
+                        warn!(
+                            "Continuing transcription with raw audio because VAD output was empty"
+                        );
+                    }
                     debug!(
-                        "Recording stopped and samples retrieved in {:?}, sample count: {}, captured sample count: {}, active signal observed: {}, diagnostic state: {:?}",
+                        "Recording stopped and samples retrieved in {:?}, sample count: {}, captured sample count: {}, active signal observed: {}, diagnostic state: {:?}, VAD fallback: {}",
                         stop_recording_time.elapsed(),
                         stop_result.samples.len(),
                         stop_result.captured_sample_count,
                         stop_result.observed_active_signal,
-                        stop_result.diagnostic_state
+                        stop_result.diagnostic_state,
+                        stop_result.vad_fallback
                     );
 
                     if operation_is_cancelled(&ah, operation_token.as_ref()) {
