@@ -1216,7 +1216,7 @@ pub fn change_post_process_api_key_setting(
         return Ok(());
     }
 
-    settings::try_write_settings_domain(
+    settings::try_write_settings_domain_and_save(
         &app,
         settings::SettingsWriteDomain::PostProcessing,
         |settings| {
