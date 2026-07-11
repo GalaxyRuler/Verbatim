@@ -10,6 +10,7 @@ use enigo::{Direction, Enigo, Key, Keyboard};
 use log::{info, warn};
 use serde::Serialize;
 use std::process::{Child, Command, ExitStatus, Stdio};
+use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Manager};
 use tauri_plugin_clipboard_manager::ClipboardExt;
@@ -23,6 +24,7 @@ const FOCUSED_TEXT_READ_CAP: usize = MAX_FOCUSED_TEXT_CHARS;
 const PASTE_VERIFY_TOTAL_MS: u64 = 600;
 const PASTE_VERIFY_POLL_MS: u64 = 75;
 const TARGET_CHANGED_BEFORE_INSERTION: &str = "target changed before insertion";
+const EXTERNAL_SCRIPT_DEADLINE: Duration = Duration::from_secs(2);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct ClipboardPayloadMarker {
@@ -1315,12 +1317,14 @@ fn send_key_combo_via_xdotool(paste_method: &PasteMethod) -> Result<(), String> 
     Ok(())
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 struct ExternalScriptInvocation<'a> {
     program: &'a str,
     args: Vec<&'a str>,
     stdin: &'a [u8],
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 fn build_external_script_invocation<'a>(
     script_path: &'a str,
     text: &'a str,
@@ -1339,36 +1343,125 @@ fn external_script_failure_message(script_path: &str, code: Option<i32>) -> Stri
     )
 }
 
-fn wait_for_external_script(
-    child: &mut Child,
-    script_path: &str,
-    is_cancelled: CancellationCheck<'_>,
-) -> Result<ExitStatus, String> {
-    loop {
-        if let Some(status) = child
-            .try_wait()
-            .map_err(|e| format!("Failed to poll external script '{}': {}", script_path, e))?
-        {
-            return Ok(status);
-        }
+struct ExternalScriptChildGuard {
+    child: Arc<Mutex<Option<Child>>>,
+    script_path: String,
+}
 
-        if let Err(err) = ensure_not_cancelled(is_cancelled, "external script completion") {
-            kill_external_script_child(child, script_path);
-            return Err(err);
+impl ExternalScriptChildGuard {
+    fn kill(&self) {
+        let mut child_slot = self.child.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(child) = child_slot.as_mut() {
+            if let Err(kill_err) = child.kill() {
+                warn!(
+                    "Failed to kill external script '{}': {}",
+                    self.script_path, kill_err
+                );
+            }
+            let _ = child.wait();
         }
-
-        std::thread::sleep(Duration::from_millis(25));
+        *child_slot = None;
     }
 }
 
-fn kill_external_script_child(child: &mut Child, script_path: &str) {
-    if let Err(kill_err) = child.kill() {
-        warn!(
-            "Failed to kill cancelled external script '{}': {}",
-            script_path, kill_err
-        );
+impl Drop for ExternalScriptChildGuard {
+    fn drop(&mut self) {
+        self.kill();
     }
-    let _ = child.wait();
+}
+
+fn paste_via_external_script_with_args(
+    text: &str,
+    program: &str,
+    args: &[&str],
+    is_cancelled: CancellationCheck<'_>,
+) -> Result<(), String> {
+    use std::io::Write;
+
+    info!("Pasting via external script: {}", program);
+    ensure_not_cancelled(is_cancelled, "external script invocation")?;
+
+    let child_slot = Arc::new(Mutex::new(None));
+    let guard = ExternalScriptChildGuard {
+        child: Arc::clone(&child_slot),
+        script_path: program.to_string(),
+    };
+    let (result_tx, result_rx) = mpsc::channel();
+    let program_owned = program.to_string();
+    let args_owned = args
+        .iter()
+        .map(|arg| (*arg).to_string())
+        .collect::<Vec<_>>();
+    let stdin_payload = text.as_bytes().to_vec();
+    let worker_slot = Arc::clone(&child_slot);
+    std::thread::spawn(move || {
+        let result = (|| -> Result<ExitStatus, String> {
+            let mut child = Command::new(&program_owned)
+                .args(&args_owned)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .map_err(|e| {
+                    format!(
+                        "Failed to execute external script '{}': {}",
+                        program_owned, e
+                    )
+                })?;
+
+            let mut stdin = child.stdin.take();
+            *worker_slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(child);
+            if let Some(mut stdin) = stdin.take() {
+                stdin.write_all(&stdin_payload).map_err(|e| {
+                    format!(
+                        "Failed to write to external script '{}': {}",
+                        program_owned, e
+                    )
+                })?;
+            }
+
+            loop {
+                let mut slot = worker_slot.lock().unwrap_or_else(|e| e.into_inner());
+                let Some(child) = slot.as_mut() else {
+                    return Err(format!("External script '{}' was killed", program_owned));
+                };
+                if let Some(status) = child.try_wait().map_err(|e| {
+                    format!("Failed to poll external script '{}': {}", program_owned, e)
+                })? {
+                    *slot = None;
+                    return Ok(status);
+                }
+                drop(slot);
+                std::thread::sleep(Duration::from_millis(25));
+            }
+        })();
+        let _ = result_tx.send(result);
+    });
+
+    let deadline = Instant::now() + EXTERNAL_SCRIPT_DEADLINE;
+    loop {
+        if let Err(err) = ensure_not_cancelled(is_cancelled, "external script completion") {
+            guard.kill();
+            return Err(err);
+        }
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            guard.kill();
+            return Err(format!(
+                "External script '{}' exceeded completion deadline",
+                program
+            ));
+        }
+        match result_rx.recv_timeout(remaining.min(Duration::from_millis(25))) {
+            Ok(Ok(status)) if status.success() => return Ok(()),
+            Ok(Ok(status)) => return Err(external_script_failure_message(program, status.code())),
+            Ok(Err(error)) => return Err(error),
+            Err(mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                return Err(format!("External script '{}' worker stopped", program))
+            }
+        }
+    }
 }
 
 /// Pastes text by invoking an external script.
@@ -1378,42 +1471,7 @@ fn paste_via_external_script(
     script_path: &str,
     is_cancelled: CancellationCheck<'_>,
 ) -> Result<(), String> {
-    use std::io::Write;
-
-    info!("Pasting via external script: {}", script_path);
-    ensure_not_cancelled(is_cancelled, "external script invocation")?;
-
-    let invocation = build_external_script_invocation(script_path, text);
-    let mut child = Command::new(invocation.program)
-        .args(&invocation.args)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|e| format!("Failed to execute external script '{}': {}", script_path, e))?;
-
-    if let Err(err) = ensure_not_cancelled(is_cancelled, "external script stdin write") {
-        kill_external_script_child(&mut child, script_path);
-        return Err(err);
-    }
-    let mut stdin = child
-        .stdin
-        .take()
-        .ok_or_else(|| format!("Failed to open stdin for external script '{}'", script_path))?;
-    stdin.write_all(invocation.stdin).map_err(|e| {
-        format!(
-            "Failed to write to external script '{}': {}",
-            script_path, e
-        )
-    })?;
-    drop(stdin);
-
-    let status = wait_for_external_script(&mut child, script_path, is_cancelled)?;
-    if !status.success() {
-        return Err(external_script_failure_message(script_path, status.code()));
-    }
-
-    Ok(())
+    paste_via_external_script_with_args(text, script_path, &[], is_cancelled)
 }
 
 /// Types text directly by simulating individual key presses.
@@ -1991,6 +2049,21 @@ mod tests {
         assert!(!message.contains("stdout"));
         assert!(!message.contains("stderr"));
         assert!(!message.contains("sensitive text"));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn hanging_external_script_is_killed_by_completion_deadline() {
+        let started = Instant::now();
+        let result = paste_via_external_script_with_args(
+            "payload",
+            "cmd.exe",
+            &["/C", "ping", "127.0.0.1", "-n", "20", ">", "NUL"],
+            None,
+        );
+
+        assert!(result.is_err());
+        assert!(started.elapsed() < Duration::from_secs(3));
     }
 
     #[test]

@@ -2170,16 +2170,25 @@ impl ShortcutAction for TranscribeAction {
                                     operation_token: operation_token.clone(),
                                     paste_started_at: Instant::now(),
                                 };
-                                ah.run_on_main_thread(move || {
-                                    complete_adaptive_insertion(insertion);
-                                })
-                                .unwrap_or_else(|e| {
-                                    error!("Failed to run paste on main thread: {:?}", e);
-                                    finish_dictation_transaction(
-                                        &ah,
-                                        DictationTransactionTerminal::InsertionSchedulingFailed,
-                                    );
-                                });
+                                if matches!(
+                                    insertion.settings.paste_method,
+                                    crate::settings::PasteMethod::ExternalScript
+                                ) {
+                                    std::thread::spawn(move || {
+                                        complete_adaptive_insertion(insertion)
+                                    });
+                                } else {
+                                    ah.run_on_main_thread(move || {
+                                        complete_adaptive_insertion(insertion);
+                                    })
+                                    .unwrap_or_else(|e| {
+                                        error!("Failed to run paste on main thread: {:?}", e);
+                                        finish_dictation_transaction(
+                                            &ah,
+                                            DictationTransactionTerminal::InsertionSchedulingFailed,
+                                        );
+                                    });
+                                }
                             } else {
                                 let processed = process_transcription_output(
                                     &ah,
@@ -2258,7 +2267,11 @@ impl ShortcutAction for TranscribeAction {
                                 let app_for_insertion = ah.clone();
                                 let settings_for_insertion = settings.clone();
                                 let paste_started_at = Instant::now();
-                                ah.run_on_main_thread(move || {
+                                let external_script = matches!(
+                                    settings_for_insertion.paste_method,
+                                    crate::settings::PasteMethod::ExternalScript
+                                );
+                                let insertion = move || {
                                     complete_classic_insertion(
                                         app_for_insertion,
                                         Arc::clone(&hm),
@@ -2270,14 +2283,18 @@ impl ShortcutAction for TranscribeAction {
                                         classic_context,
                                         paste_started_at,
                                     );
-                                })
-                                .unwrap_or_else(|e| {
-                                    error!("Failed to run paste on main thread: {:?}", e);
-                                    finish_dictation_transaction(
-                                        &ah,
-                                        DictationTransactionTerminal::InsertionSchedulingFailed,
-                                    );
-                                });
+                                };
+                                if external_script {
+                                    std::thread::spawn(insertion);
+                                } else {
+                                    ah.run_on_main_thread(insertion).unwrap_or_else(|e| {
+                                        error!("Failed to run paste on main thread: {:?}", e);
+                                        finish_dictation_transaction(
+                                            &ah,
+                                            DictationTransactionTerminal::InsertionSchedulingFailed,
+                                        );
+                                    });
+                                }
                             }
                         }
                         Err(err) => {
