@@ -1,7 +1,8 @@
+use crate::audio_toolkit::device_names_match;
 use crate::settings::SoundTheme;
 use crate::settings::{self, AppSettings};
-use cpal::traits::{DeviceTrait, HostTrait};
 use log::{debug, error, warn};
+use rodio::cpal::traits::{DeviceTrait, HostTrait};
 use rodio::OutputStreamBuilder;
 use std::fs::File;
 use std::io::BufReader;
@@ -104,16 +105,27 @@ fn play_audio_file(
             debug!("Using default device");
             OutputStreamBuilder::from_default_device()?
         } else {
-            let host = crate::audio_toolkit::get_cpal_host();
+            // Rodio is intentionally pinned to cpal 0.16 while capture uses cpal 0.17.
+            // Enumerate playback devices through rodio's cpal re-export so the device
+            // type passed to OutputStreamBuilder stays on rodio's side of that boundary.
+            let host = rodio::cpal::default_host();
             let devices = host.output_devices()?;
 
-            let mut found_device = None;
+            let mut exact_device = None;
+            let mut compatible_device = None;
             for device in devices {
-                if device.name()? == device_name {
-                    found_device = Some(device);
+                let enumerated_name = device.name()?;
+                if enumerated_name == device_name {
+                    exact_device = Some(device);
                     break;
                 }
+
+                if compatible_device.is_none() && device_names_match(&enumerated_name, &device_name)
+                {
+                    compatible_device = Some(device);
+                }
             }
+            let found_device = exact_device.or(compatible_device);
 
             match found_device {
                 Some(device) => OutputStreamBuilder::from_device(device)?,

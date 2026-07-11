@@ -58,9 +58,14 @@ where
     }
 }
 
-pub fn classify_final_text(final_text: String) -> FinalTextDecision {
+pub fn classify_final_text(final_text: String, observed_active_signal: bool) -> FinalTextDecision {
     if final_text.is_empty() {
-        FinalTextDecision::Terminal(DictationTransactionTerminal::EmptyOutput)
+        let terminal = if observed_active_signal {
+            DictationTransactionTerminal::TranscriptionFailed
+        } else {
+            DictationTransactionTerminal::EmptyOutput
+        };
+        FinalTextDecision::Terminal(terminal)
     } else {
         FinalTextDecision::Continue(final_text)
     }
@@ -151,13 +156,17 @@ mod tests {
     }
 
     #[test]
-    fn final_text_decision_inserts_only_non_empty_output() {
+    fn empty_output_with_active_signal_is_a_failure() {
         assert_eq!(
-            classify_final_text(String::new()),
+            classify_final_text(String::new(), true),
+            FinalTextDecision::Terminal(DictationTransactionTerminal::TranscriptionFailed)
+        );
+        assert_eq!(
+            classify_final_text(String::new(), false),
             FinalTextDecision::Terminal(DictationTransactionTerminal::EmptyOutput)
         );
         assert_eq!(
-            classify_final_text("hello".to_string()),
+            classify_final_text("hello".to_string(), true),
             FinalTextDecision::Continue("hello".to_string())
         );
     }

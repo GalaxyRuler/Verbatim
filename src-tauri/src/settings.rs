@@ -532,6 +532,8 @@ pub struct AppSettings {
     #[serde(default)]
     pub selected_microphone: Option<String>,
     #[serde(default)]
+    pub selected_microphone_id: Option<String>,
+    #[serde(default)]
     pub clamshell_microphone: Option<String>,
     #[serde(default)]
     pub selected_output_device: Option<String>,
@@ -1290,6 +1292,7 @@ pub fn get_default_settings() -> AppSettings {
         selected_model: "".to_string(),
         always_on_microphone: false,
         selected_microphone: None,
+        selected_microphone_id: None,
         clamshell_microphone: None,
         selected_output_device: None,
         translate_to_english: false,
@@ -1672,6 +1675,12 @@ pub fn apply_settings_mutation<T>(
     f(settings)
 }
 
+fn reconcile_selected_microphone_identity(previous_name: Option<&str>, settings: &mut AppSettings) {
+    if settings.selected_microphone.as_deref() != previous_name {
+        settings.selected_microphone_id = None;
+    }
+}
+
 /// The ONLY public way to mutate persisted settings. Holds the write lock across the
 /// whole read-modify-write so concurrent mutations cannot lost-update each other.
 /// Do NOT `.await` or emit Tauri events inside `f`; emit after this returns.
@@ -1680,7 +1689,9 @@ pub fn mutate_settings_locked<T>(app: &AppHandle, f: impl FnOnce(&mut AppSetting
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     let mut settings = get_settings(app);
+    let selected_microphone_before = settings.selected_microphone.clone();
     let result = apply_settings_mutation(&mut settings, f);
+    reconcile_selected_microphone_identity(selected_microphone_before.as_deref(), &mut settings);
     write_settings(app, settings);
     result
 }
@@ -1764,7 +1775,9 @@ where
     F: FnOnce(&mut AppSettings) -> Result<(), String>,
 {
     let mut next = settings.clone();
+    let selected_microphone_before = next.selected_microphone.clone();
     mutate(&mut next)?;
+    reconcile_selected_microphone_identity(selected_microphone_before.as_deref(), &mut next);
     *settings = next;
     Ok(())
 }
@@ -1885,6 +1898,45 @@ mod tests {
         assert!(!settings.history_enabled);
         assert!(!settings.recordings_enabled);
         assert_eq!(settings.selected_model, "unchanged-model");
+    }
+
+    #[test]
+    fn settings_domain_clears_microphone_id_only_when_selected_name_changes() {
+        let mut settings = get_default_settings();
+        settings.selected_microphone = Some("Old Microphone".to_string());
+        settings.selected_microphone_id = Some("wasapi:OLD".to_string());
+
+        mutate_settings_domain(&mut settings, SettingsWriteDomain::Privacy, |settings| {
+            settings.history_enabled = !settings.history_enabled;
+        })
+        .expect("unrelated mutation should succeed");
+        assert_eq!(
+            settings.selected_microphone_id.as_deref(),
+            Some("wasapi:OLD")
+        );
+
+        mutate_settings_domain(&mut settings, SettingsWriteDomain::Audio, |settings| {
+            settings.selected_microphone = Some("New Microphone".to_string());
+        })
+        .expect("microphone selection mutation should succeed");
+        assert_eq!(settings.selected_microphone_id, None);
+    }
+
+    #[test]
+    fn microphone_identity_reconciliation_preserves_same_name_and_clears_changed_name() {
+        let mut settings = get_default_settings();
+        settings.selected_microphone = Some("Old Microphone".to_string());
+        settings.selected_microphone_id = Some("wasapi:OLD".to_string());
+
+        reconcile_selected_microphone_identity(Some("Old Microphone"), &mut settings);
+        assert_eq!(
+            settings.selected_microphone_id.as_deref(),
+            Some("wasapi:OLD")
+        );
+
+        settings.selected_microphone = Some("New Microphone".to_string());
+        reconcile_selected_microphone_identity(Some("Old Microphone"), &mut settings);
+        assert_eq!(settings.selected_microphone_id, None);
     }
 
     #[test]

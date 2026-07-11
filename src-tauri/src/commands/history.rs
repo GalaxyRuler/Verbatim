@@ -1,6 +1,6 @@
 use crate::actions::process_transcription_output;
 use crate::managers::{
-    history::{HistoryManager, PaginatedHistory},
+    history::{HistoryDeletionOutcome, HistoryManager, PaginatedHistory},
     transcription::TranscriptionManager,
 };
 use std::sync::Arc;
@@ -75,7 +75,7 @@ pub async fn delete_history_entry(
     _app: AppHandle,
     history_manager: State<'_, Arc<HistoryManager>>,
     id: i64,
-) -> Result<(), String> {
+) -> Result<HistoryDeletionOutcome, String> {
     history_manager
         .delete_entry(id)
         .await
@@ -87,7 +87,7 @@ pub async fn delete_history_entry(
 pub async fn clear_history(
     _app: AppHandle,
     history_manager: State<'_, Arc<HistoryManager>>,
-) -> Result<usize, String> {
+) -> Result<HistoryDeletionOutcome, String> {
     history_manager
         .clear_history()
         .await
@@ -99,7 +99,7 @@ pub async fn clear_history(
 pub async fn clear_recordings(
     _app: AppHandle,
     history_manager: State<'_, Arc<HistoryManager>>,
-) -> Result<usize, String> {
+) -> Result<HistoryDeletionOutcome, String> {
     history_manager
         .clear_unsaved_recordings()
         .await

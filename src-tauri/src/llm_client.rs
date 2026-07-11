@@ -1,8 +1,15 @@
+use crate::providers::CancellationToken;
 use crate::settings::PostProcessProvider;
 use log::debug;
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE, REFERER, USER_AGENT};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::time::Duration;
+
+/// Post-processing must never hold a transcript hostage: reqwest's default
+/// is no timeout, so a stalled provider would hang the pipeline forever.
+const LLM_CONNECT_TIMEOUT_SECS: u64 = 10;
+const LLM_REQUEST_TIMEOUT_SECS: u64 = 120;
 
 #[derive(Debug, Serialize)]
 struct ChatMessage {
@@ -98,9 +105,25 @@ fn build_headers(provider: &PostProcessProvider, api_key: &str) -> Result<Header
 
 /// Create an HTTP client with provider-specific headers
 fn create_client(provider: &PostProcessProvider, api_key: &str) -> Result<reqwest::Client, String> {
+    create_client_with_timeouts(
+        provider,
+        api_key,
+        Duration::from_secs(LLM_CONNECT_TIMEOUT_SECS),
+        Duration::from_secs(LLM_REQUEST_TIMEOUT_SECS),
+    )
+}
+
+fn create_client_with_timeouts(
+    provider: &PostProcessProvider,
+    api_key: &str,
+    connect_timeout: Duration,
+    request_timeout: Duration,
+) -> Result<reqwest::Client, String> {
     let headers = build_headers(provider, api_key)?;
     reqwest::Client::builder()
         .default_headers(headers)
+        .connect_timeout(connect_timeout)
+        .timeout(request_timeout)
         .build()
         .map_err(|e| format!("Failed to build HTTP client: {}", e))
 }
@@ -161,9 +184,44 @@ async fn read_json_response(
         .map_err(|e| format!("Failed to parse {} response: {}", failure_context, e))
 }
 
+async fn send_http_request(
+    request: reqwest::RequestBuilder,
+    failure_context: &str,
+    cancellation: Option<&CancellationToken>,
+) -> Result<reqwest::Response, String> {
+    let Some(cancellation) = cancellation else {
+        return request
+            .send()
+            .await
+            .map_err(|e| format!("{}: {}", failure_context, e));
+    };
+
+    if cancellation.is_cancelled() {
+        return Err("post-processing cancelled".to_string());
+    }
+
+    let request = request.send();
+    tokio::pin!(request);
+    let mut cancel_poll = tokio::time::interval(Duration::from_millis(100));
+
+    loop {
+        tokio::select! {
+            response = &mut request => {
+                return response.map_err(|e| format!("{}: {}", failure_context, e));
+            }
+            _ = cancel_poll.tick() => {
+                if cancellation.is_cancelled() {
+                    return Err("post-processing cancelled".to_string());
+                }
+            }
+        }
+    }
+}
+
 /// Send a chat completion request to an OpenAI-compatible API
 /// Returns Ok(Some(content)) on success, Ok(None) if response has no content,
 /// or Err on actual errors (HTTP, parsing, etc.)
+#[cfg_attr(not(test), allow(dead_code))]
 pub async fn send_chat_completion(
     provider: &PostProcessProvider,
     api_key: String,
@@ -199,6 +257,31 @@ pub async fn send_chat_completion_with_schema(
     json_schema: Option<Value>,
     reasoning_effort: Option<String>,
     reasoning: Option<ReasoningConfig>,
+) -> Result<Option<String>, String> {
+    send_chat_completion_with_schema_and_cancellation(
+        provider,
+        api_key,
+        model,
+        user_content,
+        system_prompt,
+        json_schema,
+        reasoning_effort,
+        reasoning,
+        None,
+    )
+    .await
+}
+
+pub async fn send_chat_completion_with_schema_and_cancellation(
+    provider: &PostProcessProvider,
+    api_key: String,
+    model: &str,
+    user_content: String,
+    system_prompt: Option<String>,
+    json_schema: Option<Value>,
+    reasoning_effort: Option<String>,
+    reasoning: Option<ReasoningConfig>,
+    cancellation: Option<&CancellationToken>,
 ) -> Result<Option<String>, String> {
     let client = create_client(provider, &api_key)?;
 
@@ -243,12 +326,12 @@ pub async fn send_chat_completion_with_schema(
     for (index, url) in urls.iter().enumerate() {
         debug!("Sending chat completion request to: {}", url);
 
-        let response = client
-            .post(url)
-            .json(&request_body)
-            .send()
-            .await
-            .map_err(|e| format!("HTTP request failed: {}", e))?;
+        let response = send_http_request(
+            client.post(url).json(&request_body),
+            "HTTP request failed",
+            cancellation,
+        )
+        .await?;
 
         let parsed = read_json_response(response, "API request").await?;
         if let Some(message) = response_error_message(&parsed) {
@@ -289,11 +372,7 @@ pub async fn fetch_models(
     for (index, url) in urls.iter().enumerate() {
         debug!("Fetching models from: {}", url);
 
-        let response = client
-            .get(url)
-            .send()
-            .await
-            .map_err(|e| format!("Failed to fetch models: {}", e))?;
+        let response = send_http_request(client.get(url), "Failed to fetch models", None).await?;
 
         let parsed = read_json_response(response, "Model list request").await?;
         if let Some(message) = response_error_message(&parsed) {
@@ -342,6 +421,7 @@ mod tests {
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::thread;
+    use std::time::{Duration, Instant};
 
     fn provider(base_url: String) -> PostProcessProvider {
         PostProcessProvider {
@@ -386,6 +466,78 @@ mod tests {
         stream
             .write_all(response.as_bytes())
             .expect("write response");
+    }
+
+    #[tokio::test]
+    async fn client_times_out_on_stalled_server() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
+        let addr = listener.local_addr().expect("local addr");
+        let (shutdown_tx, shutdown_rx) = std::sync::mpsc::channel::<()>();
+        let server = thread::spawn(move || {
+            let _held = listener.accept().ok();
+            let _ = shutdown_rx.recv();
+        });
+
+        let client = create_client_with_timeouts(
+            &provider(format!("http://{addr}")),
+            "test-key",
+            Duration::from_secs(1),
+            Duration::from_secs(2),
+        )
+        .expect("client");
+
+        let started = Instant::now();
+        let result = client.get(format!("http://{addr}/v1/models")).send().await;
+
+        assert!(
+            result.is_err(),
+            "stalled server must produce a timeout error"
+        );
+        assert!(started.elapsed() >= Duration::from_secs(1));
+        assert!(started.elapsed() < Duration::from_secs(LLM_REQUEST_TIMEOUT_SECS + 10));
+
+        let _ = shutdown_tx.send(());
+        server.join().expect("server thread");
+    }
+
+    #[tokio::test]
+    async fn chat_completion_cancellation_aborts_stalled_request() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
+        let addr = listener.local_addr().expect("local addr");
+        let (shutdown_tx, shutdown_rx) = std::sync::mpsc::channel::<()>();
+        let server = thread::spawn(move || {
+            let _held = listener.accept().ok();
+            let _ = shutdown_rx.recv();
+        });
+
+        let cancellation = crate::providers::CancellationToken::default();
+        let cancellation_for_task = cancellation.clone();
+        let cancel_task = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            cancellation_for_task.cancel();
+        });
+
+        let started = Instant::now();
+        let error = send_chat_completion_with_schema_and_cancellation(
+            &provider(format!("http://{addr}/v1")),
+            String::new(),
+            "test-model",
+            "Clean this transcript".to_string(),
+            None,
+            None,
+            None,
+            None,
+            Some(&cancellation),
+        )
+        .await
+        .expect_err("cancelled request should return an error");
+
+        cancel_task.await.expect("cancel task");
+        assert!(error.contains("cancelled"));
+        assert!(started.elapsed() < Duration::from_secs(2));
+
+        let _ = shutdown_tx.send(());
+        server.join().expect("server thread");
     }
 
     #[tokio::test]

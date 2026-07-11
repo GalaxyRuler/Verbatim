@@ -611,6 +611,7 @@
       "unsave": "הסר משמורים",
       "delete": "מחק רשומה",
       "deleteError": "מחיקת הרשומה נכשלה. נסה שוב.",
+      "deletePartial": "{{deleted}} מתוך {{requested}} נמחקו; ניסיון חוזר ממתין.",
       "retranscribe": "תמלל מחדש",
       "retranscribeError": "תמלול מחדש נכשל. נסה שוב.",
       "transcribing": "מתמלל...",

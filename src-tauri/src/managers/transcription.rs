@@ -2,8 +2,8 @@ use crate::audio_toolkit::{apply_dictionary_entries, filter_transcription_output
 use crate::managers::audio::AudioRecordingManager;
 use crate::managers::model::{EngineType, ModelManager};
 use crate::providers::{
-    resolve_whisper_gpu_device, CancellationToken, EngineProvider, ModelLocator,
-    TranscribeRsProvider,
+    resolve_whisper_gpu_device, CancellationToken, EngineProvider, ModelLocator, SpeechInput,
+    SpeechResponse, TranscribeRsProvider,
 };
 use crate::settings::{
     get_settings, AppSettings, ModelUnloadTimeout, OrtAcceleratorSetting, WhisperAcceleratorSetting,
@@ -12,13 +12,14 @@ use anyhow::Result;
 use log::{debug, error, info, warn};
 use serde::Serialize;
 use specta::Type;
+use std::any::Any;
 use std::collections::HashSet;
 use std::io::Read;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::Path;
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, AtomicUsize, Ordering};
+use std::sync::{mpsc, Arc, Condvar, Mutex, MutexGuard, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 use tauri::{AppHandle, Emitter, Manager};
@@ -64,6 +65,86 @@ fn engine_label(engine_type: EngineType) -> &'static str {
         EngineType::Canary => "canary",
         EngineType::Cohere => "cohere",
     }
+}
+
+const MAX_INFERENCE_TIMEOUT: Duration = Duration::from_secs(240);
+const MODEL_LOAD_DEADLINE: Duration = Duration::from_secs(120);
+static ABANDONED_INFERENCE_THREADS: AtomicUsize = AtomicUsize::new(0);
+
+const RUN_ACTIVE: u8 = 0;
+const RUN_ABANDONED: u8 = 1;
+const RUN_EXITED: u8 = 2;
+
+/// 60s base + 3x realtime headroom, capped. Slow CPU + large model safe.
+fn inference_timeout(sample_count: usize) -> Duration {
+    let audio_secs = sample_count as u64 / 16_000;
+    Duration::from_secs(60 + 3 * audio_secs).min(MAX_INFERENCE_TIMEOUT)
+}
+
+fn new_inference_run_state() -> Arc<AtomicU8> {
+    Arc::new(AtomicU8::new(RUN_ACTIVE))
+}
+
+fn abandoned_inference_thread_count() -> usize {
+    ABANDONED_INFERENCE_THREADS.load(Ordering::SeqCst)
+}
+
+fn engine_wedged_restart_required() -> bool {
+    abandoned_inference_thread_count() >= 1
+}
+
+fn panic_payload_message(panic_payload: &(dyn Any + Send)) -> String {
+    if let Some(s) = panic_payload.downcast_ref::<&str>() {
+        s.to_string()
+    } else if let Some(s) = panic_payload.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "unknown panic".to_string()
+    }
+}
+
+fn mark_inference_run_abandoned(run_state: &AtomicU8) -> bool {
+    if run_state
+        .compare_exchange(
+            RUN_ACTIVE,
+            RUN_ABANDONED,
+            Ordering::SeqCst,
+            Ordering::SeqCst,
+        )
+        .is_ok()
+    {
+        ABANDONED_INFERENCE_THREADS.fetch_add(1, Ordering::SeqCst);
+        true
+    } else {
+        false
+    }
+}
+
+fn mark_inference_run_exited(run_state: &AtomicU8) {
+    if run_state.swap(RUN_EXITED, Ordering::SeqCst) == RUN_ABANDONED {
+        ABANDONED_INFERENCE_THREADS.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+struct InferenceRunExitGuard {
+    run_state: Arc<AtomicU8>,
+}
+
+impl InferenceRunExitGuard {
+    fn new(run_state: Arc<AtomicU8>) -> Self {
+        Self { run_state }
+    }
+}
+
+impl Drop for InferenceRunExitGuard {
+    fn drop(&mut self) {
+        mark_inference_run_exited(&self.run_state);
+    }
+}
+
+#[cfg(test)]
+fn reset_abandoned_inference_threads_for_test() {
+    ABANDONED_INFERENCE_THREADS.store(0, Ordering::SeqCst);
 }
 
 fn should_retry_model_load_on_cpu(
@@ -408,15 +489,37 @@ fn wait_for_model_loading_to_finish(
     loading_condvar: &Condvar,
     cancellation: &CancellationToken,
 ) -> Result<()> {
+    wait_for_model_loading_to_finish_with_deadline(
+        is_loading,
+        loading_condvar,
+        cancellation,
+        MODEL_LOAD_DEADLINE,
+    )
+}
+
+fn wait_for_model_loading_to_finish_with_deadline(
+    is_loading: &Mutex<bool>,
+    loading_condvar: &Condvar,
+    cancellation: &CancellationToken,
+    deadline: Duration,
+) -> Result<()> {
     if cancellation.is_cancelled() {
         return Err(anyhow::anyhow!("transcription cancelled before model load"));
     }
 
-    let mut is_loading = is_loading.lock().unwrap();
+    let started = Instant::now();
+    let mut is_loading = is_loading.lock().unwrap_or_else(|e| e.into_inner());
     while *is_loading {
+        if started.elapsed() > deadline {
+            return Err(anyhow::anyhow!(
+                "model load timed out after {}s",
+                deadline.as_secs()
+            ));
+        }
+
         let wait_result = loading_condvar
             .wait_timeout(is_loading, Duration::from_millis(50))
-            .unwrap();
+            .unwrap_or_else(|e| e.into_inner());
         is_loading = wait_result.0;
 
         if cancellation.is_cancelled() {
@@ -425,6 +528,16 @@ fn wait_for_model_loading_to_finish(
     }
 
     Ok(())
+}
+
+fn model_not_loaded_for_transcription_error(last_load_error: Option<String>) -> anyhow::Error {
+    match last_load_error {
+        Some(error) if !error.is_empty() => anyhow::anyhow!(
+            "Model is not loaded for transcription. Last model load error: {}",
+            error
+        ),
+        _ => anyhow::anyhow!("Model is not loaded for transcription."),
+    }
 }
 
 #[derive(Clone)]
@@ -438,6 +551,7 @@ pub struct TranscriptionManager {
     watcher_handle: Arc<Mutex<Option<thread::JoinHandle<()>>>>,
     is_loading: Arc<Mutex<bool>>,
     loading_condvar: Arc<Condvar>,
+    last_load_error: Arc<Mutex<Option<String>>>,
 }
 
 impl TranscriptionManager {
@@ -452,6 +566,7 @@ impl TranscriptionManager {
             watcher_handle: Arc::new(Mutex::new(None)),
             is_loading: Arc::new(Mutex::new(false)),
             loading_condvar: Arc::new(Condvar::new()),
+            last_load_error: Arc::new(Mutex::new(None)),
         };
 
         // Start the idle watcher
@@ -595,6 +710,162 @@ impl TranscriptionManager {
         Ok(())
     }
 
+    fn engine_wedged_restart_required_error(&self) -> anyhow::Error {
+        let message = "A previous transcription timed out and the native inference engine is still running. Restart Verbatim to recover.";
+        let _ = self.app_handle.emit(
+            "model-state-changed",
+            ModelStateEvent {
+                event_type: "loading_failed".to_string(),
+                model_id: None,
+                model_name: None,
+                error: Some(message.to_string()),
+                diagnostic_code: Some("engine_wedged_restart_required".to_string()),
+                fallback: Some("restart_required".to_string()),
+            },
+        );
+        anyhow::anyhow!(message)
+    }
+
+    fn refuse_if_engine_wedged(&self) -> Result<()> {
+        if engine_wedged_restart_required() {
+            Err(self.engine_wedged_restart_required_error())
+        } else {
+            Ok(())
+        }
+    }
+
+    fn set_last_load_error(&self, error: String) {
+        let mut last_load_error = self
+            .last_load_error
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        *last_load_error = Some(error);
+    }
+
+    fn clear_last_load_error(&self) {
+        let mut last_load_error = self
+            .last_load_error
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        *last_load_error = None;
+    }
+
+    fn last_load_error(&self) -> Option<String> {
+        self.last_load_error
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    fn model_not_loaded_error(&self) -> anyhow::Error {
+        model_not_loaded_for_transcription_error(self.last_load_error())
+    }
+
+    fn clear_current_model_id(&self) {
+        let mut current_model = self
+            .current_model_id
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        *current_model = None;
+    }
+
+    fn inference_timeout_error(&self, timeout: Duration, sample_count: usize) -> anyhow::Error {
+        self.clear_current_model_id();
+
+        let message = format!(
+            "Transcription timed out after {}s for {} audio samples. Restart Verbatim if the engine remains busy.",
+            timeout.as_secs(),
+            sample_count
+        );
+        error!("{}", message);
+
+        let _ = self.app_handle.emit(
+            "model-state-changed",
+            ModelStateEvent {
+                event_type: "unloaded".to_string(),
+                model_id: None,
+                model_name: None,
+                error: Some(message.clone()),
+                diagnostic_code: Some("inference_timeout".to_string()),
+                fallback: Some("model_unloaded_for_reload".to_string()),
+            },
+        );
+
+        anyhow::anyhow!(message)
+    }
+
+    fn inference_worker_exited_error(&self) -> anyhow::Error {
+        self.clear_current_model_id();
+
+        let message = "Transcription worker exited before returning a result. The model has been unloaded and will reload on next attempt.";
+        error!("{}", message);
+
+        let _ = self.app_handle.emit(
+            "model-state-changed",
+            ModelStateEvent {
+                event_type: "unloaded".to_string(),
+                model_id: None,
+                model_name: None,
+                error: Some(message.to_string()),
+                diagnostic_code: Some("inference_worker_exited".to_string()),
+                fallback: Some("model_unloaded_for_reload".to_string()),
+            },
+        );
+
+        anyhow::anyhow!(message)
+    }
+
+    fn provider_panic_error(
+        &self,
+        mut provider: TranscribeRsProvider,
+        panic_payload: Box<dyn Any + Send>,
+    ) -> anyhow::Error {
+        // Provider panicked — do NOT put it back (it's in an unknown state).
+        // The provider is unloaded and dropped here.
+        provider.unload();
+
+        let panic_msg = panic_payload_message(panic_payload.as_ref());
+        error!(
+            "Transcription engine panicked: {}. Model has been unloaded.",
+            panic_msg
+        );
+
+        self.clear_current_model_id();
+
+        let _ = self.app_handle.emit(
+            "model-state-changed",
+            ModelStateEvent {
+                event_type: "unloaded".to_string(),
+                model_id: None,
+                model_name: None,
+                error: Some(format!("Engine panicked: {}", panic_msg)),
+                diagnostic_code: Some("provider_panic".to_string()),
+                fallback: Some("model_unloaded_for_reload".to_string()),
+            },
+        );
+
+        anyhow::anyhow!(
+            "Transcription engine panicked: {}. The model has been unloaded and will reload on next attempt.",
+            panic_msg
+        )
+    }
+
+    fn complete_inference_result(
+        &self,
+        provider: TranscribeRsProvider,
+        transcribe_result: thread::Result<Result<SpeechResponse>>,
+    ) -> Result<SpeechResponse> {
+        match transcribe_result {
+            Ok(inner_result) => {
+                // Success or normal error — put the provider back.
+                let mut engine_guard = self.lock_engine();
+                *engine_guard = Some(provider);
+                inner_result
+            }
+            Err(panic_payload) => Err(self.provider_panic_error(provider, panic_payload)),
+        }
+    }
+
     fn now_ms() -> u64 {
         SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
@@ -621,6 +892,9 @@ impl TranscriptionManager {
     }
 
     pub fn load_model(&self, model_id: &str) -> Result<()> {
+        self.refuse_if_engine_wedged()?;
+        self.clear_last_load_error();
+
         let load_start = std::time::Instant::now();
         debug!("Starting to load model: {}", model_id);
 
@@ -817,7 +1091,10 @@ impl TranscriptionManager {
         thread::spawn(move || {
             let settings = get_settings(&self_clone.app_handle);
             if let Err(e) = self_clone.load_model(&settings.selected_model) {
+                self_clone.set_last_load_error(e.to_string());
                 error!("Failed to load model: {}", e);
+            } else {
+                self_clone.clear_last_load_error();
             }
             let mut is_loading = self_clone.is_loading.lock().unwrap();
             *is_loading = false;
@@ -846,6 +1123,8 @@ impl TranscriptionManager {
             ));
         }
 
+        self.refuse_if_engine_wedged()?;
+
         // Update last activity timestamp
         self.touch_activity();
 
@@ -870,7 +1149,7 @@ impl TranscriptionManager {
 
             let engine_guard = self.lock_engine();
             if engine_guard.is_none() {
-                return Err(anyhow::anyhow!("Model is not loaded for transcription."));
+                return Err(self.model_not_loaded_error());
             }
         }
 
@@ -910,6 +1189,11 @@ impl TranscriptionManager {
             &settings.dictionary_phrases(),
             cancellation,
         );
+        let sample_count = match &request.input {
+            SpeechInput::Audio(audio) => audio.len(),
+            SpeechInput::Text(_) => 0,
+        };
+        let timeout = inference_timeout(sample_count);
 
         // Perform transcription with the appropriate provider.
         // We use catch_unwind to prevent engine panics from poisoning the mutex,
@@ -920,7 +1204,7 @@ impl TranscriptionManager {
             // Take the provider out so we own it during transcription.
             // If the provider panics, we simply don't put it back (effectively unloading it)
             // instead of poisoning the mutex.
-            let mut provider = match engine_guard.take() {
+            let provider = match engine_guard.take() {
                 Some(provider) => provider,
                 None => {
                     return Err(anyhow::anyhow!(
@@ -932,58 +1216,49 @@ impl TranscriptionManager {
             // Release the lock before transcribing — no mutex held during the engine call
             drop(engine_guard);
 
-            let transcribe_result = catch_unwind(AssertUnwindSafe(
-                || -> Result<crate::providers::SpeechResponse> { provider.run(request) },
-            ));
+            let (result_tx, result_rx) = mpsc::channel();
+            let run_state = new_inference_run_state();
+            let worker_run_state = Arc::clone(&run_state);
+            let inference_thread = thread::Builder::new()
+                .name("verbatim-inference".to_string())
+                .spawn(move || {
+                    let _exit_guard = InferenceRunExitGuard::new(worker_run_state);
+                    let mut provider = provider;
+                    let transcribe_result =
+                        catch_unwind(AssertUnwindSafe(|| -> Result<SpeechResponse> {
+                            provider.run(request)
+                        }));
+                    let _ = result_tx.send((provider, transcribe_result));
+                })
+                .map_err(|e| {
+                    self.clear_current_model_id();
+                    anyhow::anyhow!(
+                        "Failed to start inference worker: {}. The model has been unloaded and will reload on next attempt.",
+                        e
+                    )
+                })?;
 
-            match transcribe_result {
-                Ok(inner_result) => {
-                    // Success or normal error — put the provider back
-                    let mut engine_guard = self.lock_engine();
-                    *engine_guard = Some(provider);
-                    inner_result?
+            match result_rx.recv_timeout(timeout) {
+                Ok((provider, transcribe_result)) => {
+                    let _ = inference_thread.join();
+                    self.complete_inference_result(provider, transcribe_result)?
                 }
-                Err(panic_payload) => {
-                    // Provider panicked — do NOT put it back (it's in an unknown state).
-                    // The provider is unloaded and dropped here.
-                    provider.unload();
-                    let panic_msg = if let Some(s) = panic_payload.downcast_ref::<&str>() {
-                        s.to_string()
-                    } else if let Some(s) = panic_payload.downcast_ref::<String>() {
-                        s.clone()
-                    } else {
-                        "unknown panic".to_string()
-                    };
-                    error!(
-                        "Transcription engine panicked: {}. Model has been unloaded.",
-                        panic_msg
-                    );
-
-                    // Clear the model ID so it will be reloaded on next attempt
-                    {
-                        let mut current_model = self
-                            .current_model_id
-                            .lock()
-                            .unwrap_or_else(|e| e.into_inner());
-                        *current_model = None;
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    if mark_inference_run_abandoned(&run_state) {
+                        return Err(self.inference_timeout_error(timeout, sample_count));
                     }
 
-                    let _ = self.app_handle.emit(
-                        "model-state-changed",
-                        ModelStateEvent {
-                            event_type: "unloaded".to_string(),
-                            model_id: None,
-                            model_name: None,
-                            error: Some(format!("Engine panicked: {}", panic_msg)),
-                            diagnostic_code: Some("provider_panic".to_string()),
-                            fallback: Some("model_unloaded_for_reload".to_string()),
-                        },
-                    );
-
-                    return Err(anyhow::anyhow!(
-                        "Transcription engine panicked: {}. The model has been unloaded and will reload on next attempt.",
-                        panic_msg
-                    ));
+                    match result_rx.recv() {
+                        Ok((provider, transcribe_result)) => {
+                            let _ = inference_thread.join();
+                            self.complete_inference_result(provider, transcribe_result)?
+                        }
+                        Err(_) => return Err(self.inference_worker_exited_error()),
+                    }
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    let _ = inference_thread.join();
+                    return Err(self.inference_worker_exited_error());
                 }
             }
         };
@@ -1177,6 +1452,8 @@ impl Drop for TranscriptionManager {
 mod tests {
     use super::*;
 
+    static ABANDONED_COUNTER_TEST_LOCK: Mutex<()> = Mutex::new(());
+
     #[test]
     fn english_translation_requires_user_toggle_and_model_support() {
         assert!(effective_english_translation(true, true));
@@ -1204,6 +1481,78 @@ mod tests {
     #[test]
     fn empty_supported_language_list_accepts_any_selected_language() {
         assert_eq!(validate_selected_language("ar", &[]), "ar");
+    }
+
+    #[test]
+    fn inference_timeout_is_proportional_to_audio_length() {
+        assert_eq!(
+            inference_timeout(30 * 16_000),
+            Duration::from_secs(60 + 3 * 30)
+        );
+        assert_eq!(inference_timeout(160), Duration::from_secs(60));
+        assert_eq!(inference_timeout(3_600 * 16_000), MAX_INFERENCE_TIMEOUT);
+    }
+
+    #[test]
+    fn abandoned_inference_counter_tracks_timeout_then_return() {
+        let _guard = ABANDONED_COUNTER_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        reset_abandoned_inference_threads_for_test();
+        let run_state = new_inference_run_state();
+
+        assert!(mark_inference_run_abandoned(&run_state));
+        assert_eq!(abandoned_inference_thread_count(), 1);
+
+        mark_inference_run_exited(&run_state);
+        assert_eq!(abandoned_inference_thread_count(), 0);
+    }
+
+    #[test]
+    fn abandoned_inference_counter_ignores_return_before_timeout() {
+        let _guard = ABANDONED_COUNTER_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        reset_abandoned_inference_threads_for_test();
+        let run_state = new_inference_run_state();
+
+        mark_inference_run_exited(&run_state);
+
+        assert!(!mark_inference_run_abandoned(&run_state));
+        assert_eq!(abandoned_inference_thread_count(), 0);
+    }
+
+    #[test]
+    fn abandoned_inference_exit_guard_decrements_once_after_timeout_panic() {
+        let _guard = ABANDONED_COUNTER_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        reset_abandoned_inference_threads_for_test();
+        let run_state = new_inference_run_state();
+        let guard = InferenceRunExitGuard::new(Arc::clone(&run_state));
+
+        assert!(mark_inference_run_abandoned(&run_state));
+        assert_eq!(abandoned_inference_thread_count(), 1);
+
+        drop(guard);
+        assert_eq!(abandoned_inference_thread_count(), 0);
+
+        mark_inference_run_exited(&run_state);
+        assert_eq!(abandoned_inference_thread_count(), 0);
+    }
+
+    #[test]
+    fn abandoned_inference_requires_restart_until_thread_exits() {
+        let _guard = ABANDONED_COUNTER_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        reset_abandoned_inference_threads_for_test();
+
+        assert!(!engine_wedged_restart_required());
+        ABANDONED_INFERENCE_THREADS.store(1, Ordering::SeqCst);
+        assert!(engine_wedged_restart_required());
+
+        reset_abandoned_inference_threads_for_test();
     }
 
     #[test]
@@ -1393,6 +1742,34 @@ mod tests {
 
         handle.join().expect("cancellation thread should finish");
         assert!(error.to_string().contains("cancelled during model load"));
+    }
+
+    #[test]
+    fn wait_for_model_loading_times_out() {
+        let is_loading = Mutex::new(true);
+        let loading_condvar = Condvar::new();
+        let cancellation = CancellationToken::default();
+        let started = Instant::now();
+
+        let error = wait_for_model_loading_to_finish_with_deadline(
+            &is_loading,
+            &loading_condvar,
+            &cancellation,
+            Duration::from_millis(200),
+        )
+        .expect_err("stuck model load wait should time out");
+
+        assert!(started.elapsed() < Duration::from_secs(2));
+        assert!(error.to_string().contains("timed out"));
+    }
+
+    #[test]
+    fn model_not_loaded_error_includes_last_load_error() {
+        let error =
+            model_not_loaded_for_transcription_error(Some("accelerator load failed".to_string()));
+
+        assert!(error.to_string().contains("Model is not loaded"));
+        assert!(error.to_string().contains("accelerator load failed"));
     }
 
     #[test]

@@ -1,6 +1,10 @@
 use crate::adaptive::language::analyze_language;
 use crate::adaptive::types::LanguageClass;
 
+/// Below this many alphabetic chars a script judgment is noise; never
+/// withhold a paste on it (F-002: locked ar + "yes" must paste).
+const MIN_ALPHABETIC_FOR_GUARD: usize = 12;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ExpectedScript {
     Latin,
@@ -75,7 +79,7 @@ fn dominant_script(text: &str) -> Option<ExpectedScript> {
         total += 1;
     }
 
-    if total < 3 {
+    if total < MIN_ALPHABETIC_FOR_GUARD {
         return None;
     }
 
@@ -184,6 +188,21 @@ mod tests {
     }
 
     #[test]
+    fn short_cross_script_text_is_not_blocked() {
+        assert!(!contradicts_locked_language("ar", "yes"));
+        assert!(!contradicts_locked_language("ar", "ok thanks"));
+        assert!(!contradicts_locked_language("en", "شكرا"));
+    }
+
+    #[test]
+    fn long_cross_script_text_is_still_blocked() {
+        assert!(contradicts_locked_language(
+            "ar",
+            "this is clearly a full english sentence that contradicts the arabic lock"
+        ));
+    }
+
+    #[test]
     fn russian_lock_flags_latin_output() {
         assert!(contradicts_locked_language(
             "ru",
@@ -222,7 +241,10 @@ mod tests {
 
     #[test]
     fn latin_lock_flags_cjk_output() {
-        assert!(contradicts_locked_language("en", "これは日本語の文章です"));
+        assert!(contradicts_locked_language(
+            "en",
+            "これは明らかに英語設定と矛盾する十分に長い日本語の文章です"
+        ));
     }
 
     #[test]

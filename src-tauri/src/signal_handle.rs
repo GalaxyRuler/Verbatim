@@ -1,4 +1,3 @@
-use crate::runtime_settings::ShortcutRuntime;
 use crate::TranscriptionCoordinator;
 #[cfg(unix)]
 use log::debug;
@@ -15,8 +14,10 @@ use std::thread;
 /// Send a transcription input to the coordinator.
 /// Used by signal handlers, CLI flags, and any other external trigger.
 pub fn send_transcription_input(app: &AppHandle, binding_id: &str, source: &str) {
+    let settings = crate::settings::get_settings(app);
+    let runtime = crate::runtime_settings::shortcut_runtime(&settings).as_toggle();
     if let Some(c) = app.try_state::<TranscriptionCoordinator>() {
-        c.send_input(binding_id, source, true, ShortcutRuntime::toggle_mode());
+        c.send_input(binding_id, source, true, runtime);
     } else {
         warn!("TranscriptionCoordinator not initialized");
     }

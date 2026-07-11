@@ -117,6 +117,20 @@ fn build_whisper_initial_prompt(
     }
 }
 
+const MIN_SAMPLES_FOR_INITIAL_PROMPT: usize = 16_000;
+
+fn should_inject_initial_prompt(sample_count: usize) -> bool {
+    sample_count >= MIN_SAMPLES_FOR_INITIAL_PROMPT
+}
+
+fn strip_prompt_echo<'a>(output: &'a str, prompt: &str) -> &'a str {
+    if prompt.is_empty() {
+        return output;
+    }
+
+    output.trim_start().strip_prefix(prompt).unwrap_or(output)
+}
+
 fn source_language_code(source_language: &LanguageSelection) -> String {
     match source_language {
         LanguageSelection::Auto => "auto".to_string(),
@@ -145,10 +159,13 @@ fn transcription_language_candidates(
 }
 
 fn whisper_language_hint(
-    _selected_language: &str,
+    selected_language: &str,
     _language_shortlist: &[String],
 ) -> Option<String> {
-    None
+    match selected_language {
+        "" | "auto" => None,
+        language => Some(language.to_string()),
+    }
 }
 
 fn score_text_for_language(text: &str, language: &str) -> f32 {
@@ -313,10 +330,11 @@ impl EngineProvider for TranscribeRsProvider {
             .ok_or_else(|| anyhow::anyhow!("provider engine is not loaded"))?
         {
             LoadedEngine::Whisper(whisper_engine) => {
-                let initial_prompt = build_whisper_initial_prompt(
-                    &request.custom_words,
-                    &request.language_shortlist,
-                );
+                let initial_prompt = if should_inject_initial_prompt(audio.as_ref().len()) {
+                    build_whisper_initial_prompt(&request.custom_words, &request.language_shortlist)
+                } else {
+                    None
+                };
                 let whisper_language =
                     whisper_language_hint(&selected_language, &request.language_shortlist);
 
@@ -327,9 +345,13 @@ impl EngineProvider for TranscribeRsProvider {
                     ..Default::default()
                 };
 
-                whisper_engine
+                let mut result = whisper_engine
                     .transcribe_with(audio.as_ref(), &params)
-                    .map_err(|e| anyhow::anyhow!("Whisper transcription failed: {}", e))?
+                    .map_err(|e| anyhow::anyhow!("Whisper transcription failed: {}", e))?;
+                if let Some(prompt) = params.initial_prompt.as_deref() {
+                    result.text = strip_prompt_echo(&result.text, prompt).to_string();
+                }
+                result
             }
             LoadedEngine::Parakeet(parakeet_engine) => {
                 let params = ParakeetParams {
@@ -554,6 +576,22 @@ mod tests {
     }
 
     #[test]
+    fn initial_prompt_skipped_for_short_audio() {
+        assert!(!should_inject_initial_prompt(12_000));
+        assert!(should_inject_initial_prompt(24_000));
+    }
+
+    #[test]
+    fn prompt_echo_is_stripped_from_head() {
+        let prompt = "Kubernetes, Verbatim, GalaxyRuler";
+        assert_eq!(
+            strip_prompt_echo("Kubernetes, Verbatim, GalaxyRuler hello world", prompt),
+            " hello world"
+        );
+        assert_eq!(strip_prompt_echo("hello world", prompt), "hello world");
+    }
+
+    #[test]
     fn normalizes_chinese_language_variants_for_engine_hints() {
         assert_eq!(normalize_language_for_engine("zh-Hans"), "zh");
         assert_eq!(normalize_language_for_engine("zh-Hant"), "zh");
@@ -588,8 +626,25 @@ mod tests {
     }
 
     #[test]
-    fn whisper_locked_transcription_uses_native_auto_detect() {
-        assert_eq!(whisper_language_hint("ar", &["en".to_string()]), None);
+    fn locked_language_reaches_whisper_params() {
+        let no_shortlist: Vec<String> = vec![];
+        assert_eq!(
+            whisper_language_hint("ar", &no_shortlist),
+            Some("ar".to_string())
+        );
+        assert_eq!(
+            whisper_language_hint("en", &no_shortlist),
+            Some("en".to_string())
+        );
+        assert_eq!(whisper_language_hint("auto", &no_shortlist), None);
+        assert_eq!(whisper_language_hint("", &no_shortlist), None);
+
+        let shortlist = vec!["ar".to_string(), "en".to_string()];
+        assert_eq!(
+            whisper_language_hint("ar", &shortlist),
+            Some("ar".to_string())
+        );
+        assert_eq!(whisper_language_hint("auto", &shortlist), None);
     }
 
     #[test]

@@ -1,12 +1,12 @@
 use crate::actions::ACTION_MAP;
 use crate::managers::audio::AudioRecordingManager;
 use crate::runtime_settings::ShortcutRuntime;
-use log::{debug, error, warn};
+use log::{debug, error, info, warn};
 use serde::Serialize;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 
 const MAX_COORDINATOR_RESTARTS: usize = 1;
@@ -27,7 +27,12 @@ enum Command {
         binding_id: String,
         released_at: Instant,
     },
-    ProcessingFinished,
+    ProcessingFinished {
+        generation: u64,
+    },
+    ProcessingWatchdog {
+        generation: u64,
+    },
     InjectWorkerPanicForSmoke,
 }
 
@@ -41,6 +46,12 @@ struct CoordinatorHealthEvent {
     status: CoordinatorHealthStatus,
     restart_count: usize,
     reason: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct RecordingErrorPayload {
+    error_type: String,
+    detail: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
@@ -126,7 +137,59 @@ enum Stage {
         binding_id: String,
         mode: RecordingMode,
     },
-    Processing,
+    Processing {
+        generation: u64,
+    },
+}
+
+/// A toggle press that arrived while the pipeline was busy processing.
+/// Replayed as a fresh start when processing finishes, so rapid stop->start
+/// toggles are deferred instead of silently dropped.
+#[derive(Clone, Debug)]
+struct PendingToggle {
+    binding_id: String,
+    hotkey_string: String,
+    stored_at: Instant,
+}
+
+/// A press older than this is user-abandoned; don't surprise-start recording.
+const PENDING_TOGGLE_MAX_AGE: Duration = Duration::from_secs(3);
+const PROCESSING_WATCHDOG: Duration = Duration::from_secs(300);
+
+#[derive(Debug, PartialEq, Eq)]
+enum PendingDecision {
+    Stored,
+    Cancelled,
+}
+
+fn pending_toggle_on_press(
+    pending: &mut Option<PendingToggle>,
+    binding_id: &str,
+    hotkey_string: &str,
+    at: Instant,
+) -> PendingDecision {
+    if pending.take().is_some() {
+        PendingDecision::Cancelled
+    } else {
+        *pending = Some(PendingToggle {
+            binding_id: binding_id.to_string(),
+            hotkey_string: hotkey_string.to_string(),
+            stored_at: at,
+        });
+        PendingDecision::Stored
+    }
+}
+
+fn take_replayable_pending(pending: Option<PendingToggle>, now: Instant) -> Option<PendingToggle> {
+    pending.filter(|p| now.duration_since(p.stored_at) <= PENDING_TOGGLE_MAX_AGE)
+}
+
+fn processing_finish_matches(stage: &Stage, generation: u64) -> bool {
+    matches!(stage, Stage::Processing { generation: active } if *active == generation)
+}
+
+fn watchdog_should_recover(stage: &Stage, generation: u64) -> bool {
+    processing_finish_matches(stage, generation)
 }
 
 /// Serialises all transcription lifecycle events through a single thread
@@ -154,8 +217,8 @@ impl TranscriptionCoordinator {
     }
 
     /// Send a keyboard/signal input event for a transcribe binding.
-    /// For signal-based toggles, use `is_pressed: true` and
-    /// [`ShortcutRuntime::toggle_mode`].
+    /// External press-only triggers should pass `is_pressed: true` with the
+    /// user shortcut runtime converted through [`ShortcutRuntime::as_toggle`].
     pub fn send_input(
         &self,
         binding_id: &str,
@@ -177,8 +240,8 @@ impl TranscriptionCoordinator {
         });
     }
 
-    pub fn notify_processing_finished(&self) {
-        self.send_command(Command::ProcessingFinished);
+    pub fn notify_processing_finished(&self, generation: u64) {
+        self.send_command(Command::ProcessingFinished { generation });
     }
 
     pub fn health_snapshot(&self) -> Vec<CoordinatorHealthSnapshot> {
@@ -334,14 +397,18 @@ fn run_worker(app: AppHandle, supervisor_tx: Sender<SupervisorMessage>, rx: Rece
     let mut stage = Stage::Idle;
     let mut last_press: Option<Instant> = None;
     let mut active_press: Option<(String, Instant)> = None;
+    let mut pending_toggle: Option<PendingToggle> = None;
+    let mut next_generation: u64 = 0;
 
     while let Ok(cmd) = rx.recv() {
         handle_command(
             &app,
             supervisor_tx.clone(),
             &mut stage,
+            &mut next_generation,
             &mut last_press,
             &mut active_press,
+            &mut pending_toggle,
             cmd,
         );
     }
@@ -381,8 +448,10 @@ fn handle_command(
     app: &AppHandle,
     supervisor_tx: Sender<SupervisorMessage>,
     stage: &mut Stage,
+    next_generation: &mut u64,
     last_press: &mut Option<Instant>,
     active_press: &mut Option<(String, Instant)>,
+    pending_toggle: &mut Option<PendingToggle>,
     cmd: Command,
 ) {
     match cmd {
@@ -413,7 +482,14 @@ fn handle_command(
                         stop_binding_for_latched_press(stage, &binding_id).map(str::to_string)
                     {
                         *active_press = None;
-                        stop(app, stage, &active_binding_id, &hotkey_string);
+                        stop(
+                            app,
+                            stage,
+                            next_generation,
+                            supervisor_tx.clone(),
+                            &active_binding_id,
+                            &hotkey_string,
+                        );
                     } else if let Some(active_binding_id) = stop_binding_for_expired_pending_press(
                         stage,
                         &binding_id,
@@ -423,7 +499,14 @@ fn handle_command(
                     .map(str::to_string)
                     {
                         *active_press = None;
-                        stop(app, stage, &active_binding_id, &hotkey_string);
+                        stop(
+                            app,
+                            stage,
+                            next_generation,
+                            supervisor_tx.clone(),
+                            &active_binding_id,
+                            &hotkey_string,
+                        );
                     } else if matches!(stage, Stage::Idle) {
                         start(
                             app,
@@ -463,7 +546,14 @@ fn handle_command(
                             runtime,
                         );
                     } else {
-                        stop(app, stage, &active_binding_id, &hotkey_string);
+                        stop(
+                            app,
+                            stage,
+                            next_generation,
+                            supervisor_tx.clone(),
+                            &active_binding_id,
+                            &hotkey_string,
+                        );
                     }
                 }
             } else if is_pressed {
@@ -482,12 +572,35 @@ fn handle_command(
                         if let Some(active_binding_id) =
                             stop_binding_for_input(stage, &binding_id).map(str::to_string)
                         {
-                            stop(app, stage, &active_binding_id, &hotkey_string);
+                            stop(
+                                app,
+                                stage,
+                                next_generation,
+                                supervisor_tx.clone(),
+                                &active_binding_id,
+                                &hotkey_string,
+                            );
                         } else {
                             debug!("Ignoring press for '{binding_id}': pipeline busy");
                         }
                     }
-                    _ => debug!("Ignoring press for '{binding_id}': pipeline busy"),
+                    Stage::Processing { .. } => {
+                        match pending_toggle_on_press(
+                            pending_toggle,
+                            &binding_id,
+                            &hotkey_string,
+                            event_at,
+                        ) {
+                            PendingDecision::Stored => {
+                                info!(
+                                    "Deferred toggle press for '{binding_id}' until processing finishes"
+                                );
+                            }
+                            PendingDecision::Cancelled => {
+                                info!("Cancelled pending toggle press for '{binding_id}'");
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -495,8 +608,9 @@ fn handle_command(
             recording_was_active,
         } => {
             *active_press = None;
+            *pending_toggle = None;
             // Don't reset during processing — wait for the pipeline to finish.
-            if !matches!(stage, Stage::Processing)
+            if !matches!(stage, Stage::Processing { .. })
                 && (recording_was_active || matches!(stage, Stage::Recording { .. }))
             {
                 *stage = Stage::Idle;
@@ -511,12 +625,54 @@ fn handle_command(
                     .map(str::to_string)
             {
                 *active_press = None;
-                stop(app, stage, &active_binding_id, "");
+                stop(
+                    app,
+                    stage,
+                    next_generation,
+                    supervisor_tx.clone(),
+                    &active_binding_id,
+                    "",
+                );
             }
         }
-        Command::ProcessingFinished => {
+        Command::ProcessingFinished { generation } => {
+            if !processing_finish_matches(stage, generation) {
+                debug!("Ignoring stale ProcessingFinished (generation {generation})");
+                return;
+            }
             *active_press = None;
             *stage = Stage::Idle;
+            if let Some(pending) = take_replayable_pending(pending_toggle.take(), Instant::now()) {
+                info!(
+                    "Replaying deferred toggle press for '{}'",
+                    pending.binding_id
+                );
+                start(
+                    app,
+                    stage,
+                    &pending.binding_id,
+                    &pending.hotkey_string,
+                    RecordingMode::Latched,
+                );
+            }
+        }
+        Command::ProcessingWatchdog { generation } => {
+            if watchdog_should_recover(stage, generation) {
+                error!(
+                    "Pipeline stuck in Processing for {}s (generation {generation}); force-recovering",
+                    PROCESSING_WATCHDOG.as_secs()
+                );
+                *active_press = None;
+                *pending_toggle = None;
+                *stage = Stage::Idle;
+                let _ = app.emit(
+                    "recording-error",
+                    RecordingErrorPayload {
+                        error_type: "pipeline_watchdog_recovered".to_string(),
+                        detail: Some(format!("generation {generation}")),
+                    },
+                );
+            }
         }
         Command::InjectWorkerPanicForSmoke => {
             panic!("forced coordinator panic for packaged smoke drill");
@@ -549,13 +705,24 @@ fn start(
     }
 }
 
-fn stop(app: &AppHandle, stage: &mut Stage, binding_id: &str, hotkey_string: &str) {
+fn stop(
+    app: &AppHandle,
+    stage: &mut Stage,
+    next_generation: &mut u64,
+    supervisor_tx: Sender<SupervisorMessage>,
+    binding_id: &str,
+    hotkey_string: &str,
+) {
     let Some(action) = ACTION_MAP.get(binding_id) else {
         warn!("No action in ACTION_MAP for '{binding_id}'");
+        *stage = Stage::Idle;
         return;
     };
-    action.stop(app, binding_id, hotkey_string);
-    *stage = Stage::Processing;
+    *next_generation += 1;
+    let generation = *next_generation;
+    *stage = Stage::Processing { generation };
+    action.stop(app, binding_id, hotkey_string, generation);
+    schedule_processing_watchdog(supervisor_tx, generation);
 }
 
 fn stop_binding_for_input<'a>(stage: &'a Stage, incoming_binding_id: &str) -> Option<&'a str> {
@@ -715,6 +882,15 @@ fn schedule_tap_window_expiry(
     });
 }
 
+fn schedule_processing_watchdog(tx: Sender<SupervisorMessage>, generation: u64) {
+    thread::spawn(move || {
+        thread::sleep(PROCESSING_WATCHDOG);
+        let _ = tx.send(SupervisorMessage::Command(Command::ProcessingWatchdog {
+            generation,
+        }));
+    });
+}
+
 fn bindings_match(active_binding_id: &str, incoming_binding_id: &str) -> bool {
     active_binding_id == incoming_binding_id
         || (is_transcribe_binding(active_binding_id) && is_transcribe_binding(incoming_binding_id))
@@ -723,6 +899,7 @@ fn bindings_match(active_binding_id: &str, incoming_binding_id: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
 
     #[test]
     fn alternate_transcribe_binding_can_stop_active_recording() {
@@ -749,9 +926,73 @@ mod tests {
 
     #[test]
     fn transcribe_binding_does_not_interrupt_processing() {
-        let stage = Stage::Processing;
+        let stage = Stage::Processing { generation: 1 };
 
         assert_eq!(stop_binding_for_input(&stage, "transcribe"), None);
+    }
+
+    #[test]
+    fn press_during_processing_stores_pending_toggle() {
+        let mut pending: Option<PendingToggle> = None;
+        let decision =
+            pending_toggle_on_press(&mut pending, "transcribe", "ctrl+space", Instant::now());
+
+        assert_eq!(decision, PendingDecision::Stored);
+        assert!(pending.is_some());
+        assert_eq!(pending.as_ref().unwrap().binding_id, "transcribe");
+    }
+
+    #[test]
+    fn second_press_during_processing_cancels_pending_toggle() {
+        let mut pending: Option<PendingToggle> = None;
+        let now = Instant::now();
+
+        pending_toggle_on_press(&mut pending, "transcribe", "ctrl+space", now);
+        let decision = pending_toggle_on_press(&mut pending, "transcribe", "ctrl+space", now);
+
+        assert_eq!(decision, PendingDecision::Cancelled);
+        assert!(pending.is_none());
+    }
+
+    #[test]
+    fn fresh_pending_toggle_is_replayable_on_finish() {
+        let now = Instant::now();
+        let pending = Some(PendingToggle {
+            binding_id: "transcribe".into(),
+            hotkey_string: "ctrl+space".into(),
+            stored_at: now,
+        });
+
+        assert!(take_replayable_pending(pending, now).is_some());
+    }
+
+    #[test]
+    fn stale_pending_toggle_is_dropped_on_finish() {
+        let stored_at = Instant::now() - PENDING_TOGGLE_MAX_AGE - Duration::from_millis(1);
+        let pending = Some(PendingToggle {
+            binding_id: "transcribe".into(),
+            hotkey_string: "ctrl+space".into(),
+            stored_at,
+        });
+
+        assert!(take_replayable_pending(pending, Instant::now()).is_none());
+    }
+
+    #[test]
+    fn stale_processing_finished_is_ignored() {
+        let stage = Stage::Processing { generation: 2 };
+
+        assert!(!processing_finish_matches(&stage, 1));
+        assert!(processing_finish_matches(&stage, 2));
+    }
+
+    #[test]
+    fn watchdog_only_fires_for_matching_generation() {
+        let stage = Stage::Processing { generation: 5 };
+
+        assert!(watchdog_should_recover(&stage, 5));
+        assert!(!watchdog_should_recover(&stage, 4));
+        assert!(!watchdog_should_recover(&Stage::Idle, 5));
     }
 
     #[test]

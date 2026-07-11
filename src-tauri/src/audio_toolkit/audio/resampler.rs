@@ -1,4 +1,4 @@
-use rubato::{FftFixedIn, Resampler};
+use rubato::{FftFixedIn, Resampler, ResamplerConstructionError};
 use std::time::Duration;
 
 // Make this a constant you can tweak
@@ -10,35 +10,42 @@ pub struct FrameResampler {
     in_buf: Vec<f32>,
     frame_samples: usize,
     pending: Vec<f32>,
+    dropped_chunks: usize,
 }
 
 impl FrameResampler {
-    pub fn new(in_hz: usize, out_hz: usize, frame_dur: Duration) -> Self {
+    pub fn new(
+        in_hz: usize,
+        out_hz: usize,
+        frame_dur: Duration,
+    ) -> Result<Self, ResamplerConstructionError> {
         let frame_samples = ((out_hz as f64 * frame_dur.as_secs_f64()).round()) as usize;
         assert!(frame_samples > 0, "frame duration too short");
 
         // Use fixed chunk size instead of GCD-based
         let chunk_in = RESAMPLER_CHUNK_SIZE;
 
-        let resampler = (in_hz != out_hz).then(|| {
-            FftFixedIn::<f32>::new(in_hz, out_hz, chunk_in, 1, 1)
-                .expect("Failed to create resampler")
-        });
+        let resampler = if in_hz != out_hz {
+            Some(FftFixedIn::<f32>::new(in_hz, out_hz, chunk_in, 1, 1)?)
+        } else {
+            None
+        };
 
-        Self {
+        Ok(Self {
             resampler,
             chunk_in,
             in_buf: Vec::with_capacity(chunk_in),
             frame_samples,
             pending: Vec::with_capacity(frame_samples),
-        }
+            dropped_chunks: 0,
+        })
     }
 
     pub fn push(&mut self, mut src: &[f32], mut emit: impl FnMut(&[f32])) {
-        if self.resampler.is_none() {
+        let Some(mut resampler) = self.resampler.take() else {
             self.emit_frames(src, &mut emit);
             return;
-        }
+        };
 
         while !src.is_empty() {
             let space = self.chunk_in - self.in_buf.len();
@@ -47,32 +54,40 @@ impl FrameResampler {
             src = &src[take..];
 
             if self.in_buf.len() == self.chunk_in {
-                // let start = std::time::Instant::now();
-                if let Ok(out) = self
-                    .resampler
-                    .as_mut()
-                    .unwrap()
-                    .process(&[&self.in_buf[..]], None)
-                {
-                    // let duration = start.elapsed();
-                    // log::debug!("Resampler took: {:?}", duration);
-                    self.emit_frames(&out[0], &mut emit);
+                match resampler.process(&[&self.in_buf[..]], None) {
+                    Ok(out) => self.emit_frames(&out[0], &mut emit),
+                    Err(err) => {
+                        log::warn!(
+                            "Audio resampler failed to process input chunk: {err}; dropping chunk"
+                        );
+                        self.dropped_chunks = self.dropped_chunks.saturating_add(1);
+                    }
                 }
                 self.in_buf.clear();
             }
         }
+
+        self.resampler = Some(resampler);
     }
 
     pub fn finish(&mut self, mut emit: impl FnMut(&[f32])) {
         // Process any remaining input samples
-        if let Some(ref mut resampler) = self.resampler {
+        if let Some(mut resampler) = self.resampler.take() {
             if !self.in_buf.is_empty() {
                 // Pad with zeros to reach chunk size
                 self.in_buf.resize(self.chunk_in, 0.0);
-                if let Ok(out) = resampler.process(&[&self.in_buf[..]], None) {
-                    self.emit_frames(&out[0], &mut emit);
+                match resampler.process(&[&self.in_buf[..]], None) {
+                    Ok(out) => self.emit_frames(&out[0], &mut emit),
+                    Err(err) => {
+                        log::warn!(
+                            "Audio resampler failed to process final input chunk: {err}; dropping chunk"
+                        );
+                        self.dropped_chunks = self.dropped_chunks.saturating_add(1);
+                    }
                 }
+                self.in_buf.clear();
             }
+            self.resampler = Some(resampler);
         }
 
         // Emit any remaining pending frame (padded with zeros)
@@ -81,6 +96,10 @@ impl FrameResampler {
             emit(&self.pending);
             self.pending.clear();
         }
+    }
+
+    pub(crate) fn take_dropped_chunks(&mut self) -> usize {
+        std::mem::take(&mut self.dropped_chunks)
     }
 
     fn emit_frames(&mut self, mut data: &[f32], emit: &mut impl FnMut(&[f32])) {
@@ -95,5 +114,17 @@ impl FrameResampler {
                 self.pending.clear();
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn invalid_input_sample_rate_returns_error() {
+        let result = FrameResampler::new(0, 16_000, Duration::from_millis(30));
+
+        assert!(result.is_err());
     }
 }

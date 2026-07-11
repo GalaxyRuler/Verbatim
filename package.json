@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "check": "tsc --noEmit",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
@@ -34,6 +35,7 @@
     "check:public-hygiene": "bun scripts/check-public-hygiene.ts",
     "check:cargo-git-pins": "bun scripts/check-cargo-git-pins.ts",
     "check:branch-protection": "bun scripts/check-branch-protection.ts",
+    "check:bindings": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check-bindings-windows.ps1",
     "check:rust-dependency-policy": "cargo deny --manifest-path src-tauri/Cargo.toml check",
     "check:tauri-security": "bun scripts/validate-tauri-security.ts",
     "check:model-benchmark-evidence": "bun scripts/check-model-benchmark-evidence.ts",

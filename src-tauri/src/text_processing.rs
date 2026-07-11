@@ -98,6 +98,38 @@ pub fn strip_invisible_chars(text: &str) -> String {
     text.replace(['\u{200B}', '\u{200C}', '\u{200D}', '\u{FEFF}'], "")
 }
 
+/// Detects model-envelope noise that must never be pasted as dictation:
+/// assistant preambles, refusals, markdown fences. Case-insensitive,
+/// prefix-anchored to avoid false positives on legitimate dictation.
+pub fn looks_like_llm_noise(text: &str) -> bool {
+    let text = text.trim_start();
+    if text.starts_with("```") {
+        return true;
+    }
+
+    let lower = text.to_lowercase();
+    const PREAMBLES: &[&str] = &[
+        "sure, here",
+        "sure! here",
+        "here is the",
+        "here's the",
+        "certainly, here",
+        "certainly! here",
+    ];
+    const REFUSALS: &[&str] = &[
+        "i can't",
+        "i cannot",
+        "i'm sorry, but",
+        "i am sorry, but",
+        "as an ai",
+        "i'm unable to",
+        "i am unable to",
+    ];
+
+    PREAMBLES.iter().any(|prefix| lower.starts_with(prefix))
+        || REFUSALS.iter().any(|prefix| lower.starts_with(prefix))
+}
+
 pub fn extract_structured_text(content: &str, field: &str) -> Result<String, StructuredTextError> {
     let json = serde_json::from_str::<Value>(content)
         .map_err(|err| StructuredTextError::InvalidJson(err.to_string()))?;
@@ -145,9 +177,19 @@ pub async fn send_text_provider_request(
     model: &str,
     request: TextProviderRequest,
 ) -> Result<Option<String>, String> {
+    send_text_provider_request_with_cancellation(provider, api_key, model, request, None).await
+}
+
+pub async fn send_text_provider_request_with_cancellation(
+    provider: &crate::settings::PostProcessProvider,
+    api_key: String,
+    model: &str,
+    request: TextProviderRequest,
+    cancellation: Option<&crate::providers::CancellationToken>,
+) -> Result<Option<String>, String> {
     let request_config = provider_reasoning_config(&provider.id);
     let json_schema = request.json_schema();
-    crate::llm_client::send_chat_completion_with_schema(
+    crate::llm_client::send_chat_completion_with_schema_and_cancellation(
         provider,
         api_key,
         model,
@@ -156,6 +198,7 @@ pub async fn send_text_provider_request(
         json_schema,
         request_config.reasoning_effort,
         request_config.reasoning,
+        cancellation,
     )
     .await
 }
@@ -244,6 +287,22 @@ mod tests {
 
         assert!(err.to_string().contains("preservation checks"));
         assert!(err.to_string().contains("LostArabicScript"));
+    }
+
+    #[test]
+    fn llm_preamble_and_refusals_are_rejected() {
+        assert!(looks_like_llm_noise("Sure, here's the cleaned text: hello"));
+        assert!(looks_like_llm_noise(
+            "Here is the corrected transcript:\nhello"
+        ));
+        assert!(looks_like_llm_noise("I can't help with that request."));
+        assert!(looks_like_llm_noise(
+            "```json\n{\"transcription\": \"hi\"}\n```"
+        ));
+        assert!(!looks_like_llm_noise(
+            "hello world, this is my dictated sentence"
+        ));
+        assert!(!looks_like_llm_noise("sure, let's meet at five"));
     }
 
     #[test]
