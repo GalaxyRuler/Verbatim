@@ -7,9 +7,9 @@ import type {
   TranslationRequestSettings,
   WhisperAcceleratorSetting,
   OrtAcceleratorSetting,
-  AppSettings as Settings,
 } from "@/bindings";
 import { commands } from "@/bindings";
+import { asAppSettings, type AppSettings as Settings } from "@/lib/settings";
 
 // Guard so the backend "model-state-changed" subscription is attached at most
 // once, even if initialize() runs again (e.g. the useSettings effect re-fires
@@ -232,7 +232,7 @@ export const useSettingsStore = create<SettingsStore>()(
       try {
         const result = await commands.getAppSettings();
         if (result.status === "ok") {
-          const settings = result.data;
+          const settings = asAppSettings(result.data);
           const normalizedSettings: Settings = {
             ...settings,
             always_on_microphone: settings.always_on_microphone ?? false,
@@ -641,7 +641,7 @@ export const useSettingsStore = create<SettingsStore>()(
       try {
         const result = await commands.getDefaultSettings();
         if (result.status === "ok") {
-          set({ defaultSettings: result.data });
+          set({ defaultSettings: asAppSettings(result.data) });
         } else {
           console.error("Failed to load default settings:", result.error);
         }

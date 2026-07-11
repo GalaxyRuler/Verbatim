@@ -4,19 +4,29 @@
 //! global-shortcut plugin.
 
 use log::{error, warn};
-use tauri::AppHandle;
+use tauri::{AppHandle, Runtime};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
 #[cfg(not(target_os = "linux"))]
 use crate::settings::get_settings;
-use crate::settings::{self, is_unbound_shortcut, ShortcutBinding};
+use crate::settings::{self, is_unbound_shortcut, AppSettings, ShortcutBinding};
 
-use super::handler::handle_shortcut_event;
+use super::{emit_shortcut_registration_failure, handler::handle_shortcut_event};
 
 /// Initialize shortcuts using Tauri's global-shortcut plugin
 pub fn init_shortcuts(app: &AppHandle) {
-    let default_bindings = settings::get_default_settings().bindings;
     let user_settings = settings::load_or_create_app_settings(app);
+    init_shortcuts_with_registration(app, &user_settings, |binding| {
+        register_shortcut(app, binding)
+    });
+}
+
+fn init_shortcuts_with_registration<R: Runtime>(
+    app: &AppHandle<R>,
+    user_settings: &AppSettings,
+    mut register: impl FnMut(ShortcutBinding) -> Result<(), String>,
+) {
+    let default_bindings = settings::get_default_settings().bindings;
 
     // Register all default shortcuts, applying user customizations
     for (id, default_binding) in default_bindings {
@@ -32,9 +42,11 @@ pub fn init_shortcuts(app: &AppHandle) {
             .get(&id)
             .cloned()
             .unwrap_or(default_binding);
+        let hotkey = binding.current_binding.clone();
 
-        if let Err(e) = register_shortcut(app, binding) {
+        if let Err(e) = register(binding) {
             error!("Failed to register shortcut {} during init: {}", id, e);
+            emit_shortcut_registration_failure(app, &hotkey);
         }
     }
 }
@@ -173,15 +185,31 @@ pub fn register_cancel_shortcut(app: &AppHandle) {
 
     #[cfg(not(target_os = "linux"))]
     {
-        let app_clone = app.clone();
-        tauri::async_runtime::spawn(async move {
-            if let Some(cancel_binding) = get_settings(&app_clone).bindings.get("cancel").cloned() {
-                if let Err(e) = register_shortcut(&app_clone, cancel_binding) {
-                    error!("Failed to register cancel shortcut: {}", e);
-                }
-            }
-        });
+        let cancel_binding = get_settings(app).bindings.get("cancel").cloned();
+        let registration_app = app.clone();
+        let _ = register_cancel_shortcut_with_registration(
+            app.clone(),
+            cancel_binding,
+            move |binding| register_shortcut(&registration_app, binding),
+        );
     }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn register_cancel_shortcut_with_registration<R: Runtime>(
+    app: AppHandle<R>,
+    cancel_binding: Option<ShortcutBinding>,
+    register: impl FnOnce(ShortcutBinding) -> Result<(), String> + Send + 'static,
+) -> tauri::async_runtime::JoinHandle<()> {
+    tauri::async_runtime::spawn(async move {
+        if let Some(cancel_binding) = cancel_binding {
+            let hotkey = cancel_binding.current_binding.clone();
+            if let Err(e) = register(cancel_binding) {
+                error!("Failed to register cancel shortcut: {}", e);
+                emit_shortcut_registration_failure(&app, &hotkey);
+            }
+        }
+    })
 }
 
 /// Unregister the cancel shortcut (called when recording stops)
@@ -202,5 +230,78 @@ pub fn unregister_cancel_shortcut(app: &AppHandle) {
                 let _ = unregister_shortcut(&app_clone, cancel_binding);
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Arc, Mutex};
+    use tauri::Listener;
+
+    fn event_payloads(app: &tauri::App<tauri::test::MockRuntime>) -> Arc<Mutex<Vec<String>>> {
+        let payloads = Arc::new(Mutex::new(Vec::new()));
+        let payloads_for_listener = Arc::clone(&payloads);
+        app.handle().listen("recording-error", move |event| {
+            payloads_for_listener
+                .lock()
+                .expect("lock event payloads")
+                .push(event.payload().to_string());
+        });
+        payloads
+    }
+
+    fn assert_registration_failure(payloads: &Mutex<Vec<String>>, hotkey: &str) {
+        let payloads = payloads.lock().expect("lock collected payloads");
+        assert_eq!(payloads.len(), 1);
+        let payload = serde_json::from_str::<serde_json::Value>(&payloads[0])
+            .expect("recording-error payload is JSON");
+        assert_eq!(payload["error_type"], "shortcut_registration_failed");
+        assert_eq!(payload["detail"], hotkey);
+    }
+
+    #[test]
+    fn init_shortcuts_reports_the_failed_registration_hotkey() {
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("build shortcut event test app");
+        let payloads = event_payloads(&app);
+        let mut settings = settings::get_default_settings();
+        for binding in settings.bindings.values_mut() {
+            binding.current_binding.clear();
+        }
+        settings
+            .bindings
+            .get_mut("transcribe")
+            .unwrap()
+            .current_binding = "ctrl+space".into();
+
+        init_shortcuts_with_registration(app.handle(), &settings, |binding| {
+            if is_unbound_shortcut(&binding.current_binding) {
+                Ok(())
+            } else {
+                Err("injected".into())
+            }
+        });
+
+        assert_registration_failure(&payloads, "ctrl+space");
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    #[test]
+    fn register_cancel_shortcut_reports_the_failed_registration_hotkey() {
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("build shortcut event test app");
+        let payloads = event_payloads(&app);
+        let cancel_binding = settings::get_default_settings().bindings.remove("cancel");
+
+        let _ = tauri::async_runtime::block_on(register_cancel_shortcut_with_registration(
+            app.handle().clone(),
+            cancel_binding,
+            |_| Err("injected".into()),
+        ));
+
+        assert_registration_failure(&payloads, "escape");
     }
 }

@@ -512,8 +512,11 @@ impl std::ops::DerefMut for SecretMap {
 /* useful for composing the initial JSON in the store ------------------ */
 #[derive(Serialize, Deserialize, Debug, Clone, Type)]
 pub struct AppSettings {
+    #[serde(default = "default_bindings")]
     pub bindings: HashMap<String, ShortcutBinding>,
+    #[serde(default = "default_push_to_talk")]
     pub push_to_talk: bool,
+    #[serde(default = "default_audio_feedback")]
     pub audio_feedback: bool,
     #[serde(default = "default_audio_feedback_volume")]
     pub audio_feedback_volume: f32,
@@ -543,10 +546,6 @@ pub struct AppSettings {
     pub translation_enabled: bool,
     #[serde(default)]
     pub translation_request: Option<TranslationRequestSettings>,
-    #[serde(default)]
-    pub translation_provider_id: Option<String>,
-    #[serde(default)]
-    pub translation_model_id: Option<String>,
     #[serde(default = "default_selected_language")]
     pub selected_language: String,
     #[serde(default)]
@@ -664,6 +663,18 @@ pub struct AppSettings {
 
 fn default_model() -> String {
     "".to_string()
+}
+
+fn default_bindings() -> HashMap<String, ShortcutBinding> {
+    get_default_settings().bindings
+}
+
+fn default_push_to_talk() -> bool {
+    true
+}
+
+fn default_audio_feedback() -> bool {
+    false
 }
 
 fn default_adaptive_language_shortlist() -> Vec<String> {
@@ -1323,8 +1334,6 @@ pub fn get_default_settings() -> AppSettings {
         translate_to_english: false,
         translation_enabled: false,
         translation_request: None,
-        translation_provider_id: None,
-        translation_model_id: None,
         selected_language: "auto".to_string(),
         dictation_language_mode: DictationLanguageMode::default(),
         overlay_position: default_overlay_position(),
@@ -1616,6 +1625,9 @@ enum SettingsLoadOrigin {
 }
 
 pub fn load_or_create_app_settings(app: &AppHandle) -> AppSettings {
+    let _guard = SETTINGS_WRITE_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let store = match open_settings_store(app) {
         Ok(store) => store,
         Err(error) => {
@@ -1666,26 +1678,13 @@ pub fn load_or_create_app_settings(app: &AppHandle) -> AppSettings {
         )
     };
 
-    let binding_changed = ensure_binding_defaults(&mut settings);
-    let post_process_changed = ensure_post_process_defaults(&mut settings);
-    let adaptive_changed = ensure_adaptive_defaults(&mut settings);
-    let translation_changed = ensure_translation_defaults(&mut settings);
-    let dictionary_changed = ensure_dictionary_defaults_for_loaded_value(
-        &mut settings,
-        settings_value_for_defaults.as_ref(),
-    );
-    let snippet_changed = ensure_snippet_defaults(&mut settings);
+    let defaults_changed =
+        reconcile_loaded_settings_defaults(&mut settings, settings_value_for_defaults.as_ref());
     let credentials_changed = crate::credentials::prepare_post_process_api_keys_for_store(
         &mut settings,
         crate::credentials::CredentialStoreFailurePolicy::PreserveLegacyValue,
     );
-    should_persist_settings |= binding_changed
-        || post_process_changed
-        || adaptive_changed
-        || translation_changed
-        || dictionary_changed
-        || snippet_changed
-        || credentials_changed;
+    should_persist_settings |= defaults_changed || credentials_changed;
     if should_persist_settings {
         if let Err(error) = persist_loaded_settings_value(
             store.as_ref(),
@@ -1773,7 +1772,47 @@ fn privacy_safe_settings_fallback() -> AppSettings {
 fn try_get_settings<R: tauri::Runtime>(app: &AppHandle<R>) -> Result<SettingsLoadOutcome, String> {
     let store = open_settings_store(app)?;
 
-    Ok(load_settings_from_store(app, store.as_ref()))
+    Ok(load_settings_from_store_read_only(store.as_ref()))
+}
+
+fn load_settings_from_store_read_only<R: tauri::Runtime>(
+    store: &tauri_plugin_store::Store<R>,
+) -> SettingsLoadOutcome {
+    let mut settings_value_for_defaults = None;
+    let (mut settings, load_origin) = if let Some(settings_value) = store.get("settings") {
+        settings_value_for_defaults = Some(settings_value.clone());
+        match serde_json::from_value::<AppSettings>(settings_value) {
+            Ok(settings) => (settings, SettingsLoadOrigin::Parsed),
+            Err(error) => {
+                warn!("Failed to parse settings during read-only load: {error}");
+                (
+                    recover_settings_from_unparseable_value(
+                        settings_value_for_defaults
+                            .as_ref()
+                            .expect("settings value is present during recovery"),
+                    ),
+                    SettingsLoadOrigin::Recovered,
+                )
+            }
+        }
+    } else {
+        (get_default_settings(), SettingsLoadOrigin::New)
+    };
+
+    reconcile_loaded_settings_defaults(&mut settings, settings_value_for_defaults.as_ref());
+
+    SettingsLoadOutcome {
+        settings,
+        // A first-run or recovered value is only safe to use after the startup loader has
+        // durably persisted it. Ordinary reads must never become that persistence boundary.
+        persistence_error: match load_origin {
+            SettingsLoadOrigin::Parsed => None,
+            SettingsLoadOrigin::New | SettingsLoadOrigin::Recovered => {
+                Some("settings initialization is deferred to startup".to_string())
+            }
+        },
+        load_origin,
+    }
 }
 
 fn load_settings_from_store<R: tauri::Runtime>(
@@ -1818,21 +1857,8 @@ fn load_settings_from_store<R: tauri::Runtime>(
         )
     };
 
-    let binding_changed = ensure_binding_defaults(&mut settings);
-    let post_process_changed = ensure_post_process_defaults(&mut settings);
-    let adaptive_changed = ensure_adaptive_defaults(&mut settings);
-    let translation_changed = ensure_translation_defaults(&mut settings);
-    let dictionary_changed = ensure_dictionary_defaults_for_loaded_value(
-        &mut settings,
-        settings_value_for_defaults.as_ref(),
-    );
-    let snippet_changed = ensure_snippet_defaults(&mut settings);
-    should_persist_settings |= binding_changed
-        || post_process_changed
-        || adaptive_changed
-        || translation_changed
-        || dictionary_changed
-        || snippet_changed;
+    should_persist_settings |=
+        reconcile_loaded_settings_defaults(&mut settings, settings_value_for_defaults.as_ref());
     let persistence_error = if should_persist_settings {
         persist_loaded_settings_value(
             store,
@@ -1850,6 +1876,26 @@ fn load_settings_from_store<R: tauri::Runtime>(
         persistence_error,
         load_origin,
     }
+}
+
+fn reconcile_loaded_settings_defaults(
+    settings: &mut AppSettings,
+    settings_value_for_defaults: Option<&serde_json::Value>,
+) -> bool {
+    let binding_changed = ensure_binding_defaults(settings);
+    let post_process_changed = ensure_post_process_defaults(settings);
+    let adaptive_changed = ensure_adaptive_defaults(settings);
+    let translation_changed = ensure_translation_defaults(settings);
+    let dictionary_changed =
+        ensure_dictionary_defaults_for_loaded_value(settings, settings_value_for_defaults);
+    let snippet_changed = ensure_snippet_defaults(settings);
+
+    binding_changed
+        || post_process_changed
+        || adaptive_changed
+        || translation_changed
+        || dictionary_changed
+        || snippet_changed
 }
 
 /// Pure application of a mutation to an already-loaded settings value.
@@ -2131,18 +2177,22 @@ pub fn reset_settings_to_defaults_with_backup(app: &AppHandle) -> Result<(), Str
     Ok(())
 }
 
-pub fn get_bindings(app: &AppHandle) -> HashMap<String, ShortcutBinding> {
+pub fn get_bindings<R: tauri::Runtime>(app: &AppHandle<R>) -> HashMap<String, ShortcutBinding> {
     let settings = get_settings(app);
 
     settings.bindings
 }
 
-pub fn get_stored_binding(app: &AppHandle, id: &str) -> ShortcutBinding {
+pub fn get_stored_binding<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    id: &str,
+) -> Option<ShortcutBinding> {
     let bindings = get_bindings(app);
 
-    let binding = bindings.get(id).unwrap().clone();
-
-    binding
+    bindings
+        .get(id)
+        .cloned()
+        .or_else(|| get_default_settings().bindings.get(id).cloned())
 }
 
 pub fn get_history_limit(app: &AppHandle) -> usize {
@@ -2387,6 +2437,100 @@ mod tests {
         ] {
             assert_eq!(persisted["settings"][key], expected[key], "persisted {key}");
         }
+    }
+
+    #[test]
+    fn get_settings_reconciles_legacy_bindings_without_mutating_the_store() {
+        let (app, _app_data_cleanup) = unique_store_test_app("read-only-reconciliation");
+        let store = app
+            .store_builder(PathBuf::from(SETTINGS_STORE_PATH))
+            .disable_auto_save()
+            .build()
+            .expect("build settings store with auto-save disabled");
+        let mut legacy_settings = get_default_settings();
+        legacy_settings.bindings.remove("cancel");
+        let legacy_value = serde_json::to_value(&legacy_settings)
+            .expect("serialize legacy settings without cancel binding");
+        store.set("settings", legacy_value.clone());
+        store.save().expect("seed legacy settings on disk");
+        let store_path =
+            settings_store_file_path(app.handle()).expect("resolve settings store path");
+        let before_file = fs::read(&store_path).expect("read seeded settings store");
+
+        let first_read = get_settings(app.handle());
+        let second_read = get_settings(app.handle());
+
+        assert!(
+            first_read.bindings.contains_key("cancel"),
+            "read-time reconciliation must still make legacy bindings usable"
+        );
+        assert!(second_read.bindings.contains_key("cancel"));
+        assert_eq!(
+            store.get("settings"),
+            Some(legacy_value),
+            "read-only settings loads must not update the Store cache"
+        );
+        assert_eq!(
+            fs::read(&store_path).expect("read settings store after reads"),
+            before_file,
+            "read-only settings loads must not rewrite the Store file"
+        );
+    }
+
+    #[test]
+    fn unknown_stored_binding_returns_none_without_panicking() {
+        let (app, _app_data_cleanup) = unique_store_test_app("unknown-stored-binding");
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            get_stored_binding(app.handle(), "removed_legacy_binding")
+        }));
+        let binding = result.expect("a missing legacy binding must not panic during lookup");
+
+        assert!(
+            binding.is_none(),
+            "an unknown legacy binding must not fabricate a shortcut"
+        );
+    }
+
+    #[test]
+    fn legacy_settings_without_bindings_push_to_talk_or_audio_feedback_use_defaults() {
+        let defaults = get_default_settings();
+        let mut legacy_value =
+            serde_json::to_value(&defaults).expect("serialize default settings as legacy input");
+        let object = legacy_value
+            .as_object_mut()
+            .expect("default settings serialize as an object");
+        object.remove("bindings");
+        object.remove("push_to_talk");
+        object.remove("audio_feedback");
+
+        let settings: AppSettings = serde_json::from_value(legacy_value)
+            .expect("deserialize old settings without recovery");
+
+        assert_eq!(settings.bindings.len(), defaults.bindings.len());
+        assert_eq!(
+            settings
+                .bindings
+                .get("transcribe")
+                .expect("default transcribe binding")
+                .current_binding,
+            defaults
+                .bindings
+                .get("transcribe")
+                .expect("default transcribe binding")
+                .current_binding
+        );
+        assert_eq!(settings.push_to_talk, defaults.push_to_talk);
+        assert_eq!(settings.audio_feedback, defaults.audio_feedback);
+    }
+
+    #[test]
+    fn settings_serialization_omits_obsolete_translation_provider_fields() {
+        let value =
+            serde_json::to_value(get_default_settings()).expect("serialize default settings");
+
+        assert!(value.get("translation_provider_id").is_none());
+        assert!(value.get("translation_model_id").is_none());
     }
 
     #[test]

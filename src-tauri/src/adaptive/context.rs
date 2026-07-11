@@ -13,8 +13,21 @@ struct PersistedContextMetadata {
     is_sensitive: bool,
 }
 
-pub fn capture_context(private_patterns: &[String]) -> CapturedContext {
-    let context = capture_platform_context();
+pub fn capture_context(private_patterns: &[String], capture_nearby_text: bool) -> CapturedContext {
+    let context = capture_platform_context(capture_nearby_text);
+    finalize_captured_context(context, private_patterns, capture_nearby_text)
+}
+
+fn finalize_captured_context(
+    mut context: CapturedContext,
+    private_patterns: &[String],
+    capture_nearby_text: bool,
+) -> CapturedContext {
+    if !capture_nearby_text {
+        context.window_title = None;
+        context.window_title_hash = None;
+    }
+
     sanitize_context(context, private_patterns)
 }
 
@@ -139,7 +152,7 @@ fn hash_text(text: &str) -> String {
 }
 
 #[cfg(not(target_os = "windows"))]
-fn capture_platform_context() -> CapturedContext {
+fn capture_platform_context(_capture_nearby_text: bool) -> CapturedContext {
     CapturedContext {
         captured_at_ms: Utc::now().timestamp_millis(),
         process_name: None,
@@ -153,7 +166,7 @@ fn capture_platform_context() -> CapturedContext {
 }
 
 #[cfg(target_os = "windows")]
-fn capture_platform_context() -> CapturedContext {
+fn capture_platform_context(capture_nearby_text: bool) -> CapturedContext {
     use std::path::Path;
     use windows::core::PWSTR;
     use windows::Win32::Foundation::{CloseHandle, HWND};
@@ -170,7 +183,9 @@ fn capture_platform_context() -> CapturedContext {
             GetWindowThreadProcessId(hwnd, Some(&mut process_id));
         }
 
-        let window_title = read_window_title(hwnd);
+        let window_title = capture_nearby_text
+            .then(|| read_window_title(hwnd))
+            .flatten();
         let window_class = read_window_class(hwnd);
         let process_name = if process_id == 0 {
             None
@@ -364,6 +379,34 @@ mod tests {
         assert!(context.is_sensitive);
         assert!(context.window_title.is_none());
         assert!(context.window_title_hash.is_some());
+    }
+
+    #[test]
+    fn nearby_text_opt_out_removes_window_title_but_keeps_target_metadata() {
+        let context = finalize_captured_context(
+            CapturedContext {
+                captured_at_ms: 1,
+                process_name: Some("Code.exe".to_string()),
+                window_title: Some("task notes beside the cursor".to_string()),
+                window_title_hash: Some("old-title-hash".to_string()),
+                window_class: Some("Chrome_WidgetWin_1".to_string()),
+                target_kind: TargetKind::Technical,
+                target_fingerprint: Some("code.exe|chrome_widgetwin_1".to_string()),
+                is_sensitive: false,
+            },
+            &[],
+            false,
+        );
+
+        assert!(context.window_title.is_none());
+        assert!(context.window_title_hash.is_none());
+        assert_eq!(context.process_name.as_deref(), Some("Code.exe"));
+        assert_eq!(context.window_class.as_deref(), Some("Chrome_WidgetWin_1"));
+        assert_eq!(
+            context.target_fingerprint.as_deref(),
+            Some("code.exe|chrome_widgetwin_1")
+        );
+        assert_eq!(context.target_kind, TargetKind::Technical);
     }
 
     #[test]

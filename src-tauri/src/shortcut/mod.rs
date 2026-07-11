@@ -104,7 +104,7 @@ pub mod verbatim_keys {
 use log::{error, info, warn};
 use serde::Serialize;
 use specta::Type;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 use tauri_plugin_autostart::ManagerExt;
 
@@ -117,6 +117,22 @@ use crate::settings::{
     APPLE_INTELLIGENCE_PROVIDER_ID,
 };
 use crate::tray;
+
+#[derive(Clone, Serialize)]
+struct RecordingErrorEvent {
+    error_type: &'static str,
+    detail: Option<String>,
+}
+
+pub(crate) fn emit_shortcut_registration_failure<R: Runtime>(app: &AppHandle<R>, hotkey: &str) {
+    let _ = app.emit(
+        "recording-error",
+        RecordingErrorEvent {
+            error_type: "shortcut_registration_failed",
+            detail: Some(hotkey.to_string()),
+        },
+    );
+}
 
 // Note: Commands are accessed via shortcut::verbatim_keys:: in lib.rs
 
@@ -299,7 +315,8 @@ pub fn change_binding(
 #[tauri::command]
 #[specta::specta]
 pub fn reset_binding(app: AppHandle, id: String) -> Result<BindingResponse, String> {
-    let binding = settings::get_stored_binding(&app, &id);
+    let binding = settings::get_stored_binding(&app, &id)
+        .ok_or_else(|| format!("Binding with id '{}' not found in defaults", id))?;
     change_binding(app, id, binding.default_binding)
 }
 
@@ -321,10 +338,24 @@ pub fn suspend_binding(app: AppHandle, id: String) -> Result<(), String> {
 #[tauri::command]
 #[specta::specta]
 pub fn resume_binding(app: AppHandle, id: String) -> Result<(), String> {
-    if let Some(b) = settings::get_bindings(&app).get(&id).cloned() {
-        if let Err(e) = register_shortcut(&app, b) {
-            error!("resume_binding error for id '{}': {}", id, e);
-            return Err(e);
+    let binding = settings::get_bindings(&app).get(&id).cloned();
+    resume_binding_with_registration(&app, &id, binding, |binding| {
+        register_shortcut(&app, binding)
+    })
+}
+
+fn resume_binding_with_registration<R: Runtime>(
+    app: &AppHandle<R>,
+    id: &str,
+    binding: Option<ShortcutBinding>,
+    register: impl FnOnce(ShortcutBinding) -> Result<(), String>,
+) -> Result<(), String> {
+    if let Some(binding) = binding {
+        let hotkey = binding.current_binding.clone();
+        if let Err(error) = register(binding) {
+            error!("resume_binding error for id '{}': {}", id, error);
+            emit_shortcut_registration_failure(app, &hotkey);
+            return Err(error);
         }
     }
     Ok(())
@@ -481,9 +512,36 @@ fn register_all_shortcuts_for_implementation(
     app: &AppHandle,
     implementation: KeyboardImplementation,
 ) -> Vec<String> {
+    let current_settings = settings::get_settings(app);
+    register_all_shortcuts_with_registration(
+        app,
+        implementation,
+        current_settings,
+        |implementation, binding| match implementation {
+            KeyboardImplementation::Tauri => tauri_impl::register_shortcut(app, binding),
+            KeyboardImplementation::VerbatimKeys => verbatim_keys::register_shortcut(app, binding),
+        },
+        |bindings| {
+            settings::write_settings_domain(
+                app,
+                settings::SettingsWriteDomain::Shortcuts,
+                |settings| settings.bindings = bindings,
+            )
+        },
+    )
+}
+
+fn register_all_shortcuts_with_registration<R: Runtime>(
+    app: &AppHandle<R>,
+    implementation: KeyboardImplementation,
+    mut current_settings: settings::AppSettings,
+    mut register: impl FnMut(KeyboardImplementation, ShortcutBinding) -> Result<(), String>,
+    persist_bindings: impl FnOnce(
+        std::collections::HashMap<String, ShortcutBinding>,
+    ) -> Result<(), String>,
+) -> Vec<String> {
     let mut reset_bindings = Vec::new();
     let default_bindings = settings::get_default_settings().bindings;
-    let mut current_settings = settings::get_settings(app);
 
     for (id, default_binding) in &default_bindings {
         // Skip cancel shortcut as it's dynamically registered
@@ -520,28 +578,19 @@ fn register_all_shortcuts_for_implementation(
         }
 
         // Register with the appropriate implementation
-        let result = match implementation {
-            KeyboardImplementation::Tauri => tauri_impl::register_shortcut(app, binding),
-            KeyboardImplementation::VerbatimKeys => verbatim_keys::register_shortcut(app, binding),
-        };
-
-        if let Err(e) = result {
+        let hotkey = binding.current_binding.clone();
+        if let Err(e) = register(implementation, binding) {
             error!(
                 "Failed to register shortcut '{}' for {:?}: {}",
                 id, implementation, e
             );
+            emit_shortcut_registration_failure(app, &hotkey);
         }
     }
 
     // Save settings if any bindings were reset
     if !reset_bindings.is_empty() {
-        if let Err(e) = settings::write_settings_domain(
-            app,
-            settings::SettingsWriteDomain::Shortcuts,
-            |settings| {
-                settings.bindings = current_settings.bindings;
-            },
-        ) {
+        if let Err(e) = persist_bindings(current_settings.bindings) {
             error!("Failed to persist reset shortcut bindings: {}", e);
         }
     }
@@ -1135,15 +1184,37 @@ pub fn change_post_process_enabled_setting(app: AppHandle, enabled: bool) -> Res
     )?;
 
     // Register or unregister the post-processing shortcut
-    if let Some(binding) = binding {
-        if enabled {
-            let _ = register_shortcut(&app, binding);
-        } else {
-            let _ = unregister_shortcut(&app, binding);
-        }
-    }
+    apply_post_process_shortcut_change(
+        &app,
+        enabled,
+        binding,
+        |binding| register_shortcut(&app, binding),
+        |binding| unregister_shortcut(&app, binding),
+    );
 
     Ok(())
+}
+
+fn apply_post_process_shortcut_change<R: Runtime>(
+    app: &AppHandle<R>,
+    enabled: bool,
+    binding: Option<ShortcutBinding>,
+    register: impl FnOnce(ShortcutBinding) -> Result<(), String>,
+    unregister: impl FnOnce(ShortcutBinding) -> Result<(), String>,
+) {
+    let Some(binding) = binding else {
+        return;
+    };
+
+    if enabled {
+        let hotkey = binding.current_binding.clone();
+        if let Err(e) = register(binding) {
+            error!("Failed to register post-processing shortcut: {}", e);
+            emit_shortcut_registration_failure(app, &hotkey);
+        }
+    } else {
+        let _ = unregister(binding);
+    }
 }
 
 #[tauri::command]
@@ -1576,6 +1647,20 @@ pub async fn get_available_accelerators() -> crate::managers::transcription::Ava
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Arc, Mutex};
+    use tauri::Listener;
+
+    fn event_payloads(app: &tauri::App<tauri::test::MockRuntime>) -> Arc<Mutex<Vec<String>>> {
+        let payloads = Arc::new(Mutex::new(Vec::new()));
+        let listener_payloads = Arc::clone(&payloads);
+        app.handle().listen("recording-error", move |event| {
+            listener_payloads
+                .lock()
+                .expect("lock event payloads")
+                .push(event.payload().to_string());
+        });
+        payloads
+    }
 
     #[test]
     fn empty_shortcuts_are_valid_for_registration_skip() {
@@ -1597,6 +1682,100 @@ mod tests {
             KeyboardImplementation::VerbatimKeys
         )
         .is_ok());
+    }
+
+    #[test]
+    fn implementation_switch_registration_failures_emit_the_affected_hotkey() {
+        for implementation in [
+            KeyboardImplementation::Tauri,
+            KeyboardImplementation::VerbatimKeys,
+        ] {
+            let app = tauri::test::mock_builder()
+                .build(tauri::test::mock_context(tauri::test::noop_assets()))
+                .expect("build shortcut event test app");
+            let payloads = event_payloads(&app);
+            let mut settings = settings::get_default_settings();
+            for binding in settings.bindings.values_mut() {
+                binding.current_binding.clear();
+            }
+            settings
+                .bindings
+                .get_mut("transcribe")
+                .expect("default transcribe binding")
+                .current_binding = "ctrl+space".into();
+
+            let reset_bindings = register_all_shortcuts_with_registration(
+                app.handle(),
+                implementation,
+                settings,
+                |_implementation, binding| {
+                    if is_unbound_shortcut(&binding.current_binding) {
+                        Ok(())
+                    } else {
+                        Err("injected".into())
+                    }
+                },
+                |_| Ok(()),
+            );
+
+            assert!(reset_bindings.is_empty());
+            let payloads = payloads.lock().expect("lock event payloads");
+            assert_eq!(payloads.len(), 1);
+            let payload = serde_json::from_str::<serde_json::Value>(&payloads[0])
+                .expect("recording-error payload is JSON");
+            assert_eq!(payload["error_type"], "shortcut_registration_failed");
+            assert_eq!(payload["detail"], "ctrl+space");
+        }
+    }
+
+    #[test]
+    fn enabling_post_processing_reports_the_failed_registration_hotkey() {
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("build shortcut event test app");
+        let payloads = event_payloads(&app);
+        let binding = settings::get_default_settings()
+            .bindings
+            .remove("transcribe_with_post_process");
+
+        apply_post_process_shortcut_change(
+            app.handle(),
+            true,
+            binding,
+            |_| Err("injected".into()),
+            |_| Ok(()),
+        );
+
+        let payloads = payloads.lock().expect("lock event payloads");
+        assert_eq!(payloads.len(), 1);
+        let payload = serde_json::from_str::<serde_json::Value>(&payloads[0])
+            .expect("recording-error payload is JSON");
+        assert_eq!(payload["error_type"], "shortcut_registration_failed");
+        assert_eq!(payload["detail"], "ctrl+shift+space");
+    }
+
+    #[test]
+    fn resuming_a_binding_reports_the_failed_registration_hotkey() {
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("build shortcut event test app");
+        let payloads = event_payloads(&app);
+        let binding = settings::get_default_settings()
+            .bindings
+            .remove("transcribe");
+
+        let error = resume_binding_with_registration(app.handle(), "transcribe", binding, |_| {
+            Err("injected".into())
+        })
+        .expect_err("registration failure should remain a command error");
+
+        assert_eq!(error, "injected");
+        let payloads = payloads.lock().expect("lock event payloads");
+        assert_eq!(payloads.len(), 1);
+        let payload = serde_json::from_str::<serde_json::Value>(&payloads[0])
+            .expect("recording-error payload is JSON");
+        assert_eq!(payload["error_type"], "shortcut_registration_failed");
+        assert_eq!(payload["detail"], "ctrl+space");
     }
 
     #[test]

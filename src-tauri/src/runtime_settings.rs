@@ -120,7 +120,6 @@ impl ContextRuntime {
         self.capture_context
     }
 
-    #[cfg_attr(not(test), allow(dead_code))]
     pub fn should_capture_nearby_text(&self) -> bool {
         self.capture_nearby_text
     }
