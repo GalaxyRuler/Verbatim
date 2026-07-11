@@ -3,7 +3,9 @@ use crate::input::{self, EnigoState};
 use crate::post_paste_learning::{FocusedTextSnapshot, MAX_FOCUSED_TEXT_CHARS};
 #[cfg(target_os = "linux")]
 use crate::settings::TypingTool;
-use crate::settings::{get_settings, AutoSubmitKey, ClipboardHandling, PasteMethod};
+use crate::settings::{
+    self, get_settings, AppSettings, AutoSubmitKey, ClipboardHandling, PasteMethod,
+};
 use enigo::{Direction, Enigo, Key, Keyboard};
 use log::{info, warn};
 use serde::Serialize;
@@ -738,6 +740,10 @@ fn clipboard_payload_wait_timeout(paste_delay_ms: u64) -> Duration {
     Duration::from_millis(paste_delay_ms.max(CLIPBOARD_PAYLOAD_POLL_INTERVAL_MS))
 }
 
+fn paste_delay_ms_for_runtime(app_settings: &AppSettings) -> u64 {
+    settings::clamp_paste_delay_ms(app_settings.paste_delay_ms)
+}
+
 fn wait_until_clipboard_owns_payload(
     app_handle: &AppHandle,
     payload: &str,
@@ -785,7 +791,7 @@ pub(crate) fn paste_exact_preserving_clipboard_with_cancellation(
 ) -> Result<(), String> {
     let settings = get_settings(app_handle);
     let paste_method = settings.paste_method;
-    let paste_delay_ms = settings.paste_delay_ms;
+    let paste_delay_ms = paste_delay_ms_for_runtime(&settings);
 
     info!(
         "Using exact replacement paste method: {:?}, delay: {}ms",
@@ -1646,7 +1652,7 @@ fn paste_with_auto_learn(
 ) -> Result<(), String> {
     let settings = get_settings(&app_handle);
     let paste_method = settings.paste_method;
-    let paste_delay_ms = settings.paste_delay_ms;
+    let paste_delay_ms = paste_delay_ms_for_runtime(&settings);
     let private_session_enabled = crate::private_session::is_enabled(&app_handle);
 
     // Append trailing space if setting is enabled
@@ -1736,7 +1742,7 @@ fn paste_with_auto_learn(
     }
 
     if should_send_auto_submit(settings.auto_submit, paste_method) {
-        std::thread::sleep(Duration::from_millis(settings.paste_delay_ms.max(50)));
+        std::thread::sleep(Duration::from_millis(paste_delay_ms.max(50)));
         ensure_not_cancelled(is_cancelled, "auto-submit")?;
         send_return_key(&mut enigo, settings.auto_submit_key)?;
     }
@@ -2100,6 +2106,20 @@ mod tests {
         assert_eq!(
             clipboard_payload_wait_timeout(75),
             Duration::from_millis(75)
+        );
+    }
+
+    #[test]
+    fn paste_delay_read_clamps_legacy_value_before_clipboard_wait() {
+        let mut legacy = crate::settings::get_default_settings();
+        legacy.paste_delay_ms = 60_000;
+
+        let delay_ms = paste_delay_ms_for_runtime(&legacy);
+
+        assert_eq!(delay_ms, 2_000);
+        assert_eq!(
+            clipboard_payload_wait_timeout(delay_ms),
+            Duration::from_millis(2_000)
         );
     }
 

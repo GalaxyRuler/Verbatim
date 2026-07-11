@@ -15,6 +15,12 @@ use tauri::{Emitter, Manager};
 const STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 const SELECTED_MICROPHONE_UNAVAILABLE_PREFIX: &str = "Selected microphone unavailable";
 
+fn extra_recording_buffer_delay(settings: &AppSettings) -> Option<Duration> {
+    let delay_ms =
+        crate::settings::clamp_extra_recording_buffer_ms(settings.extra_recording_buffer_ms);
+    (delay_ms > 0).then(|| Duration::from_millis(delay_ms))
+}
+
 fn set_mute(mute: bool) {
     #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
     let _ = mute;
@@ -744,12 +750,12 @@ impl AudioRecordingManager {
 
                 // Optionally keep recording for a bit longer to capture trailing audio
                 let settings = get_settings(&self.app_handle);
-                if settings.extra_recording_buffer_ms > 0 {
+                if let Some(delay) = extra_recording_buffer_delay(&settings) {
                     debug!(
                         "Extra recording buffer: sleeping {}ms before stopping",
-                        settings.extra_recording_buffer_ms
+                        delay.as_millis()
                     );
-                    std::thread::sleep(Duration::from_millis(settings.extra_recording_buffer_ms));
+                    std::thread::sleep(delay);
                 }
 
                 let stop_output = if let Some(rec) = self
@@ -1143,5 +1149,16 @@ mod tests {
         assert!(is_default_microphone_selection("default"));
         assert!(is_default_microphone_selection("Default"));
         assert!(!is_default_microphone_selection("Default Array Microphone"));
+    }
+
+    #[test]
+    fn extra_recording_buffer_read_clamps_legacy_value() {
+        let mut legacy = crate::settings::get_default_settings();
+        legacy.extra_recording_buffer_ms = 99_999_999;
+
+        assert_eq!(
+            extra_recording_buffer_delay(&legacy),
+            Some(Duration::from_millis(2_000))
+        );
     }
 }

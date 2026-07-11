@@ -773,6 +773,31 @@ fn default_audio_feedback_volume() -> f32 {
     1.0
 }
 
+pub fn clamp_extra_recording_buffer_ms(v: u64) -> u64 {
+    // Used by thread::sleep on the stop path; a typo must not hang dictation.
+    v.min(2_000)
+}
+
+pub fn clamp_audio_feedback_volume(v: f32) -> f32 {
+    if v.is_nan() {
+        1.0
+    } else {
+        v.clamp(0.0, 1.0)
+    }
+}
+
+pub fn clamp_word_correction_threshold(v: f64) -> f64 {
+    if v.is_nan() {
+        0.18
+    } else {
+        v.clamp(0.0, 1.0)
+    }
+}
+
+pub fn clamp_paste_delay_ms(v: u64) -> u64 {
+    v.min(2_000)
+}
+
 fn default_sound_theme() -> SoundTheme {
     SoundTheme::Marimba
 }
@@ -3609,5 +3634,30 @@ mod tests {
         assert!(entry.active);
         assert!(!entry.user_confirmed);
         assert!(!entry.needs_review);
+    }
+
+    #[test]
+    fn extra_recording_buffer_clamps_to_two_seconds() {
+        assert_eq!(clamp_extra_recording_buffer_ms(99_999_999), 2_000);
+        assert_eq!(clamp_extra_recording_buffer_ms(150), 150);
+    }
+
+    #[test]
+    fn audio_feedback_volume_normalizes_non_finite_and_out_of_range_values() {
+        assert_eq!(clamp_audio_feedback_volume(f32::NAN), 1.0);
+        assert_eq!(clamp_audio_feedback_volume(-3.0), 0.0);
+        assert_eq!(clamp_audio_feedback_volume(9.0), 1.0);
+    }
+
+    #[test]
+    fn word_correction_threshold_normalizes_non_finite_and_out_of_range_values() {
+        assert_eq!(clamp_word_correction_threshold(f64::NAN), 0.18);
+        assert_eq!(clamp_word_correction_threshold(7.5), 1.0);
+        assert_eq!(clamp_word_correction_threshold(-0.1), 0.0);
+    }
+
+    #[test]
+    fn paste_delay_clamps_to_two_seconds() {
+        assert_eq!(clamp_paste_delay_ms(60_000), 2_000);
     }
 }

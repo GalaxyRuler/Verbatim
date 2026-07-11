@@ -1309,7 +1309,7 @@ fn apply_local_text_transforms(
         apply_dictionary_entries(
             &raw_text,
             &settings.dictionary_entries,
-            settings.word_correction_threshold,
+            crate::settings::clamp_word_correction_threshold(settings.word_correction_threshold),
         )
     } else {
         raw_text
@@ -1788,6 +1788,28 @@ mod tests {
             apply_local_text_transforms("please use email signature".to_string(), &settings, false);
 
         assert_eq!(result, "please use Regards,\nAbdullah");
+    }
+
+    #[test]
+    fn local_text_transforms_clamp_legacy_word_correction_threshold() {
+        let mut legacy = crate::settings::get_default_settings();
+        legacy.word_correction_threshold = f64::NAN;
+        legacy.dictionary_entries = vec![crate::settings::DictionaryEntry {
+            id: "dictionary_1_postgres".to_string(),
+            phrase: "Postgres".to_string(),
+            replacement_of: None,
+            source: crate::settings::DictionaryEntrySource::Manual,
+            priority: crate::settings::DictionaryEntryPriority::Normal,
+            created_at_ms: 1,
+            updated_at_ms: 1,
+            active: true,
+            user_confirmed: false,
+            needs_review: false,
+        }];
+
+        let result = apply_local_text_transforms("posgres is running".to_string(), &legacy, false);
+
+        assert_eq!(result, "Postgres is running");
     }
 
     #[test]

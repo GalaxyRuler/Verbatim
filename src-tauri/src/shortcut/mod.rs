@@ -583,6 +583,22 @@ fn initialize_verbatim_keys_with_rollback(app: &AppHandle) -> Result<bool, Strin
 // General Settings Commands
 // ============================================================================
 
+fn set_audio_feedback_volume(app_settings: &mut settings::AppSettings, volume: f32) {
+    app_settings.audio_feedback_volume = settings::clamp_audio_feedback_volume(volume);
+}
+
+fn set_word_correction_threshold(app_settings: &mut settings::AppSettings, threshold: f64) {
+    app_settings.word_correction_threshold = settings::clamp_word_correction_threshold(threshold);
+}
+
+fn set_extra_recording_buffer_ms(app_settings: &mut settings::AppSettings, ms: u64) {
+    app_settings.extra_recording_buffer_ms = settings::clamp_extra_recording_buffer_ms(ms);
+}
+
+fn set_paste_delay_ms(app_settings: &mut settings::AppSettings, ms: u64) {
+    app_settings.paste_delay_ms = settings::clamp_paste_delay_ms(ms);
+}
+
 #[tauri::command]
 #[specta::specta]
 pub fn change_ptt_setting(app: AppHandle, enabled: bool) -> Result<(), String> {
@@ -605,7 +621,7 @@ pub fn change_audio_feedback_setting(app: AppHandle, enabled: bool) -> Result<()
 #[specta::specta]
 pub fn change_audio_feedback_volume_setting(app: AppHandle, volume: f32) -> Result<(), String> {
     settings::write_settings_domain(&app, settings::SettingsWriteDomain::Audio, |settings| {
-        settings.audio_feedback_volume = volume;
+        set_audio_feedback_volume(settings, volume);
     })?;
     Ok(())
 }
@@ -965,7 +981,7 @@ pub fn change_word_correction_threshold_setting(
     threshold: f64,
 ) -> Result<(), String> {
     settings::write_settings_domain(&app, settings::SettingsWriteDomain::Adaptive, |settings| {
-        settings.word_correction_threshold = threshold;
+        set_word_correction_threshold(settings, threshold);
     })?;
     Ok(())
 }
@@ -974,7 +990,7 @@ pub fn change_word_correction_threshold_setting(
 #[specta::specta]
 pub fn change_extra_recording_buffer_setting(app: AppHandle, ms: u64) -> Result<(), String> {
     settings::write_settings_domain(&app, settings::SettingsWriteDomain::Audio, |settings| {
-        settings.extra_recording_buffer_ms = ms;
+        set_extra_recording_buffer_ms(settings, ms);
     })?;
     Ok(())
 }
@@ -983,7 +999,7 @@ pub fn change_extra_recording_buffer_setting(app: AppHandle, ms: u64) -> Result<
 #[specta::specta]
 pub fn change_paste_delay_ms_setting(app: AppHandle, ms: u64) -> Result<(), String> {
     settings::write_settings_domain(&app, settings::SettingsWriteDomain::Insertion, |settings| {
-        settings.paste_delay_ms = ms;
+        set_paste_delay_ms(settings, ms);
     })?;
     Ok(())
 }
@@ -1581,5 +1597,51 @@ mod tests {
             KeyboardImplementation::VerbatimKeys
         )
         .is_ok());
+    }
+
+    #[test]
+    fn audio_feedback_volume_setter_clamps_before_persisting() {
+        let mut persisted = crate::settings::get_default_settings();
+
+        set_audio_feedback_volume(&mut persisted, f32::NAN);
+        assert_eq!(persisted.audio_feedback_volume, 1.0);
+
+        set_audio_feedback_volume(&mut persisted, -3.0);
+        assert_eq!(persisted.audio_feedback_volume, 0.0);
+
+        set_audio_feedback_volume(&mut persisted, 9.0);
+        assert_eq!(persisted.audio_feedback_volume, 1.0);
+    }
+
+    #[test]
+    fn word_correction_threshold_setter_clamps_before_persisting() {
+        let mut persisted = crate::settings::get_default_settings();
+
+        set_word_correction_threshold(&mut persisted, f64::NAN);
+        assert_eq!(persisted.word_correction_threshold, 0.18);
+
+        set_word_correction_threshold(&mut persisted, 7.5);
+        assert_eq!(persisted.word_correction_threshold, 1.0);
+
+        set_word_correction_threshold(&mut persisted, -0.1);
+        assert_eq!(persisted.word_correction_threshold, 0.0);
+    }
+
+    #[test]
+    fn extra_recording_buffer_setter_clamps_before_persisting() {
+        let mut persisted = crate::settings::get_default_settings();
+
+        set_extra_recording_buffer_ms(&mut persisted, 99_999_999);
+
+        assert_eq!(persisted.extra_recording_buffer_ms, 2_000);
+    }
+
+    #[test]
+    fn paste_delay_setter_clamps_before_persisting() {
+        let mut persisted = crate::settings::get_default_settings();
+
+        set_paste_delay_ms(&mut persisted, 60_000);
+
+        assert_eq!(persisted.paste_delay_ms, 2_000);
     }
 }
