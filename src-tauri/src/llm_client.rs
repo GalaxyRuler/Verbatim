@@ -68,6 +68,12 @@ struct ChatMessageResponse {
 
 /// Build headers for API requests based on provider type
 fn build_headers(provider: &PostProcessProvider, api_key: &str) -> Result<HeaderMap, String> {
+    if crate::settings::is_insecure_lan_post_process_base_url(&provider.base_url)
+        && !api_key.trim().is_empty()
+    {
+        return Err("API keys are forbidden for insecure LAN providers".to_string());
+    }
+
     let mut headers = HeaderMap::new();
 
     // Common headers
@@ -432,6 +438,15 @@ mod tests {
             models_endpoint: Some("/models".to_string()),
             supports_structured_output: false,
         }
+    }
+
+    #[test]
+    fn insecure_lan_transport_rejects_api_keys() {
+        let provider = provider("http://192.168.1.20:8000/v1".to_string());
+        let error = build_headers(&provider, "secret-key")
+            .expect_err("insecure LAN transport must not carry API keys");
+        assert!(error.contains("forbidden"));
+        assert!(build_headers(&provider, "").is_ok());
     }
 
     fn read_request_path(stream: &mut std::net::TcpStream) -> String {

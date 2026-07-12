@@ -1,6 +1,6 @@
 use crate::settings::{
-    is_local_post_process_base_url, AppSettings, LLMPrompt, OverlayPosition, PostProcessProvider,
-    TranslationRoute,
+    is_insecure_lan_post_process_base_url, is_local_post_process_base_url, AppSettings, LLMPrompt,
+    OverlayPosition, PostProcessProvider, TranslationRoute,
 };
 use std::time::Duration;
 
@@ -322,12 +322,21 @@ pub fn text_processing_provider_runtime(
         return skipped_text_processing(TextProcessingSkipReason::MissingModel);
     }
 
-    let api_key = settings
-        .post_process_api_keys
-        .get(&provider.id)
-        .map(String::as_str)
-        .unwrap_or_default();
-    if !is_local_post_process_base_url(&provider.base_url) && api_key.trim().is_empty() {
+    let insecure_lan = settings.allow_insecure_lan_post_process
+        && is_insecure_lan_post_process_base_url(&provider.base_url);
+    let api_key = if insecure_lan {
+        ""
+    } else {
+        settings
+            .post_process_api_keys
+            .get(&provider.id)
+            .map(String::as_str)
+            .unwrap_or_default()
+    };
+    if !is_local_post_process_base_url(&provider.base_url)
+        && !insecure_lan
+        && api_key.trim().is_empty()
+    {
         return skipped_text_processing(TextProcessingSkipReason::RemoteMissingApiKey);
     }
 
@@ -462,4 +471,36 @@ pub fn post_processing_runtime(settings: &AppSettings, requested: bool) -> PostP
             api_key: api_runtime.api_key.clone(),
         },
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn insecure_lan_opt_in_never_carries_an_api_key() {
+        let mut settings = crate::settings::get_default_settings();
+        settings.post_process_enabled = true;
+        settings.allow_insecure_lan_post_process = true;
+        settings.post_process_provider_id = "custom".to_string();
+        settings
+            .post_process_provider_mut("custom")
+            .expect("custom provider")
+            .base_url = "http://192.168.1.20:8000/v1".to_string();
+        settings
+            .post_process_models
+            .insert("custom".to_string(), "test-model".to_string());
+        settings
+            .post_process_api_keys
+            .insert("custom".to_string(), "secret-key".to_string());
+
+        let runtime = text_processing_provider_runtime(
+            &settings,
+            TextProcessingIntent::DictationPostProcessing { requested: true },
+        );
+        let provider = runtime
+            .api_provider()
+            .expect("opted-in insecure LAN provider should remain usable");
+        assert!(provider.api_key.is_empty());
+    }
 }

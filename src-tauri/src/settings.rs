@@ -606,6 +606,8 @@ pub struct AppSettings {
     pub post_process_providers: Vec<PostProcessProvider>,
     #[serde(default = "default_post_process_api_keys")]
     pub post_process_api_keys: SecretMap,
+    #[serde(default)]
+    pub allow_insecure_lan_post_process: bool,
     #[serde(default = "default_post_process_models")]
     pub post_process_models: HashMap<String, String>,
     #[serde(default = "default_post_process_prompts")]
@@ -974,10 +976,36 @@ pub fn is_local_post_process_base_url(base_url: &str) -> bool {
         return false;
     }
 
-    matches!(
-        parsed.host_str(),
-        Some("localhost") | Some("127.0.0.1") | Some("::1") | Some("[::1]")
-    )
+    parsed.host_str().is_some_and(|host| {
+        host.eq_ignore_ascii_case("localhost")
+            || host
+                .trim_matches(['[', ']'])
+                .parse::<std::net::IpAddr>()
+                .map(|address| address.is_loopback())
+                .unwrap_or(false)
+    })
+}
+
+pub fn validate_post_process_base_url(
+    base_url: &str,
+    allow_insecure_lan: bool,
+) -> Result<(), String> {
+    let parsed = reqwest::Url::parse(base_url.trim())
+        .map_err(|error| format!("Invalid provider URL: {error}"))?;
+
+    match parsed.scheme() {
+        "https" => Ok(()),
+        "http" if is_local_post_process_base_url(base_url) => Ok(()),
+        "http" if allow_insecure_lan => Ok(()),
+        "http" => Err("Non-loopback provider URLs must use HTTPS".to_string()),
+        scheme => Err(format!("Unsupported provider URL scheme: {scheme}")),
+    }
+}
+
+pub fn is_insecure_lan_post_process_base_url(base_url: &str) -> bool {
+    reqwest::Url::parse(base_url.trim())
+        .map(|parsed| parsed.scheme() == "http" && !is_local_post_process_base_url(base_url))
+        .unwrap_or(false)
 }
 
 fn default_post_process_models() -> HashMap<String, String> {
@@ -1364,6 +1392,7 @@ pub fn get_default_settings() -> AppSettings {
         post_process_provider_id: default_post_process_provider_id(),
         post_process_providers: default_post_process_providers(),
         post_process_api_keys: default_post_process_api_keys(),
+        allow_insecure_lan_post_process: false,
         post_process_models: default_post_process_models(),
         post_process_prompts: default_post_process_prompts(),
         post_process_selected_prompt_id: None,
@@ -3454,6 +3483,16 @@ mod tests {
         assert!(vllm.allow_base_url_edit);
         assert_eq!(vllm.models_endpoint.as_deref(), Some("/models"));
         assert!(!vllm.supports_structured_output);
+    }
+
+    #[test]
+    fn provider_url_policy_requires_tls_off_loopback() {
+        assert!(validate_post_process_base_url("https://192.168.1.20:8000/v1", false).is_ok());
+        assert!(validate_post_process_base_url("http://localhost:8000/v1", false).is_ok());
+        assert!(validate_post_process_base_url("http://127.0.0.1:8000/v1", false).is_ok());
+        assert!(validate_post_process_base_url("http://[::1]:8000/v1", false).is_ok());
+        assert!(validate_post_process_base_url("http://192.168.1.20:8000/v1", false).is_err());
+        assert!(validate_post_process_base_url("http://192.168.1.20:8000/v1", true).is_ok());
     }
 
     #[test]

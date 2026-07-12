@@ -111,10 +111,10 @@ use tauri_plugin_autostart::ManagerExt;
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 use crate::settings::APPLE_INTELLIGENCE_DEFAULT_MODEL_ID;
 use crate::settings::{
-    self, get_settings, is_unbound_shortcut, AutoSubmitKey, ClipboardHandling,
-    DictationLanguageMode, KeyboardImplementation, LLMPrompt, OverlayPosition, PasteMethod,
-    ShortcutBinding, SoundTheme, TranslationRequestSettings, TranslationRoute, TypingTool,
-    APPLE_INTELLIGENCE_PROVIDER_ID,
+    self, get_settings, is_unbound_shortcut, validate_post_process_base_url, AutoSubmitKey,
+    ClipboardHandling, DictationLanguageMode, KeyboardImplementation, LLMPrompt, OverlayPosition,
+    PasteMethod, ShortcutBinding, SoundTheme, TranslationRequestSettings, TranslationRoute,
+    TypingTool, APPLE_INTELLIGENCE_PROVIDER_ID,
 };
 use crate::tray;
 
@@ -1258,18 +1258,40 @@ pub fn change_post_process_base_url_setting(
                 .map(|provider| provider.label.clone())
                 .ok_or_else(|| format!("Provider '{}' not found", provider_id))?;
 
-            let provider = settings
-                .post_process_provider_mut(&provider_id)
-                .expect("Provider looked up above must exist");
-
-            if !provider.allow_base_url_edit {
+            let allow_insecure_lan = settings.allow_insecure_lan_post_process;
+            let allow_base_url_edit = settings
+                .post_process_provider(&provider_id)
+                .is_some_and(|provider| provider.allow_base_url_edit);
+            if !allow_base_url_edit {
                 return Err(format!(
                     "Provider '{}' does not allow editing the base URL",
                     label
                 ));
             }
+            validate_post_process_base_url(&base_url, allow_insecure_lan)?;
+
+            let provider = settings
+                .post_process_provider_mut(&provider_id)
+                .expect("Provider looked up above must exist");
 
             provider.base_url = base_url;
+            Ok(())
+        },
+    )?;
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn change_post_process_insecure_lan_setting(
+    app: AppHandle,
+    enabled: bool,
+) -> Result<(), String> {
+    settings::try_write_settings_domain(
+        &app,
+        settings::SettingsWriteDomain::PostProcessing,
+        |settings| {
+            settings.allow_insecure_lan_post_process = enabled;
             Ok(())
         },
     )?;
