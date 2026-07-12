@@ -5,7 +5,6 @@ use crate::local_llm::runtime::{
 };
 use crate::local_llm::LocalLlmSettings;
 use anyhow::Result;
-use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use specta::Type;
@@ -126,18 +125,19 @@ impl LocalLlmManager {
             .metadata()
             .map(|metadata| metadata.len())
             .unwrap_or(0);
-        let client = reqwest::Client::new();
-        let mut request = client.get(&url);
+        let downloader = crate::download::DownloadClient::default();
+        let deadline = Instant::now() + downloader.total_timeout();
+        let mut request = downloader.get(&url);
         if resume_from > 0 {
             request = request.header("Range", format!("bytes={}-", resume_from));
         }
 
-        let mut response = request.send().await?;
+        let mut response = downloader.send(request, &cancel_flag).await?;
         if resume_from > 0 && response.status() == reqwest::StatusCode::OK {
             drop(response);
             let _ = fs::remove_file(&partial_path);
             resume_from = 0;
-            response = client.get(&url).send().await?;
+            response = downloader.send(downloader.get(&url), &cancel_flag).await?;
         }
 
         if !response.status().is_success()
@@ -168,16 +168,11 @@ impl LocalLlmManager {
         self.emit_download_progress(model_id, downloaded, total_size);
         let mut last_emit = Instant::now();
         let throttle = Duration::from_millis(100);
-        let mut stream = response.bytes_stream();
 
-        while let Some(chunk) = stream.next().await {
-            if cancel_flag.load(Ordering::Relaxed) {
-                drop(file);
-                self.emit_download_progress(model_id, downloaded, total_size);
-                return Ok(());
-            }
-
-            let chunk = chunk?;
+        while let Some(chunk) = downloader
+            .next_chunk(&mut response, &cancel_flag, deadline)
+            .await?
+        {
             file.write_all(&chunk)?;
             downloaded += chunk.len() as u64;
 
