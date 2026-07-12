@@ -88,9 +88,13 @@ fn play_sound_blocking(app: &AppHandle, path: &Path) {
     }
 }
 
+fn audio_feedback_volume_for_playback(app_settings: &AppSettings) -> f32 {
+    settings::clamp_audio_feedback_volume(app_settings.audio_feedback_volume)
+}
+
 fn play_sound_at_path(app: &AppHandle, path: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let settings = settings::get_settings(app);
-    let volume = settings.audio_feedback_volume;
+    let volume = audio_feedback_volume_for_playback(&settings);
     let selected_device = settings.selected_output_device.clone();
     play_audio_file(path, selected_device, volume)
 }
@@ -151,4 +155,23 @@ fn play_audio_file(
     sink.sleep_until_end();
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn audio_feedback_volume_read_clamps_legacy_value() {
+        let mut legacy = crate::settings::get_default_settings();
+
+        legacy.audio_feedback_volume = f32::NAN;
+        assert_eq!(audio_feedback_volume_for_playback(&legacy), 1.0);
+
+        legacy.audio_feedback_volume = -3.0;
+        assert_eq!(audio_feedback_volume_for_playback(&legacy), 0.0);
+
+        legacy.audio_feedback_volume = 9.0;
+        assert_eq!(audio_feedback_volume_for_playback(&legacy), 1.0);
+    }
 }

@@ -512,8 +512,11 @@ impl std::ops::DerefMut for SecretMap {
 /* useful for composing the initial JSON in the store ------------------ */
 #[derive(Serialize, Deserialize, Debug, Clone, Type)]
 pub struct AppSettings {
+    #[serde(default = "default_bindings")]
     pub bindings: HashMap<String, ShortcutBinding>,
+    #[serde(default = "default_push_to_talk")]
     pub push_to_talk: bool,
+    #[serde(default = "default_audio_feedback")]
     pub audio_feedback: bool,
     #[serde(default = "default_audio_feedback_volume")]
     pub audio_feedback_volume: f32,
@@ -543,10 +546,6 @@ pub struct AppSettings {
     pub translation_enabled: bool,
     #[serde(default)]
     pub translation_request: Option<TranslationRequestSettings>,
-    #[serde(default)]
-    pub translation_provider_id: Option<String>,
-    #[serde(default)]
-    pub translation_model_id: Option<String>,
     #[serde(default = "default_selected_language")]
     pub selected_language: String,
     #[serde(default)]
@@ -666,6 +665,18 @@ fn default_model() -> String {
     "".to_string()
 }
 
+fn default_bindings() -> HashMap<String, ShortcutBinding> {
+    get_default_settings().bindings
+}
+
+fn default_push_to_talk() -> bool {
+    true
+}
+
+fn default_audio_feedback() -> bool {
+    false
+}
+
 fn default_adaptive_language_shortlist() -> Vec<String> {
     vec!["en".to_string(), "ar".to_string()]
 }
@@ -771,6 +782,31 @@ fn default_recording_retention_period() -> RecordingRetentionPeriod {
 
 fn default_audio_feedback_volume() -> f32 {
     1.0
+}
+
+pub fn clamp_extra_recording_buffer_ms(v: u64) -> u64 {
+    // Used by thread::sleep on the stop path; a typo must not hang dictation.
+    v.min(2_000)
+}
+
+pub fn clamp_audio_feedback_volume(v: f32) -> f32 {
+    if v.is_nan() {
+        1.0
+    } else {
+        v.clamp(0.0, 1.0)
+    }
+}
+
+pub fn clamp_word_correction_threshold(v: f64) -> f64 {
+    if v.is_nan() {
+        0.18
+    } else {
+        v.clamp(0.0, 1.0)
+    }
+}
+
+pub fn clamp_paste_delay_ms(v: u64) -> u64 {
+    v.min(2_000)
 }
 
 fn default_sound_theme() -> SoundTheme {
@@ -1298,8 +1334,6 @@ pub fn get_default_settings() -> AppSettings {
         translate_to_english: false,
         translation_enabled: false,
         translation_request: None,
-        translation_provider_id: None,
-        translation_model_id: None,
         selected_language: "auto".to_string(),
         dictation_language_mode: DictationLanguageMode::default(),
         overlay_position: default_overlay_position(),
@@ -1487,7 +1521,7 @@ fn recover_settings_from_unparseable_value(settings_value: &serde_json::Value) -
     serde_json::from_value(merged_value).unwrap_or(default_settings)
 }
 
-fn settings_store_file_path(app: &AppHandle) -> Result<PathBuf, String> {
+fn settings_store_file_path<R: tauri::Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
     let store_path = crate::portable::store_path(SETTINGS_STORE_PATH);
     if store_path.is_absolute() {
         return Ok(store_path);
@@ -1497,7 +1531,7 @@ fn settings_store_file_path(app: &AppHandle) -> Result<PathBuf, String> {
         .map_err(|err| format!("resolve settings store path: {err}"))
 }
 
-fn settings_backup_directory(app: &AppHandle) -> Result<PathBuf, String> {
+fn settings_backup_directory<R: tauri::Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
     let settings_path = settings_store_file_path(app)?;
     settings_path
         .parent()
@@ -1519,7 +1553,10 @@ fn backup_settings_value_to_dir(
     Ok(backup_path)
 }
 
-fn backup_unparseable_settings(app: &AppHandle, settings_value: &serde_json::Value) {
+fn backup_unparseable_settings<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    settings_value: &serde_json::Value,
+) {
     match settings_backup_directory(app)
         .and_then(|dir| backup_settings_value_to_dir(&dir, settings_value))
     {
@@ -1531,8 +1568,8 @@ fn backup_unparseable_settings(app: &AppHandle, settings_value: &serde_json::Val
     }
 }
 
-fn recover_unparseable_settings(
-    app: &AppHandle,
+fn recover_unparseable_settings<R: tauri::Runtime>(
+    app: &AppHandle<R>,
     settings_value: &serde_json::Value,
     error: &serde_json::Error,
 ) -> AppSettings {
@@ -1556,65 +1593,114 @@ fn ensure_binding_defaults(settings: &mut AppSettings) -> bool {
     changed
 }
 
+fn open_settings_store<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+) -> Result<std::sync::Arc<tauri_plugin_store::Store<R>>, String> {
+    open_settings_store_at_path(app, crate::portable::store_path(SETTINGS_STORE_PATH))
+}
+
+fn open_settings_store_at_path<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    store_path: PathBuf,
+) -> Result<std::sync::Arc<tauri_plugin_store::Store<R>>, String> {
+    // The Store plugin calls `AppHandle::state` while constructing a `StoreBuilder`, which
+    // panics if the plugin state was never registered. Keep only that constructor call inside
+    // the recovery boundary. `build` can also resolve paths, lock shared state, and deserialize
+    // persisted data; errors and panics there must retain their native semantics.
+    let store_builder = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        app.store_builder(store_path)
+    }))
+    .map_err(|_| "initialize settings store: Store plugin state unavailable".to_string())?;
+
+    store_builder
+        .build()
+        .map_err(|error| format!("initialize settings store: {error}"))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SettingsLoadOrigin {
+    New,
+    Parsed,
+    Recovered,
+}
+
 pub fn load_or_create_app_settings(app: &AppHandle) -> AppSettings {
-    // Initialize store
-    let store = app
-        .store(crate::portable::store_path(SETTINGS_STORE_PATH))
-        .expect("Failed to initialize store");
+    let _guard = SETTINGS_WRITE_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let store = match open_settings_store(app) {
+        Ok(store) => store,
+        Err(error) => {
+            warn!("Failed to initialize settings store: {error}");
+            return privacy_safe_settings_fallback();
+        }
+    };
 
     let mut settings_value_for_defaults = None;
-    let mut settings = if let Some(settings_value) = store.get("settings") {
+    let (
+        mut settings,
+        settings_before_migrations,
+        mut should_persist_settings,
+        force_immediate_save,
+        load_origin,
+    ) = if let Some(settings_value) = store.get("settings") {
         settings_value_for_defaults = Some(settings_value.clone());
-        // Parse the entire settings object
+        // Parse the entire settings object.
         match serde_json::from_value::<AppSettings>(settings_value.clone()) {
-            Ok(mut settings) => {
+            Ok(settings) => {
                 debug!("{}", existing_settings_log_message(&settings));
-                let updated = ensure_binding_defaults(&mut settings);
-
-                if updated {
-                    debug!("Settings updated with new bindings");
-                    store.set("settings", serde_json::to_value(&settings).unwrap());
-                }
-
-                settings
+                (
+                    settings.clone(),
+                    Some(settings),
+                    false,
+                    false,
+                    SettingsLoadOrigin::Parsed,
+                )
             }
-            Err(e) => {
-                let recovered_settings = recover_unparseable_settings(app, &settings_value, &e);
-                store.set(
-                    "settings",
-                    serde_json::to_value(&recovered_settings).unwrap(),
-                );
-                recovered_settings
+            Err(error) => {
+                let recovered_settings = recover_unparseable_settings(app, &settings_value, &error);
+                (
+                    recovered_settings.clone(),
+                    Some(recovered_settings),
+                    true,
+                    true,
+                    SettingsLoadOrigin::Recovered,
+                )
             }
         }
     } else {
-        let default_settings = get_default_settings();
-        store.set("settings", serde_json::to_value(&default_settings).unwrap());
-        default_settings
+        (
+            get_default_settings(),
+            None,
+            true,
+            false,
+            SettingsLoadOrigin::New,
+        )
     };
 
-    let binding_changed = ensure_binding_defaults(&mut settings);
-    let post_process_changed = ensure_post_process_defaults(&mut settings);
-    let adaptive_changed = ensure_adaptive_defaults(&mut settings);
-    let translation_changed = ensure_translation_defaults(&mut settings);
-    let dictionary_changed = ensure_dictionary_defaults_for_loaded_value(
-        &mut settings,
-        settings_value_for_defaults.as_ref(),
-    );
-    let snippet_changed = ensure_snippet_defaults(&mut settings);
+    let defaults_changed =
+        reconcile_loaded_settings_defaults(&mut settings, settings_value_for_defaults.as_ref());
     let credentials_changed = crate::credentials::prepare_post_process_api_keys_for_store(
         &mut settings,
         crate::credentials::CredentialStoreFailurePolicy::PreserveLegacyValue,
     );
-    if binding_changed
-        || post_process_changed
-        || adaptive_changed
-        || translation_changed
-        || dictionary_changed
-        || snippet_changed
-        || credentials_changed
-    {
-        store.set("settings", serde_json::to_value(&settings).unwrap());
+    should_persist_settings |= defaults_changed || credentials_changed;
+    if should_persist_settings {
+        if let Err(error) = persist_loaded_settings_value(
+            store.as_ref(),
+            settings_before_migrations.as_ref(),
+            &settings,
+            force_immediate_save || credentials_changed,
+        ) {
+            // Startup initialization has no command caller to return this to.
+            warn!("Failed to persist migrated settings: {error}");
+            if load_origin != SettingsLoadOrigin::Parsed {
+                // Only a clean parsed value is a persisted user setting that runtime may retain.
+                // Do not enable data retention, context capture, or post-processing from an
+                // unpersisted first-run default or recovered value.
+                return privacy_safe_settings_fallback();
+            }
+        }
     }
 
     crate::credentials::hydrate_post_process_api_keys(&mut settings);
@@ -1622,48 +1708,201 @@ pub fn load_or_create_app_settings(app: &AppHandle) -> AppSettings {
     settings
 }
 
-pub fn get_settings(app: &AppHandle) -> AppSettings {
-    let store = app
-        .store(crate::portable::store_path(SETTINGS_STORE_PATH))
-        .expect("Failed to initialize store");
+pub fn get_settings<R: tauri::Runtime>(app: &AppHandle<R>) -> AppSettings {
+    match try_get_settings(app) {
+        Ok(outcome) => settings_for_non_command_read(outcome),
+        Err(error) => {
+            warn!("Failed to load settings: {error}");
+            privacy_safe_settings_fallback()
+        }
+    }
+}
 
+struct SettingsLoadOutcome {
+    settings: AppSettings,
+    persistence_error: Option<String>,
+    load_origin: SettingsLoadOrigin,
+}
+
+fn settings_for_non_command_read(outcome: SettingsLoadOutcome) -> AppSettings {
+    let SettingsLoadOutcome {
+        settings,
+        persistence_error,
+        load_origin,
+    } = outcome;
+
+    if let Some(error) = persistence_error.as_deref() {
+        warn!("Failed to persist reconciled settings: {error}");
+        if load_origin != SettingsLoadOrigin::Parsed {
+            // A first-run default or recovery result was never durably persisted. Fail closed
+            // rather than enabling storage or context-derived data without a clean parsed user
+            // value to preserve.
+            return privacy_safe_settings_fallback();
+        }
+    }
+    settings
+}
+
+fn settings_for_fallible_domain_write(outcome: SettingsLoadOutcome) -> Result<AppSettings, String> {
+    let SettingsLoadOutcome {
+        settings,
+        persistence_error,
+        ..
+    } = outcome;
+    match persistence_error {
+        Some(error) => Err(error),
+        None => Ok(settings),
+    }
+}
+
+fn privacy_safe_settings_fallback() -> AppSettings {
+    let mut settings = get_default_settings();
+    settings.history_enabled = false;
+    settings.recordings_enabled = false;
+    settings.adaptive_profiles_enabled = false;
+    settings.context_awareness_enabled = false;
+    settings.context_nearby_text_enabled = false;
+    settings.auto_add_dictionary_words = false;
+    settings.adaptive_correction_memory_enabled = false;
+    settings.post_process_enabled = false;
+    settings.post_process_api_keys.clear();
+    settings
+}
+
+fn try_get_settings<R: tauri::Runtime>(app: &AppHandle<R>) -> Result<SettingsLoadOutcome, String> {
+    let store = open_settings_store(app)?;
+
+    Ok(load_settings_from_store_read_only(store.as_ref()))
+}
+
+fn load_settings_from_store_read_only<R: tauri::Runtime>(
+    store: &tauri_plugin_store::Store<R>,
+) -> SettingsLoadOutcome {
     let mut settings_value_for_defaults = None;
-    let mut settings = if let Some(settings_value) = store.get("settings") {
+    let (mut settings, load_origin) = if let Some(settings_value) = store.get("settings") {
         settings_value_for_defaults = Some(settings_value.clone());
-        serde_json::from_value::<AppSettings>(settings_value.clone()).unwrap_or_else(|err| {
-            let recovered_settings = recover_unparseable_settings(app, &settings_value, &err);
-            store.set(
-                "settings",
-                serde_json::to_value(&recovered_settings).unwrap(),
-            );
-            recovered_settings
-        })
+        match serde_json::from_value::<AppSettings>(settings_value) {
+            Ok(settings) => (settings, SettingsLoadOrigin::Parsed),
+            Err(error) => {
+                warn!("Failed to parse settings during read-only load: {error}");
+                (
+                    recover_settings_from_unparseable_value(
+                        settings_value_for_defaults
+                            .as_ref()
+                            .expect("settings value is present during recovery"),
+                    ),
+                    SettingsLoadOrigin::Recovered,
+                )
+            }
+        }
     } else {
-        let default_settings = get_default_settings();
-        store.set("settings", serde_json::to_value(&default_settings).unwrap());
-        default_settings
+        (get_default_settings(), SettingsLoadOrigin::New)
     };
 
-    let binding_changed = ensure_binding_defaults(&mut settings);
-    let post_process_changed = ensure_post_process_defaults(&mut settings);
-    let adaptive_changed = ensure_adaptive_defaults(&mut settings);
-    let translation_changed = ensure_translation_defaults(&mut settings);
-    let dictionary_changed = ensure_dictionary_defaults_for_loaded_value(
-        &mut settings,
-        settings_value_for_defaults.as_ref(),
-    );
-    let snippet_changed = ensure_snippet_defaults(&mut settings);
-    if binding_changed
+    reconcile_loaded_settings_defaults(&mut settings, settings_value_for_defaults.as_ref());
+
+    SettingsLoadOutcome {
+        settings,
+        // A first-run or recovered value is only safe to use after the startup loader has
+        // durably persisted it. Ordinary reads must never become that persistence boundary.
+        persistence_error: match load_origin {
+            // A clean first-run default is safe to report on a read: history and
+            // recordings default ON and the startup loader durably persists them
+            // moments later. Failing closed here disabled retention on every fresh
+            // install (regressing the packaged first-launch contract), because
+            // early get_settings reads run before the startup loader persists.
+            SettingsLoadOrigin::Parsed | SettingsLoadOrigin::New => None,
+            // A recovered (previously unparseable) value has unknown user intent;
+            // do not enable retention from it on a read until startup re-persists.
+            SettingsLoadOrigin::Recovered => {
+                Some("settings initialization is deferred to startup".to_string())
+            }
+        },
+        load_origin,
+    }
+}
+
+fn load_settings_from_store<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    store: &tauri_plugin_store::Store<R>,
+) -> SettingsLoadOutcome {
+    let mut settings_value_for_defaults = None;
+    let (
+        mut settings,
+        settings_before_migrations,
+        mut should_persist_settings,
+        force_immediate_save,
+        load_origin,
+    ) = if let Some(settings_value) = store.get("settings") {
+        settings_value_for_defaults = Some(settings_value.clone());
+        match serde_json::from_value::<AppSettings>(settings_value.clone()) {
+            Ok(settings) => (
+                settings.clone(),
+                Some(settings),
+                false,
+                false,
+                SettingsLoadOrigin::Parsed,
+            ),
+            Err(error) => {
+                let recovered_settings = recover_unparseable_settings(app, &settings_value, &error);
+                (
+                    recovered_settings.clone(),
+                    Some(recovered_settings),
+                    true,
+                    true,
+                    SettingsLoadOrigin::Recovered,
+                )
+            }
+        }
+    } else {
+        (
+            get_default_settings(),
+            None,
+            true,
+            false,
+            SettingsLoadOrigin::New,
+        )
+    };
+
+    should_persist_settings |=
+        reconcile_loaded_settings_defaults(&mut settings, settings_value_for_defaults.as_ref());
+    let persistence_error = if should_persist_settings {
+        persist_loaded_settings_value(
+            store,
+            settings_before_migrations.as_ref(),
+            &settings,
+            force_immediate_save,
+        )
+        .err()
+    } else {
+        None
+    };
+
+    SettingsLoadOutcome {
+        settings,
+        persistence_error,
+        load_origin,
+    }
+}
+
+fn reconcile_loaded_settings_defaults(
+    settings: &mut AppSettings,
+    settings_value_for_defaults: Option<&serde_json::Value>,
+) -> bool {
+    let binding_changed = ensure_binding_defaults(settings);
+    let post_process_changed = ensure_post_process_defaults(settings);
+    let adaptive_changed = ensure_adaptive_defaults(settings);
+    let translation_changed = ensure_translation_defaults(settings);
+    let dictionary_changed =
+        ensure_dictionary_defaults_for_loaded_value(settings, settings_value_for_defaults);
+    let snippet_changed = ensure_snippet_defaults(settings);
+
+    binding_changed
         || post_process_changed
         || adaptive_changed
         || translation_changed
         || dictionary_changed
         || snippet_changed
-    {
-        store.set("settings", serde_json::to_value(&settings).unwrap());
-    }
-
-    settings
 }
 
 /// Pure application of a mutation to an already-loaded settings value.
@@ -1681,6 +1920,63 @@ fn reconcile_selected_microphone_identity(previous_name: Option<&str>, settings:
     }
 }
 
+fn settings_change_requires_immediate_save(previous: &AppSettings, next: &AppSettings) -> bool {
+    previous.history_enabled != next.history_enabled
+        || previous.recordings_enabled != next.recordings_enabled
+        || previous.history_limit != next.history_limit
+        || previous.recording_retention_period != next.recording_retention_period
+        || previous.adaptive_profiles_enabled != next.adaptive_profiles_enabled
+        || previous.context_awareness_enabled != next.context_awareness_enabled
+        || previous.context_nearby_text_enabled != next.context_nearby_text_enabled
+        || previous.auto_add_dictionary_words != next.auto_add_dictionary_words
+        || previous.adaptive_correction_memory_enabled != next.adaptive_correction_memory_enabled
+        || previous.post_process_enabled != next.post_process_enabled
+        || &*previous.post_process_api_keys != &*next.post_process_api_keys
+}
+
+fn persist_settings_value<R: tauri::Runtime>(
+    store: &tauri_plugin_store::Store<R>,
+    settings_value: serde_json::Value,
+    immediate_save: bool,
+) -> Result<(), String> {
+    let previous_settings_value = if immediate_save {
+        store.get("settings")
+    } else {
+        None
+    };
+    store.set("settings", settings_value);
+    if immediate_save {
+        if let Err(error) = store.save() {
+            match previous_settings_value {
+                Some(previous_settings_value) => store.set("settings", previous_settings_value),
+                None => {
+                    store.delete("settings");
+                }
+            }
+            return Err(format!("atomically persist settings: {error}"));
+        }
+    }
+    Ok(())
+}
+
+fn persist_loaded_settings_value<R: tauri::Runtime>(
+    store: &tauri_plugin_store::Store<R>,
+    settings_before_migrations: Option<&AppSettings>,
+    settings: &AppSettings,
+    force_immediate_save: bool,
+) -> Result<(), String> {
+    // No prior value means first-run initialization; persist privacy defaults before the
+    // store debounce can lose them during an early shutdown.
+    let immediate_save = force_immediate_save
+        || settings_before_migrations.is_none()
+        || settings_before_migrations.is_some_and(|settings_before| {
+            settings_change_requires_immediate_save(settings_before, settings)
+        });
+    let settings_value =
+        serde_json::to_value(settings).map_err(|error| format!("serialize settings: {error}"))?;
+    persist_settings_value(store, settings_value, immediate_save)
+}
+
 /// The ONLY public way to mutate persisted settings. Holds the write lock across the
 /// whole read-modify-write so concurrent mutations cannot lost-update each other.
 /// Do NOT `.await` or emit Tauri events inside `f`; emit after this returns.
@@ -1689,10 +1985,16 @@ pub fn mutate_settings_locked<T>(app: &AppHandle, f: impl FnOnce(&mut AppSetting
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     let mut settings = get_settings(app);
+    let settings_before = settings.clone();
     let selected_microphone_before = settings.selected_microphone.clone();
     let result = apply_settings_mutation(&mut settings, f);
     reconcile_selected_microphone_identity(selected_microphone_before.as_deref(), &mut settings);
-    write_settings(app, settings);
+    let immediate_save = settings_change_requires_immediate_save(&settings_before, &settings);
+    if let Err(error) = write_settings_with_immediate_save(app, settings, immediate_save) {
+        // Current callers mutate debounced settings only. Privacy-sensitive command paths use
+        // the fallible domain writers below, so they never report success after a required save.
+        warn!("Failed to persist settings mutation: {error}");
+    }
     result
 }
 
@@ -1701,18 +2003,72 @@ pub fn mutate_settings_locked<T>(app: &AppHandle, f: impl FnOnce(&mut AppSetting
 // (`write_settings_domain` / `try_write_settings_domain`), which take the same lock.
 // The deny-list test `dictionary_mutation_paths_do_not_call_write_settings_directly`
 // guards this for every migrated file.
-pub fn write_settings(app: &AppHandle, mut settings: AppSettings) {
-    let store = app
-        .store(crate::portable::store_path(SETTINGS_STORE_PATH))
-        .expect("Failed to initialize store");
+pub fn write_settings(app: &AppHandle, settings: AppSettings) {
+    let settings_before = get_settings(app);
+    let immediate_save = settings_change_requires_immediate_save(&settings_before, &settings);
+    if let Err(error) = write_settings_with_immediate_save(app, settings, immediate_save) {
+        // This legacy helper is used by startup/native smoke code, not UI-facing sensitive
+        // mutations. Those mutations go through the fallible domain writers below.
+        warn!("Failed to persist settings: {error}");
+    }
+}
 
+fn write_settings_with_immediate_save(
+    app: &AppHandle,
+    settings: AppSettings,
+    immediate_save: bool,
+) -> Result<(), String> {
+    let store = open_settings_store(app)?;
+
+    write_settings_to_store_with_immediate_save(store.as_ref(), settings, immediate_save)
+}
+
+fn write_settings_to_store_with_immediate_save<R: tauri::Runtime>(
+    store: &tauri_plugin_store::Store<R>,
+    mut settings: AppSettings,
+    immediate_save: bool,
+) -> Result<(), String> {
     crate::dictionary::sync_legacy_custom_words(&mut settings);
     crate::snippets::sync_snippets(&mut settings);
-    crate::credentials::prepare_post_process_api_keys_for_store(
+    let credentials_changed = crate::credentials::prepare_post_process_api_keys_for_store(
         &mut settings,
         crate::credentials::CredentialStoreFailurePolicy::RejectNewValue,
     );
-    store.set("settings", serde_json::to_value(&settings).unwrap());
+    let settings_value =
+        serde_json::to_value(&settings).map_err(|error| format!("serialize settings: {error}"))?;
+    persist_settings_value(store, settings_value, immediate_save || credentials_changed)
+}
+
+fn try_persist_settings_domain_with_immediate_save<R: tauri::Runtime>(
+    store: &tauri_plugin_store::Store<R>,
+    settings_before: &AppSettings,
+    settings: AppSettings,
+    force_immediate_save: bool,
+) -> Result<(), String> {
+    let immediate_save =
+        force_immediate_save || settings_change_requires_immediate_save(settings_before, &settings);
+    write_settings_to_store_with_immediate_save(store, settings, immediate_save)
+}
+
+fn try_write_settings_domain_with_immediate_save_to_store<R, F>(
+    store: &tauri_plugin_store::Store<R>,
+    domain: SettingsWriteDomain,
+    mut settings: AppSettings,
+    force_immediate_save: bool,
+    mutate: F,
+) -> Result<(), String>
+where
+    R: tauri::Runtime,
+    F: FnOnce(&mut AppSettings) -> Result<(), String>,
+{
+    let settings_before = settings.clone();
+    try_mutate_settings_domain(&mut settings, domain, mutate)?;
+    try_persist_settings_domain_with_immediate_save(
+        store,
+        &settings_before,
+        settings,
+        force_immediate_save,
+    )
 }
 
 pub(crate) fn write_settings_domain<F>(
@@ -1742,12 +2098,42 @@ pub(crate) fn try_write_settings_domain<F>(
 where
     F: FnOnce(&mut AppSettings) -> Result<(), String>,
 {
+    try_write_settings_domain_with_immediate_save(app, domain, false, mutate)
+}
+
+pub(crate) fn try_write_settings_domain_and_save<F>(
+    app: &AppHandle,
+    domain: SettingsWriteDomain,
+    mutate: F,
+) -> Result<(), String>
+where
+    F: FnOnce(&mut AppSettings) -> Result<(), String>,
+{
+    try_write_settings_domain_with_immediate_save(app, domain, true, mutate)
+}
+
+fn try_write_settings_domain_with_immediate_save<F>(
+    app: &AppHandle,
+    domain: SettingsWriteDomain,
+    force_immediate_save: bool,
+    mutate: F,
+) -> Result<(), String>
+where
+    F: FnOnce(&mut AppSettings) -> Result<(), String>,
+{
     let _guard = SETTINGS_WRITE_LOCK
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let mut settings = get_settings(app);
-    try_mutate_settings_domain(&mut settings, domain, mutate)?;
-    write_settings(app, settings);
+    let store = open_settings_store(app)?;
+    let settings =
+        settings_for_fallible_domain_write(load_settings_from_store(app, store.as_ref()))?;
+    try_write_settings_domain_with_immediate_save_to_store(
+        store.as_ref(),
+        domain,
+        settings,
+        force_immediate_save,
+        mutate,
+    )?;
     Ok(())
 }
 
@@ -1783,9 +2169,7 @@ where
 }
 
 pub fn reset_settings_to_defaults_with_backup(app: &AppHandle) -> Result<(), String> {
-    let store = app
-        .store(crate::portable::store_path(SETTINGS_STORE_PATH))
-        .map_err(|err| format!("initialize settings store: {err}"))?;
+    let store = open_settings_store(app)?;
 
     if let Some(settings_value) = store.get("settings") {
         let backup_dir = settings_backup_directory(app)?;
@@ -1795,22 +2179,27 @@ pub fn reset_settings_to_defaults_with_backup(app: &AppHandle) -> Result<(), Str
     let default_settings = get_default_settings();
     let default_value = serde_json::to_value(&default_settings)
         .map_err(|err| format!("serialize default settings: {err}"))?;
-    store.set("settings", default_value);
+    persist_settings_value(store.as_ref(), default_value, true)
+        .map_err(|err| format!("atomically reset settings: {err}"))?;
     Ok(())
 }
 
-pub fn get_bindings(app: &AppHandle) -> HashMap<String, ShortcutBinding> {
+pub fn get_bindings<R: tauri::Runtime>(app: &AppHandle<R>) -> HashMap<String, ShortcutBinding> {
     let settings = get_settings(app);
 
     settings.bindings
 }
 
-pub fn get_stored_binding(app: &AppHandle, id: &str) -> ShortcutBinding {
+pub fn get_stored_binding<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    id: &str,
+) -> Option<ShortcutBinding> {
     let bindings = get_bindings(app);
 
-    let binding = bindings.get(id).unwrap().clone();
-
-    binding
+    bindings
+        .get(id)
+        .cloned()
+        .or_else(|| get_default_settings().bindings.get(id).cloned())
 }
 
 pub fn get_history_limit(app: &AppHandle) -> usize {
@@ -1826,6 +2215,854 @@ pub fn get_recording_retention_period(app: &AppHandle) -> RecordingRetentionPeri
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct TestAppDataCleanup(PathBuf);
+
+    impl Drop for TestAppDataCleanup {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn unique_store_test_app(
+        name: &str,
+    ) -> (tauri::App<tauri::test::MockRuntime>, TestAppDataCleanup) {
+        let mut context = tauri::test::mock_context(tauri::test::noop_assets());
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock is after Unix epoch")
+            .as_nanos();
+        context.config_mut().identifier = format!(
+            "com.galaxyruler.verbatim.settings-test.{name}.{}.{}",
+            std::process::id(),
+            unique
+        );
+        let app = tauri::test::mock_builder()
+            .plugin(tauri_plugin_store::Builder::new().build())
+            .build(context)
+            .expect("build isolated Tauri test app");
+        let app_data_dir = crate::portable::app_data_dir(app.handle())
+            .expect("resolve isolated test app data directory");
+
+        (app, TestAppDataCleanup(app_data_dir))
+    }
+
+    #[test]
+    fn tauri_plugin_store_lockfile_is_pinned_to_atomic_fork() {
+        let store_package = include_str!("../Cargo.lock")
+            .split("[[package]]")
+            .find(|package| {
+                package
+                    .lines()
+                    .any(|line| line.trim() == "name = \"tauri-plugin-store\"")
+            })
+            .expect("tauri-plugin-store package in Cargo.lock");
+        let source = store_package
+            .lines()
+            .find_map(|line| line.trim().strip_prefix("source = \"")?.strip_suffix('"'))
+            .expect("tauri-plugin-store source in Cargo.lock");
+
+        assert!(
+            source.starts_with("git+https://github.com/GalaxyRuler/plugins-workspace"),
+            "tauri-plugin-store must begin with the GalaxyRuler atomic-persistence fork source, not crates.io or another Git source; got {source}"
+        );
+    }
+
+    #[test]
+    fn patched_store_save_writes_valid_json_without_temp_droppings() {
+        let temp_dir = tempfile::tempdir().expect("create store tempdir");
+        let store_path = temp_dir.path().join("settings").join("settings.json");
+
+        let app = tauri::test::mock_builder()
+            .plugin(tauri_plugin_store::Builder::new().build())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("build Tauri test app");
+        let store = app
+            .store_builder(&store_path)
+            .disable_auto_save()
+            .build()
+            .expect("build store");
+
+        store.set("privacy", serde_json::json!(true));
+        store.save().expect("save store through patched plugin");
+
+        let directory_entries = std::fs::read_dir(
+            store_path
+                .parent()
+                .expect("settings path has a parent directory"),
+        )
+        .expect("read store directory")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("collect store directory entries");
+        assert_eq!(directory_entries.len(), 1, "no temporary files remain");
+        assert_eq!(
+            directory_entries[0].file_name(),
+            std::ffi::OsStr::new("settings.json")
+        );
+
+        let persisted: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&store_path).expect("read persisted store"))
+                .expect("persisted store is valid JSON");
+        assert_eq!(persisted["privacy"], serde_json::json!(true));
+    }
+
+    #[test]
+    fn immediate_save_policy_is_limited_to_sensitive_settings_changes() {
+        let before = get_default_settings();
+
+        for mutate in [
+            |settings: &mut AppSettings| settings.history_enabled = !settings.history_enabled,
+            |settings: &mut AppSettings| settings.recordings_enabled = !settings.recordings_enabled,
+            |settings: &mut AppSettings| settings.history_limit += 1,
+            |settings: &mut AppSettings| {
+                settings.recording_retention_period = RecordingRetentionPeriod::Never
+            },
+            |settings: &mut AppSettings| {
+                settings.adaptive_profiles_enabled = !settings.adaptive_profiles_enabled
+            },
+            |settings: &mut AppSettings| {
+                settings.context_awareness_enabled = !settings.context_awareness_enabled
+            },
+            |settings: &mut AppSettings| {
+                settings.context_nearby_text_enabled = !settings.context_nearby_text_enabled
+            },
+            |settings: &mut AppSettings| {
+                settings.auto_add_dictionary_words = !settings.auto_add_dictionary_words
+            },
+            |settings: &mut AppSettings| {
+                settings.adaptive_correction_memory_enabled =
+                    !settings.adaptive_correction_memory_enabled
+            },
+            |settings: &mut AppSettings| {
+                settings.post_process_enabled = !settings.post_process_enabled
+            },
+            |settings: &mut AppSettings| {
+                settings
+                    .post_process_api_keys
+                    .insert("openai".to_string(), "changed".to_string());
+            },
+        ] {
+            let mut after = before.clone();
+            mutate(&mut after);
+            assert!(
+                settings_change_requires_immediate_save(&before, &after),
+                "sensitive settings change must force an atomic save"
+            );
+        }
+
+        for mutate in [
+            |settings: &mut AppSettings| settings.selected_model = "other-model".to_string(),
+            |settings: &mut AppSettings| settings.app_language = "de".to_string(),
+            |settings: &mut AppSettings| settings.post_process_provider_id = "ollama".to_string(),
+        ] {
+            let mut after = before.clone();
+            mutate(&mut after);
+            assert!(
+                !settings_change_requires_immediate_save(&before, &after),
+                "ordinary settings changes must remain debounced"
+            );
+        }
+    }
+
+    #[test]
+    fn adaptive_correction_memory_command_uses_fallible_adaptive_domain_writer() {
+        let source = include_str!("commands/adaptive.rs");
+        let command_start = source
+            .find("pub fn set_adaptive_correction_memory_enabled")
+            .expect("find adaptive correction-memory command");
+        let command = &source[command_start..];
+        let command_end = command
+            .find("\n}\n\n#[tauri::command]")
+            .expect("find adaptive correction-memory command end");
+        let command = &command[..command_end];
+
+        assert!(command.contains("try_write_settings_domain("));
+        assert!(command.contains("SettingsWriteDomain::Adaptive"));
+        assert!(!command.contains("mutate_settings_locked("));
+    }
+
+    #[test]
+    fn immediate_settings_save_persists_to_disk_without_auto_save() {
+        let temp_dir = tempfile::tempdir().expect("create settings tempdir");
+        let store_path = temp_dir.path().join("settings").join("settings.json");
+        let app = tauri::test::mock_builder()
+            .plugin(tauri_plugin_store::Builder::new().build())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("build Tauri test app");
+        let store = app
+            .store_builder(&store_path)
+            .disable_auto_save()
+            .build()
+            .expect("build store");
+
+        persist_settings_value(
+            store.as_ref(),
+            serde_json::json!({ "history_enabled": false }),
+            true,
+        )
+        .expect("immediately persist privacy setting");
+
+        let persisted: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(&store_path).expect("read immediately persisted settings"),
+        )
+        .expect("persisted settings are valid JSON");
+        assert_eq!(
+            persisted["settings"]["history_enabled"],
+            serde_json::json!(false)
+        );
+    }
+
+    #[test]
+    fn default_settings_creation_saves_immediately_without_auto_save() {
+        let temp_dir = tempfile::tempdir().expect("create settings tempdir");
+        let store_path = temp_dir.path().join("settings").join("settings.json");
+        let app = tauri::test::mock_builder()
+            .plugin(tauri_plugin_store::Builder::new().build())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("build Tauri test app");
+        let store = app
+            .store_builder(&store_path)
+            .disable_auto_save()
+            .build()
+            .expect("build store");
+
+        let default_settings = get_default_settings();
+        persist_loaded_settings_value(store.as_ref(), None, &default_settings, false)
+            .expect("persist new default settings");
+
+        let persisted: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(&store_path).expect("read immediately persisted default settings"),
+        )
+        .expect("persisted default settings are valid JSON");
+        let expected = serde_json::to_value(&default_settings).expect("serialize default settings");
+        for key in [
+            "history_enabled",
+            "recordings_enabled",
+            "adaptive_profiles_enabled",
+            "context_awareness_enabled",
+            "auto_add_dictionary_words",
+        ] {
+            assert_eq!(persisted["settings"][key], expected[key], "persisted {key}");
+        }
+    }
+
+    #[test]
+    fn get_settings_reconciles_legacy_bindings_without_mutating_the_store() {
+        let (app, _app_data_cleanup) = unique_store_test_app("read-only-reconciliation");
+        let store = app
+            .store_builder(PathBuf::from(SETTINGS_STORE_PATH))
+            .disable_auto_save()
+            .build()
+            .expect("build settings store with auto-save disabled");
+        let mut legacy_settings = get_default_settings();
+        legacy_settings.bindings.remove("cancel");
+        let legacy_value = serde_json::to_value(&legacy_settings)
+            .expect("serialize legacy settings without cancel binding");
+        store.set("settings", legacy_value.clone());
+        store.save().expect("seed legacy settings on disk");
+        let store_path =
+            settings_store_file_path(app.handle()).expect("resolve settings store path");
+        let before_file = fs::read(&store_path).expect("read seeded settings store");
+
+        let first_read = get_settings(app.handle());
+        let second_read = get_settings(app.handle());
+
+        assert!(
+            first_read.bindings.contains_key("cancel"),
+            "read-time reconciliation must still make legacy bindings usable"
+        );
+        assert!(second_read.bindings.contains_key("cancel"));
+        assert_eq!(
+            store.get("settings"),
+            Some(legacy_value),
+            "read-only settings loads must not update the Store cache"
+        );
+        assert_eq!(
+            fs::read(&store_path).expect("read settings store after reads"),
+            before_file,
+            "read-only settings loads must not rewrite the Store file"
+        );
+    }
+
+    #[test]
+    fn unknown_stored_binding_returns_none_without_panicking() {
+        let (app, _app_data_cleanup) = unique_store_test_app("unknown-stored-binding");
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            get_stored_binding(app.handle(), "removed_legacy_binding")
+        }));
+        let binding = result.expect("a missing legacy binding must not panic during lookup");
+
+        assert!(
+            binding.is_none(),
+            "an unknown legacy binding must not fabricate a shortcut"
+        );
+    }
+
+    #[test]
+    fn legacy_settings_without_bindings_push_to_talk_or_audio_feedback_use_defaults() {
+        let defaults = get_default_settings();
+        let mut legacy_value =
+            serde_json::to_value(&defaults).expect("serialize default settings as legacy input");
+        let object = legacy_value
+            .as_object_mut()
+            .expect("default settings serialize as an object");
+        object.remove("bindings");
+        object.remove("push_to_talk");
+        object.remove("audio_feedback");
+
+        let settings: AppSettings = serde_json::from_value(legacy_value)
+            .expect("deserialize old settings without recovery");
+
+        assert_eq!(settings.bindings.len(), defaults.bindings.len());
+        assert_eq!(
+            settings
+                .bindings
+                .get("transcribe")
+                .expect("default transcribe binding")
+                .current_binding,
+            defaults
+                .bindings
+                .get("transcribe")
+                .expect("default transcribe binding")
+                .current_binding
+        );
+        assert_eq!(settings.push_to_talk, defaults.push_to_talk);
+        assert_eq!(settings.audio_feedback, defaults.audio_feedback);
+    }
+
+    #[test]
+    fn settings_serialization_omits_obsolete_translation_provider_fields() {
+        let value =
+            serde_json::to_value(get_default_settings()).expect("serialize default settings");
+
+        assert!(value.get("translation_provider_id").is_none());
+        assert!(value.get("translation_model_id").is_none());
+    }
+
+    #[test]
+    fn immediate_domain_write_returns_persistence_failure_without_panicking() {
+        let temp_dir = tempfile::tempdir().expect("create settings tempdir");
+        let blocked_parent = temp_dir.path().join("settings-parent-file");
+        std::fs::write(&blocked_parent, "not a directory").expect("create blocked parent file");
+        let store_path = blocked_parent.join("settings.json");
+        let app = tauri::test::mock_builder()
+            .plugin(tauri_plugin_store::Builder::new().build())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("build Tauri test app");
+        let store = app
+            .store_builder(&store_path)
+            .disable_auto_save()
+            .build()
+            .expect("build store before attempted persistence");
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            try_write_settings_domain_with_immediate_save_to_store(
+                store.as_ref(),
+                SettingsWriteDomain::Privacy,
+                get_default_settings(),
+                false,
+                |settings| {
+                    settings.history_enabled = !settings.history_enabled;
+                    Ok(())
+                },
+            )
+        }));
+        let error = result
+            .expect("immediate persistence failure must not panic")
+            .expect_err("blocked store path must return an error");
+
+        assert!(
+            error.contains("atomically persist settings"),
+            "unexpected persistence error: {error}"
+        );
+    }
+
+    #[test]
+    fn adaptive_correction_memory_domain_write_saves_immediately_without_auto_save() {
+        let temp_dir = tempfile::tempdir().expect("create settings tempdir");
+        let store_path = temp_dir.path().join("settings").join("settings.json");
+        let app = tauri::test::mock_builder()
+            .plugin(tauri_plugin_store::Builder::new().build())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("build Tauri test app");
+        let store = app
+            .store_builder(&store_path)
+            .disable_auto_save()
+            .build()
+            .expect("build settings store");
+
+        try_write_settings_domain_with_immediate_save_to_store(
+            store.as_ref(),
+            SettingsWriteDomain::Adaptive,
+            get_default_settings(),
+            false,
+            |settings| {
+                settings.adaptive_correction_memory_enabled = false;
+                Ok(())
+            },
+        )
+        .expect("persist adaptive correction-memory preference immediately");
+
+        let persisted: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(&store_path).expect("read immediately persisted settings"),
+        )
+        .expect("persisted settings are valid JSON");
+        assert_eq!(
+            persisted["settings"]["adaptive_correction_memory_enabled"],
+            serde_json::json!(false)
+        );
+    }
+
+    #[test]
+    fn adaptive_correction_memory_domain_write_propagates_immediate_save_failure() {
+        let temp_dir = tempfile::tempdir().expect("create settings tempdir");
+        let blocked_parent = temp_dir.path().join("settings-parent-file");
+        std::fs::write(&blocked_parent, "not a directory").expect("create blocked parent file");
+        let store_path = blocked_parent.join("settings.json");
+        let app = tauri::test::mock_builder()
+            .plugin(tauri_plugin_store::Builder::new().build())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("build Tauri test app");
+        let store = app
+            .store_builder(&store_path)
+            .disable_auto_save()
+            .build()
+            .expect("build store before attempted persistence");
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            try_write_settings_domain_with_immediate_save_to_store(
+                store.as_ref(),
+                SettingsWriteDomain::Adaptive,
+                get_default_settings(),
+                false,
+                |settings| {
+                    settings.adaptive_correction_memory_enabled = false;
+                    Ok(())
+                },
+            )
+        }));
+        let error = result
+            .expect("adaptive correction-memory persistence failure must not panic")
+            .expect_err("blocked store path must return an error");
+
+        assert!(
+            error.contains("atomically persist settings"),
+            "unexpected persistence error: {error}"
+        );
+        assert!(
+            store.get("settings").is_none(),
+            "a failed adaptive correction-memory save must not retain a cache-only value"
+        );
+    }
+
+    #[test]
+    fn unavailable_settings_store_uses_privacy_safe_runtime_fallback() {
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("build Tauri test app without the Store plugin");
+        let error = match open_settings_store(app.handle()) {
+            Ok(_) => panic!("missing Store plugin state must become an initialization error"),
+            Err(error) => error,
+        };
+        assert!(error.contains("Store plugin state unavailable"));
+        let settings = get_settings(app.handle());
+
+        assert!(!settings.history_enabled);
+        assert!(!settings.recordings_enabled);
+        assert!(!settings.adaptive_profiles_enabled);
+        assert!(!settings.context_awareness_enabled);
+        assert!(!settings.context_nearby_text_enabled);
+        assert!(!settings.auto_add_dictionary_words);
+        assert!(!settings.adaptive_correction_memory_enabled);
+        assert!(!settings.post_process_enabled);
+        assert!(settings.post_process_api_keys.is_empty());
+    }
+
+    #[test]
+    fn unrelated_store_build_panic_is_not_relabelled_as_missing_plugin() {
+        let temp_dir = tempfile::tempdir().expect("create settings tempdir");
+        let store_path = temp_dir.path().join("settings.json");
+        std::fs::write(&store_path, b"trigger custom deserializer")
+            .expect("seed settings store for deserializer");
+
+        let app = tauri::test::mock_builder()
+            .plugin(
+                tauri_plugin_store::Builder::new()
+                    .default_deserialize_fn(|_| panic!("injected store deserializer panic"))
+                    .build(),
+            )
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("build Tauri test app");
+
+        let panic = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            open_settings_store_at_path(app.handle(), store_path)
+        })) {
+            Ok(_) => panic!("store build panic must propagate"),
+            Err(panic) => panic,
+        };
+        let message = panic
+            .downcast_ref::<&str>()
+            .copied()
+            .or_else(|| panic.downcast_ref::<String>().map(String::as_str));
+        assert_eq!(message, Some("injected store deserializer panic"));
+    }
+
+    #[test]
+    fn clean_first_run_read_reports_default_retention_not_privacy_safe_fallback() {
+        // Regression: a read-only load of a clean (empty) store must report the
+        // documented first-launch defaults (history/recordings ON), not the
+        // privacy-safe fallback. Early get_settings reads happen before the
+        // startup loader persists; failing closed here disabled retention on
+        // every fresh install (packaged first-launch smoke regression).
+        let temp_dir = tempfile::tempdir().expect("create settings tempdir");
+        let store_path = temp_dir.path().join("settings").join("settings.json");
+
+        let app = tauri::test::mock_builder()
+            .plugin(tauri_plugin_store::Builder::new().build())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("build Tauri test app");
+        let store = app
+            .store_builder(&store_path)
+            .disable_auto_save()
+            .build()
+            .expect("build empty settings store");
+        assert!(store.get("settings").is_none());
+
+        let outcome = load_settings_from_store_read_only(store.as_ref());
+        assert_eq!(outcome.load_origin, SettingsLoadOrigin::New);
+        assert!(
+            outcome.persistence_error.is_none(),
+            "a clean first-run read must not be flagged as unpersistable"
+        );
+
+        let runtime_settings = settings_for_non_command_read(outcome);
+        assert!(runtime_settings.history_enabled);
+        assert!(runtime_settings.recordings_enabled);
+    }
+
+    #[test]
+    fn failed_first_run_default_persist_uses_privacy_safe_runtime_fallback() {
+        let temp_dir = tempfile::tempdir().expect("create settings tempdir");
+        let store_dir = temp_dir.path().join("settings");
+        std::fs::create_dir_all(&store_dir).expect("create settings directory");
+        let store_path = store_dir.join("settings.json");
+        std::fs::write(&store_path, b"{}").expect("seed empty settings store");
+
+        let app = tauri::test::mock_builder()
+            .plugin(tauri_plugin_store::Builder::new().build())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("build Tauri test app");
+        let store = app
+            .store_builder(&store_path)
+            .disable_auto_save()
+            .build()
+            .expect("load empty settings store");
+
+        let moved_store_dir = temp_dir.path().join("settings-original");
+        std::fs::rename(&store_dir, &moved_store_dir).expect("move loaded store directory");
+        std::fs::write(&store_dir, "blocked settings parent")
+            .expect("replace settings directory with a file");
+
+        let outcome = load_settings_from_store(app.handle(), store.as_ref());
+        assert_eq!(outcome.load_origin, SettingsLoadOrigin::New);
+        assert!(outcome
+            .persistence_error
+            .as_deref()
+            .is_some_and(|error| error.contains("atomically persist settings")));
+
+        let runtime_settings = settings_for_non_command_read(outcome);
+        assert!(!runtime_settings.history_enabled);
+        assert!(!runtime_settings.recordings_enabled);
+        assert!(!runtime_settings.context_awareness_enabled);
+        assert!(!runtime_settings.post_process_enabled);
+        assert!(runtime_settings.post_process_api_keys.is_empty());
+    }
+
+    #[test]
+    fn failed_first_run_persist_does_not_leave_permissive_settings_in_store_cache() {
+        let temp_dir = tempfile::tempdir().expect("create settings tempdir");
+        let store_dir = temp_dir.path().join("settings");
+        std::fs::create_dir_all(&store_dir).expect("create settings directory");
+        let store_path = store_dir.join("settings.json");
+
+        let app = tauri::test::mock_builder()
+            .plugin(tauri_plugin_store::Builder::new().build())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("build Tauri test app");
+        let store = app
+            .store_builder(&store_path)
+            .disable_auto_save()
+            .build()
+            .expect("build empty settings store");
+        assert!(store.get("settings").is_none());
+
+        let moved_store_dir = temp_dir.path().join("settings-original");
+        std::fs::rename(&store_dir, &moved_store_dir).expect("move loaded store directory");
+        std::fs::write(&store_dir, "blocked settings parent")
+            .expect("replace settings directory with a file");
+
+        let first_runtime_settings =
+            settings_for_non_command_read(load_settings_from_store(app.handle(), store.as_ref()));
+        assert!(!first_runtime_settings.history_enabled);
+        assert!(!first_runtime_settings.recordings_enabled);
+
+        let second_runtime_settings =
+            settings_for_non_command_read(load_settings_from_store(app.handle(), store.as_ref()));
+        assert!(
+            !second_runtime_settings.history_enabled,
+            "a second read of the same Store must not treat unsaved defaults as durable"
+        );
+        assert!(!second_runtime_settings.recordings_enabled);
+        assert!(
+            store.get("settings").is_none(),
+            "a failed first-run save must restore the missing settings cache entry"
+        );
+    }
+
+    #[test]
+    fn failed_recovered_settings_repair_uses_privacy_safe_runtime_fallback_and_restores_malformed_cache(
+    ) {
+        let temp_dir = tempfile::tempdir().expect("create settings tempdir");
+        let store_dir = temp_dir.path().join("settings");
+        std::fs::create_dir_all(&store_dir).expect("create settings directory");
+        let store_path = store_dir.join("settings.json");
+        let malformed_settings = serde_json::json!({
+            "history_enabled": "not a boolean",
+            "recordings_enabled": ["not a boolean"],
+        });
+        std::fs::write(
+            &store_path,
+            serde_json::to_vec(&serde_json::json!({ "settings": malformed_settings }))
+                .expect("serialize malformed settings store"),
+        )
+        .expect("seed malformed settings store");
+
+        let (app, _app_data_cleanup) = unique_store_test_app("failed-recovery-repair");
+        let store = app
+            .store_builder(&store_path)
+            .disable_auto_save()
+            .build()
+            .expect("load malformed settings store");
+        assert_eq!(store.get("settings"), Some(malformed_settings.clone()));
+
+        let moved_store_dir = temp_dir.path().join("settings-original");
+        std::fs::rename(&store_dir, &moved_store_dir).expect("move loaded store directory");
+        std::fs::write(&store_dir, "blocked settings parent")
+            .expect("replace settings directory with a file");
+
+        let first_outcome = load_settings_from_store(app.handle(), store.as_ref());
+        assert_eq!(first_outcome.load_origin, SettingsLoadOrigin::Recovered);
+        assert!(first_outcome
+            .persistence_error
+            .as_deref()
+            .is_some_and(|error| error.contains("atomically persist settings")));
+        let first_runtime_settings = settings_for_non_command_read(first_outcome);
+        assert!(
+            !first_runtime_settings.history_enabled,
+            "a failed recovered-settings repair must not enable history at runtime"
+        );
+        assert!(
+            !first_runtime_settings.recordings_enabled,
+            "a failed recovered-settings repair must not enable recordings at runtime"
+        );
+        assert_eq!(
+            store.get("settings"),
+            Some(malformed_settings.clone()),
+            "a failed recovery save must restore the malformed cache entry"
+        );
+
+        let command_error = settings_for_fallible_domain_write(load_settings_from_store(
+            app.handle(),
+            store.as_ref(),
+        ))
+        .expect_err("a command writer must receive the failed recovered-settings repair");
+        assert!(
+            command_error.contains("atomically persist settings"),
+            "unexpected recovered-settings repair error: {command_error}"
+        );
+
+        let second_runtime_settings =
+            settings_for_non_command_read(load_settings_from_store(app.handle(), store.as_ref()));
+        assert!(
+            !second_runtime_settings.history_enabled,
+            "a second same-Store read must not revive recovered permissive history defaults"
+        );
+        assert!(
+            !second_runtime_settings.recordings_enabled,
+            "a second same-Store read must not revive recovered permissive recording defaults"
+        );
+        assert_eq!(
+            store.get("settings"),
+            Some(malformed_settings),
+            "each failed recovery save must retain the malformed cache entry"
+        );
+    }
+
+    #[test]
+    fn failed_reconciliation_save_keeps_existing_privacy_settings_for_runtime_reads() {
+        let temp_dir = tempfile::tempdir().expect("create settings tempdir");
+        let store_dir = temp_dir.path().join("settings");
+        std::fs::create_dir_all(&store_dir).expect("create settings directory");
+        let store_path = store_dir.join("settings.json");
+        let mut persisted_settings = get_default_settings();
+        persisted_settings.history_enabled = false;
+        persisted_settings.recordings_enabled = false;
+        persisted_settings.post_process_api_keys.clear();
+        let persisted_store = serde_json::json!({
+            "settings": serde_json::to_value(&persisted_settings)
+                .expect("serialize seeded settings"),
+        });
+        std::fs::write(
+            &store_path,
+            serde_json::to_vec(&persisted_store).expect("serialize seeded store"),
+        )
+        .expect("seed settings store");
+
+        let app = tauri::test::mock_builder()
+            .plugin(tauri_plugin_store::Builder::new().build())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("build Tauri test app");
+        let store = app
+            .store_builder(&store_path)
+            .disable_auto_save()
+            .build()
+            .expect("load seeded settings store");
+        assert_eq!(store.get("settings").unwrap()["history_enabled"], false);
+        assert_eq!(store.get("settings").unwrap()["recordings_enabled"], false);
+
+        let moved_store_dir = temp_dir.path().join("settings-original");
+        std::fs::rename(&store_dir, &moved_store_dir).expect("move loaded store directory");
+        std::fs::write(&store_dir, "blocked settings parent")
+            .expect("replace settings directory with a file");
+
+        let outcome = load_settings_from_store(app.handle(), store.as_ref());
+        assert_eq!(outcome.load_origin, SettingsLoadOrigin::Parsed);
+        assert!(outcome
+            .persistence_error
+            .as_deref()
+            .is_some_and(|error| error.contains("atomically persist settings")));
+
+        let runtime_settings = settings_for_non_command_read(outcome);
+        assert!(!runtime_settings.history_enabled);
+        assert!(!runtime_settings.recordings_enabled);
+        assert_eq!(
+            store.get("settings"),
+            Some(persisted_store["settings"].clone()),
+            "a failed reconciliation save must restore the original cached settings"
+        );
+
+        let second_outcome = load_settings_from_store(app.handle(), store.as_ref());
+        assert!(second_outcome
+            .persistence_error
+            .as_deref()
+            .is_some_and(|error| error.contains("atomically persist settings")));
+        let second_runtime_settings = settings_for_non_command_read(second_outcome);
+        assert!(!second_runtime_settings.history_enabled);
+        assert!(!second_runtime_settings.recordings_enabled);
+        assert_eq!(
+            store.get("settings"),
+            Some(persisted_store["settings"].clone()),
+            "each failed reconciliation save must leave the original cached settings intact"
+        );
+    }
+
+    #[test]
+    fn loaded_sensitive_post_process_key_migration_saves_immediately_without_auto_save() {
+        let temp_dir = tempfile::tempdir().expect("create settings tempdir");
+        let store_path = temp_dir.path().join("settings").join("settings.json");
+        let app = tauri::test::mock_builder()
+            .plugin(tauri_plugin_store::Builder::new().build())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("build Tauri test app");
+        let store = app
+            .store_builder(&store_path)
+            .disable_auto_save()
+            .build()
+            .expect("build store");
+
+        let mut before = get_default_settings();
+        before.post_process_api_keys.clear();
+        let mut migrated = before.clone();
+        assert!(ensure_post_process_defaults(&mut migrated));
+        assert!(settings_change_requires_immediate_save(&before, &migrated));
+
+        persist_loaded_settings_value(store.as_ref(), Some(&before), &migrated, false)
+            .expect("persist sensitive post-process key migration");
+
+        let persisted: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(&store_path).expect("read immediately persisted settings"),
+        )
+        .expect("persisted settings are valid JSON");
+        assert!(persisted["settings"]["post_process_api_keys"]
+            .as_object()
+            .is_some_and(|api_keys| !api_keys.is_empty()));
+    }
+
+    #[test]
+    fn recovered_settings_save_immediately_without_auto_save() {
+        let temp_dir = tempfile::tempdir().expect("create settings tempdir");
+        let store_path = temp_dir.path().join("settings").join("settings.json");
+        let app = tauri::test::mock_builder()
+            .plugin(tauri_plugin_store::Builder::new().build())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("build Tauri test app");
+        let store = app
+            .store_builder(&store_path)
+            .disable_auto_save()
+            .build()
+            .expect("build store");
+
+        let recovered_before_migrations = get_default_settings();
+        let recovered = recovered_before_migrations.clone();
+        persist_loaded_settings_value(
+            store.as_ref(),
+            Some(&recovered_before_migrations),
+            &recovered,
+            true,
+        )
+        .expect("immediately persist recovered settings");
+
+        assert!(
+            store_path.exists(),
+            "recovery that can replace sensitive settings must not wait for debounce"
+        );
+    }
+
+    #[test]
+    fn loaded_non_sensitive_binding_migration_remains_debounced() {
+        let temp_dir = tempfile::tempdir().expect("create settings tempdir");
+        let store_path = temp_dir.path().join("settings").join("settings.json");
+        let app = tauri::test::mock_builder()
+            .plugin(tauri_plugin_store::Builder::new().build())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("build Tauri test app");
+        let store = app
+            .store_builder(&store_path)
+            .disable_auto_save()
+            .build()
+            .expect("build store");
+
+        let mut before = get_default_settings();
+        let removed_binding = before
+            .bindings
+            .keys()
+            .next()
+            .expect("default settings contain a binding")
+            .clone();
+        before.bindings.remove(&removed_binding);
+        let mut migrated = before.clone();
+        assert!(ensure_binding_defaults(&mut migrated));
+        assert!(!settings_change_requires_immediate_save(&before, &migrated));
+
+        persist_loaded_settings_value(store.as_ref(), Some(&before), &migrated, false)
+            .expect("persist non-sensitive binding migration");
+
+        assert!(
+            !store_path.exists(),
+            "non-sensitive migration must remain on the debounced store path"
+        );
+    }
 
     #[test]
     fn default_settings_disable_auto_submit() {
@@ -2581,5 +3818,30 @@ mod tests {
         assert!(entry.active);
         assert!(!entry.user_confirmed);
         assert!(!entry.needs_review);
+    }
+
+    #[test]
+    fn extra_recording_buffer_clamps_to_two_seconds() {
+        assert_eq!(clamp_extra_recording_buffer_ms(99_999_999), 2_000);
+        assert_eq!(clamp_extra_recording_buffer_ms(150), 150);
+    }
+
+    #[test]
+    fn audio_feedback_volume_normalizes_non_finite_and_out_of_range_values() {
+        assert_eq!(clamp_audio_feedback_volume(f32::NAN), 1.0);
+        assert_eq!(clamp_audio_feedback_volume(-3.0), 0.0);
+        assert_eq!(clamp_audio_feedback_volume(9.0), 1.0);
+    }
+
+    #[test]
+    fn word_correction_threshold_normalizes_non_finite_and_out_of_range_values() {
+        assert_eq!(clamp_word_correction_threshold(f64::NAN), 0.18);
+        assert_eq!(clamp_word_correction_threshold(7.5), 1.0);
+        assert_eq!(clamp_word_correction_threshold(-0.1), 0.0);
+    }
+
+    #[test]
+    fn paste_delay_clamps_to_two_seconds() {
+        assert_eq!(clamp_paste_delay_ms(60_000), 2_000);
     }
 }

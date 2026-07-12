@@ -43,6 +43,39 @@ impl TranscribeRsProvider {
             model_id: None,
         }
     }
+
+    /// Load Whisper with parameters captured by the caller while it holds the
+    /// model-load lock. Other engines still use their global configuration
+    /// because transcribe-rs does not expose per-load parameters for them.
+    pub fn load_with_whisper_params(
+        &mut self,
+        asset: &ModelAsset,
+        use_gpu: bool,
+        requested_gpu_device: i32,
+    ) -> Result<()> {
+        if !matches!(asset.metadata.engine_type, EngineType::Whisper) {
+            return self.load(asset);
+        }
+
+        let model_path = match &asset.locator {
+            ModelLocator::File(path) | ModelLocator::Directory(path) => path,
+            ModelLocator::ManagedServer { .. } | ModelLocator::ExternalHttp { .. } => {
+                return Err(anyhow::anyhow!(
+                    "transcribe_rs provider requires a local file or directory model asset"
+                ));
+            }
+        };
+        let params = WhisperLoadParams {
+            use_gpu,
+            flash_attn: false,
+            gpu_device: resolve_whisper_gpu_device(use_gpu, requested_gpu_device),
+        };
+        self.engine = Some(LoadedEngine::Whisper(WhisperEngine::load_with_params(
+            model_path, params,
+        )?));
+        self.model_id = Some(asset.id.clone());
+        Ok(())
+    }
 }
 
 impl Default for TranscribeRsProvider {

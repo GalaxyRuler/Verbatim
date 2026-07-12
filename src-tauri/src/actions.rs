@@ -332,8 +332,11 @@ fn complete_adaptive_insertion(request: AdaptiveInsertionRequest) {
     let verify_adaptive_target =
         should_verify_adaptive_target(&context) && should_capture_adaptive_context(&settings);
     let target_verified = if verify_adaptive_target {
-        let current_context =
-            crate::adaptive::context::capture_context(&settings.adaptive_private_app_patterns);
+        let context_runtime = crate::runtime_settings::context_runtime(&settings);
+        let current_context = crate::adaptive::context::capture_context(
+            context_runtime.private_app_patterns(),
+            context_runtime.should_capture_nearby_text(),
+        );
         adaptive_target_verified(&context, &current_context)
     } else {
         true
@@ -972,8 +975,11 @@ fn classic_target_verified(
         return true;
     }
 
-    let current_context =
-        crate::adaptive::context::capture_context(&settings.adaptive_private_app_patterns);
+    let context_runtime = crate::runtime_settings::context_runtime(settings);
+    let current_context = crate::adaptive::context::capture_context(
+        context_runtime.private_app_patterns(),
+        context_runtime.should_capture_nearby_text(),
+    );
     adaptive_target_verified(context, &current_context)
 }
 
@@ -1771,6 +1777,7 @@ impl ShortcutAction for TranscribeAction {
             {
                 let context = crate::adaptive::context::capture_context(
                     context_runtime.private_app_patterns(),
+                    context_runtime.should_capture_nearby_text(),
                 );
                 if target_privacy_exclusion_blocks_recording(&context) {
                     target_privacy_excluded = true;

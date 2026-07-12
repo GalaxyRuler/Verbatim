@@ -394,7 +394,9 @@ fn run_whisper_gpu_preflight_child(
 fn run_cached_whisper_gpu_preflight(model_path: &Path, gpu_device: i32) -> GpuPreflightOutcome {
     let cache_key = whisper_gpu_preflight_cache_key(model_path, gpu_device);
     {
-        let cache = whisper_gpu_preflight_ok_cache().lock().unwrap();
+        let cache = whisper_gpu_preflight_ok_cache()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         if cache.contains(&cache_key) {
             return GpuPreflightOutcome::Passed;
         }
@@ -404,7 +406,7 @@ fn run_cached_whisper_gpu_preflight(model_path: &Path, gpu_device: i32) -> GpuPr
     if outcome == GpuPreflightOutcome::Passed {
         whisper_gpu_preflight_ok_cache()
             .lock()
-            .unwrap()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
             .insert(cache_key);
     }
     outcome
@@ -478,9 +480,29 @@ pub struct LoadingGuard {
 
 impl Drop for LoadingGuard {
     fn drop(&mut self) {
-        let mut is_loading = self.is_loading.lock().unwrap();
+        let mut is_loading = self
+            .is_loading
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         *is_loading = false;
         self.loading_condvar.notify_all();
+    }
+}
+
+struct TranscriptionRunGuard {
+    is_transcribing: Arc<AtomicBool>,
+}
+
+impl TranscriptionRunGuard {
+    fn new(is_transcribing: Arc<AtomicBool>) -> Self {
+        is_transcribing.store(true, Ordering::Release);
+        Self { is_transcribing }
+    }
+}
+
+impl Drop for TranscriptionRunGuard {
+    fn drop(&mut self) {
+        self.is_transcribing.store(false, Ordering::Release);
     }
 }
 
@@ -540,6 +562,17 @@ fn model_not_loaded_for_transcription_error(last_load_error: Option<String>) -> 
     }
 }
 
+fn engine_unavailable_for_transcription_error(
+    is_transcribing: bool,
+    last_load_error: Option<String>,
+) -> anyhow::Error {
+    if is_transcribing {
+        anyhow::anyhow!("transcription already in progress; try again")
+    } else {
+        model_not_loaded_for_transcription_error(last_load_error)
+    }
+}
+
 #[derive(Clone)]
 pub struct TranscriptionManager {
     engine: Arc<Mutex<Option<TranscribeRsProvider>>>,
@@ -551,6 +584,8 @@ pub struct TranscriptionManager {
     watcher_handle: Arc<Mutex<Option<thread::JoinHandle<()>>>>,
     is_loading: Arc<Mutex<bool>>,
     loading_condvar: Arc<Condvar>,
+    load_lock: Arc<Mutex<()>>,
+    is_transcribing: Arc<AtomicBool>,
     last_load_error: Arc<Mutex<Option<String>>>,
 }
 
@@ -566,6 +601,8 @@ impl TranscriptionManager {
             watcher_handle: Arc::new(Mutex::new(None)),
             is_loading: Arc::new(Mutex::new(false)),
             loading_condvar: Arc::new(Condvar::new()),
+            load_lock: Arc::new(Mutex::new(())),
+            is_transcribing: Arc::new(AtomicBool::new(false)),
             last_load_error: Arc::new(Mutex::new(None)),
         };
 
@@ -637,7 +674,10 @@ impl TranscriptionManager {
                 }
                 debug!("Idle watcher thread shutting down gracefully");
             });
-            *manager.watcher_handle.lock().unwrap() = Some(handle);
+            *manager
+                .watcher_handle
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(handle);
         }
 
         Ok(manager)
@@ -661,7 +701,10 @@ impl TranscriptionManager {
     /// clear the flag and wake waiters. Returns `None` if a load is already in
     /// progress.
     pub fn try_start_loading(&self) -> Option<LoadingGuard> {
-        let mut is_loading = self.is_loading.lock().unwrap();
+        let mut is_loading = self
+            .is_loading
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         if *is_loading {
             return None;
         }
@@ -685,7 +728,10 @@ impl TranscriptionManager {
             *engine = None;
         }
         {
-            let mut current_model = self.current_model_id.lock().unwrap();
+            let mut current_model = self
+                .current_model_id
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             *current_model = None;
         }
 
@@ -758,7 +804,10 @@ impl TranscriptionManager {
     }
 
     fn model_not_loaded_error(&self) -> anyhow::Error {
-        model_not_loaded_for_transcription_error(self.last_load_error())
+        engine_unavailable_for_transcription_error(
+            self.is_transcribing.load(Ordering::Acquire),
+            self.last_load_error(),
+        )
     }
 
     fn clear_current_model_id(&self) {
@@ -869,8 +918,8 @@ impl TranscriptionManager {
     fn now_ms() -> u64 {
         SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as u64
+            .map(|duration| duration.as_millis() as u64)
+            .unwrap_or(0)
     }
 
     /// Reset the idle timer to now.
@@ -892,6 +941,11 @@ impl TranscriptionManager {
     }
 
     pub fn load_model(&self, model_id: &str) -> Result<()> {
+        // Keep accelerator-global updates and provider construction serialized.
+        let _load_lock = self
+            .load_lock
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         self.refuse_if_engine_wedged()?;
         self.clear_last_load_error();
 
@@ -991,8 +1045,14 @@ impl TranscriptionManager {
             }
         }
         apply_accelerator_settings(&self.app_handle);
+        let whisper_use_gpu = settings.whisper_accelerator != WhisperAcceleratorSetting::Cpu;
+        let whisper_gpu_device = settings.whisper_gpu_device;
         let mut provider = TranscribeRsProvider::new();
-        let load_fallback = match provider.load(&model_asset) {
+        let load_fallback = match provider.load_with_whisper_params(
+            &model_asset,
+            whisper_use_gpu,
+            whisper_gpu_device,
+        ) {
             Ok(()) => None,
             Err(initial_error)
                 if should_retry_model_load_on_cpu(
@@ -1008,7 +1068,11 @@ impl TranscriptionManager {
                 apply_cpu_accelerator_fallback(model_info.engine_type.clone());
 
                 let mut cpu_provider = TranscribeRsProvider::new();
-                match cpu_provider.load(&model_asset) {
+                match cpu_provider.load_with_whisper_params(
+                    &model_asset,
+                    false,
+                    transcribe_rs::accel::GPU_DEVICE_AUTO,
+                ) {
                     Ok(()) => {
                         provider = cpu_provider;
                         Some("cpu_after_accelerator_load_failed".to_string())
@@ -1050,7 +1114,10 @@ impl TranscriptionManager {
             *engine = Some(provider);
         }
         {
-            let mut current_model = self.current_model_id.lock().unwrap();
+            let mut current_model = self
+                .current_model_id
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             *current_model = Some(model_id.to_string());
         }
 
@@ -1081,14 +1148,17 @@ impl TranscriptionManager {
 
     /// Kicks off the model loading in a background thread if it's not already loaded
     pub fn initiate_model_load(&self) {
-        let mut is_loading = self.is_loading.lock().unwrap();
-        if *is_loading || self.is_model_loaded() {
+        let loading_guard = match self.try_start_loading() {
+            Some(guard) => guard,
+            None => return,
+        };
+        if self.is_model_loaded() {
             return;
         }
 
-        *is_loading = true;
         let self_clone = self.clone();
         thread::spawn(move || {
+            let _loading_guard = loading_guard;
             let settings = get_settings(&self_clone.app_handle);
             if let Err(e) = self_clone.load_model(&settings.selected_model) {
                 self_clone.set_last_load_error(e.to_string());
@@ -1096,14 +1166,14 @@ impl TranscriptionManager {
             } else {
                 self_clone.clear_last_load_error();
             }
-            let mut is_loading = self_clone.is_loading.lock().unwrap();
-            *is_loading = false;
-            self_clone.loading_condvar.notify_all();
         });
     }
 
     pub fn get_current_model(&self) -> Option<String> {
-        let current_model = self.current_model_id.lock().unwrap();
+        let current_model = self
+            .current_model_id
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         current_model.clone()
     }
 
@@ -1207,11 +1277,18 @@ impl TranscriptionManager {
             let provider = match engine_guard.take() {
                 Some(provider) => provider,
                 None => {
-                    return Err(anyhow::anyhow!(
-                        "Model failed to load after auto-load attempt. Please check your model settings."
-                    ));
+                    return Err(self.model_not_loaded_error());
                 }
             };
+            // Claim the active inference state before releasing the empty engine
+            // mutex so concurrent callers deterministically receive the busy error.
+            // Both the receiver and worker retain this guard. On normal completion
+            // the receiver keeps the busy state through provider restoration; on a
+            // timeout it drops its copy while the worker remains the final owner.
+            let transcription_run_guard = Arc::new(TranscriptionRunGuard::new(Arc::clone(
+                &self.is_transcribing,
+            )));
+            let worker_transcription_run_guard = Arc::clone(&transcription_run_guard);
 
             // Release the lock before transcribing — no mutex held during the engine call
             drop(engine_guard);
@@ -1222,6 +1299,7 @@ impl TranscriptionManager {
             let inference_thread = thread::Builder::new()
                 .name("verbatim-inference".to_string())
                 .spawn(move || {
+                    let _transcription_run_guard = worker_transcription_run_guard;
                     let _exit_guard = InferenceRunExitGuard::new(worker_run_state);
                     let mut provider = provider;
                     let transcribe_result =
@@ -1309,7 +1387,7 @@ fn apply_local_text_transforms(
         apply_dictionary_entries(
             &raw_text,
             &settings.dictionary_entries,
-            settings.word_correction_threshold,
+            crate::settings::clamp_word_correction_threshold(settings.word_correction_threshold),
         )
     } else {
         raw_text
@@ -1438,7 +1516,12 @@ impl Drop for TranscriptionManager {
         self.shutdown_signal.store(true, Ordering::Relaxed);
 
         // Wait for the thread to finish gracefully
-        if let Some(handle) = self.watcher_handle.lock().unwrap().take() {
+        if let Some(handle) = self
+            .watcher_handle
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take()
+        {
             if let Err(e) = handle.join() {
                 warn!("Failed to join idle watcher thread: {:?}", e);
             } else {
@@ -1553,6 +1636,26 @@ mod tests {
         assert!(engine_wedged_restart_required());
 
         reset_abandoned_inference_threads_for_test();
+    }
+
+    #[test]
+    fn empty_engine_while_the_inference_guard_is_active_reports_busy() {
+        let is_transcribing = Arc::new(AtomicBool::new(false));
+        let receiver_guard = Arc::new(TranscriptionRunGuard::new(Arc::clone(&is_transcribing)));
+        let worker_guard = Arc::clone(&receiver_guard);
+        let error = engine_unavailable_for_transcription_error(
+            is_transcribing.load(Ordering::Acquire),
+            None,
+        );
+
+        assert_eq!(
+            error.to_string(),
+            "transcription already in progress; try again"
+        );
+        drop(worker_guard);
+        assert!(is_transcribing.load(Ordering::Acquire));
+        drop(receiver_guard);
+        assert!(!is_transcribing.load(Ordering::Acquire));
     }
 
     #[test]
@@ -1788,6 +1891,28 @@ mod tests {
             apply_local_text_transforms("please use email signature".to_string(), &settings, false);
 
         assert_eq!(result, "please use Regards,\nAbdullah");
+    }
+
+    #[test]
+    fn local_text_transforms_clamp_legacy_word_correction_threshold() {
+        let mut legacy = crate::settings::get_default_settings();
+        legacy.word_correction_threshold = f64::NAN;
+        legacy.dictionary_entries = vec![crate::settings::DictionaryEntry {
+            id: "dictionary_1_postgres".to_string(),
+            phrase: "Postgres".to_string(),
+            replacement_of: None,
+            source: crate::settings::DictionaryEntrySource::Manual,
+            priority: crate::settings::DictionaryEntryPriority::Normal,
+            created_at_ms: 1,
+            updated_at_ms: 1,
+            active: true,
+            user_confirmed: false,
+            needs_review: false,
+        }];
+
+        let result = apply_local_text_transforms("posgres is running".to_string(), &legacy, false);
+
+        assert_eq!(result, "Postgres is running");
     }
 
     #[test]

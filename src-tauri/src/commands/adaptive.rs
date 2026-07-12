@@ -1,6 +1,6 @@
 use crate::adaptive::profile::{find_profile_or_default, AdaptiveProfile};
 use crate::managers::history::{AdaptiveHistoryMetadata, HistoryEntry, HistoryManager};
-use crate::settings::{get_settings, mutate_settings_locked};
+use crate::settings::{get_settings, try_write_settings_domain, SettingsWriteDomain};
 use std::sync::Arc;
 use tauri::{AppHandle, State};
 
@@ -65,10 +65,10 @@ pub fn reset_adaptive_correction_memory(_app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 #[specta::specta]
 pub fn set_adaptive_correction_memory_enabled(app: AppHandle, enabled: bool) -> Result<(), String> {
-    mutate_settings_locked(&app, |settings| {
+    try_write_settings_domain(&app, SettingsWriteDomain::Adaptive, |settings| {
         settings.adaptive_correction_memory_enabled = enabled;
-    });
-    Ok(())
+        Ok(())
+    })
 }
 
 #[tauri::command]

@@ -135,6 +135,7 @@ gtk = "0.18"
 transcribe-rs = { version = "0.3.3", optional = true, features = ["whisper-vulkan"] }
 
 [patch.crates-io]
+tauri-plugin-store = { git = "https://github.com/GalaxyRuler/plugins-workspace", rev = "78a7bdaade6f93252228532065fc0d20b3f2d4df" }
 tauri-runtime = { git = "https://github.com/GalaxyRuler/tauri.git", rev = "ad9ba9448b82b1a1628333ae06459e4def470db3" }
 tauri-runtime-wry = { git = "https://github.com/GalaxyRuler/tauri.git", rev = "ad9ba9448b82b1a1628333ae06459e4def470db3" }
 tauri-utils = { git = "https://github.com/GalaxyRuler/tauri.git", rev = "ad9ba9448b82b1a1628333ae06459e4def470db3" }

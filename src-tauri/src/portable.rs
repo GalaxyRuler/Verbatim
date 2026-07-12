@@ -118,6 +118,7 @@ mod tests {
         let marker = dir.join("portable");
         let mut f = std::fs::File::create(&marker).unwrap();
         write!(f, "Verbatim Portable Mode").unwrap();
+        drop(f);
         assert!(is_valid_portable_marker(&marker));
         std::fs::remove_dir_all(dir).unwrap();
     }
@@ -139,6 +140,7 @@ mod tests {
         let marker = dir.join("portable");
         let mut f = std::fs::File::create(&marker).unwrap();
         write!(f, "some other content").unwrap();
+        drop(f);
         assert!(!is_valid_portable_marker(&marker));
         std::fs::remove_dir_all(dir).unwrap();
     }
@@ -167,6 +169,7 @@ mod tests {
         let marker = dir.join("portable");
         let mut f = std::fs::File::create(&marker).unwrap();
         write!(f, "  Verbatim Portable Mode\n").unwrap();
+        drop(f);
         assert!(is_valid_portable_marker(&marker));
         std::fs::remove_dir_all(dir).unwrap();
     }
