@@ -1806,8 +1806,15 @@ fn load_settings_from_store_read_only<R: tauri::Runtime>(
         // A first-run or recovered value is only safe to use after the startup loader has
         // durably persisted it. Ordinary reads must never become that persistence boundary.
         persistence_error: match load_origin {
-            SettingsLoadOrigin::Parsed => None,
-            SettingsLoadOrigin::New | SettingsLoadOrigin::Recovered => {
+            // A clean first-run default is safe to report on a read: history and
+            // recordings default ON and the startup loader durably persists them
+            // moments later. Failing closed here disabled retention on every fresh
+            // install (regressing the packaged first-launch contract), because
+            // early get_settings reads run before the startup loader persists.
+            SettingsLoadOrigin::Parsed | SettingsLoadOrigin::New => None,
+            // A recovered (previously unparseable) value has unknown user intent;
+            // do not enable retention from it on a read until startup re-persists.
+            SettingsLoadOrigin::Recovered => {
                 Some("settings initialization is deferred to startup".to_string())
             }
         },
@@ -2699,6 +2706,39 @@ mod tests {
             .copied()
             .or_else(|| panic.downcast_ref::<String>().map(String::as_str));
         assert_eq!(message, Some("injected store deserializer panic"));
+    }
+
+    #[test]
+    fn clean_first_run_read_reports_default_retention_not_privacy_safe_fallback() {
+        // Regression: a read-only load of a clean (empty) store must report the
+        // documented first-launch defaults (history/recordings ON), not the
+        // privacy-safe fallback. Early get_settings reads happen before the
+        // startup loader persists; failing closed here disabled retention on
+        // every fresh install (packaged first-launch smoke regression).
+        let temp_dir = tempfile::tempdir().expect("create settings tempdir");
+        let store_path = temp_dir.path().join("settings").join("settings.json");
+
+        let app = tauri::test::mock_builder()
+            .plugin(tauri_plugin_store::Builder::new().build())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("build Tauri test app");
+        let store = app
+            .store_builder(&store_path)
+            .disable_auto_save()
+            .build()
+            .expect("build empty settings store");
+        assert!(store.get("settings").is_none());
+
+        let outcome = load_settings_from_store_read_only(store.as_ref());
+        assert_eq!(outcome.load_origin, SettingsLoadOrigin::New);
+        assert!(
+            outcome.persistence_error.is_none(),
+            "a clean first-run read must not be flagged as unpersistable"
+        );
+
+        let runtime_settings = settings_for_non_command_read(outcome);
+        assert!(runtime_settings.history_enabled);
+        assert!(runtime_settings.recordings_enabled);
     }
 
     #[test]
