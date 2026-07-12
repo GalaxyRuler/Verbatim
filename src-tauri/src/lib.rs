@@ -12,6 +12,7 @@ mod credentials;
 mod dictation_transaction;
 mod dictionary;
 mod dictionary_learning;
+mod download;
 mod elevation_watch;
 mod helpers;
 mod input;
@@ -1131,6 +1132,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             shortcut::change_formatting_level_setting,
             shortcut::change_experimental_enabled_setting,
             shortcut::change_post_process_base_url_setting,
+            shortcut::change_post_process_insecure_lan_setting,
             shortcut::change_post_process_api_key_setting,
             shortcut::change_post_process_model_setting,
             shortcut::set_post_process_provider,

@@ -126,6 +126,12 @@ pub(crate) struct RecordingStopResult {
     pub(crate) vad_fallback: bool,
 }
 
+#[derive(Default)]
+struct MicrophoneLifecycleState {
+    is_open: bool,
+    did_mute: bool,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum RecordingStopOutcome {
     Complete,
@@ -313,12 +319,12 @@ pub struct AudioRecordingManager {
     app_handle: tauri::AppHandle,
 
     recorder: Arc<Mutex<Option<AudioRecorder>>>,
-    is_open: Arc<Mutex<bool>>,
+    lifecycle: Arc<Mutex<MicrophoneLifecycleState>>,
+    mute_api: Arc<Mutex<()>>,
     is_recording: Arc<Mutex<bool>>,
     recording_started_at: Arc<Mutex<Option<Instant>>>,
     mic_diagnostic: Arc<Mutex<SilenceDiagnostic>>,
     mic_diagnostic_state: Arc<Mutex<MicDiagnosticState>>,
-    did_mute: Arc<Mutex<bool>>,
     close_generation: Arc<AtomicU64>,
 }
 
@@ -339,12 +345,12 @@ impl AudioRecordingManager {
             app_handle: app.clone(),
 
             recorder: Arc::new(Mutex::new(None)),
-            is_open: Arc::new(Mutex::new(false)),
+            lifecycle: Arc::new(Mutex::new(MicrophoneLifecycleState::default())),
+            mute_api: Arc::new(Mutex::new(())),
             is_recording: Arc::new(Mutex::new(false)),
             recording_started_at: Arc::new(Mutex::new(None)),
             mic_diagnostic: Arc::new(Mutex::new(SilenceDiagnostic::default())),
             mic_diagnostic_state: Arc::new(Mutex::new(MicDiagnosticState::Recording)),
-            did_mute: Arc::new(Mutex::new(false)),
             close_generation: Arc::new(AtomicU64::new(0)),
         };
 
@@ -541,22 +547,35 @@ impl AudioRecordingManager {
     /// Applies mute if mute_while_recording is enabled and stream is open
     pub fn apply_mute(&self) {
         let settings = get_settings(&self.app_handle);
-        let mut did_mute_guard = self.did_mute.lock().unwrap_or_else(|e| e.into_inner());
+        let _mute_api_guard = self.mute_api.lock().unwrap_or_else(|e| e.into_inner());
+        let should_mute = {
+            let mut lifecycle = self.lifecycle.lock().unwrap_or_else(|e| e.into_inner());
+            if settings.mute_while_recording && lifecycle.is_open {
+                lifecycle.did_mute = true;
+                true
+            } else {
+                false
+            }
+        };
 
-        if settings.mute_while_recording && *self.is_open.lock().unwrap_or_else(|e| e.into_inner())
-        {
+        if should_mute {
             set_mute(true);
-            *did_mute_guard = true;
             debug!("Mute applied");
         }
     }
 
     /// Removes mute if it was applied
     pub fn remove_mute(&self) {
-        let mut did_mute_guard = self.did_mute.lock().unwrap_or_else(|e| e.into_inner());
-        if *did_mute_guard {
+        let _mute_api_guard = self.mute_api.lock().unwrap_or_else(|e| e.into_inner());
+        let should_unmute = {
+            let mut lifecycle = self.lifecycle.lock().unwrap_or_else(|e| e.into_inner());
+            let was_muted = lifecycle.did_mute;
+            lifecycle.did_mute = false;
+            was_muted
+        };
+
+        if should_unmute {
             set_mute(false);
-            *did_mute_guard = false;
             debug!("Mute removed");
         }
     }
@@ -579,8 +598,8 @@ impl AudioRecordingManager {
     }
 
     pub fn start_microphone_stream(&self) -> Result<(), anyhow::Error> {
-        let mut open_flag = self.is_open.lock().unwrap_or_else(|e| e.into_inner());
-        if *open_flag {
+        let mut lifecycle = self.lifecycle.lock().unwrap_or_else(|e| e.into_inner());
+        if lifecycle.is_open {
             debug!("Microphone stream already active");
             return Ok(());
         }
@@ -588,8 +607,7 @@ impl AudioRecordingManager {
         let start_time = Instant::now();
 
         // Don't mute immediately - caller will handle muting after audio feedback
-        let mut did_mute_guard = self.did_mute.lock().unwrap_or_else(|e| e.into_inner());
-        *did_mute_guard = false;
+        lifecycle.did_mute = false;
 
         // Get the selected device from settings, considering clamshell mode
         let settings = get_settings(&self.app_handle);
@@ -616,7 +634,7 @@ impl AudioRecordingManager {
                 .map_err(|e| anyhow::anyhow!("Failed to open recorder: {}", e))?;
         }
 
-        *open_flag = true;
+        lifecycle.is_open = true;
         // This timing covers through cpal's stream.play() returning — i.e. the
         // point cpal surfaces as "stream running." It does NOT guarantee the
         // host audio device is producing samples yet; the first input callback
@@ -630,16 +648,21 @@ impl AudioRecordingManager {
     }
 
     pub fn stop_microphone_stream(&self) {
-        let mut open_flag = self.is_open.lock().unwrap_or_else(|e| e.into_inner());
-        if !*open_flag {
-            return;
-        }
+        let _mute_api_guard = self.mute_api.lock().unwrap_or_else(|e| e.into_inner());
+        let should_unmute = {
+            let mut lifecycle = self.lifecycle.lock().unwrap_or_else(|e| e.into_inner());
+            if !lifecycle.is_open {
+                return;
+            }
 
-        let mut did_mute_guard = self.did_mute.lock().unwrap_or_else(|e| e.into_inner());
-        if *did_mute_guard {
+            lifecycle.is_open = false;
+            let was_muted = lifecycle.did_mute;
+            lifecycle.did_mute = false;
+            was_muted
+        };
+        if should_unmute {
             set_mute(false);
         }
-        *did_mute_guard = false;
 
         if let Some(rec) = self
             .recorder
@@ -656,7 +679,6 @@ impl AudioRecordingManager {
             let _ = rec.close();
         }
 
-        *open_flag = false;
         debug!("Microphone stream stopped");
     }
 
@@ -730,7 +752,12 @@ impl AudioRecordingManager {
 
     pub fn update_selected_device(&self) -> Result<(), anyhow::Error> {
         // If currently open, restart the microphone stream to use the new device
-        if *self.is_open.lock().unwrap_or_else(|e| e.into_inner()) {
+        if self
+            .lifecycle
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .is_open
+        {
             self.close_generation.fetch_add(1, Ordering::SeqCst);
             self.stop_microphone_stream();
             self.start_microphone_stream()?;
@@ -773,6 +800,7 @@ impl AudioRecordingManager {
                                 raw_samples: Vec::new(),
                                 device_error: false,
                                 dropped_resampler_chunks: 0,
+                                dropped_audio_chunks: 0,
                             }
                         }
                     }
@@ -783,6 +811,7 @@ impl AudioRecordingManager {
                         raw_samples: Vec::new(),
                         device_error: false,
                         dropped_resampler_chunks: 0,
+                        dropped_audio_chunks: 0,
                     }
                 };
 
@@ -802,10 +831,16 @@ impl AudioRecordingManager {
                     raw_samples,
                     device_error,
                     dropped_resampler_chunks,
+                    dropped_audio_chunks,
                 } = stop_output;
                 if dropped_resampler_chunks > 0 {
                     log::warn!(
                         "Microphone diagnostics: audio resampler dropped {dropped_resampler_chunks} chunk(s) during recording"
+                    );
+                }
+                if dropped_audio_chunks > 0 {
+                    log::warn!(
+                        "Microphone diagnostics: audio callback dropped {dropped_audio_chunks} newest chunk(s)"
                     );
                 }
                 let sample_selection = if device_error {
@@ -966,6 +1001,16 @@ impl AudioRecordingManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{mpsc, Arc, Barrier};
+    use std::time::Duration;
+
+    fn with_lifecycle_state<T>(
+        lifecycle: &Mutex<MicrophoneLifecycleState>,
+        update: impl FnOnce(&mut MicrophoneLifecycleState) -> T,
+    ) -> T {
+        let mut lifecycle = lifecycle.lock().unwrap();
+        update(&mut lifecycle)
+    }
 
     fn dev<'a>(stable_id: Option<&'a str>, name: &'a str) -> DeviceSelectionInfo<'a> {
         DeviceSelectionInfo { stable_id, name }
@@ -1160,5 +1205,70 @@ mod tests {
             extra_recording_buffer_delay(&legacy),
             Some(Duration::from_millis(2_000))
         );
+    }
+
+    #[test]
+    fn microphone_lifecycle_state_removes_abba_deadlock() {
+        let is_open = Arc::new(Mutex::new(false));
+        let did_mute = Arc::new(Mutex::new(false));
+        let barrier = Arc::new(Barrier::new(2));
+        let release_barrier = Arc::new(Barrier::new(2));
+
+        let old_apply = {
+            let is_open = Arc::clone(&is_open);
+            let did_mute = Arc::clone(&did_mute);
+            let barrier = Arc::clone(&barrier);
+            let release_barrier = Arc::clone(&release_barrier);
+            std::thread::spawn(move || {
+                let _did_mute = did_mute.lock().unwrap();
+                barrier.wait();
+                let blocked =
+                    matches!(is_open.try_lock(), Err(std::sync::TryLockError::WouldBlock));
+                release_barrier.wait();
+                blocked
+            })
+        };
+        let old_stop = {
+            let is_open = Arc::clone(&is_open);
+            let did_mute = Arc::clone(&did_mute);
+            let barrier = Arc::clone(&barrier);
+            let release_barrier = Arc::clone(&release_barrier);
+            std::thread::spawn(move || {
+                let _is_open = is_open.lock().unwrap();
+                barrier.wait();
+                let blocked = matches!(
+                    did_mute.try_lock(),
+                    Err(std::sync::TryLockError::WouldBlock)
+                );
+                release_barrier.wait();
+                blocked
+            })
+        };
+
+        assert!(old_apply.join().unwrap());
+        assert!(old_stop.join().unwrap());
+
+        let lifecycle = Arc::new(Mutex::new(MicrophoneLifecycleState::default()));
+        let start_barrier = Arc::new(Barrier::new(8));
+        let (done_tx, done_rx) = mpsc::channel();
+        for _ in 0..8 {
+            let lifecycle = Arc::clone(&lifecycle);
+            let start_barrier = Arc::clone(&start_barrier);
+            let done_tx = done_tx.clone();
+            std::thread::spawn(move || {
+                start_barrier.wait();
+                with_lifecycle_state(&lifecycle, |state| {
+                    state.is_open = true;
+                    state.did_mute = false;
+                });
+                done_tx.send(()).unwrap();
+            });
+        }
+
+        for _ in 0..8 {
+            done_rx
+                .recv_timeout(Duration::from_secs(1))
+                .expect("all lifecycle transitions must complete without deadlock");
+        }
     }
 }

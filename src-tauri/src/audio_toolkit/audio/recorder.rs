@@ -2,7 +2,7 @@ use std::{
     collections::VecDeque,
     io::Error,
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         mpsc, Arc, Mutex,
     },
     time::{Duration, Instant},
@@ -28,6 +28,7 @@ enum Cmd {
 
 enum AudioChunk {
     Samples(Vec<f32>),
+    #[cfg_attr(not(test), allow(dead_code))]
     EndOfStream,
 }
 
@@ -35,6 +36,7 @@ const RAW_FALLBACK_MAX_SECS: usize = 300;
 const RAW_FALLBACK_MAX_SAMPLES: usize =
     RAW_FALLBACK_MAX_SECS * constants::WHISPER_SAMPLE_RATE as usize;
 const WORKER_JOIN_TIMEOUT: Duration = Duration::from_secs(3);
+const AUDIO_QUEUE_CAPACITY: usize = 32;
 
 fn join_worker_with_timeout(worker: std::thread::JoinHandle<()>, timeout: Duration) -> bool {
     let deadline = Instant::now() + timeout;
@@ -60,6 +62,7 @@ pub struct RecorderStopOutput {
     pub raw_samples: Vec<f32>,
     pub device_error: bool,
     pub dropped_resampler_chunks: usize,
+    pub dropped_audio_chunks: usize,
 }
 
 pub struct AudioRecorder {
@@ -101,7 +104,9 @@ impl AudioRecorder {
             return Ok(()); // already open
         }
 
-        let (sample_tx, sample_rx) = mpsc::channel::<AudioChunk>();
+        let (sample_tx, sample_rx) = mpsc::sync_channel::<AudioChunk>(AUDIO_QUEUE_CAPACITY);
+        let eos_pending = Arc::new(AtomicBool::new(false));
+        let audio_overruns = Arc::new(AtomicUsize::new(0));
         let (cmd_tx, cmd_rx) = mpsc::channel::<Cmd>();
         let (init_tx, init_rx) = mpsc::sync_channel::<Result<(), String>>(1);
 
@@ -119,6 +124,8 @@ impl AudioRecorder {
         let vad = self.vad.clone();
         // Move the optional level callback into the worker thread
         let level_cb = self.level_cb.clone();
+        let worker_eos_pending = Arc::clone(&eos_pending);
+        let worker_audio_overruns = Arc::clone(&audio_overruns);
 
         let worker = std::thread::spawn(move || {
             let stop_flag = Arc::new(AtomicBool::new(false));
@@ -153,6 +160,8 @@ impl AudioRecorder {
                         channels,
                         stop_flag.clone(),
                         device_error.clone(),
+                        eos_pending.clone(),
+                        audio_overruns.clone(),
                     )
                     .map_err(|e| format!("Failed to build input stream: {e}"))?,
                     cpal::SampleFormat::I8 => AudioRecorder::build_stream::<i8>(
@@ -162,6 +171,8 @@ impl AudioRecorder {
                         channels,
                         stop_flag.clone(),
                         device_error.clone(),
+                        eos_pending.clone(),
+                        audio_overruns.clone(),
                     )
                     .map_err(|e| format!("Failed to build input stream: {e}"))?,
                     cpal::SampleFormat::I16 => AudioRecorder::build_stream::<i16>(
@@ -171,6 +182,8 @@ impl AudioRecorder {
                         channels,
                         stop_flag.clone(),
                         device_error.clone(),
+                        eos_pending.clone(),
+                        audio_overruns.clone(),
                     )
                     .map_err(|e| format!("Failed to build input stream: {e}"))?,
                     cpal::SampleFormat::I32 => AudioRecorder::build_stream::<i32>(
@@ -180,6 +193,8 @@ impl AudioRecorder {
                         channels,
                         stop_flag.clone(),
                         device_error.clone(),
+                        eos_pending.clone(),
+                        audio_overruns.clone(),
                     )
                     .map_err(|e| format!("Failed to build input stream: {e}"))?,
                     cpal::SampleFormat::F32 => AudioRecorder::build_stream::<f32>(
@@ -189,6 +204,8 @@ impl AudioRecorder {
                         channels,
                         stop_flag.clone(),
                         device_error.clone(),
+                        eos_pending.clone(),
+                        audio_overruns.clone(),
                     )
                     .map_err(|e| format!("Failed to build input stream: {e}"))?,
                     sample_format => {
@@ -215,6 +232,8 @@ impl AudioRecorder {
                         cmd_rx,
                         level_cb,
                         stop_flag,
+                        worker_eos_pending,
+                        worker_audio_overruns,
                     );
                     drop(stream);
                 }
@@ -328,10 +347,12 @@ impl AudioRecorder {
     fn build_stream<T>(
         device: &cpal::Device,
         config: &cpal::SupportedStreamConfig,
-        sample_tx: mpsc::Sender<AudioChunk>,
+        sample_tx: mpsc::SyncSender<AudioChunk>,
         channels: usize,
         stop_flag: Arc<AtomicBool>,
         device_error: Arc<AtomicBool>,
+        eos_pending: Arc<AtomicBool>,
+        audio_overruns: Arc<AtomicUsize>,
     ) -> Result<cpal::Stream, cpal::BuildStreamError>
     where
         T: Sample + SizedSample + Send + 'static,
@@ -340,11 +361,13 @@ impl AudioRecorder {
         let mut output_buffer = Vec::new();
         let mut eos_sent = false;
         let stream_sample_tx = sample_tx.clone();
+        let stream_eos_pending = Arc::clone(&eos_pending);
+        let stream_audio_overruns = Arc::clone(&audio_overruns);
 
         let stream_cb = move |data: &[T], _: &cpal::InputCallbackInfo| {
             if stop_flag.load(Ordering::Relaxed) {
                 if !eos_sent {
-                    let _ = stream_sample_tx.send(AudioChunk::EndOfStream);
+                    stream_eos_pending.store(true, Ordering::Release);
                     eos_sent = true;
                 }
                 return;
@@ -369,12 +392,11 @@ impl AudioRecorder {
                 }
             }
 
-            if stream_sample_tx
-                .send(AudioChunk::Samples(output_buffer.clone()))
-                .is_err()
-            {
-                log::error!("Failed to send samples");
-            }
+            try_send_audio_chunk(
+                &stream_sample_tx,
+                AudioChunk::Samples(output_buffer.clone()),
+                &stream_audio_overruns,
+            );
         };
 
         device.build_input_stream(
@@ -383,7 +405,7 @@ impl AudioRecorder {
             move |err| {
                 log::error!("Stream error: {}", err);
                 device_error.store(true, Ordering::SeqCst);
-                let _ = sample_tx.send(AudioChunk::EndOfStream);
+                eos_pending.store(true, Ordering::Release);
             },
             None,
         )
@@ -459,13 +481,36 @@ pub fn is_no_input_device_error(error_message: &str) -> bool {
             && normalized.contains("coreaudio"))
 }
 
+fn try_send_audio_chunk(
+    sample_tx: &mpsc::SyncSender<AudioChunk>,
+    chunk: AudioChunk,
+    audio_overruns: &AtomicUsize,
+) {
+    match sample_tx.try_send(chunk) {
+        Ok(()) => {}
+        Err(mpsc::TrySendError::Full(_)) => {
+            audio_overruns.fetch_add(1, Ordering::Relaxed);
+        }
+        Err(mpsc::TrySendError::Disconnected(_)) => {}
+    }
+}
+
+#[cfg(test)]
+fn take_eos_if_drained(sample_rx: &mpsc::Receiver<AudioChunk>, eos_pending: &AtomicBool) -> bool {
+    if sample_rx.try_recv().is_ok() {
+        return false;
+    }
+    eos_pending.swap(false, Ordering::AcqRel)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         is_microphone_access_denied, is_no_input_device_error, join_worker_with_timeout,
-        run_consumer, AudioChunk, Cmd, FrameResampler,
+        run_consumer, take_eos_if_drained, try_send_audio_chunk, AudioChunk, Cmd, FrameResampler,
+        AUDIO_QUEUE_CAPACITY,
     };
-    use std::sync::atomic::AtomicBool;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::{mpsc, Arc};
     use std::time::Duration;
 
@@ -523,9 +568,13 @@ mod tests {
 
     #[test]
     fn start_command_applies_before_first_audio_chunk_after_start_request() {
-        let (sample_tx, sample_rx) = mpsc::channel();
+        let (sample_tx, sample_rx) = mpsc::sync_channel(AUDIO_QUEUE_CAPACITY);
         let (cmd_tx, cmd_rx) = mpsc::channel();
         let stop_flag = Arc::new(AtomicBool::new(false));
+        let eos_pending = Arc::new(AtomicBool::new(false));
+        let audio_overruns = Arc::new(AtomicUsize::new(0));
+        let consumer_eos_pending = Arc::clone(&eos_pending);
+        let consumer_audio_overruns = Arc::clone(&audio_overruns);
 
         let consumer = std::thread::spawn(move || {
             run_consumer(
@@ -536,6 +585,8 @@ mod tests {
                 cmd_rx,
                 None,
                 stop_flag,
+                consumer_eos_pending,
+                consumer_audio_overruns,
             );
         });
 
@@ -564,9 +615,13 @@ mod tests {
 
     #[test]
     fn eos_before_stop_unblocks_stop_without_drain_timeout() {
-        let (sample_tx, sample_rx) = mpsc::channel();
+        let (sample_tx, sample_rx) = mpsc::sync_channel(AUDIO_QUEUE_CAPACITY);
         let (cmd_tx, cmd_rx) = mpsc::channel();
         let stop_flag = Arc::new(AtomicBool::new(false));
+        let eos_pending = Arc::new(AtomicBool::new(false));
+        let audio_overruns = Arc::new(AtomicUsize::new(0));
+        let consumer_eos_pending = Arc::clone(&eos_pending);
+        let consumer_audio_overruns = Arc::clone(&audio_overruns);
         let (barrier_tx, barrier_rx) = mpsc::channel();
         let level_cb: Arc<dyn Fn(Vec<f32>) + Send + Sync> = Arc::new(move |_| {
             let _ = barrier_tx.send(());
@@ -581,6 +636,8 @@ mod tests {
                 cmd_rx,
                 Some(level_cb),
                 stop_flag,
+                consumer_eos_pending,
+                consumer_audio_overruns,
             );
         });
 
@@ -600,6 +657,22 @@ mod tests {
         drop(cmd_tx);
         consumer.join().unwrap();
     }
+
+    #[test]
+    fn bounded_audio_queue_drops_newest_but_keeps_eos_reliable() {
+        let (sample_tx, sample_rx) = mpsc::sync_channel(AUDIO_QUEUE_CAPACITY);
+        let overruns = Arc::new(AtomicUsize::new(0));
+
+        for _ in 0..(AUDIO_QUEUE_CAPACITY + 20) {
+            try_send_audio_chunk(&sample_tx, AudioChunk::Samples(vec![0.0; 32]), &overruns);
+        }
+        let eos_pending = Arc::new(AtomicBool::new(true));
+
+        assert!(overruns.load(Ordering::Relaxed) >= 20);
+        let retained = sample_rx.try_iter().count();
+        assert_eq!(retained, AUDIO_QUEUE_CAPACITY);
+        assert!(take_eos_if_drained(&sample_rx, &eos_pending));
+    }
 }
 
 fn run_consumer(
@@ -610,6 +683,8 @@ fn run_consumer(
     cmd_rx: mpsc::Receiver<Cmd>,
     level_cb: Option<Arc<dyn Fn(Vec<f32>) + Send + Sync + 'static>>,
     stop_flag: Arc<AtomicBool>,
+    eos_pending: Arc<AtomicBool>,
+    audio_overruns: Arc<AtomicUsize>,
 ) {
     let mut processed_samples = Vec::<f32>::new();
     let mut raw_samples = VecDeque::<f32>::new();
@@ -637,8 +712,14 @@ fn run_consumer(
                 // The cpal callback sees the stop flag, sends EndOfStream, and goes
                 // silent — guaranteeing every captured sample is in the channel
                 // ahead of the sentinel.
+                let eos_deadline = Instant::now() + Duration::from_secs(2);
                 loop {
-                    match sample_rx.recv_timeout(Duration::from_secs(2)) {
+                    let remaining = eos_deadline.saturating_duration_since(Instant::now());
+                    if remaining.is_zero() {
+                        log::warn!("Timed out waiting for EndOfStream from audio callback");
+                        break;
+                    }
+                    match sample_rx.recv_timeout(remaining.min(Duration::from_millis(20))) {
                         Ok(AudioChunk::Samples(remaining)) => {
                             frame_resampler.push(&remaining, &mut |frame: &[f32]| {
                                 handle_frame(
@@ -651,10 +732,12 @@ fn run_consumer(
                             });
                         }
                         Ok(AudioChunk::EndOfStream) => break,
-                        Err(_) => {
-                            log::warn!("Timed out waiting for EndOfStream from audio callback");
-                            break;
+                        Err(mpsc::RecvTimeoutError::Timeout) => {
+                            if eos_pending.swap(false, Ordering::AcqRel) {
+                                break;
+                            }
                         }
+                        Err(mpsc::RecvTimeoutError::Disconnected) => break,
                     }
                 }
             }
@@ -663,12 +746,20 @@ fn run_consumer(
                 handle_frame(frame, true, &vad, &mut processed_samples, &mut raw_samples)
             });
             let dropped_resampler_chunks = frame_resampler.take_dropped_chunks();
+            let dropped_audio_chunks = audio_overruns.swap(0, Ordering::Relaxed);
+            if dropped_audio_chunks > 0 {
+                log::warn!(
+                    "Audio callback dropped {} newest chunks because the consumer was behind",
+                    dropped_audio_chunks
+                );
+            }
 
             let _ = $reply_tx.send(RecorderStopOutput {
                 samples: std::mem::take(&mut processed_samples),
                 raw_samples: std::mem::take(&mut raw_samples).into_iter().collect(),
                 device_error: false,
                 dropped_resampler_chunks,
+                dropped_audio_chunks,
             });
 
             // Resume the audio callback so the consumer loop can continue
@@ -764,6 +855,7 @@ fn run_consumer(
             AudioChunk::Samples(s) => s,
             AudioChunk::EndOfStream => {
                 end_of_stream_received = true;
+                eos_pending.store(false, Ordering::Release);
                 for cmd in deferred_commands {
                     if let Cmd::Stop(reply_tx) = cmd {
                         handle_stop!(reply_tx, false);

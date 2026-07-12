@@ -1,7 +1,6 @@
 use crate::settings::{get_settings, mutate_settings_locked};
 use anyhow::Result;
 use flate2::read::GzDecoder;
-use futures_util::StreamExt;
 use log::{debug, info, warn};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -579,14 +578,15 @@ impl ModelManager {
         };
 
         // Create HTTP client with range request for resuming
-        let client = reqwest::Client::new();
-        let mut request = client.get(&url);
+        let downloader = crate::download::DownloadClient::default();
+        let deadline = Instant::now() + downloader.total_timeout();
+        let mut request = downloader.get(&url);
 
         if resume_from > 0 {
             request = request.header("Range", format!("bytes={}-", resume_from));
         }
 
-        let mut response = request.send().await?;
+        let mut response = downloader.send(request, &cancel_flag).await?;
 
         // If we tried to resume but server returned 200 (not 206 Partial Content),
         // the server doesn't support range requests. Delete partial file and restart
@@ -603,7 +603,7 @@ impl ModelManager {
             resume_from = 0;
 
             // Restart download without range header
-            response = client.get(&url).send().await?;
+            response = downloader.send(downloader.get(&url), &cancel_flag).await?;
         }
 
         // Check for success or partial content status
@@ -624,7 +624,6 @@ impl ModelManager {
         };
 
         let mut downloaded = resume_from;
-        let mut stream = response.bytes_stream();
 
         // Open file for appending if resuming, or create new if starting fresh
         let mut file = if resume_from > 0 {
@@ -656,18 +655,10 @@ impl ModelManager {
         let throttle_duration = Duration::from_millis(100);
 
         // Download with progress
-        while let Some(chunk) = stream.next().await {
-            // Check if download was cancelled
-            if cancel_flag.load(Ordering::Relaxed) {
-                drop(file);
-                info!("Download cancelled for: {}", model_id);
-                // Keep partial file for resume functionality.
-                // Guard handles is_downloading + cancel_flags cleanup on drop.
-                return Ok(());
-            }
-
-            let chunk = chunk?;
-
+        while let Some(chunk) = downloader
+            .next_chunk(&mut response, &cancel_flag, deadline)
+            .await?
+        {
             file.write_all(&chunk)?;
             downloaded += chunk.len() as u64;
 

@@ -1,7 +1,6 @@
 //! Model pack metadata and filesystem helpers for Android ASR.
 
 use anyhow::Result;
-use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use specta::Type;
@@ -720,18 +719,21 @@ async fn download_component<R: Runtime>(
         .metadata()
         .map(|metadata| metadata.len())
         .unwrap_or(0);
-    let client = reqwest::Client::new();
-    let mut request = client.get(&file.url);
+    let downloader = crate::download::DownloadClient::default();
+    let deadline = Instant::now() + downloader.total_timeout();
+    let mut request = downloader.get(&file.url);
     if resume_from > 0 {
         request = request.header("Range", format!("bytes={resume_from}-"));
     }
 
-    let mut response = request.send().await?;
+    let mut response = downloader.send(request, cancel_flag).await?;
     if resume_from > 0 && response.status() == reqwest::StatusCode::OK {
         drop(response);
         let _ = fs::remove_file(&partial_path);
         resume_from = 0;
-        response = client.get(&file.url).send().await?;
+        response = downloader
+            .send(downloader.get(&file.url), cancel_flag)
+            .await?;
     }
 
     if !response.status().is_success() && response.status() != reqwest::StatusCode::PARTIAL_CONTENT
@@ -768,26 +770,11 @@ async fn download_component<R: Runtime>(
 
     let mut last_emit = Instant::now();
     let throttle = Duration::from_millis(100);
-    let mut stream = response.bytes_stream();
 
-    while let Some(chunk) = stream.next().await {
-        if cancel_flag.load(Ordering::Relaxed) {
-            drop(output);
-            emit_progress(
-                app,
-                model_id,
-                "cancelled",
-                Some(file.target_path.clone()),
-                downloaded,
-                total_size,
-            );
-            return Err(anyhow::anyhow!(
-                "Android ASR model download cancelled for {}",
-                model_id
-            ));
-        }
-
-        let chunk = chunk?;
+    while let Some(chunk) = downloader
+        .next_chunk(&mut response, cancel_flag, deadline)
+        .await?
+    {
         output.write_all(&chunk)?;
         downloaded += chunk.len() as u64;
         if last_emit.elapsed() >= throttle {

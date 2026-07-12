@@ -8,6 +8,84 @@ use tauri::{AppHandle, Manager};
 /// Enigo is wrapped in a Mutex since it requires mutable access.
 pub struct EnigoState(pub Mutex<Enigo>);
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+trait KeySink {
+    fn key(&mut self, key: Key, direction: enigo::Direction) -> Result<(), String>;
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+impl KeySink for Enigo {
+    fn key(&mut self, key: Key, direction: enigo::Direction) -> Result<(), String> {
+        Keyboard::key(self, key, direction).map_err(|e| e.to_string())
+    }
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+struct PressedKeyGuard<'a, S: KeySink> {
+    sink: &'a mut S,
+    pressed: Vec<Key>,
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+impl<'a, S: KeySink> PressedKeyGuard<'a, S> {
+    fn new(sink: &'a mut S) -> Self {
+        Self {
+            sink,
+            pressed: Vec::new(),
+        }
+    }
+
+    fn press(&mut self, key: Key) -> Result<(), String> {
+        self.sink
+            .key(key, enigo::Direction::Press)
+            .map_err(|error| format!("Failed to press key: {error}"))?;
+        self.pressed.push(key);
+        Ok(())
+    }
+
+    fn click(&mut self, key: Key) -> Result<(), String> {
+        self.sink
+            .key(key, enigo::Direction::Click)
+            .map_err(|error| format!("Failed to click key: {error}"))
+    }
+
+    fn release_all(&mut self) -> Result<(), String> {
+        let mut first_error = None;
+        for key in self.pressed.drain(..).rev() {
+            if let Err(error) = self.sink.key(key, enigo::Direction::Release) {
+                first_error.get_or_insert_with(|| format!("Failed to release key: {error}"));
+            }
+        }
+        first_error.map_or(Ok(()), Err)
+    }
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+impl<S: KeySink> Drop for PressedKeyGuard<'_, S> {
+    fn drop(&mut self) {
+        for key in self.pressed.drain(..).rev() {
+            let _ = self.sink.key(key, enigo::Direction::Release);
+        }
+    }
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn send_paste_chord<S: KeySink>(
+    sink: &mut S,
+    modifier_key: Key,
+    paste_key: Key,
+    with_shift: bool,
+) -> Result<(), String> {
+    let mut guard = PressedKeyGuard::new(sink);
+    guard.press(modifier_key)?;
+    if with_shift {
+        guard.press(Key::Shift)?;
+    }
+    guard.click(paste_key)?;
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    guard.release_all()
+}
+
 impl EnigoState {
     pub fn new() -> Result<Self, String> {
         let enigo = Enigo::new(&Settings::default())
@@ -37,21 +115,7 @@ pub fn send_paste_ctrl_v(enigo: &mut Enigo) -> Result<(), String> {
     #[cfg(target_os = "linux")]
     let (modifier_key, v_key_code) = (Key::Control, Key::Unicode('v'));
 
-    // Press modifier + V
-    enigo
-        .key(modifier_key, enigo::Direction::Press)
-        .map_err(|e| format!("Failed to press modifier key: {}", e))?;
-    enigo
-        .key(v_key_code, enigo::Direction::Click)
-        .map_err(|e| format!("Failed to click V key: {}", e))?;
-
-    std::thread::sleep(std::time::Duration::from_millis(100));
-
-    enigo
-        .key(modifier_key, enigo::Direction::Release)
-        .map_err(|e| format!("Failed to release modifier key: {}", e))?;
-
-    Ok(())
+    send_paste_chord(enigo, modifier_key, v_key_code, false)
 }
 
 #[cfg(any(target_os = "android", target_os = "ios"))]
@@ -72,27 +136,7 @@ pub fn send_paste_ctrl_shift_v(enigo: &mut Enigo) -> Result<(), String> {
     #[cfg(target_os = "linux")]
     let (modifier_key, v_key_code) = (Key::Control, Key::Unicode('v'));
 
-    // Press Ctrl/Cmd + Shift + V
-    enigo
-        .key(modifier_key, enigo::Direction::Press)
-        .map_err(|e| format!("Failed to press modifier key: {}", e))?;
-    enigo
-        .key(Key::Shift, enigo::Direction::Press)
-        .map_err(|e| format!("Failed to press Shift key: {}", e))?;
-    enigo
-        .key(v_key_code, enigo::Direction::Click)
-        .map_err(|e| format!("Failed to click V key: {}", e))?;
-
-    std::thread::sleep(std::time::Duration::from_millis(100));
-
-    enigo
-        .key(Key::Shift, enigo::Direction::Release)
-        .map_err(|e| format!("Failed to release Shift key: {}", e))?;
-    enigo
-        .key(modifier_key, enigo::Direction::Release)
-        .map_err(|e| format!("Failed to release modifier key: {}", e))?;
-
-    Ok(())
+    send_paste_chord(enigo, modifier_key, v_key_code, true)
 }
 
 #[cfg(any(target_os = "android", target_os = "ios"))]
@@ -110,21 +154,7 @@ pub fn send_paste_shift_insert(enigo: &mut Enigo) -> Result<(), String> {
     #[cfg(not(target_os = "windows"))]
     let insert_key_code = Key::Other(0x76); // XK_Insert (keycode 118 / 0x76, also used as fallback)
 
-    // Press Shift + Insert
-    enigo
-        .key(Key::Shift, enigo::Direction::Press)
-        .map_err(|e| format!("Failed to press Shift key: {}", e))?;
-    enigo
-        .key(insert_key_code, enigo::Direction::Click)
-        .map_err(|e| format!("Failed to click Insert key: {}", e))?;
-
-    std::thread::sleep(std::time::Duration::from_millis(100));
-
-    enigo
-        .key(Key::Shift, enigo::Direction::Release)
-        .map_err(|e| format!("Failed to release Shift key: {}", e))?;
-
-    Ok(())
+    send_paste_chord(enigo, Key::Shift, insert_key_code, false)
 }
 
 #[cfg(any(target_os = "android", target_os = "ios"))]
@@ -137,20 +167,16 @@ pub fn send_paste_shift_insert(_enigo: &mut Enigo) -> Result<(), String> {
 pub fn send_ltr_reading_order(enigo: &mut Enigo) -> Result<(), String> {
     const VK_LSHIFT: u32 = 0xA0;
 
-    enigo
-        .key(Key::Control, enigo::Direction::Press)
+    Keyboard::key(enigo, Key::Control, enigo::Direction::Press)
         .map_err(|e| format!("Failed to press Control key: {}", e))?;
-    enigo
-        .key(Key::Other(VK_LSHIFT), enigo::Direction::Press)
+    Keyboard::key(enigo, Key::Other(VK_LSHIFT), enigo::Direction::Press)
         .map_err(|e| format!("Failed to press Left Shift key: {}", e))?;
 
     std::thread::sleep(std::time::Duration::from_millis(20));
 
-    enigo
-        .key(Key::Other(VK_LSHIFT), enigo::Direction::Release)
+    Keyboard::key(enigo, Key::Other(VK_LSHIFT), enigo::Direction::Release)
         .map_err(|e| format!("Failed to release Left Shift key: {}", e))?;
-    enigo
-        .key(Key::Control, enigo::Direction::Release)
+    Keyboard::key(enigo, Key::Control, enigo::Direction::Release)
         .map_err(|e| format!("Failed to release Control key: {}", e))?;
 
     Ok(())
@@ -170,4 +196,70 @@ pub fn paste_text_direct(enigo: &mut Enigo, text: &str) -> Result<(), String> {
 #[cfg(any(target_os = "android", target_os = "ios"))]
 pub fn paste_text_direct(_enigo: &mut Enigo, _text: &str) -> Result<(), String> {
     Err("Desktop direct text injection is not supported on mobile".to_string())
+}
+
+#[cfg(all(test, not(any(target_os = "android", target_os = "ios"))))]
+mod tests {
+    use super::*;
+
+    struct FaultInjectingSink {
+        calls: Vec<(Key, enigo::Direction)>,
+        fail_at: usize,
+        next_call: usize,
+    }
+
+    impl KeySink for FaultInjectingSink {
+        fn key(&mut self, key: Key, direction: enigo::Direction) -> Result<(), String> {
+            let call = self.next_call;
+            self.next_call += 1;
+            if call == self.fail_at {
+                return Err("injected enigo failure".to_string());
+            }
+            self.calls.push((key, direction));
+            Ok(())
+        }
+    }
+
+    fn assert_failed_chord_releases_pressed_modifiers(
+        modifier: Key,
+        paste_key: Key,
+        with_shift: bool,
+        fail_at: usize,
+    ) {
+        let mut sink = FaultInjectingSink {
+            calls: Vec::new(),
+            fail_at,
+            next_call: 0,
+        };
+
+        assert!(send_paste_chord(&mut sink, modifier, paste_key, with_shift).is_err());
+        assert!(sink
+            .calls
+            .iter()
+            .any(|(key, direction)| *key == modifier && *direction == enigo::Direction::Release));
+        if with_shift {
+            assert!(sink
+                .calls
+                .iter()
+                .any(|(key, direction)| *key == Key::Shift
+                    && *direction == enigo::Direction::Release));
+        }
+    }
+
+    #[test]
+    fn ctrl_or_cmd_v_failure_releases_modifier() {
+        assert_failed_chord_releases_pressed_modifiers(Key::Control, Key::Unicode('v'), false, 1);
+        assert_failed_chord_releases_pressed_modifiers(Key::Meta, Key::Unicode('v'), false, 1);
+    }
+
+    #[test]
+    fn ctrl_or_cmd_shift_v_failure_releases_both_modifiers() {
+        assert_failed_chord_releases_pressed_modifiers(Key::Control, Key::Unicode('v'), true, 2);
+        assert_failed_chord_releases_pressed_modifiers(Key::Meta, Key::Unicode('v'), true, 2);
+    }
+
+    #[test]
+    fn shift_insert_failure_releases_shift() {
+        assert_failed_chord_releases_pressed_modifiers(Key::Shift, Key::Other(0x2D), false, 1);
+    }
 }
