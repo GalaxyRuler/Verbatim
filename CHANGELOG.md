@@ -12,6 +12,27 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/). Version
 
 ---
 
+## [0.13.0] — 2026-07-12
+
+Reliability hardening release: a full audit of the dictation pipeline plus fixes for both known toggle/language bugs, the last-mile paste path, the audio device layer, settings persistence, and a set of latent concurrency/security issues found in a codebase assessment.
+
+### Fixed
+
+- **Push-to-talk no longer stops working after the first dictation (F-001).** Toggle presses that arrive while a transcription is still processing are now deferred and replayed instead of silently dropped; added a generation-tagged completion path and a stuck-pipeline watchdog, plus wall-clock timeouts on inference, model load, and LLM post-processing so a hang can never wedge the pipeline.
+- **Locked-language dictation no longer withholds or mis-transcribes output (F-002).** The selected language is now passed to the Whisper engine, and the language guard no longer suppresses short correct output; empty output with observed speech is treated as a failure rather than silence.
+- **Transcriptions no longer silently lost at paste time.** Post-paste verification confirms the text actually landed and drives recovery/notification when it does not; the clipboard is restored on every exit path and focus is re-checked immediately before insertion.
+- **"Deleted" recordings can no longer stay on disk.** History deletion now removes the audio file before its database row and keeps a retryable entry on failure; startup reconciliation removes orphaned recordings.
+- **Audio device robustness.** Mic loss mid-recording is surfaced immediately instead of stalling; VAD initialization failure degrades to ungated capture instead of killing the microphone; stable device IDs (cpal 0.17) survive device renames and duplicate names.
+- **Settings no longer corrupt on power loss.** Settings are persisted atomically (temp file + fsync + rename); privacy-relevant toggles are flushed immediately; numeric settings are clamped.
+- **Latent hardening.** Fixed a microphone mute/open lock-ordering deadlock; moved external-script insertion off the UI thread with timeouts and cancellation; release keyboard modifiers on injection failure; added connect/read/total timeouts and working cancellation to model downloads; require HTTPS for non-loopback post-processing endpoints (explicit insecure-LAN opt-in, never with an API key); bounded the realtime audio capture queue with reliable end-of-stream delivery.
+
+### Security
+
+- Removed an over-privileged manual PR-build workflow that could run contributor code with inherited secrets.
+- Added a path-filter-free, read-only required CI gate that builds and tests the app on every pull request.
+
+---
+
 ## [0.12.0] — 2026-07-09
 
 ### Added
