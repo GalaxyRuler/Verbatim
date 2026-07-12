@@ -800,6 +800,7 @@ impl AudioRecordingManager {
                                 raw_samples: Vec::new(),
                                 device_error: false,
                                 dropped_resampler_chunks: 0,
+                                dropped_audio_chunks: 0,
                             }
                         }
                     }
@@ -810,6 +811,7 @@ impl AudioRecordingManager {
                         raw_samples: Vec::new(),
                         device_error: false,
                         dropped_resampler_chunks: 0,
+                        dropped_audio_chunks: 0,
                     }
                 };
 
@@ -829,10 +831,16 @@ impl AudioRecordingManager {
                     raw_samples,
                     device_error,
                     dropped_resampler_chunks,
+                    dropped_audio_chunks,
                 } = stop_output;
                 if dropped_resampler_chunks > 0 {
                     log::warn!(
                         "Microphone diagnostics: audio resampler dropped {dropped_resampler_chunks} chunk(s) during recording"
+                    );
+                }
+                if dropped_audio_chunks > 0 {
+                    log::warn!(
+                        "Microphone diagnostics: audio callback dropped {dropped_audio_chunks} newest chunk(s)"
                     );
                 }
                 let sample_selection = if device_error {
