@@ -1737,6 +1737,11 @@ mod tests {
         let binding = settings::get_default_settings()
             .bindings
             .remove("transcribe_with_post_process");
+        let expected_hotkey = binding
+            .as_ref()
+            .expect("default post-process binding")
+            .current_binding
+            .clone();
 
         apply_post_process_shortcut_change(
             app.handle(),
@@ -1751,7 +1756,7 @@ mod tests {
         let payload = serde_json::from_str::<serde_json::Value>(&payloads[0])
             .expect("recording-error payload is JSON");
         assert_eq!(payload["error_type"], "shortcut_registration_failed");
-        assert_eq!(payload["detail"], "ctrl+shift+space");
+        assert_eq!(payload["detail"], expected_hotkey);
     }
 
     #[test]
@@ -1763,6 +1768,11 @@ mod tests {
         let binding = settings::get_default_settings()
             .bindings
             .remove("transcribe");
+        let expected_hotkey = binding
+            .as_ref()
+            .expect("default transcribe binding")
+            .current_binding
+            .clone();
 
         let error = resume_binding_with_registration(app.handle(), "transcribe", binding, |_| {
             Err("injected".into())
@@ -1775,7 +1785,7 @@ mod tests {
         let payload = serde_json::from_str::<serde_json::Value>(&payloads[0])
             .expect("recording-error payload is JSON");
         assert_eq!(payload["error_type"], "shortcut_registration_failed");
-        assert_eq!(payload["detail"], "ctrl+space");
+        assert_eq!(payload["detail"], expected_hotkey);
     }
 
     #[test]
