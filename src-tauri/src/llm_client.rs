@@ -442,7 +442,7 @@ mod tests {
 
     #[test]
     fn insecure_lan_transport_rejects_api_keys() {
-        let provider = provider("http://192.168.1.20:8000/v1".to_string());
+        let provider = provider("http://203.0.113.20:8000/v1".to_string());
         let error = build_headers(&provider, "secret-key")
             .expect_err("insecure LAN transport must not carry API keys");
         assert!(error.contains("forbidden"));

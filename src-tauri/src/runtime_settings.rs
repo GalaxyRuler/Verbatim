@@ -486,7 +486,7 @@ mod tests {
         settings
             .post_process_provider_mut("custom")
             .expect("custom provider")
-            .base_url = "http://192.168.1.20:8000/v1".to_string();
+            .base_url = "http://203.0.113.20:8000/v1".to_string();
         settings
             .post_process_models
             .insert("custom".to_string(), "test-model".to_string());

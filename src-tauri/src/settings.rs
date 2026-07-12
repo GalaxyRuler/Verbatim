@@ -3487,12 +3487,12 @@ mod tests {
 
     #[test]
     fn provider_url_policy_requires_tls_off_loopback() {
-        assert!(validate_post_process_base_url("https://192.168.1.20:8000/v1", false).is_ok());
+        assert!(validate_post_process_base_url("https://203.0.113.20:8000/v1", false).is_ok());
         assert!(validate_post_process_base_url("http://localhost:8000/v1", false).is_ok());
         assert!(validate_post_process_base_url("http://127.0.0.1:8000/v1", false).is_ok());
         assert!(validate_post_process_base_url("http://[::1]:8000/v1", false).is_ok());
-        assert!(validate_post_process_base_url("http://192.168.1.20:8000/v1", false).is_err());
-        assert!(validate_post_process_base_url("http://192.168.1.20:8000/v1", true).is_ok());
+        assert!(validate_post_process_base_url("http://203.0.113.20:8000/v1", false).is_err());
+        assert!(validate_post_process_base_url("http://203.0.113.20:8000/v1", true).is_ok());
     }
 
     #[test]
