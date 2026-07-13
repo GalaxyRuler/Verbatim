@@ -340,6 +340,11 @@ jobs:
             const version = '${{ needs.create-release.outputs.version }}';
             const signed = '${{ inputs.sign_binaries }}' === 'true';
             const signingIdentityLabel = process.env.SIGNING_IDENTITY_LABEL?.trim() || null;
+            // The release is still a draft here, so the GitHub API's asset.browser_download_url
+            // points at a temporary "untagged-<id>" path that 404s once the release is published
+            // and the real tag is created. Build the stable, permanent URL by hand instead.
+            const stableDownloadUrl = (name) =>
+              `https://github.com/${context.repo.owner}/${context.repo.repo}/releases/download/v${version}/${name}`;
 
             if (signed && !signingIdentityLabel) {
               core.setFailed('signing_identity_label is required when sign_binaries is true.');
@@ -395,6 +400,14 @@ jobs:
                 const assetName = decodeURIComponent(
                   new URL(entry.url).pathname.split('/').pop() ?? '',
                 );
+                // Tauri emits both a canonical "<os>-<arch>" key and bundle-type
+                // aliases like "<os>-<arch>-<bundle>" that point at the same asset
+                // (e.g. windows-x86_64 and windows-x86_64-msi both resolve to the
+                // .msi). Always prefer the canonical key so the manifest records the
+                // platform check-release-evidence.ts actually looks up.
+                const existing = updaterAssetsByName.get(assetName);
+                const isCanonicalPlatform = platform.split('-').length === 2;
+                if (existing && !isCanonicalPlatform) continue;
                 updaterAssetsByName.set(assetName, {
                   platform,
                   signaturePresent: typeof entry.signature === 'string' && entry.signature.length > 0,
@@ -431,14 +444,14 @@ jobs:
                 size_bytes: asset.size,
                 sha256: digest,
                 content_type: asset.content_type,
-                browser_download_url: asset.browser_download_url,
+                browser_download_url: stableDownloadUrl(asset.name),
                 updater_platform_key: updater?.platform ?? null,
                 updater_signature_in_latest_json: updater?.signaturePresent ?? false,
                 updater_signature_asset_present: names.includes(`${asset.name}.sig`),
                 signing_enabled: signed,
                 signing_identity: signed ? signingIdentityLabel : null,
-                provenance_url: provenanceAsset.browser_download_url,
-                sbom_url: sbomAsset.browser_download_url,
+                provenance_url: stableDownloadUrl(provenanceAsset.name),
+                sbom_url: stableDownloadUrl(sbomAsset.name),
               });
             }
 
