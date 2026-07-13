@@ -22,10 +22,53 @@ pub fn device_names_match(first_name: &str, second_name: &str) -> bool {
         || has_legacy_driver_suffix(second_name, first_name)
 }
 
+/// Picks the most specific name available from a cpal device description.
+///
+/// On Windows, cpal's WASAPI backend sets `description.name()` from the
+/// endpoint's `DEVPKEY_Device_DeviceDesc` property, which is the generic
+/// driver-class label (e.g. "Microphone") shared by every input device using
+/// the same driver. When the more specific `DEVPKEY_Device_FriendlyName`
+/// (e.g. "Microphone (Realtek(R) Audio)") differs, cpal stashes it as the
+/// first `extended()` line instead of using it for `name()`. Prefer that
+/// line so devices sharing a driver don't all enumerate under one identical
+/// generic label.
+fn preferred_device_name(description: &cpal::DeviceDescription) -> String {
+    description
+        .extended()
+        .first()
+        .cloned()
+        .unwrap_or_else(|| description.name().to_string())
+}
+
 fn device_name(device: &cpal::Device) -> Result<String, cpal::DeviceNameError> {
     device
         .description()
-        .map(|description| description.name().to_string())
+        .map(|description| preferred_device_name(&description))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cpal::DeviceDescriptionBuilder;
+
+    #[test]
+    fn prefers_specific_friendly_name_over_generic_device_class_description() {
+        let description = DeviceDescriptionBuilder::new("Microphone")
+            .add_extended_line("Microphone (Realtek(R) Audio)")
+            .build();
+
+        assert_eq!(
+            preferred_device_name(&description),
+            "Microphone (Realtek(R) Audio)"
+        );
+    }
+
+    #[test]
+    fn falls_back_to_generic_name_when_no_extended_line_present() {
+        let description = DeviceDescriptionBuilder::new("USB Audio Device").build();
+
+        assert_eq!(preferred_device_name(&description), "USB Audio Device");
+    }
 }
 
 pub fn list_input_devices() -> Result<Vec<CpalDeviceInfo>, Box<dyn std::error::Error>> {
