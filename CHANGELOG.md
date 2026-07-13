@@ -12,6 +12,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/). Version
 
 ---
 
+## [0.13.1] — 2026-07-13
+
+Patch release fixing a regression in the audio device pickers.
+
+### Fixed
+
+- **Microphone and output dropdowns now show each device's real name.** After the cpal 0.17 migration, Windows enumerated every input/output device under its generic driver-class label (so the list read "Microphone", "Microphone", "Microphone" with no way to tell them apart). Device enumeration now prefers the specific friendly name Windows exposes, falling back to the generic label only when no specific name is available.
+
+---
+
 ## [0.13.0] — 2026-07-12
 
 Reliability hardening release: a full audit of the dictation pipeline plus fixes for both known toggle/language bugs, the last-mile paste path, the audio device layer, settings persistence, and a set of latent concurrency/security issues found in a codebase assessment.
