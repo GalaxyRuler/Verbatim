@@ -489,7 +489,8 @@
           "reprocess": "Reprocess last",
           "reset": "Reset memory",
           "reprocessDone": "Latest adaptive entry reprocessed.",
-          "resetDone": "Adaptive correction memory reset."
+          "resetDone": "Adaptive correction memory reset.",
+          "privateSessionBlocked": "Reprocessing is unavailable during a private session."
         }
       },
       "dockedPill": {

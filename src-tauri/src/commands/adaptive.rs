@@ -4,6 +4,8 @@ use crate::settings::{get_settings, try_write_settings_domain, SettingsWriteDoma
 use std::sync::Arc;
 use tauri::{AppHandle, State};
 
+const PRIVATE_SESSION_REPROCESS_ERROR: &str = "private_session_active";
+
 struct ReprocessedAdaptiveEntry {
     file_name: String,
     raw_text: String,
@@ -48,6 +50,32 @@ fn build_reprocessed_adaptive_entry(
     })
 }
 
+async fn reprocess_last_adaptive_entry_with<Load, LoadFuture, Save>(
+    private_session_enabled: bool,
+    profile_id: Option<String>,
+    load_latest: Load,
+    save: Save,
+) -> Result<(), String>
+where
+    Load: FnOnce() -> LoadFuture,
+    LoadFuture: std::future::Future<
+        Output = Result<(Option<HistoryEntry>, Vec<AdaptiveProfile>, String), String>,
+    >,
+    Save: FnOnce(ReprocessedAdaptiveEntry) -> Result<(), String>,
+{
+    if private_session_enabled {
+        return Err(PRIVATE_SESSION_REPROCESS_ERROR.to_string());
+    }
+
+    let (entry, profiles, default_profile_id) = load_latest().await?;
+    let entry =
+        entry.ok_or_else(|| "No adaptive history entry available to reprocess".to_string())?;
+    let reprocessed =
+        build_reprocessed_adaptive_entry(&entry, &profiles, &default_profile_id, profile_id)?;
+
+    save(reprocessed)
+}
+
 #[tauri::command]
 #[specta::specta]
 pub fn get_adaptive_profiles(
@@ -78,37 +106,44 @@ pub async fn reprocess_last_adaptive_entry(
     history_manager: State<'_, Arc<HistoryManager>>,
     profile_id: Option<String>,
 ) -> Result<(), String> {
-    let settings = get_settings(&app);
-    let entry = history_manager
-        .get_latest_adaptive_entry()
-        .await
-        .map_err(|err| err.to_string())?
-        .ok_or_else(|| "No adaptive history entry available to reprocess".to_string())?;
-
-    let reprocessed = build_reprocessed_adaptive_entry(
-        &entry,
-        &settings.adaptive_profiles,
-        &settings.adaptive_default_profile_id,
+    reprocess_last_adaptive_entry_with(
+        crate::private_session::is_enabled(&app),
         profile_id,
-    )?;
-
-    history_manager
-        .save_entry_with_metadata(
-            reprocessed.file_name,
-            reprocessed.raw_text,
-            true,
-            reprocessed.post_processed_text,
-            None,
-            reprocessed.metadata,
-        )
-        .map(|_| ())
-        .map_err(|err| err.to_string())
+        || async {
+            let settings = get_settings(&app);
+            let entry = history_manager
+                .get_latest_adaptive_entry()
+                .await
+                .map_err(|err| err.to_string())?;
+            Ok((
+                entry,
+                settings.adaptive_profiles,
+                settings.adaptive_default_profile_id,
+            ))
+        },
+        |reprocessed| {
+            history_manager
+                .save_entry_with_metadata(
+                    reprocessed.file_name,
+                    reprocessed.raw_text,
+                    true,
+                    reprocessed.post_processed_text,
+                    None,
+                    reprocessed.metadata,
+                )
+                .map(|_| ())
+                .map_err(|err| err.to_string())
+        },
+    )
+    .await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::adaptive::profile::default_profiles;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
 
     fn adaptive_entry() -> HistoryEntry {
         HistoryEntry {
@@ -191,5 +226,72 @@ mod tests {
                 .expect("reprocess succeeds");
 
         assert_eq!(reprocessed.metadata.profile_id.as_deref(), Some("email"));
+    }
+
+    #[tokio::test]
+    async fn private_session_blocks_reprocess_before_history_query_or_save() {
+        let query_count = Arc::new(AtomicUsize::new(0));
+        let save_count = Arc::new(AtomicUsize::new(0));
+        let query_count_for_load = Arc::clone(&query_count);
+        let save_count_for_save = Arc::clone(&save_count);
+
+        let result = reprocess_last_adaptive_entry_with(
+            true,
+            None,
+            move || {
+                query_count_for_load.fetch_add(1, Ordering::SeqCst);
+                std::future::ready(Ok((
+                    Some(adaptive_entry()),
+                    default_profiles(),
+                    "default_clean".to_string(),
+                )))
+            },
+            move |_| {
+                save_count_for_save.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            },
+        )
+        .await;
+
+        assert_eq!(result, Err(PRIVATE_SESSION_REPROCESS_ERROR.to_string()));
+        assert_eq!(query_count.load(Ordering::SeqCst), 0);
+        assert_eq!(save_count.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn public_session_reprocesses_latest_entry() {
+        let query_count = Arc::new(AtomicUsize::new(0));
+        let save_count = Arc::new(AtomicUsize::new(0));
+        let query_count_for_load = Arc::clone(&query_count);
+        let save_count_for_save = Arc::clone(&save_count);
+
+        let result = reprocess_last_adaptive_entry_with(
+            false,
+            None,
+            move || {
+                query_count_for_load.fetch_add(1, Ordering::SeqCst);
+                std::future::ready(Ok((
+                    Some(adaptive_entry()),
+                    default_profiles(),
+                    "default_clean".to_string(),
+                )))
+            },
+            move |reprocessed| {
+                save_count_for_save.fetch_add(1, Ordering::SeqCst);
+                assert_eq!(reprocessed.file_name, "verbatim-42.wav");
+                assert_eq!(
+                    reprocessed.post_processed_text.as_deref(),
+                    Some("please send the file today")
+                );
+                assert_eq!(reprocessed.metadata.profile_id.as_deref(), Some("email"));
+                assert_eq!(reprocessed.metadata.parent_entry_id, Some(42));
+                Ok(())
+            },
+        )
+        .await;
+
+        assert_eq!(result, Ok(()));
+        assert_eq!(query_count.load(Ordering::SeqCst), 1);
+        assert_eq!(save_count.load(Ordering::SeqCst), 1);
     }
 }
