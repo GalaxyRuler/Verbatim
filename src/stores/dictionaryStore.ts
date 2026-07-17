@@ -14,6 +14,7 @@ type DictionaryState = {
   candidates: LearnCandidate[];
   diagnostics: DictionaryDiagnostics | null;
   isLoading: boolean;
+  entriesLoaded: boolean;
   updatingIds: Set<string>;
   loadEntries: () => Promise<void>;
   addEntry: (input: DictionaryEntryInput) => Promise<DictionaryEntry>;
@@ -77,13 +78,14 @@ export const useDictionaryStore = create<DictionaryState>()((set, get) => ({
   candidates: [],
   diagnostics: null,
   isLoading: false,
+  entriesLoaded: false,
   updatingIds: new Set<string>(),
 
   loadEntries: async () => {
     set({ isLoading: true });
     try {
       const entries = unwrapResult(await commands.listDictionaryEntries());
-      set({ entries: sortEntries(entries) });
+      set({ entries: sortEntries(entries), entriesLoaded: true });
     } finally {
       set({ isLoading: false });
     }

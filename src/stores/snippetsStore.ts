@@ -9,6 +9,7 @@ import {
 type SnippetsState = {
   entries: SnippetEntry[];
   isLoading: boolean;
+  entriesLoaded: boolean;
   updatingIds: Set<string>;
   loadEntries: () => Promise<void>;
   addEntry: (input: SnippetEntryInput) => Promise<SnippetEntry>;
@@ -42,13 +43,14 @@ const unwrapResult = <T>(
 export const useSnippetsStore = create<SnippetsState>()((set) => ({
   entries: [],
   isLoading: false,
+  entriesLoaded: false,
   updatingIds: new Set<string>(),
 
   loadEntries: async () => {
     set({ isLoading: true });
     try {
       const entries = unwrapResult(await commands.listSnippetEntries());
-      set({ entries: sortEntries(entries) });
+      set({ entries: sortEntries(entries), entriesLoaded: true });
     } finally {
       set({ isLoading: false });
     }

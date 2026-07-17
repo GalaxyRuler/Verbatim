@@ -1999,6 +1999,7 @@ test.describe("Verbatim App", () => {
             replacement_of: "club",
             source: "manual",
             priority: "starred",
+            active: true,
             created_at_ms: 1,
             updated_at_ms: 2,
           },
