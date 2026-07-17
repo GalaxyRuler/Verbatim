@@ -5,6 +5,8 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 
+use crate::selection::SelectionCaptureError;
+
 const POST_PASTE_SETTLE_DELAY: Duration = Duration::from_millis(120);
 const POST_PASTE_POLL_INTERVAL: Duration = Duration::from_millis(150);
 const POST_PASTE_STABLE_EDIT_DELAY: Duration = Duration::from_millis(300);
@@ -139,7 +141,8 @@ pub fn capture_focused_text_snapshot() -> Option<FocusedTextSnapshot> {
 }
 
 #[allow(dead_code)]
-pub fn capture_focused_text_selection_snapshot() -> Result<FocusedTextSelectionSnapshot, String> {
+pub fn capture_focused_text_selection_snapshot(
+) -> Result<FocusedTextSelectionSnapshot, SelectionCaptureError> {
     capture_platform_focused_text_selection_snapshot()
 }
 
@@ -439,9 +442,11 @@ fn capture_platform_focused_text_snapshot() -> Result<FocusedTextSnapshot, Strin
 }
 
 #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
-fn capture_platform_focused_text_selection_snapshot() -> Result<FocusedTextSelectionSnapshot, String>
-{
-    Err("selected-text capture is not implemented on this platform yet".to_string())
+fn capture_platform_focused_text_selection_snapshot(
+) -> Result<FocusedTextSelectionSnapshot, SelectionCaptureError> {
+    Err(SelectionCaptureError::Unavailable(
+        "selected-text capture is not implemented on this platform yet".to_string(),
+    ))
 }
 
 #[cfg(target_os = "macos")]
@@ -450,8 +455,8 @@ fn capture_platform_focused_text_snapshot() -> Result<FocusedTextSnapshot, Strin
 }
 
 #[cfg(target_os = "macos")]
-fn capture_platform_focused_text_selection_snapshot() -> Result<FocusedTextSelectionSnapshot, String>
-{
+fn capture_platform_focused_text_selection_snapshot(
+) -> Result<FocusedTextSelectionSnapshot, SelectionCaptureError> {
     macos_focused_text::capture_with_selection()
 }
 
@@ -461,8 +466,8 @@ fn capture_platform_focused_text_snapshot() -> Result<FocusedTextSnapshot, Strin
 }
 
 #[cfg(target_os = "linux")]
-fn capture_platform_focused_text_selection_snapshot() -> Result<FocusedTextSelectionSnapshot, String>
-{
+fn capture_platform_focused_text_selection_snapshot(
+) -> Result<FocusedTextSelectionSnapshot, SelectionCaptureError> {
     linux_focused_text::capture_with_selection()
 }
 
@@ -472,8 +477,8 @@ fn capture_platform_focused_text_snapshot() -> Result<FocusedTextSnapshot, Strin
 }
 
 #[cfg(target_os = "windows")]
-fn capture_platform_focused_text_selection_snapshot() -> Result<FocusedTextSelectionSnapshot, String>
-{
+fn capture_platform_focused_text_selection_snapshot(
+) -> Result<FocusedTextSelectionSnapshot, SelectionCaptureError> {
     windows_focused_text::capture_with_selection()
 }
 
@@ -526,21 +531,33 @@ fn parse_selection_snapshot_output(output: &[u8]) -> Result<FocusedTextSelection
 /// exercised by unit tests on every platform even though the capture code itself
 /// only compiles on macOS/Linux.
 #[cfg(any(target_os = "macos", target_os = "linux", test))]
-fn classify_secure_sentinel(stdout: &str, stderr: &str) -> Option<&'static str> {
+fn classify_secure_sentinel(stdout: &str, stderr: &str) -> Option<SelectionCaptureError> {
     if stdout.trim() == "__VERBATIM_SECURE__" || stderr.contains("__VERBATIM_SECURE__") {
-        return Some("skip: secure_field");
+        return Some(SelectionCaptureError::SecureField);
     }
     if stderr.contains("__VERBATIM_SECURE_CHECK_ERROR__") {
-        return Some("skip: secure_check_error");
+        return Some(SelectionCaptureError::SecureCheckError);
+    }
+    if stdout.trim() == "__VERBATIM_SECURE_CHECK_ERROR__" {
+        return Some(SelectionCaptureError::SecureCheckError);
     }
     None
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn focused_text_secure_skip_reason(error: SelectionCaptureError) -> String {
+    match error {
+        SelectionCaptureError::SecureField => "skip: secure_field".to_string(),
+        SelectionCaptureError::SecureCheckError => "skip: secure_check_error".to_string(),
+        other => other.to_string(),
+    }
 }
 
 #[cfg(target_os = "macos")]
 mod macos_focused_text {
     use super::{
         parse_selection_snapshot_output, parse_snapshot_output, Command,
-        FocusedTextSelectionSnapshot, FocusedTextSnapshot,
+        FocusedTextSelectionSnapshot, FocusedTextSnapshot, SelectionCaptureError,
     };
 
     pub fn capture() -> Result<FocusedTextSnapshot, String> {
@@ -557,27 +574,35 @@ mod macos_focused_text {
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
-        if let Some(skip) = super::classify_secure_sentinel(&stdout, "") {
-            return Err(skip.to_string());
+        if let Some(error) = super::classify_secure_sentinel(&stdout, "") {
+            return Err(super::focused_text_secure_skip_reason(error));
         }
 
         parse_snapshot_output(&output.stdout)
     }
 
-    pub fn capture_with_selection() -> Result<FocusedTextSelectionSnapshot, String> {
+    pub fn capture_with_selection() -> Result<FocusedTextSelectionSnapshot, SelectionCaptureError> {
         let output = Command::new("osascript")
             .args(["-e", MACOS_FOCUSED_TEXT_SELECTION_SCRIPT])
             .output()
-            .map_err(|error| format!("failed to run osascript: {}", error))?;
+            .map_err(|error| {
+                SelectionCaptureError::Unavailable(format!("failed to run osascript: {}", error))
+            })?;
 
-        if !output.status.success() {
-            return Err(format!(
-                "macOS Accessibility selection snapshot failed: {}",
-                String::from_utf8_lossy(&output.stderr).trim()
-            ));
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if let Some(error) = super::classify_secure_sentinel(&stdout, &stderr) {
+            return Err(error);
         }
 
-        parse_selection_snapshot_output(&output.stdout)
+        if !output.status.success() {
+            return Err(SelectionCaptureError::Unavailable(format!(
+                "macOS Accessibility selection snapshot failed: {}",
+                stderr.trim()
+            )));
+        }
+
+        parse_selection_snapshot_output(&output.stdout).map_err(SelectionCaptureError::Unavailable)
     }
 
     const MACOS_FOCUSED_TEXT_SCRIPT: &str = r#"
@@ -628,6 +653,16 @@ end attrText
 tell application "System Events"
   set frontApp to first application process whose frontmost is true
   set focusedElement to value of attribute "AXFocusedUIElement" of frontApp
+
+  set subroleValue to ""
+  try
+    set subroleRaw to value of attribute "AXSubrole" of focusedElement
+    if subroleRaw is not missing value then set subroleValue to subroleRaw as text
+  on error
+    return "__VERBATIM_SECURE_CHECK_ERROR__"
+  end try
+  if subroleValue is "AXSecureTextField" then return "__VERBATIM_SECURE__"
+
   set textValue to my attrText(focusedElement, "AXValue")
   set selectedText to my attrText(focusedElement, "AXSelectedText")
 
@@ -644,7 +679,7 @@ end tell
 mod linux_focused_text {
     use super::{
         parse_selection_snapshot_output, parse_snapshot_output, Command,
-        FocusedTextSelectionSnapshot, FocusedTextSnapshot,
+        FocusedTextSelectionSnapshot, FocusedTextSnapshot, SelectionCaptureError,
     };
 
     pub fn capture() -> Result<FocusedTextSnapshot, String> {
@@ -666,8 +701,8 @@ mod linux_focused_text {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            if let Some(skip) = super::classify_secure_sentinel("", &stderr) {
-                return Err(skip.to_string());
+            if let Some(error) = super::classify_secure_sentinel("", &stderr) {
+                return Err(super::focused_text_secure_skip_reason(error));
             }
             return Err(format!(
                 "{} AT-SPI snapshot failed: {}",
@@ -679,32 +714,46 @@ mod linux_focused_text {
         parse_snapshot_output(&output.stdout)
     }
 
-    pub fn capture_with_selection() -> Result<FocusedTextSelectionSnapshot, String> {
-        run_selection_python("python3").or_else(|python3_error| {
-            run_selection_python("python").map_err(|python_error| {
-                format!(
-                    "Linux AT-SPI selection snapshot failed with python3 ({}) and python ({})",
-                    python3_error, python_error
-                )
-            })
-        })
+    pub fn capture_with_selection() -> Result<FocusedTextSelectionSnapshot, SelectionCaptureError> {
+        match run_selection_python("python3") {
+            Err(SelectionCaptureError::Unavailable(python3_error)) => {
+                match run_selection_python("python") {
+                    Err(SelectionCaptureError::Unavailable(python_error)) => {
+                        Err(SelectionCaptureError::Unavailable(format!(
+                            "Linux AT-SPI selection snapshot failed with python3 ({}) and python ({})",
+                            python3_error, python_error
+                        )))
+                    }
+                    result => result,
+                }
+            }
+            result => result,
+        }
     }
 
-    fn run_selection_python(binary: &str) -> Result<FocusedTextSelectionSnapshot, String> {
+    fn run_selection_python(
+        binary: &str,
+    ) -> Result<FocusedTextSelectionSnapshot, SelectionCaptureError> {
         let output = Command::new(binary)
             .args(["-c", LINUX_FOCUSED_TEXT_SELECTION_SCRIPT])
             .output()
-            .map_err(|error| format!("failed to run {binary}: {error}"))?;
+            .map_err(|error| {
+                SelectionCaptureError::Unavailable(format!("failed to run {binary}: {error}"))
+            })?;
 
         if !output.status.success() {
-            return Err(format!(
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            if let Some(error) = super::classify_secure_sentinel("", &stderr) {
+                return Err(error);
+            }
+            return Err(SelectionCaptureError::Unavailable(format!(
                 "{} AT-SPI selection snapshot failed: {}",
                 binary,
-                String::from_utf8_lossy(&output.stderr).trim()
-            ));
+                stderr.trim()
+            )));
         }
 
-        parse_selection_snapshot_output(&output.stdout)
+        parse_selection_snapshot_output(&output.stdout).map_err(SelectionCaptureError::Unavailable)
     }
 
     const LINUX_FOCUSED_TEXT_SCRIPT: &str = r#"
@@ -858,6 +907,13 @@ focused, path = find_focused(window)
 if focused is None:
     raise SystemExit("no focused AT-SPI element")
 
+try:
+    role = focused.getRoleName() if hasattr(focused, "getRoleName") else ""
+except Exception as exc:
+    raise SystemExit(f"__VERBATIM_SECURE_CHECK_ERROR__: {exc}")
+if isinstance(role, str) and role.strip().lower() in ("password text", "password"):
+    raise SystemExit("__VERBATIM_SECURE__")
+
 text_iface, text_value = accessible_text(focused)
 if text_iface is None:
     raise SystemExit("focused AT-SPI element has no readable text")
@@ -865,7 +921,7 @@ if text_iface is None:
 parts = [
     getattr(app, "name", "") or "",
     getattr(window, "name", "") or "",
-    focused.getRoleName() if hasattr(focused, "getRoleName") else "",
+    role,
     path,
 ]
 print("|".join(parts))
@@ -878,7 +934,10 @@ print(text_value, end="")
 
 #[cfg(target_os = "windows")]
 mod windows_focused_text {
-    use super::{FocusedTextSelection, FocusedTextSelectionSnapshot, FocusedTextSnapshot};
+    use super::{
+        FocusedTextSelection, FocusedTextSelectionSnapshot, FocusedTextSnapshot,
+        SelectionCaptureError,
+    };
     use std::ffi::c_void;
     use windows::Win32::Foundation::{RPC_E_CHANGED_MODE, S_FALSE, S_OK};
     use windows::Win32::System::Com::{
@@ -928,8 +987,8 @@ mod windows_focused_text {
         }
     }
 
-    pub fn capture_with_selection() -> Result<FocusedTextSelectionSnapshot, String> {
-        let _com = ComApartment::initialize()?;
+    pub fn capture_with_selection() -> Result<FocusedTextSelectionSnapshot, SelectionCaptureError> {
+        let _com = ComApartment::initialize().map_err(SelectionCaptureError::Unavailable)?;
 
         unsafe {
             let automation: IUIAutomation = CoCreateInstance(
@@ -937,16 +996,41 @@ mod windows_focused_text {
                 None::<&windows::core::IUnknown>,
                 CLSCTX_INPROC_SERVER,
             )
-            .map_err(|error| format!("failed to create UI Automation client: {}", error))?;
-            let element = automation
-                .GetFocusedElement()
-                .map_err(|error| format!("failed to get focused element: {}", error))?;
-            let text = read_element_text(&element)
-                .ok_or_else(|| "focused element has no readable text pattern".to_string())?;
+            .map_err(|error| {
+                SelectionCaptureError::Unavailable(format!(
+                    "failed to create UI Automation client: {}",
+                    error
+                ))
+            })?;
+            let element = automation.GetFocusedElement().map_err(|error| {
+                SelectionCaptureError::Unavailable(format!(
+                    "failed to get focused element: {}",
+                    error
+                ))
+            })?;
+
+            // Determine whether the field is protected before reading either its full value or
+            // selected ranges. Failure to determine the property is itself treated as secure.
+            match element.CurrentIsPassword() {
+                Ok(value) if value.as_bool() => {
+                    return Err(SelectionCaptureError::SecureField);
+                }
+                Ok(_) => {}
+                Err(_) => {
+                    return Err(SelectionCaptureError::SecureCheckError);
+                }
+            }
+
+            let text = read_element_text(&element).ok_or_else(|| {
+                SelectionCaptureError::Unavailable(
+                    "focused element has no readable text pattern".to_string(),
+                )
+            })?;
             let selection = read_element_selection(&element);
 
             Ok(FocusedTextSelectionSnapshot {
-                target_id: strict_target_id(&element)?,
+                target_id: strict_target_id(&element)
+                    .map_err(SelectionCaptureError::Unavailable)?,
                 text,
                 selection,
             })
@@ -1143,7 +1227,8 @@ mod tests {
     use super::{
         auto_learn_outcome_log_message, extract_corrected_inserted_text,
         focused_text_snapshot_from_parts, focused_text_within_cap, parse_selection_snapshot_output,
-        FocusedTextSelection, MAX_FOCUSED_TEXT_CHARS, POST_PASTE_LEARNING_WINDOW,
+        FocusedTextSelection, SelectionCaptureError, MAX_FOCUSED_TEXT_CHARS,
+        POST_PASTE_LEARNING_WINDOW,
     };
     use std::time::Duration;
 
@@ -1312,26 +1397,51 @@ mod tests {
     fn classifies_secure_sentinels() {
         assert_eq!(
             super::classify_secure_sentinel("__VERBATIM_SECURE__", ""),
-            Some("skip: secure_field")
+            Some(SelectionCaptureError::SecureField)
         );
         assert_eq!(
             super::classify_secure_sentinel(" __VERBATIM_SECURE__ \n", ""),
-            Some("skip: secure_field")
+            Some(SelectionCaptureError::SecureField)
         );
         assert_eq!(
             super::classify_secure_sentinel("", "__VERBATIM_SECURE__"),
-            Some("skip: secure_field")
+            Some(SelectionCaptureError::SecureField)
         );
         assert_eq!(
             super::classify_secure_sentinel(
                 "",
                 "Traceback...__VERBATIM_SECURE_CHECK_ERROR__: boom"
             ),
-            Some("skip: secure_check_error")
+            Some(SelectionCaptureError::SecureCheckError)
+        );
+        assert_eq!(
+            super::classify_secure_sentinel("__VERBATIM_SECURE_CHECK_ERROR__", ""),
+            Some(SelectionCaptureError::SecureCheckError)
         );
         assert_eq!(
             super::classify_secure_sentinel("app|window\ntext", ""),
             None
         );
+    }
+
+    #[test]
+    fn secure_selection_platform_output_is_rejected_before_snapshot_parsing() {
+        for (stdout, stderr, expected) in [
+            (
+                "__VERBATIM_SECURE__",
+                "",
+                SelectionCaptureError::SecureField,
+            ),
+            (
+                "",
+                "__VERBATIM_SECURE_CHECK_ERROR__: denied",
+                SelectionCaptureError::SecureCheckError,
+            ),
+        ] {
+            assert_eq!(
+                super::classify_secure_sentinel(stdout, stderr),
+                Some(expected)
+            );
+        }
     }
 }

@@ -48,6 +48,10 @@ type LanguageGuardBlockedEvent = {
   preview: string;
 };
 
+type TransformSelectionCaptureBlockedEvent = {
+  reason_code: "secure_field" | "secure_check_error";
+};
+
 type DictationBlockedEvent = {
   app_name: string;
 };
@@ -296,6 +300,23 @@ function DesktopApp() {
         },
       });
     });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [t]);
+
+  useEffect(() => {
+    const unlisten = listen<TransformSelectionCaptureBlockedEvent>(
+      "transform-selection-capture-blocked",
+      (event) => {
+        const description =
+          event.payload.reason_code === "secure_check_error"
+            ? t("errors.transformSecureCheckErrorDescription")
+            : t("errors.transformSecureFieldDescription");
+
+        toast.warning(t("errors.transformSecureFieldTitle"), { description });
+      },
+    );
     return () => {
       unlisten.then((fn) => fn());
     };

@@ -49,6 +49,11 @@ struct LanguageGuardEvent {
     preview: String,
 }
 
+#[derive(Clone, serde::Serialize)]
+struct TransformSelectionCaptureBlockedEvent {
+    reason_code: String,
+}
+
 /// Drop guard that notifies the [`TranscriptionCoordinator`] when the
 /// transcription pipeline finishes — whether it completes normally or panics.
 struct FinishGuard(AppHandle, u64);
@@ -2394,6 +2399,18 @@ impl ShortcutAction for TransformShortcutAction {
                     );
                 }
                 Err(err) => {
+                    if matches!(
+                        err.as_str(),
+                        crate::selection::SECURE_FIELD_REASON_CODE
+                            | crate::selection::SECURE_CHECK_ERROR_REASON_CODE
+                    ) {
+                        let _ = app.emit(
+                            "transform-selection-capture-blocked",
+                            TransformSelectionCaptureBlockedEvent {
+                                reason_code: err.clone(),
+                            },
+                        );
+                    }
                     warn!("Transform shortcut '{}' failed: {}", binding_id, err);
                 }
             }

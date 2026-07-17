@@ -60,8 +60,32 @@ pub enum SelectionReplaceError {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SelectionCaptureError {
     NoSelection,
+    SecureField,
+    SecureCheckError,
     Unavailable(String),
 }
+
+pub const SECURE_FIELD_REASON_CODE: &str = "secure_field";
+pub const SECURE_CHECK_ERROR_REASON_CODE: &str = "secure_check_error";
+
+impl SelectionCaptureError {
+    pub const fn reason_code(&self) -> &'static str {
+        match self {
+            Self::NoSelection => "no_selection",
+            Self::SecureField => SECURE_FIELD_REASON_CODE,
+            Self::SecureCheckError => SECURE_CHECK_ERROR_REASON_CODE,
+            Self::Unavailable(_) => "selection_unavailable",
+        }
+    }
+}
+
+impl fmt::Display for SelectionCaptureError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.reason_code())
+    }
+}
+
+impl std::error::Error for SelectionCaptureError {}
 
 impl SelectionSnapshot {
     #[cfg(test)]
@@ -164,9 +188,9 @@ fn capture_current_selection_snapshot_with<C>(
     capture: C,
 ) -> Result<SelectionSnapshot, SelectionCaptureError>
 where
-    C: FnOnce() -> Result<FocusedTextSelectionSnapshot, String>,
+    C: FnOnce() -> Result<FocusedTextSelectionSnapshot, SelectionCaptureError>,
 {
-    let snapshot = capture().map_err(SelectionCaptureError::Unavailable)?;
+    let snapshot = capture()?;
     selection_snapshot_from_focused_text_selection(snapshot)
 }
 
@@ -490,6 +514,38 @@ mod tests {
                 "selection unsupported".to_string()
             ))
         );
+    }
+
+    #[test]
+    fn secure_capture_errors_have_stable_reason_codes() {
+        assert_eq!(
+            SelectionCaptureError::SecureField.reason_code(),
+            SECURE_FIELD_REASON_CODE
+        );
+        assert_eq!(
+            SelectionCaptureError::SecureCheckError.reason_code(),
+            SECURE_CHECK_ERROR_REASON_CODE
+        );
+        assert_eq!(
+            SelectionCaptureError::SecureField.to_string(),
+            "secure_field"
+        );
+        assert_eq!(
+            SelectionCaptureError::SecureCheckError.to_string(),
+            "secure_check_error"
+        );
+    }
+
+    #[test]
+    fn secure_capture_policy_propagates_before_snapshot_conversion() {
+        for capture_error in [
+            SelectionCaptureError::SecureField,
+            SelectionCaptureError::SecureCheckError,
+        ] {
+            let result = capture_current_selection_snapshot_with(|| Err(capture_error.clone()));
+
+            assert_eq!(result, Err(capture_error));
+        }
     }
 
     #[test]
