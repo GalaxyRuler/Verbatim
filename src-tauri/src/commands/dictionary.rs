@@ -69,8 +69,8 @@ pub fn update_dictionary_entry(
 #[specta::specta]
 pub fn delete_dictionary_entry(app: AppHandle, id: String) -> Result<(), String> {
     crate::settings::mutate_settings_locked(&app, |settings| {
-        crate::dictionary::delete_entries(settings, &[id]);
-    });
+        crate::dictionary::delete_entries(settings, &[id])
+    })?;
     Ok(())
 }
 
@@ -80,10 +80,9 @@ pub fn undo_dictionary_entries(
     app: AppHandle,
     ids: Vec<String>,
 ) -> Result<Vec<DictionaryEntry>, String> {
-    let deleted = crate::settings::mutate_settings_locked(&app, |settings| {
+    crate::settings::mutate_settings_locked(&app, |settings| {
         crate::dictionary::delete_entries(settings, &ids)
-    });
-    Ok(deleted)
+    })
 }
 
 #[tauri::command]
@@ -177,8 +176,8 @@ pub fn reject_learn_candidate(app: AppHandle, phrase: String) -> Result<(), Stri
 pub fn set_dictionary_entry_active(app: AppHandle, id: String, active: bool) -> Result<(), String> {
     let now_ms = crate::dictionary::current_unix_ms();
     crate::settings::mutate_settings_locked(&app, |settings| {
-        crate::dictionary::set_entry_active(settings, now_ms, &id, active);
-    });
+        crate::dictionary::set_entry_active(settings, now_ms, &id, active)
+    })?;
     Ok(())
 }
 

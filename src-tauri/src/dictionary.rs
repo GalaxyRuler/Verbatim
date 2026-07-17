@@ -2,6 +2,8 @@ use crate::dictionary_learning::canonicalize;
 use crate::settings::{
     AppSettings, DictionaryEntry, DictionaryEntryPriority, DictionaryEntrySource, LearnCandidate,
 };
+
+pub const AMBIGUOUS_ENTRY_ID: &str = "ambiguous_entry_id";
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const MAX_DICTIONARY_PHRASE_CHARS: usize = 120;
@@ -238,11 +240,17 @@ pub fn update_entry(
     replacement_of: Option<Option<String>>,
     priority: Option<DictionaryEntryPriority>,
 ) -> Result<DictionaryEntry, String> {
-    let index = settings
+    let mut matching_indices = settings
         .dictionary_entries
         .iter()
-        .position(|entry| entry.id == id)
+        .enumerate()
+        .filter_map(|(index, entry)| (entry.id == id).then_some(index));
+    let index = matching_indices
+        .next()
         .ok_or("Dictionary entry not found")?;
+    if matching_indices.next().is_some() {
+        return Err(AMBIGUOUS_ENTRY_ID.to_string());
+    }
 
     if let Some(next_phrase) = phrase.as_deref().and_then(sanitize_dictionary_phrase) {
         if has_phrase(&settings.dictionary_entries, &next_phrase, Some(id)) {
@@ -282,7 +290,23 @@ pub fn update_entry(
     Ok(updated)
 }
 
-pub fn delete_entries(settings: &mut AppSettings, ids: &[String]) -> Vec<DictionaryEntry> {
+pub fn delete_entries(
+    settings: &mut AppSettings,
+    ids: &[String],
+) -> Result<Vec<DictionaryEntry>, String> {
+    for id in ids {
+        if settings
+            .dictionary_entries
+            .iter()
+            .filter(|entry| entry.id == *id)
+            .take(2)
+            .count()
+            > 1
+        {
+            return Err(AMBIGUOUS_ENTRY_ID.to_string());
+        }
+    }
+
     let mut deleted = Vec::new();
     settings.dictionary_entries.retain(|entry| {
         if ids.iter().any(|id| id == &entry.id) {
@@ -301,7 +325,7 @@ pub fn delete_entries(settings: &mut AppSettings, ids: &[String]) -> Vec<Diction
         sync_legacy_custom_words(settings);
     }
 
-    deleted
+    Ok(deleted)
 }
 
 pub fn replace_dictionary_phrases(
@@ -668,15 +692,30 @@ pub fn reject_candidate(settings: &mut AppSettings, phrase: &str) {
 
 /// Reactivate / quarantine an entry from the review UI; clears the review flag either way
 /// (the user has looked at it).
-pub fn set_entry_active(settings: &mut AppSettings, now_ms: u64, id: &str, active: bool) -> bool {
-    let Some(entry) = settings.dictionary_entries.iter_mut().find(|e| e.id == id) else {
-        return false;
+pub fn set_entry_active(
+    settings: &mut AppSettings,
+    now_ms: u64,
+    id: &str,
+    active: bool,
+) -> Result<bool, String> {
+    let mut matching_indices = settings
+        .dictionary_entries
+        .iter()
+        .enumerate()
+        .filter_map(|(index, entry)| (entry.id == id).then_some(index));
+    let Some(index) = matching_indices.next() else {
+        return Ok(false);
     };
+    if matching_indices.next().is_some() {
+        return Err(AMBIGUOUS_ENTRY_ID.to_string());
+    }
+
+    let entry = &mut settings.dictionary_entries[index];
     entry.active = active;
     entry.needs_review = false;
     entry.updated_at_ms = now_ms;
     sync_legacy_custom_words(settings);
-    true
+    Ok(true)
 }
 
 fn stamp_since(diag: &mut crate::settings::DictionaryDiagnostics, now_ms: u64) {
@@ -975,11 +1014,73 @@ mod tests {
         ];
         sync_legacy_custom_words(&mut settings);
 
-        let deleted = delete_entries(&mut settings, &["dict_1_robyn".to_string()]);
+        let deleted = delete_entries(&mut settings, &["dict_1_robyn".to_string()])
+            .expect("unique entry deleted");
 
         assert_eq!(deleted.len(), 1);
         assert_eq!(deleted[0].phrase, "Robyn");
         assert_eq!(settings.custom_words, vec!["Abdullah al Kulaib"]);
+    }
+
+    #[test]
+    fn update_entry_rejects_ambiguous_id_without_mutating_entries() {
+        let mut settings = get_default_settings();
+        settings.dictionary_entries = vec![
+            entry("dict_collision", "Robyn"),
+            entry("dict_collision", "Robinette"),
+        ];
+        sync_legacy_custom_words(&mut settings);
+        let original_entries = settings.dictionary_entries.clone();
+        let original_words = settings.custom_words.clone();
+
+        let error = update_entry(
+            &mut settings,
+            100,
+            "dict_collision",
+            Some("Changed".to_string()),
+            None,
+            None,
+        )
+        .expect_err("duplicate persisted IDs must be rejected");
+
+        assert_eq!(error, "ambiguous_entry_id");
+        assert_eq!(settings.dictionary_entries, original_entries);
+        assert_eq!(settings.custom_words, original_words);
+    }
+
+    #[test]
+    fn delete_entries_rejects_ambiguous_id_without_mutating_entries() {
+        let mut settings = get_default_settings();
+        settings.dictionary_entries = vec![
+            entry("dict_collision", "Robyn"),
+            entry("dict_collision", "Robinette"),
+        ];
+        sync_legacy_custom_words(&mut settings);
+        let original_entries = settings.dictionary_entries.clone();
+        let original_words = settings.custom_words.clone();
+
+        let error = delete_entries(&mut settings, &["dict_collision".to_string()])
+            .expect_err("duplicate persisted IDs must be rejected");
+
+        assert_eq!(error, "ambiguous_entry_id");
+        assert_eq!(settings.dictionary_entries, original_entries);
+        assert_eq!(settings.custom_words, original_words);
+    }
+
+    #[test]
+    fn set_entry_active_rejects_ambiguous_id_without_mutating_entries() {
+        let mut settings = get_default_settings();
+        settings.dictionary_entries = vec![
+            entry("dict_collision", "Robyn"),
+            entry("dict_collision", "Robinette"),
+        ];
+        let original_entries = settings.dictionary_entries.clone();
+
+        let error = set_entry_active(&mut settings, 100, "dict_collision", false)
+            .expect_err("duplicate persisted IDs must be rejected");
+
+        assert_eq!(error, "ambiguous_entry_id");
+        assert_eq!(settings.dictionary_entries, original_entries);
     }
 
     #[test]
@@ -1024,7 +1125,7 @@ mod tests {
         .expect("auto learn")
         .expect("new entry");
 
-        let deleted = delete_entries(&mut settings, &[learned.id]);
+        let deleted = delete_entries(&mut settings, &[learned.id]).expect("unique entry deleted");
         assert_eq!(deleted.len(), 1);
         assert!(settings.dictionary_entries.is_empty());
         assert_eq!(settings.dictionary_auto_learn_suppressed, vec!["gibbeteen"]);
@@ -1492,11 +1593,11 @@ mod tests {
             needs_review: true,
             ..entry_full("dict_1", "their", Some("there"))
         });
-        assert!(set_entry_active(&mut s, 99, "dict_1", true));
+        assert!(set_entry_active(&mut s, 99, "dict_1", true).expect("unique entry"));
         assert!(s.dictionary_entries[0].active);
         assert!(!s.dictionary_entries[0].needs_review);
         assert_eq!(s.dictionary_entries[0].updated_at_ms, 99);
-        assert!(!set_entry_active(&mut s, 99, "missing", true));
+        assert!(!set_entry_active(&mut s, 99, "missing", true).expect("missing is unambiguous"));
     }
 
     #[test]

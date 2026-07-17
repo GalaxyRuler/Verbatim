@@ -869,7 +869,8 @@
         "delete": "Failed to delete dictionary entry",
         "duplicate": "{{phrase}} is already in your dictionary",
         "approve": "Couldn't approve entry",
-        "reject": "Couldn't reject entry"
+        "reject": "Couldn't reject entry",
+        "ambiguousEntryId": "This entry matches more than one saved dictionary item. No changes were made."
       },
       "pending": {
         "title": "Pending review",

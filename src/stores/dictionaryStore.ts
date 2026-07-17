@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import i18n from "@/i18n";
 import {
   commands,
   type DictionaryDiagnostics,
@@ -66,7 +67,11 @@ const unwrapResult = <T>(
   result: { status: "ok"; data: T } | { status: "error"; error: string },
 ) => {
   if (result.status === "error") {
-    throw new Error(result.error);
+    const message =
+      result.error === "ambiguous_entry_id"
+        ? i18n.t("settings.dictionary.errors.ambiguousEntryId")
+        : result.error;
+    throw new Error(message);
   }
 
   return result.data;
