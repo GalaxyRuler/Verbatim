@@ -343,26 +343,19 @@ fn preserve_case_pattern(original: &str, replacement: &str) -> String {
 
 /// Extracts punctuation prefix and suffix from a word
 fn extract_punctuation(word: &str) -> (&str, &str) {
-    let prefix_end = word.chars().take_while(|c| !c.is_alphanumeric()).count();
+    let prefix_end = word
+        .char_indices()
+        .find(|(_, character)| character.is_alphanumeric())
+        .map(|(offset, _)| offset)
+        .unwrap_or(word.len());
     let suffix_start = word
         .char_indices()
         .rev()
-        .take_while(|(_, c)| !c.is_alphanumeric())
-        .count();
+        .find(|(_, character)| character.is_alphanumeric())
+        .map(|(offset, character)| offset + character.len_utf8())
+        .unwrap_or(0);
 
-    let prefix = if prefix_end > 0 {
-        &word[..prefix_end]
-    } else {
-        ""
-    };
-
-    let suffix = if suffix_start > 0 {
-        &word[word.len() - suffix_start..]
-    } else {
-        ""
-    };
-
-    (prefix, suffix)
+    (&word[..prefix_end], &word[suffix_start..])
 }
 
 /// Returns filler words appropriate for the given language code.
@@ -542,6 +535,34 @@ mod tests {
         assert_eq!(extract_punctuation("hello"), ("", ""));
         assert_eq!(extract_punctuation("!hello?"), ("!", "?"));
         assert_eq!(extract_punctuation("...hello..."), ("...", "..."));
+    }
+
+    #[test]
+    fn extract_punctuation_handles_arabic_punctuation() {
+        assert_eq!(extract_punctuation("،مرحبا؟"), ("،", "؟"));
+    }
+
+    #[test]
+    fn extract_punctuation_handles_combining_marks() {
+        assert_eq!(
+            extract_punctuation("\u{301}e\u{301}"),
+            ("\u{301}", "\u{301}")
+        );
+    }
+
+    #[test]
+    fn extract_punctuation_handles_emoji() {
+        assert_eq!(extract_punctuation("🔥hello🙂"), ("🔥", "🙂"));
+    }
+
+    #[test]
+    fn extract_punctuation_handles_mixed_multibyte_edges() {
+        assert_eq!(extract_punctuation("(🔥مرحبا؟!)"), ("(🔥", "؟!)"));
+    }
+
+    #[test]
+    fn extract_punctuation_preserves_ascii_regression() {
+        assert_eq!(extract_punctuation("[...hello?!]"), ("[...", "?!]"));
     }
 
     #[test]
