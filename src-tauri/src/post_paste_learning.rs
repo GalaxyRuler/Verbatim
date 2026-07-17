@@ -265,7 +265,7 @@ fn learn_from_text_snapshots(
 
     let now_ms = crate::dictionary::current_unix_ms();
     let (promoted_entries, learned_count, routed_count) =
-        crate::settings::mutate_settings_locked(app, |settings| {
+        crate::settings::try_mutate_settings_locked_and_save(app, |settings| {
             let candidates = crate::dictionary_learning::infer_auto_learn_candidates(
                 &inserted_text,
                 &corrected_text,
@@ -307,8 +307,8 @@ fn learn_from_text_snapshots(
                 reinforced as u32,
                 routed as u32,
             );
-            (promoted, learned, routed)
-        });
+            Ok((promoted, learned, routed))
+        })?;
 
     // Emit AFTER the lock is released.
     if !promoted_entries.is_empty() {

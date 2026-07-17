@@ -2006,8 +2006,8 @@ fn persist_loaded_settings_value<R: tauri::Runtime>(
     persist_settings_value(store, settings_value, immediate_save)
 }
 
-/// The ONLY public way to mutate persisted settings. Holds the write lock across the
-/// whole read-modify-write so concurrent mutations cannot lost-update each other.
+/// The legacy public way to mutate debounced persisted settings. Holds the write lock across
+/// the whole read-modify-write so concurrent mutations cannot lost-update each other.
 /// Do NOT `.await` or emit Tauri events inside `f`; emit after this returns.
 pub fn mutate_settings_locked<T>(app: &AppHandle, f: impl FnOnce(&mut AppSettings) -> T) -> T {
     let _guard = SETTINGS_WRITE_LOCK
@@ -2027,9 +2027,46 @@ pub fn mutate_settings_locked<T>(app: &AppHandle, f: impl FnOnce(&mut AppSetting
     result
 }
 
+fn try_mutate_settings_locked_and_save_to_store<R, T, F>(
+    store: &tauri_plugin_store::Store<R>,
+    mut settings: AppSettings,
+    mutate: F,
+) -> Result<T, String>
+where
+    R: tauri::Runtime,
+    F: FnOnce(&mut AppSettings) -> Result<T, String>,
+{
+    let selected_microphone_before = settings.selected_microphone.clone();
+    let result = apply_settings_mutation(&mut settings, mutate)?;
+    reconcile_selected_microphone_identity(selected_microphone_before.as_deref(), &mut settings);
+    write_settings_to_store_with_immediate_save(store, settings, true)?;
+    Ok(result)
+}
+
+/// Fallible locked mutation for command paths that must not report success until the
+/// updated settings value is durable. The Store helper restores its previous cached value
+/// when the forced save fails, so callers observe the same settings after an error.
+/// Do NOT `.await` or emit Tauri events inside `mutate`; emit only after this returns `Ok`.
+pub(crate) fn try_mutate_settings_locked_and_save<R, T, F>(
+    app: &AppHandle<R>,
+    mutate: F,
+) -> Result<T, String>
+where
+    R: tauri::Runtime,
+    F: FnOnce(&mut AppSettings) -> Result<T, String>,
+{
+    let _guard = SETTINGS_WRITE_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let store = open_settings_store(app)?;
+    let settings =
+        settings_for_fallible_domain_write(load_settings_from_store(app, store.as_ref()))?;
+    try_mutate_settings_locked_and_save_to_store(store.as_ref(), settings, mutate)
+}
+
 // NOTE: `write_settings` and `get_settings` are the lock-free primitives. All MUTATION
-// paths must go through `mutate_settings_locked` or the domain writers
-// (`write_settings_domain` / `try_write_settings_domain`), which take the same lock.
+// paths must go through `mutate_settings_locked`, `try_mutate_settings_locked_and_save`, or the
+// domain writers (`write_settings_domain` / `try_write_settings_domain`), which take the same lock.
 // The deny-list test `dictionary_mutation_paths_do_not_call_write_settings_directly`
 // guards this for every migrated file.
 pub fn write_settings(app: &AppHandle, settings: AppSettings) {
@@ -2608,6 +2645,56 @@ mod tests {
     }
 
     #[test]
+    fn forced_save_mutation_rolls_back_cached_settings_on_failure() {
+        let temp_dir = tempfile::tempdir().expect("create settings tempdir");
+        let blocked_parent = temp_dir.path().join("settings-parent-file");
+        std::fs::write(&blocked_parent, "not a directory").expect("create blocked parent file");
+        let store_path = blocked_parent.join("settings.json");
+        let app = tauri::test::mock_builder()
+            .plugin(tauri_plugin_store::Builder::new().build())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("build Tauri test app");
+        let store = app
+            .store_builder(&store_path)
+            .disable_auto_save()
+            .build()
+            .expect("build store before attempted persistence");
+        let before = get_default_settings();
+        store.set(
+            "settings",
+            serde_json::to_value(&before).expect("serialize original settings"),
+        );
+
+        let error =
+            try_mutate_settings_locked_and_save_to_store(store.as_ref(), before, |settings| {
+                settings.dictionary_entries.push(DictionaryEntry {
+                    id: "dict_1_robyn".to_string(),
+                    phrase: "Robyn".to_string(),
+                    replacement_of: None,
+                    source: DictionaryEntrySource::Manual,
+                    priority: DictionaryEntryPriority::Normal,
+                    created_at_ms: 1,
+                    updated_at_ms: 1,
+                    active: true,
+                    user_confirmed: false,
+                    needs_review: false,
+                });
+                Ok(())
+            })
+            .expect_err("blocked store path must fail the forced save");
+
+        assert!(error.contains("atomically persist settings"));
+        let cached: AppSettings = serde_json::from_value(
+            store
+                .get("settings")
+                .expect("original settings remain cached"),
+        )
+        .expect("cached settings deserialize");
+        assert!(cached.dictionary_entries.is_empty());
+        assert!(cached.custom_words.is_empty());
+    }
+
+    #[test]
     fn adaptive_correction_memory_domain_write_saves_immediately_without_auto_save() {
         let temp_dir = tempfile::tempdir().expect("create settings tempdir");
         let store_path = temp_dir.path().join("settings").join("settings.json");
@@ -3135,6 +3222,26 @@ mod tests {
                 "{path} must mutate via mutate_settings_locked or the locked domain writers, not write_settings"
             );
         }
+    }
+
+    #[test]
+    fn dictionary_durable_mutation_paths_use_forced_save_writer() {
+        let commands = std::fs::read_to_string("src/commands/dictionary.rs")
+            .expect("read dictionary commands");
+        assert!(commands.contains("try_mutate_settings_locked_and_save("));
+        assert!(!commands.contains("mutate_settings_locked("));
+
+        let watcher =
+            std::fs::read_to_string("src/post_paste_learning.rs").expect("read post-paste watcher");
+        let learning_start = watcher
+            .find("fn learn_from_text_snapshots(")
+            .expect("find post-paste learning function");
+        let learning_end = watcher[learning_start..]
+            .find("\nfn auto_learn_outcome_log_message")
+            .expect("find post-paste learning function end");
+        let learning = &watcher[learning_start..learning_start + learning_end];
+        assert!(learning.contains("try_mutate_settings_locked_and_save("));
+        assert!(!learning.contains("mutate_settings_locked("));
     }
 
     #[test]
