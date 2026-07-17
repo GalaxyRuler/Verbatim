@@ -23,8 +23,10 @@ fn build_reprocessed_adaptive_entry(
         .or(entry.adaptive_profile_id.clone())
         .unwrap_or(default_profile_id.to_string());
     let profile = find_profile_or_default(profiles, &selected_profile_id);
+    // Reprocessing has no current model-validation result to prove a single locked language,
+    // so it must conservatively skip language-default filler removal.
     let final_text =
-        crate::adaptive::processor::deterministic_process(&entry.transcription_text, profile);
+        crate::adaptive::processor::deterministic_process(&entry.transcription_text, profile, None);
     crate::adaptive::processor::validate_output(&entry.transcription_text, &final_text, profile)?;
 
     Ok(ReprocessedAdaptiveEntry {
@@ -198,10 +200,7 @@ mod tests {
 
         assert_eq!(reprocessed.file_name, "verbatim-42.wav");
         assert_eq!(reprocessed.raw_text, entry.transcription_text);
-        assert_eq!(
-            reprocessed.post_processed_text.as_deref(),
-            Some("please send the file today")
-        );
+        assert!(reprocessed.post_processed_text.is_none());
         assert_eq!(reprocessed.metadata.parent_entry_id, Some(42));
         assert_eq!(
             reprocessed.metadata.profile_id.as_deref(),
@@ -279,10 +278,7 @@ mod tests {
             move |reprocessed| {
                 save_count_for_save.fetch_add(1, Ordering::SeqCst);
                 assert_eq!(reprocessed.file_name, "verbatim-42.wav");
-                assert_eq!(
-                    reprocessed.post_processed_text.as_deref(),
-                    Some("please send the file today")
-                );
+                assert!(reprocessed.post_processed_text.is_none());
                 assert_eq!(reprocessed.metadata.profile_id.as_deref(), Some("email"));
                 assert_eq!(reprocessed.metadata.parent_entry_id, Some(42));
                 Ok(())

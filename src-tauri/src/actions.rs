@@ -1024,6 +1024,7 @@ fn force_ltr_input_direction_before_paste(
 pub(crate) async fn process_adaptive_transcription_output(
     settings: &AppSettings,
     transcription: &str,
+    effective_language: Option<&str>,
     context: crate::adaptive::types::CapturedContext,
     shortcut: crate::adaptive::types::ShortcutIntent,
 ) -> crate::adaptive::types::AdaptiveProcessResult {
@@ -1053,7 +1054,11 @@ pub(crate) async fn process_adaptive_transcription_output(
     let final_text = if settings.formatting_level == crate::settings::FormattingLevel::None {
         transcription.to_string()
     } else {
-        crate::adaptive::processor::deterministic_process(transcription, profile)
+        crate::adaptive::processor::deterministic_process(
+            transcription,
+            profile,
+            effective_language,
+        )
     };
     let final_text = crate::adaptive::smart_formatting::format_transcript(
         &final_text,
@@ -1987,7 +1992,7 @@ impl ShortcutAction for TranscribeAction {
 
                     // Transcribe concurrently with WAV save
                     let transcription_time = Instant::now();
-                    let transcription_result = tm.transcribe_with_cancellation(
+                    let transcription_result = tm.transcribe_with_cancellation_context(
                         samples,
                         operation_token
                             .as_ref()
@@ -2030,7 +2035,8 @@ impl ShortcutAction for TranscribeAction {
                     }
 
                     match transcription_result {
-                        Ok(transcription) => {
+                        Ok(transcription_output) => {
+                            let transcription = transcription_output.text;
                             debug!(
                                 "{}",
                                 transcription_completed_log_message(
@@ -2071,6 +2077,7 @@ impl ShortcutAction for TranscribeAction {
                                 let processed = process_adaptive_transcription_output(
                                     &settings,
                                     &transcription,
+                                    transcription_output.effective_language.as_deref(),
                                     context.clone(),
                                     crate::adaptive::types::ShortcutIntent::Default,
                                 )

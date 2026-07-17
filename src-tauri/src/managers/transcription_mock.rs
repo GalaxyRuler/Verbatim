@@ -29,6 +29,11 @@ pub struct ModelStateEvent {
     pub fallback: Option<String>,
 }
 
+pub(crate) struct TranscriptionOutput {
+    pub text: String,
+    pub effective_language: Option<String>,
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub(crate) struct ModelLoadFallbackDrillCase {
     pub case: String,
@@ -129,9 +134,18 @@ impl TranscriptionManager {
 
     pub fn transcribe_with_cancellation(
         &self,
-        _audio: Vec<f32>,
+        audio: Vec<f32>,
         cancellation: CancellationToken,
     ) -> Result<String> {
+        self.transcribe_with_cancellation_context(audio, cancellation)
+            .map(|output| output.text)
+    }
+
+    pub(crate) fn transcribe_with_cancellation_context(
+        &self,
+        _audio: Vec<f32>,
+        cancellation: CancellationToken,
+    ) -> Result<TranscriptionOutput> {
         ensure_transcription_not_cancelled(&cancellation)?;
 
         Err(anyhow::anyhow!(ENGINE_DISABLED_ERROR))

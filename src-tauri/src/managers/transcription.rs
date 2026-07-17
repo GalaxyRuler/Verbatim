@@ -34,6 +34,11 @@ pub struct ModelStateEvent {
     pub fallback: Option<String>,
 }
 
+pub(crate) struct TranscriptionOutput {
+    pub text: String,
+    pub effective_language: Option<String>,
+}
+
 fn model_load_diagnostic_code(error: &anyhow::Error) -> &'static str {
     let message = error.to_string().to_ascii_lowercase();
     if [
@@ -434,6 +439,10 @@ fn validate_selected_language(selected_language: &str, supported_languages: &[St
     } else {
         "auto".to_string()
     }
+}
+
+fn effective_validated_dictation_language(validated_language: &str) -> Option<&str> {
+    (validated_language != "auto").then_some(validated_language)
 }
 
 fn transcription_result_log_message(final_result: &str) -> String {
@@ -1186,6 +1195,15 @@ impl TranscriptionManager {
         audio: Vec<f32>,
         cancellation: CancellationToken,
     ) -> Result<String> {
+        self.transcribe_with_cancellation_context(audio, cancellation)
+            .map(|output| output.text)
+    }
+
+    pub(crate) fn transcribe_with_cancellation_context(
+        &self,
+        audio: Vec<f32>,
+        cancellation: CancellationToken,
+    ) -> Result<TranscriptionOutput> {
         #[cfg(debug_assertions)]
         if std::env::var("VERBATIM_FORCE_TRANSCRIPTION_FAILURE").is_ok() {
             return Err(anyhow::anyhow!(
@@ -1205,7 +1223,10 @@ impl TranscriptionManager {
         if audio.is_empty() {
             debug!("Empty audio vector");
             self.maybe_unload_immediately("empty audio");
-            return Ok(String::new());
+            return Ok(TranscriptionOutput {
+                text: String::new(),
+                effective_language: None,
+            });
         }
 
         // Check if model is loaded, if not try to load it
@@ -1243,6 +1264,8 @@ impl TranscriptionManager {
                 .map(|info| info.supported_languages.clone())
                 .unwrap_or_default(),
         );
+        let effective_language =
+            effective_validated_dictation_language(&validated_language).map(str::to_string);
 
         if validated_language == "auto" && settings.selected_language != "auto" {
             warn!(
@@ -1349,7 +1372,12 @@ impl TranscriptionManager {
             .map(|info| matches!(info.engine_type, EngineType::Whisper))
             .unwrap_or(false);
 
-        let final_result = apply_local_text_transforms(result.text, &settings, is_whisper);
+        let final_result = apply_local_text_transforms(
+            result.text,
+            &settings,
+            is_whisper,
+            effective_language.as_deref(),
+        );
 
         let et = std::time::Instant::now();
         let translation_note = if effective_translate_to_english {
@@ -1371,7 +1399,10 @@ impl TranscriptionManager {
 
         self.maybe_unload_immediately("transcription");
 
-        Ok(final_result)
+        Ok(TranscriptionOutput {
+            text: final_result,
+            effective_language,
+        })
     }
 }
 
@@ -1379,6 +1410,7 @@ fn apply_local_text_transforms(
     raw_text: String,
     settings: &AppSettings,
     is_whisper: bool,
+    effective_language: Option<&str>,
 ) -> String {
     let corrected_result = if !settings.dictionary_entries.is_empty() {
         if is_whisper {
@@ -1395,7 +1427,7 @@ fn apply_local_text_transforms(
 
     let filtered_result = filter_transcription_output(
         &corrected_result,
-        &settings.app_language,
+        effective_language,
         &settings.custom_filler_words,
     );
 
@@ -1887,8 +1919,12 @@ mod tests {
             updated_at_ms: 1,
         }];
 
-        let result =
-            apply_local_text_transforms("please use email signature".to_string(), &settings, false);
+        let result = apply_local_text_transforms(
+            "please use email signature".to_string(),
+            &settings,
+            false,
+            None,
+        );
 
         assert_eq!(result, "please use Regards,\nAbdullah");
     }
@@ -1910,9 +1946,87 @@ mod tests {
             needs_review: false,
         }];
 
-        let result = apply_local_text_transforms("posgres is running".to_string(), &legacy, false);
+        let result =
+            apply_local_text_transforms("posgres is running".to_string(), &legacy, false, None);
 
         assert_eq!(result, "Postgres is running");
+    }
+
+    #[test]
+    fn local_text_transforms_use_locked_english_not_ui_language_for_fillers() {
+        let mut settings = crate::settings::get_default_settings();
+        settings.app_language = "ar".to_string();
+        settings.selected_language = "en".to_string();
+        assert_eq!(
+            settings.dictation_language_mode,
+            crate::settings::DictationLanguageMode::Auto,
+            "legacy desktop language selection does not update the newer mode field"
+        );
+        let validated = validate_selected_language("en", &["en".to_string()]);
+        let effective = effective_validated_dictation_language(&validated);
+
+        let result =
+            apply_local_text_transforms("um hello".to_string(), &settings, false, effective);
+
+        assert_eq!(result, "hello");
+    }
+
+    #[test]
+    fn local_text_transforms_preserve_english_looking_fillers_for_locked_portuguese() {
+        let mut settings = crate::settings::get_default_settings();
+        settings.selected_language = "pt".to_string();
+        let validated = validate_selected_language("pt", &["pt".to_string()]);
+        let effective = effective_validated_dictation_language(&validated);
+
+        let result =
+            apply_local_text_transforms("um gato".to_string(), &settings, false, effective);
+
+        assert_eq!(result, "um gato");
+    }
+
+    #[test]
+    fn local_text_transforms_auto_mode_skips_defaults_but_applies_custom_fillers() {
+        let mut settings = crate::settings::get_default_settings();
+        settings.dictation_language_mode = crate::settings::DictationLanguageMode::Auto;
+        settings.selected_language = "auto".to_string();
+        settings.custom_filler_words = Some(vec!["deliberate".to_string()]);
+        let validated = validate_selected_language("auto", &["en".to_string()]);
+        let effective = effective_validated_dictation_language(&validated);
+
+        let result = apply_local_text_transforms(
+            "um deliberate stays".to_string(),
+            &settings,
+            false,
+            effective,
+        );
+
+        assert_eq!(result, "um stays");
+    }
+
+    #[test]
+    fn local_text_transforms_preserve_dictionary_filler_output_in_auto_mode() {
+        let mut settings = crate::settings::get_default_settings();
+        settings.dictation_language_mode = crate::settings::DictationLanguageMode::Auto;
+        settings.selected_language = "auto".to_string();
+        settings.dictionary_entries = vec![crate::settings::DictionaryEntry {
+            id: "dictionary_1_um".to_string(),
+            phrase: "um".to_string(),
+            replacement_of: Some("placeholder".to_string()),
+            source: crate::settings::DictionaryEntrySource::Manual,
+            priority: crate::settings::DictionaryEntryPriority::Normal,
+            created_at_ms: 1,
+            updated_at_ms: 1,
+            active: true,
+            user_confirmed: false,
+            needs_review: false,
+        }];
+        let validated = validate_selected_language("auto", &["en".to_string()]);
+        let effective = effective_validated_dictation_language(&validated);
+
+        let result =
+            apply_local_text_transforms("placeholder".to_string(), &settings, false, effective);
+
+        assert_eq!(result, "um");
     }
 
     #[test]
