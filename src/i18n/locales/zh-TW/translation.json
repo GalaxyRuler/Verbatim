@@ -293,6 +293,7 @@
         "translation": "翻譯",
         "allLanguages": "所有語言"
       },
+      "languageLockClearedForModel": "此模型不支援已鎖定的聽寫語言。語言模式已重設為「自動」。",
       "noModelsMatch": "沒有符合此篩選條件的模型"
     },
     "sound": {

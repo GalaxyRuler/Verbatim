@@ -224,6 +224,7 @@
         "translation": "翻訳",
         "allLanguages": "すべての言語"
       },
+      "languageLockClearedForModel": "このモデルは固定された音声入力言語をサポートしていません。言語モードを「自動」に戻しました。",
       "noModelsMatch": "このフィルターに一致するモデルがありません。",
       "yourModels": "ダウンロード済みモデル",
       "availableModels": "ダウンロード可能"

@@ -1,8 +1,70 @@
 use crate::managers::model::{ModelInfo, ModelManager};
 use crate::managers::transcription::{ModelStateEvent, TranscriptionManager};
-use crate::settings::{get_settings, mutate_settings_locked, ModelUnloadTimeout};
+use crate::settings::{
+    get_settings, write_settings_domain, AppSettings, DictationLanguageMode, ModelUnloadTimeout,
+    SettingsWriteDomain,
+};
+use serde::Serialize;
+use specta::Type;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelSwitchReason {
+    LanguageLockClearedForModel,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
+pub struct ModelSwitchOutcome {
+    pub reason: Option<ModelSwitchReason>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ModelSwitchSnapshot {
+    selected_model: String,
+    selected_language: String,
+    dictation_language_mode: DictationLanguageMode,
+    adaptive_language_shortlist: Vec<String>,
+}
+
+fn begin_model_switch(
+    settings: &mut AppSettings,
+    model_id: &str,
+    supported_languages: &[String],
+) -> (ModelSwitchSnapshot, ModelSwitchOutcome) {
+    let snapshot = ModelSwitchSnapshot {
+        selected_model: settings.selected_model.clone(),
+        selected_language: settings.selected_language.clone(),
+        dictation_language_mode: settings.dictation_language_mode,
+        adaptive_language_shortlist: settings.adaptive_language_shortlist.clone(),
+    };
+    settings.selected_model = model_id.to_string();
+
+    let reason = if settings.selected_language != "auto"
+        && !supported_languages.is_empty()
+        && !supported_languages.contains(&settings.selected_language)
+    {
+        log::info!(
+            "Resetting language from '{}' to 'auto' (not supported by {})",
+            settings.selected_language,
+            model_id
+        );
+        settings.clear_dictation_language_lock();
+        Some(ModelSwitchReason::LanguageLockClearedForModel)
+    } else {
+        None
+    };
+
+    (snapshot, ModelSwitchOutcome { reason })
+}
+
+fn restore_model_switch(settings: &mut AppSettings, snapshot: ModelSwitchSnapshot) {
+    settings.selected_model = snapshot.selected_model;
+    settings.selected_language = snapshot.selected_language;
+    settings.dictation_language_mode = snapshot.dictation_language_mode;
+    settings.adaptive_language_shortlist = snapshot.adaptive_language_shortlist;
+}
 
 #[tauri::command]
 #[specta::specta]
@@ -58,11 +120,11 @@ pub async fn delete_model(
             .unload_model()
             .map_err(|e| format!("Failed to unload model: {}", e))?;
 
-        mutate_settings_locked(&app_handle, |settings| {
+        write_settings_domain(&app_handle, SettingsWriteDomain::Models, |settings| {
             if settings.selected_model == model_id {
                 settings.selected_model = String::new();
             }
-        });
+        })?;
     }
 
     model_manager
@@ -76,7 +138,7 @@ pub async fn delete_model(
 /// Validates the model, updates the persisted setting, and loads the model
 /// unless the unload timeout is set to "Immediately" (in which case the model
 /// will be loaded on-demand during the next transcription).
-pub fn switch_active_model(app: &AppHandle, model_id: &str) -> Result<(), String> {
+pub fn switch_active_model(app: &AppHandle, model_id: &str) -> Result<ModelSwitchOutcome, String> {
     let model_manager = app.state::<Arc<ModelManager>>();
     let transcription_manager = app.state::<Arc<TranscriptionManager>>();
 
@@ -98,30 +160,18 @@ pub fn switch_active_model(app: &AppHandle, model_id: &str) -> Result<(), String
 
     // Persist the new selection early so the frontend sees the correct model
     // when it reacts to events emitted by load_model.
-    let (unload_timeout, old_model) = mutate_settings_locked(app, |settings| {
+    let mut transition = None;
+    write_settings_domain(app, SettingsWriteDomain::Models, |settings| {
         let unload_timeout = settings.model_unload_timeout;
-        let old_model = settings.selected_model.clone();
-        settings.selected_model = model_id.to_string();
-
-        // Reset language to auto if the new model doesn't support the currently selected language.
-        // This prevents stale language settings from causing errors (e.g. Canary receiving zh-Hans)
-        // and stops downstream processing (e.g. OpenCC) from running on an irrelevant language.
-        if settings.selected_language != "auto"
-            && !model_info.supported_languages.is_empty()
-            && !model_info
-                .supported_languages
-                .contains(&settings.selected_language)
-        {
-            log::info!(
-                "Resetting language from '{}' to 'auto' (not supported by {})",
-                settings.selected_language,
-                model_id
-            );
-            settings.selected_language = "auto".to_string();
-        }
-
-        (unload_timeout, old_model)
-    });
+        let (snapshot, outcome) = begin_model_switch(
+            settings,
+            model_id,
+            model_info.supported_languages.as_slice(),
+        );
+        transition = Some((unload_timeout, snapshot, outcome));
+    })?;
+    let (unload_timeout, snapshot, outcome) =
+        transition.ok_or_else(|| "Model switch settings transition did not run".to_string())?;
 
     // Skip eager loading if unload is set to "Immediately" — the model
     // will be loaded on-demand during the next transcription.
@@ -143,18 +193,21 @@ pub fn switch_active_model(app: &AppHandle, model_id: &str) -> Result<(), String
             "Model selection changed to {} (not loading — unload set to Immediately).",
             model_id
         );
-        return Ok(());
+        return Ok(outcome);
     }
 
     // Load the model. On failure, revert the persisted selection.
     if let Err(e) = transcription_manager.load_model(model_id) {
-        mutate_settings_locked(app, |settings| {
-            settings.selected_model = old_model;
-        });
+        write_settings_domain(app, SettingsWriteDomain::Models, |settings| {
+            restore_model_switch(settings, snapshot);
+        })
+        .map_err(|rollback_error| {
+            format!("{e}; failed to restore model and language settings: {rollback_error}")
+        })?;
         return Err(e.to_string());
     }
 
-    Ok(())
+    Ok(outcome)
 }
 
 #[tauri::command]
@@ -164,7 +217,7 @@ pub async fn set_active_model(
     _model_manager: State<'_, Arc<ModelManager>>,
     _transcription_manager: State<'_, Arc<TranscriptionManager>>,
     model_id: String,
-) -> Result<(), String> {
+) -> Result<ModelSwitchOutcome, String> {
     switch_active_model(&app_handle, &model_id)
 }
 
@@ -221,4 +274,84 @@ pub async fn cancel_download(
     model_manager
         .cancel_download(&model_id)
         .map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::settings::{get_default_settings, DictationLanguageMode};
+
+    fn language_tuple(
+        settings: &crate::settings::AppSettings,
+    ) -> (String, DictationLanguageMode, Vec<String>) {
+        (
+            settings.selected_language.clone(),
+            settings.dictation_language_mode,
+            settings.adaptive_language_shortlist.clone(),
+        )
+    }
+
+    #[test]
+    fn failed_model_load_restores_model_and_full_language_tuple() {
+        let mut settings = get_default_settings();
+        settings.selected_model = "old-model".to_string();
+        settings.selected_language = "zh-Hans".to_string();
+        settings.dictation_language_mode = DictationLanguageMode::Single;
+        settings.adaptive_language_shortlist = vec!["zh-Hans".to_string(), "en-US".to_string()];
+        let before_language = language_tuple(&settings);
+
+        let (snapshot, _) = begin_model_switch(&mut settings, "english-model", &["en".to_string()]);
+        restore_model_switch(&mut settings, snapshot);
+
+        assert_eq!(settings.selected_model, "old-model");
+        assert_eq!(language_tuple(&settings), before_language);
+    }
+
+    #[test]
+    fn incompatible_model_switch_clears_language_tuple_and_reports_reason() {
+        let mut settings = get_default_settings();
+        settings.selected_model = "old-model".to_string();
+        settings.selected_language = "ar".to_string();
+        settings.dictation_language_mode = DictationLanguageMode::Single;
+        settings.adaptive_language_shortlist = vec!["ar".to_string(), "en".to_string()];
+
+        let (_, outcome) = begin_model_switch(&mut settings, "english-model", &["en".to_string()]);
+
+        assert_eq!(settings.selected_model, "english-model");
+        assert_eq!(settings.selected_language, "auto");
+        assert_eq!(
+            settings.dictation_language_mode,
+            DictationLanguageMode::Auto
+        );
+        assert_eq!(
+            settings.adaptive_language_shortlist,
+            vec!["en".to_string(), "ar".to_string()]
+        );
+        assert_eq!(
+            outcome.reason,
+            Some(ModelSwitchReason::LanguageLockClearedForModel)
+        );
+        assert_eq!(
+            serde_json::to_value(outcome.reason).expect("serialize model-switch reason"),
+            serde_json::json!("language_lock_cleared_for_model")
+        );
+    }
+
+    #[test]
+    fn compatible_model_switch_preserves_language_tuple() {
+        let mut settings = get_default_settings();
+        settings.selected_language = "pt-BR".to_string();
+        settings.dictation_language_mode = DictationLanguageMode::Single;
+        settings.adaptive_language_shortlist = vec!["pt-BR".to_string(), "ar".to_string()];
+        let before_language = language_tuple(&settings);
+
+        let (_, outcome) = begin_model_switch(
+            &mut settings,
+            "multilingual-model",
+            &["en".to_string(), "pt-BR".to_string(), "ar".to_string()],
+        );
+
+        assert_eq!(language_tuple(&settings), before_language);
+        assert_eq!(outcome.reason, None);
+    }
 }

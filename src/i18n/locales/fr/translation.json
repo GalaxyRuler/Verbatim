@@ -224,6 +224,7 @@
         "translation": "Traduction",
         "allLanguages": "Toutes les langues"
       },
+      "languageLockClearedForModel": "Ce modèle ne prend pas en charge la langue de dictée verrouillée. Le mode de langue a été réinitialisé sur Automatique.",
       "noModelsMatch": "Aucun modèle ne correspond à ce filtre.",
       "yourModels": "Modèles téléchargés",
       "availableModels": "Disponibles au téléchargement"

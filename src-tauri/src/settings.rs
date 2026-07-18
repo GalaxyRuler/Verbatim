@@ -1480,6 +1480,12 @@ pub fn get_default_settings() -> AppSettings {
 }
 
 impl AppSettings {
+    pub fn clear_dictation_language_lock(&mut self) {
+        self.selected_language = "auto".to_string();
+        self.dictation_language_mode = DictationLanguageMode::Auto;
+        self.adaptive_language_shortlist = default_adaptive_language_shortlist();
+    }
+
     pub fn apply_dictation_language_mode(
         &mut self,
         mode: DictationLanguageMode,

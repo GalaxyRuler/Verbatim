@@ -224,6 +224,7 @@
         "translation": "Tłumaczenie",
         "allLanguages": "Wszystkie języki"
       },
+      "languageLockClearedForModel": "Ten model nie obsługuje zablokowanego języka dyktowania. Tryb języka został przywrócony do Automatycznego.",
       "noModelsMatch": "Żadne modele nie pasują do tego filtra.",
       "yourModels": "Pobrane modele",
       "availableModels": "Dostępne do pobrania"

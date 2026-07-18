@@ -224,6 +224,7 @@
         "translation": "Traducción",
         "allLanguages": "Todos los idiomas"
       },
+      "languageLockClearedForModel": "Este modelo no admite el idioma de dictado fijado. El modo de idioma se restableció a Automático.",
       "noModelsMatch": "Ningún modelo coincide con este filtro.",
       "yourModels": "Modelos descargados",
       "availableModels": "Disponibles para descargar"

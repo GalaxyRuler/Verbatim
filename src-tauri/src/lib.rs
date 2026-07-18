@@ -486,8 +486,14 @@ fn initialize_core_logic(app_handle: &AppHandle) -> Result<(), StartupError> {
                         let app_clone = app.clone();
                         std::thread::spawn(move || {
                             match commands::models::switch_active_model(&app_clone, &model_id) {
-                                Ok(()) => {
+                                Ok(outcome) => {
                                     log::info!("Model switched to {} via tray.", model_id);
+                                    if let Some(reason) = outcome.reason {
+                                        log::info!(
+                                            "Model switch adjusted language settings: {:?}",
+                                            reason
+                                        );
+                                    }
                                 }
                                 Err(e) => {
                                     log::error!("Failed to switch model via tray: {}", e);

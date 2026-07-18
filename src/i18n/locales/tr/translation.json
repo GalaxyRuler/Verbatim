@@ -224,6 +224,7 @@
         "translation": "Çeviri",
         "allLanguages": "Tüm Diller"
       },
+      "languageLockClearedForModel": "Bu model sabitlenmiş dikte dilini desteklemiyor. Dil modu Otomatik olarak sıfırlandı.",
       "noModelsMatch": "Bu filtreyle eşleşen model yok.",
       "yourModels": "İndirilen modeller",
       "availableModels": "İndirilebilir"
