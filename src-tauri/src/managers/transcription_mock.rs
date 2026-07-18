@@ -2,7 +2,7 @@
 // fast test builds while failing loudly for engine-dependent operations.
 
 use crate::managers::model::ModelManager;
-use crate::providers::CancellationToken;
+use crate::providers::{CancellationToken, LanguageOutcome};
 use anyhow::Result;
 use serde::Serialize;
 use specta::Type;
@@ -32,6 +32,8 @@ pub struct ModelStateEvent {
 pub(crate) struct TranscriptionOutput {
     pub text: String,
     pub effective_language: Option<String>,
+    #[allow(dead_code)]
+    pub outcome: LanguageOutcome,
 }
 
 #[derive(Clone, Debug, Serialize)]

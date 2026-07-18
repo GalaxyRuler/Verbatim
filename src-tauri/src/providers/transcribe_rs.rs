@@ -201,6 +201,23 @@ fn whisper_language_hint(
     }
 }
 
+fn translation_performed_for_engine(engine_type: &EngineType, requested: bool) -> bool {
+    requested && matches!(engine_type, EngineType::Whisper | EngineType::Canary)
+}
+
+fn loaded_engine_type(engine: &LoadedEngine) -> EngineType {
+    match engine {
+        LoadedEngine::Whisper(_) => EngineType::Whisper,
+        LoadedEngine::Parakeet(_) => EngineType::Parakeet,
+        LoadedEngine::Moonshine(_) => EngineType::Moonshine,
+        LoadedEngine::MoonshineStreaming(_) => EngineType::MoonshineStreaming,
+        LoadedEngine::SenseVoice(_) => EngineType::SenseVoice,
+        LoadedEngine::GigaAM(_) => EngineType::GigaAM,
+        LoadedEngine::Canary(_) => EngineType::Canary,
+        LoadedEngine::Cohere(_) => EngineType::Cohere,
+    }
+}
+
 fn score_text_for_language(text: &str, language: &str) -> f32 {
     let mut arabic = 0usize;
     let mut cjk = 0usize;
@@ -355,13 +372,15 @@ impl EngineProvider for TranscribeRsProvider {
             .clone()
             .ok_or_else(|| anyhow::anyhow!("provider has no loaded model"))?;
         let selected_language = source_language_code(&request.source_language);
-        let translated = request.translation.is_some();
-
-        let result = match self
+        let translation_requested = request.translation.is_some();
+        let engine = self
             .engine
             .as_mut()
-            .ok_or_else(|| anyhow::anyhow!("provider engine is not loaded"))?
-        {
+            .ok_or_else(|| anyhow::anyhow!("provider engine is not loaded"))?;
+        let translation_performed =
+            translation_performed_for_engine(&loaded_engine_type(engine), translation_requested);
+
+        let result = match engine {
             LoadedEngine::Whisper(whisper_engine) => {
                 let initial_prompt = if should_inject_initial_prompt(audio.as_ref().len()) {
                     build_whisper_initial_prompt(&request.custom_words, &request.language_shortlist)
@@ -373,7 +392,7 @@ impl EngineProvider for TranscribeRsProvider {
 
                 let params = WhisperInferenceParams {
                     language: whisper_language,
-                    translate: translated,
+                    translate: translation_requested,
                     initial_prompt,
                     ..Default::default()
                 };
@@ -429,7 +448,7 @@ impl EngineProvider for TranscribeRsProvider {
                 };
                 let options = TranscribeOptions {
                     language: lang,
-                    translate: translated,
+                    translate: translation_requested,
                     ..Default::default()
                 };
                 canary_engine
@@ -484,7 +503,8 @@ impl EngineProvider for TranscribeRsProvider {
         Ok(SpeechResponse {
             text: result.text,
             detected_language: None,
-            translated,
+            detection_confidence: None,
+            translation_performed,
             provider_id: self.provider_id(),
             model_id,
         })
@@ -678,6 +698,20 @@ mod tests {
             Some("ar".to_string())
         );
         assert_eq!(whisper_language_hint("auto", &shortlist), None);
+    }
+
+    #[test]
+    fn translation_performed_is_truthful_for_each_engine() {
+        assert!(translation_performed_for_engine(&EngineType::Whisper, true));
+        assert!(translation_performed_for_engine(&EngineType::Canary, true));
+        assert!(!translation_performed_for_engine(
+            &EngineType::Parakeet,
+            true
+        ));
+        assert!(!translation_performed_for_engine(
+            &EngineType::Whisper,
+            false
+        ));
     }
 
     #[test]
