@@ -12,6 +12,7 @@ use tauri_plugin_store::StoreExt;
 
 pub const APPLE_INTELLIGENCE_PROVIDER_ID: &str = "apple_intelligence";
 pub const APPLE_INTELLIGENCE_DEFAULT_MODEL_ID: &str = "Apple Intelligence";
+const DICTATION_LANGUAGE_SCHEMA_VERSION: u32 = 1;
 
 #[cfg_attr(not(test), allow(dead_code))]
 static SETTINGS_WRITE_LOCK: Mutex<()> = Mutex::new(());
@@ -550,6 +551,8 @@ pub struct AppSettings {
     pub selected_language: String,
     #[serde(default)]
     pub dictation_language_mode: DictationLanguageMode,
+    #[serde(default)]
+    pub dictation_language_schema_version: u32,
     #[serde(default = "default_overlay_position")]
     pub overlay_position: OverlayPosition,
     #[serde(default)]
@@ -681,6 +684,27 @@ fn default_audio_feedback() -> bool {
 
 fn default_adaptive_language_shortlist() -> Vec<String> {
     vec!["en".to_string(), "ar".to_string()]
+}
+
+pub fn normalize_bcp47(tag: &str) -> String {
+    let mut subtags = tag.trim().split('-').filter(|subtag| !subtag.is_empty());
+    let Some(primary) = subtags.next() else {
+        return String::new();
+    };
+
+    let mut normalized = vec![primary.to_ascii_lowercase()];
+    normalized.extend(subtags.map(|subtag| {
+        if subtag.len() == 4 && subtag.bytes().all(|byte| byte.is_ascii_alphabetic()) {
+            let mut bytes = subtag.to_ascii_lowercase().into_bytes();
+            bytes[0] = bytes[0].to_ascii_uppercase();
+            String::from_utf8(bytes).expect("ASCII BCP-47 script subtag remains UTF-8")
+        } else if subtag.len() == 2 && subtag.bytes().all(|byte| byte.is_ascii_alphabetic()) {
+            subtag.to_ascii_uppercase()
+        } else {
+            subtag.to_string()
+        }
+    }));
+    normalized.join("-")
 }
 
 fn default_adaptive_default_profile_id() -> String {
@@ -1186,6 +1210,35 @@ fn ensure_adaptive_defaults(settings: &mut AppSettings) -> bool {
     changed
 }
 
+fn ensure_dictation_language_defaults(settings: &mut AppSettings) -> bool {
+    if settings.dictation_language_schema_version >= DICTATION_LANGUAGE_SCHEMA_VERSION {
+        return false;
+    }
+
+    settings.selected_language = normalize_bcp47(&settings.selected_language);
+    settings.adaptive_language_shortlist = settings
+        .adaptive_language_shortlist
+        .iter()
+        .map(|language| normalize_bcp47(language))
+        .filter(|language| !language.is_empty() && language != "auto")
+        .fold(Vec::new(), |mut languages, language| {
+            if !languages.contains(&language) {
+                languages.push(language);
+            }
+            languages
+        });
+
+    if settings.dictation_language_mode == DictationLanguageMode::Auto
+        && !settings.selected_language.is_empty()
+        && settings.selected_language != "auto"
+    {
+        settings.dictation_language_mode = DictationLanguageMode::Single;
+    }
+
+    settings.dictation_language_schema_version = DICTATION_LANGUAGE_SCHEMA_VERSION;
+    true
+}
+
 fn ensure_translation_defaults(settings: &mut AppSettings) -> bool {
     if settings.translate_to_english && settings.translation_request.is_none() {
         settings.translation_enabled = true;
@@ -1238,6 +1291,7 @@ fn ensure_snippet_defaults(settings: &mut AppSettings) -> bool {
 }
 
 pub fn set_translation_target_language(settings: &mut AppSettings, target_language: String) {
+    let target_language = normalize_bcp47(&target_language);
     let mut request = settings
         .translation_request
         .clone()
@@ -1365,6 +1419,7 @@ pub fn get_default_settings() -> AppSettings {
         translation_request: None,
         selected_language: "auto".to_string(),
         dictation_language_mode: DictationLanguageMode::default(),
+        dictation_language_schema_version: DICTATION_LANGUAGE_SCHEMA_VERSION,
         overlay_position: default_overlay_position(),
         docked_pill_enabled: false,
         warn_on_elevated_target: true,
@@ -1432,7 +1487,7 @@ impl AppSettings {
         languages: Vec<String>,
     ) -> Result<(), String> {
         let cleaned = languages.into_iter().fold(Vec::new(), |mut acc, language| {
-            let language = language.trim().to_lowercase();
+            let language = normalize_bcp47(&language);
             if !language.is_empty() && language != "auto" && !acc.contains(&language) {
                 acc.push(language);
             }
@@ -1444,8 +1499,7 @@ impl AppSettings {
             DictationLanguageMode::Single => {
                 let language = selected_language
                     .as_deref()
-                    .map(str::trim)
-                    .map(str::to_lowercase)
+                    .map(normalize_bcp47)
                     .filter(|language| !language.is_empty() && language != "auto")
                     .or_else(|| cleaned.first().cloned());
                 let Some(language) = language else {
@@ -1930,6 +1984,7 @@ fn reconcile_loaded_settings_defaults(
     let binding_changed = ensure_binding_defaults(settings);
     let post_process_changed = ensure_post_process_defaults(settings);
     let adaptive_changed = ensure_adaptive_defaults(settings);
+    let dictation_language_changed = ensure_dictation_language_defaults(settings);
     let translation_changed = ensure_translation_defaults(settings);
     let dictionary_changed =
         ensure_dictionary_defaults_for_loaded_value(settings, settings_value_for_defaults);
@@ -1938,6 +1993,7 @@ fn reconcile_loaded_settings_defaults(
     binding_changed
         || post_process_changed
         || adaptive_changed
+        || dictation_language_changed
         || translation_changed
         || dictionary_changed
         || snippet_changed
@@ -1960,6 +2016,7 @@ fn reconcile_selected_microphone_identity(previous_name: Option<&str>, settings:
 
 fn settings_change_requires_immediate_save(previous: &AppSettings, next: &AppSettings) -> bool {
     previous.dictionary_schema_version != next.dictionary_schema_version
+        || previous.dictation_language_schema_version != next.dictation_language_schema_version
         || previous.history_enabled != next.history_enabled
         || previous.recordings_enabled != next.recordings_enabled
         || previous.history_limit != next.history_limit
@@ -3814,6 +3871,94 @@ mod tests {
             settings.dictation_language_mode,
             DictationLanguageMode::Auto
         );
+    }
+
+    #[test]
+    fn dictation_language_setter_preserves_bcp47_casing() {
+        let mut settings = get_default_settings();
+
+        settings
+            .apply_dictation_language_mode(
+                DictationLanguageMode::Single,
+                Some("ZH-hans".to_string()),
+                vec![
+                    "ZH-hans".to_string(),
+                    "EN-us".to_string(),
+                    "PT-br".to_string(),
+                    "AR-sa".to_string(),
+                ],
+            )
+            .expect("single language mode with BCP-47 tags");
+
+        assert_eq!(settings.selected_language, "zh-Hans");
+        assert_eq!(
+            settings.adaptive_language_shortlist,
+            vec!["zh-Hans", "en-US", "pt-BR", "ar-SA"]
+        );
+    }
+
+    #[test]
+    fn legacy_concrete_language_without_mode_loads_as_single() {
+        let mut legacy_value =
+            serde_json::to_value(get_default_settings()).expect("serialize default settings");
+        let legacy = legacy_value
+            .as_object_mut()
+            .expect("settings serialize as an object");
+        legacy.remove("dictation_language_mode");
+        legacy.remove("dictation_language_schema_version");
+        legacy.insert("selected_language".to_string(), serde_json::json!("AR-sa"));
+        legacy.insert(
+            "adaptive_language_shortlist".to_string(),
+            serde_json::json!(["AR-sa", "EN-us"]),
+        );
+
+        let mut settings: AppSettings =
+            serde_json::from_value(legacy_value.clone()).expect("deserialize legacy fixture");
+        assert_eq!(
+            settings.dictation_language_mode,
+            DictationLanguageMode::Auto
+        );
+
+        assert!(reconcile_loaded_settings_defaults(
+            &mut settings,
+            Some(&legacy_value)
+        ));
+        assert_eq!(
+            settings.dictation_language_mode,
+            DictationLanguageMode::Single
+        );
+        assert_eq!(settings.selected_language, "ar-SA");
+        assert_eq!(settings.adaptive_language_shortlist, vec!["ar-SA", "en-US"]);
+        assert_eq!(settings.dictation_language_schema_version, 1);
+    }
+
+    #[test]
+    fn legacy_explicit_auto_mode_with_concrete_language_loads_as_single() {
+        let mut legacy_value =
+            serde_json::to_value(get_default_settings()).expect("serialize default settings");
+        let legacy = legacy_value
+            .as_object_mut()
+            .expect("settings serialize as an object");
+        legacy.remove("dictation_language_schema_version");
+        legacy.insert(
+            "dictation_language_mode".to_string(),
+            serde_json::json!("auto"),
+        );
+        legacy.insert("selected_language".to_string(), serde_json::json!("pt-BR"));
+
+        let mut settings: AppSettings =
+            serde_json::from_value(legacy_value.clone()).expect("deserialize legacy fixture");
+        assert!(reconcile_loaded_settings_defaults(
+            &mut settings,
+            Some(&legacy_value)
+        ));
+
+        assert_eq!(
+            settings.dictation_language_mode,
+            DictationLanguageMode::Single
+        );
+        assert_eq!(settings.selected_language, "pt-BR");
+        assert_eq!(settings.dictation_language_schema_version, 1);
     }
 
     #[test]
