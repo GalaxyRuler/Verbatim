@@ -2,9 +2,10 @@ use crate::dictionary_learning::canonicalize;
 use crate::settings::{
     AppSettings, DictionaryEntry, DictionaryEntryPriority, DictionaryEntrySource, LearnCandidate,
 };
+use std::collections::HashSet;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const AMBIGUOUS_ENTRY_ID: &str = "ambiguous_entry_id";
-use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const MAX_DICTIONARY_PHRASE_CHARS: usize = 120;
 
@@ -38,7 +39,7 @@ pub fn normalize_dictionary_key(raw: &str) -> String {
         .to_lowercase()
 }
 
-pub fn make_dictionary_entry_id(now_ms: u64, phrase: &str) -> String {
+fn dictionary_entry_id_base(now_ms: u64, phrase: &str) -> String {
     let mut slug = String::new();
     let mut last_was_separator = false;
 
@@ -60,6 +61,30 @@ pub fn make_dictionary_entry_id(now_ms: u64, phrase: &str) -> String {
     let slug = if slug.is_empty() { "entry" } else { slug };
 
     format!("dict_{}_{}", now_ms, slug)
+}
+
+fn allocate_dictionary_entry_id<'a>(
+    base: &str,
+    existing_ids: impl IntoIterator<Item = &'a str>,
+) -> String {
+    let existing_ids = existing_ids.into_iter().collect::<HashSet<_>>();
+    if !existing_ids.contains(base) {
+        return base.to_string();
+    }
+
+    let mut suffix = 2u64;
+    loop {
+        let candidate = format!("{base}-{suffix}");
+        if !existing_ids.contains(candidate.as_str()) {
+            return candidate;
+        }
+        suffix += 1;
+    }
+}
+
+pub fn make_dictionary_entry_id(entries: &[DictionaryEntry], now_ms: u64, phrase: &str) -> String {
+    let base = dictionary_entry_id_base(now_ms, phrase);
+    allocate_dictionary_entry_id(&base, entries.iter().map(|entry| entry.id.as_str()))
 }
 
 /// Phrases of ACTIVE entries only. Feeds the ASR prompt context and the legacy
@@ -97,6 +122,35 @@ pub fn migrate_dictionary_v1(settings: &mut AppSettings) -> bool {
     true
 }
 
+/// v1 -> v2: keep the first occurrence of every persisted entry ID and deterministically
+/// suffix later duplicates. Array order and every non-ID field remain unchanged.
+pub fn migrate_dictionary_v2(settings: &mut AppSettings) -> bool {
+    if settings.dictionary_schema_version >= 2 {
+        return false;
+    }
+
+    let mut reserved_ids = settings
+        .dictionary_entries
+        .iter()
+        .map(|entry| entry.id.clone())
+        .collect::<HashSet<_>>();
+    let mut seen_ids = HashSet::new();
+    for entry in &mut settings.dictionary_entries {
+        if seen_ids.insert(entry.id.clone()) {
+            continue;
+        }
+
+        let repaired_id =
+            allocate_dictionary_entry_id(&entry.id, reserved_ids.iter().map(String::as_str));
+        entry.id = repaired_id.clone();
+        seen_ids.insert(repaired_id.clone());
+        reserved_ids.insert(repaired_id);
+    }
+
+    settings.dictionary_schema_version = 2;
+    true
+}
+
 pub fn sync_legacy_custom_words(settings: &mut AppSettings) -> bool {
     sync_legacy_custom_words_with_migration(settings, true)
 }
@@ -131,8 +185,9 @@ pub fn sync_legacy_custom_words_with_migration(
                 continue;
             }
 
+            let id = make_dictionary_entry_id(&entries, index as u64, &phrase);
             entries.push(DictionaryEntry {
-                id: make_dictionary_entry_id(index as u64, &phrase),
+                id,
                 phrase,
                 replacement_of: None,
                 source: DictionaryEntrySource::Manual,
@@ -174,7 +229,7 @@ pub fn upsert_manual_entry(
     unsuppress_auto_learn_phrase(settings, &phrase);
 
     let entry = DictionaryEntry {
-        id: make_dictionary_entry_id(now_ms, &phrase),
+        id: make_dictionary_entry_id(&settings.dictionary_entries, now_ms, &phrase),
         phrase,
         replacement_of: sanitize_optional_phrase(replacement_of),
         source: DictionaryEntrySource::Manual,
@@ -214,7 +269,7 @@ pub fn upsert_auto_learn_entry(
     }
 
     let entry = DictionaryEntry {
-        id: make_dictionary_entry_id(now_ms, &phrase),
+        id: make_dictionary_entry_id(&settings.dictionary_entries, now_ms, &phrase),
         phrase,
         replacement_of: sanitize_optional_phrase(replacement_of),
         source: DictionaryEntrySource::AutoLearned,
@@ -358,8 +413,9 @@ pub fn replace_dictionary_phrases(
         }
 
         unsuppress_auto_learn_phrase(settings, &phrase);
+        let id = make_dictionary_entry_id(&settings.dictionary_entries, now_ms, &phrase);
         settings.dictionary_entries.push(DictionaryEntry {
-            id: make_dictionary_entry_id(now_ms, &phrase),
+            id,
             phrase,
             replacement_of: None,
             source: DictionaryEntrySource::Manual,
@@ -639,8 +695,9 @@ pub fn promote_candidate_to_entry(
         return; // phrase already active; keep the existing entry's replacement_of
     }
     unsuppress_auto_learn_phrase(settings, &phrase);
+    let id = make_dictionary_entry_id(&settings.dictionary_entries, now_ms, &phrase);
     settings.dictionary_entries.push(DictionaryEntry {
-        id: make_dictionary_entry_id(now_ms, &phrase),
+        id,
         phrase,
         replacement_of: candidate
             .replacement_of
@@ -772,9 +829,9 @@ pub fn reset_dictionary_diagnostics(settings: &mut AppSettings, now_ms: u64) {
 mod tests {
     use super::{
         approve_candidate, delete_entries, dictionary_phrases, make_dictionary_entry_id,
-        migrate_dictionary_v1, observe_correction, promote_candidate_to_entry,
-        prune_learn_candidates, record_learn_outcomes, reject_candidate,
-        replace_dictionary_phrases, sanitize_dictionary_phrase, set_entry_active,
+        migrate_dictionary_v1, migrate_dictionary_v2, observe_correction,
+        promote_candidate_to_entry, prune_learn_candidates, record_learn_outcomes,
+        reject_candidate, replace_dictionary_phrases, sanitize_dictionary_phrase, set_entry_active,
         sync_legacy_custom_words, update_entry, upsert_auto_learn_entry, upsert_manual_entry,
         ObserveOutcome, MAX_CANDIDATE_AGE_MS, MAX_LEARN_CANDIDATES,
     };
@@ -825,8 +882,33 @@ mod tests {
     #[test]
     fn make_dictionary_entry_id_is_deterministic_for_tests() {
         assert_eq!(
-            make_dictionary_entry_id(42, "Abdullah al Kulaib"),
+            make_dictionary_entry_id(&[], 42, "Abdullah al Kulaib"),
             "dict_42_abdullah-al-kulaib"
+        );
+    }
+
+    #[test]
+    fn same_millisecond_arabic_batch_receives_distinct_ids() {
+        let mut settings = get_default_settings();
+
+        replace_dictionary_phrases(
+            &mut settings,
+            42,
+            vec![
+                "عبدالله".to_string(),
+                "العربية".to_string(),
+                "القاموس".to_string(),
+            ],
+        );
+
+        let ids = settings
+            .dictionary_entries
+            .iter()
+            .map(|entry| entry.id.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            ids,
+            vec!["dict_42_entry", "dict_42_entry-2", "dict_42_entry-3"]
         );
     }
 
@@ -1550,6 +1632,117 @@ mod tests {
         }];
         assert!(!migrate_dictionary_v1(&mut s));
         assert!(!s.dictionary_entries[0].user_confirmed); // untouched: created under the new system
+    }
+
+    #[test]
+    fn migration_v2_repairs_duplicate_ids_in_order_and_is_idempotent() {
+        let mut settings = get_default_settings();
+        settings.dictionary_schema_version = 1;
+        settings.dictionary_entries = vec![
+            DictionaryEntry {
+                priority: DictionaryEntryPriority::Starred,
+                created_at_ms: 11,
+                updated_at_ms: 12,
+                user_confirmed: true,
+                ..entry_full("dict_42_entry", "عبدالله", Some("عبدالة"))
+            },
+            DictionaryEntry {
+                source: DictionaryEntrySource::Imported,
+                created_at_ms: 21,
+                updated_at_ms: 22,
+                active: false,
+                needs_review: true,
+                ..entry_full("dict_42_entry", "العربية", None)
+            },
+            DictionaryEntry {
+                source: DictionaryEntrySource::AutoLearned,
+                created_at_ms: 31,
+                updated_at_ms: 32,
+                ..entry_full("dict_42_entry", "القاموس", Some("قاموس"))
+            },
+        ];
+        let original = settings.dictionary_entries.clone();
+
+        assert!(migrate_dictionary_v2(&mut settings));
+        assert_eq!(settings.dictionary_schema_version, 2);
+        assert_eq!(
+            settings
+                .dictionary_entries
+                .iter()
+                .map(|entry| entry.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["dict_42_entry", "dict_42_entry-2", "dict_42_entry-3"]
+        );
+        for (before, after) in original.iter().zip(&settings.dictionary_entries) {
+            let mut expected = before.clone();
+            expected.id = after.id.clone();
+            assert_eq!(&expected, after, "migration may only change duplicate IDs");
+        }
+
+        let migrated = settings.clone();
+        assert!(!migrate_dictionary_v2(&mut settings));
+        assert_eq!(settings.dictionary_entries, migrated.dictionary_entries);
+        assert_eq!(
+            settings.dictionary_schema_version,
+            migrated.dictionary_schema_version
+        );
+    }
+
+    #[test]
+    fn repaired_ids_keep_dictionary_mutations_entry_exact() {
+        let mut migrated = get_default_settings();
+        migrated.dictionary_schema_version = 1;
+        migrated.dictionary_entries = vec![
+            entry("dict_shared", "Alpha"),
+            entry("dict_shared", "Bravo"),
+            entry("dict_shared", "Charlie"),
+        ];
+        assert!(migrate_dictionary_v2(&mut migrated));
+        let repaired_ids = migrated
+            .dictionary_entries
+            .iter()
+            .map(|entry| entry.id.clone())
+            .collect::<Vec<_>>();
+
+        for (target_index, target_id) in repaired_ids.iter().enumerate() {
+            let mut updated = migrated.clone();
+            let next_phrase = format!("Updated {target_index}");
+            update_entry(
+                &mut updated,
+                100 + target_index as u64,
+                target_id,
+                Some(next_phrase.clone()),
+                None,
+                None,
+            )
+            .expect("repaired ID updates exactly one entry");
+            for (index, entry) in updated.dictionary_entries.iter().enumerate() {
+                let expected_phrase = if index == target_index {
+                    next_phrase.as_str()
+                } else {
+                    migrated.dictionary_entries[index].phrase.as_str()
+                };
+                assert_eq!(entry.phrase, expected_phrase);
+            }
+
+            let mut toggled = migrated.clone();
+            set_entry_active(&mut toggled, 200 + target_index as u64, target_id, false)
+                .expect("repaired ID toggles exactly one entry");
+            for (index, entry) in toggled.dictionary_entries.iter().enumerate() {
+                assert_eq!(entry.active, index != target_index);
+            }
+
+            let mut deleted = migrated.clone();
+            let removed = delete_entries(&mut deleted, std::slice::from_ref(target_id))
+                .expect("repaired ID deletes exactly one entry");
+            assert_eq!(removed.len(), 1);
+            assert_eq!(removed[0].id, *target_id);
+            assert_eq!(deleted.dictionary_entries.len(), repaired_ids.len() - 1);
+            assert!(deleted
+                .dictionary_entries
+                .iter()
+                .all(|entry| entry.id != *target_id));
+        }
     }
 
     #[test]

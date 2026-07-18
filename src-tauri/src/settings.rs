@@ -1224,12 +1224,13 @@ fn ensure_dictionary_defaults_for_loaded_value(
     settings: &mut AppSettings,
     settings_value: Option<&serde_json::Value>,
 ) -> bool {
-    let migrated = crate::dictionary::migrate_dictionary_v1(settings);
+    let migrated_v1 = crate::dictionary::migrate_dictionary_v1(settings);
+    let migrated_v2 = crate::dictionary::migrate_dictionary_v2(settings);
     let synced = crate::dictionary::sync_legacy_custom_words_with_migration(
         settings,
         !settings_value_has_dictionary_entries(settings_value),
     );
-    migrated || synced
+    migrated_v1 || migrated_v2 || synced
 }
 
 fn ensure_snippet_defaults(settings: &mut AppSettings) -> bool {
@@ -1721,6 +1722,9 @@ pub fn load_or_create_app_settings(app: &AppHandle) -> AppSettings {
             &settings,
             force_immediate_save || credentials_changed,
         ) {
+            if let Some(settings_before_migrations) = settings_before_migrations.as_ref() {
+                settings = settings_before_migrations.clone();
+            }
             // Startup initialization has no command caller to return this to.
             warn!("Failed to persist migrated settings: {error}");
             if load_origin != SettingsLoadOrigin::Parsed {
@@ -1906,6 +1910,11 @@ fn load_settings_from_store<R: tauri::Runtime>(
     } else {
         None
     };
+    if persistence_error.is_some() {
+        if let Some(settings_before_migrations) = settings_before_migrations {
+            settings = settings_before_migrations;
+        }
+    }
 
     SettingsLoadOutcome {
         settings,
@@ -1950,7 +1959,8 @@ fn reconcile_selected_microphone_identity(previous_name: Option<&str>, settings:
 }
 
 fn settings_change_requires_immediate_save(previous: &AppSettings, next: &AppSettings) -> bool {
-    previous.history_enabled != next.history_enabled
+    previous.dictionary_schema_version != next.dictionary_schema_version
+        || previous.history_enabled != next.history_enabled
         || previous.recordings_enabled != next.recordings_enabled
         || previous.history_limit != next.history_limit
         || previous.recording_retention_period != next.recording_retention_period
@@ -2281,6 +2291,41 @@ pub fn get_recording_retention_period(app: &AppHandle) -> RecordingRetentionPeri
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+    use tauri::Listener;
+
+    fn duplicate_dictionary_settings() -> AppSettings {
+        let mut settings = get_default_settings();
+        settings.dictionary_schema_version = 1;
+        settings.dictionary_entries = vec![
+            DictionaryEntry {
+                id: "dict_shared".to_string(),
+                phrase: "Alpha".to_string(),
+                replacement_of: None,
+                source: DictionaryEntrySource::Manual,
+                priority: DictionaryEntryPriority::Normal,
+                created_at_ms: 1,
+                updated_at_ms: 1,
+                active: true,
+                user_confirmed: false,
+                needs_review: false,
+            },
+            DictionaryEntry {
+                id: "dict_shared".to_string(),
+                phrase: "Bravo".to_string(),
+                replacement_of: None,
+                source: DictionaryEntrySource::Manual,
+                priority: DictionaryEntryPriority::Normal,
+                created_at_ms: 2,
+                updated_at_ms: 2,
+                active: true,
+                user_confirmed: false,
+                needs_review: false,
+            },
+        ];
+        settings
+    }
 
     struct TestAppDataCleanup(PathBuf);
 
@@ -3113,6 +3158,90 @@ mod tests {
         assert!(persisted["settings"]["post_process_api_keys"]
             .as_object()
             .is_some_and(|api_keys| !api_keys.is_empty()));
+    }
+
+    #[test]
+    fn dictionary_v2_migration_saves_immediately_without_auto_save() {
+        let temp_dir = tempfile::tempdir().expect("create settings tempdir");
+        let store_path = temp_dir.path().join("settings").join("settings.json");
+        let app = tauri::test::mock_builder()
+            .plugin(tauri_plugin_store::Builder::new().build())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("build Tauri test app");
+        let store = app
+            .store_builder(&store_path)
+            .disable_auto_save()
+            .build()
+            .expect("build store");
+        let before = duplicate_dictionary_settings();
+        store.set(
+            "settings",
+            serde_json::to_value(&before).expect("serialize pre-v2 settings"),
+        );
+
+        let outcome = load_settings_from_store(app.handle(), store.as_ref());
+
+        assert!(outcome.persistence_error.is_none());
+        assert_eq!(outcome.settings.dictionary_schema_version, 2);
+        assert_eq!(outcome.settings.dictionary_entries[0].id, "dict_shared");
+        assert_eq!(outcome.settings.dictionary_entries[1].id, "dict_shared-2");
+        let persisted: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(&store_path).expect("read immediately persisted migration"),
+        )
+        .expect("persisted settings are valid JSON");
+        assert_eq!(persisted["settings"]["dictionary_schema_version"], 2);
+        assert_eq!(
+            persisted["settings"]["dictionary_entries"][1]["id"],
+            "dict_shared-2"
+        );
+    }
+
+    #[test]
+    fn failed_dictionary_v2_migration_keeps_version_entries_cache_and_events_unchanged() {
+        let temp_dir = tempfile::tempdir().expect("create settings tempdir");
+        let store_dir = temp_dir.path().join("settings");
+        std::fs::create_dir_all(&store_dir).expect("create settings directory");
+        let store_path = store_dir.join("settings.json");
+        let before = duplicate_dictionary_settings();
+        let before_value = serde_json::to_value(&before).expect("serialize pre-v2 settings");
+        std::fs::write(
+            &store_path,
+            serde_json::to_vec(&serde_json::json!({ "settings": before_value.clone() }))
+                .expect("serialize settings store"),
+        )
+        .expect("seed settings store");
+        let app = tauri::test::mock_builder()
+            .plugin(tauri_plugin_store::Builder::new().build())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("build Tauri test app");
+        let store = app
+            .store_builder(&store_path)
+            .disable_auto_save()
+            .build()
+            .expect("load seeded store");
+        let emitted = Arc::new(AtomicUsize::new(0));
+        let emitted_for_listener = Arc::clone(&emitted);
+        let _listener = app.listen_any("dictionary-candidates-learned", move |_| {
+            emitted_for_listener.fetch_add(1, Ordering::SeqCst);
+        });
+        let moved_store_dir = temp_dir.path().join("settings-original");
+        std::fs::rename(&store_dir, &moved_store_dir).expect("move loaded store directory");
+        std::fs::write(&store_dir, "block settings parent")
+            .expect("replace settings directory with a file");
+
+        let outcome = load_settings_from_store(app.handle(), store.as_ref());
+
+        assert!(outcome
+            .persistence_error
+            .as_deref()
+            .is_some_and(|error| error.contains("atomically persist settings")));
+        assert_eq!(outcome.settings.dictionary_schema_version, 1);
+        assert_eq!(
+            outcome.settings.dictionary_entries,
+            before.dictionary_entries
+        );
+        assert_eq!(store.get("settings"), Some(before_value));
+        assert_eq!(emitted.load(Ordering::SeqCst), 0);
     }
 
     #[test]
