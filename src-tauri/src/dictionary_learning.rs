@@ -1,3 +1,5 @@
+use unicode_normalization::UnicodeNormalization;
+
 const MAX_AUTO_LEARN_WORD_CHARS: usize = 60;
 const MAX_AUTO_LEARN_PHRASE_CHARS: usize = 120;
 const MAX_AUTO_LEARN_PHRASE_TOKENS: usize = 5;
@@ -7,13 +9,12 @@ const MAX_HYPHEN_PART_DISTANCE: usize = 2;
 /// matching, conflict grouping, occurrence identity, and suppression keys.
 /// Folds case, collapses whitespace, and maps smart punctuation to ASCII.
 ///
-/// NOTE: Does not NFC-normalize (the `unicode-normalization` crate is not a
-/// dependency of this crate). If it is added later, prefix with
-/// `raw.nfc().collect::<String>()` before the fold below.
+/// Unicode NFC is the dictionary's persisted identity contract. Display text
+/// is never produced from this key and remains byte-for-byte as stored.
 pub fn canonicalize(raw: &str) -> String {
     let mut out = String::new();
     let mut last_was_space = false;
-    for ch in raw.trim().chars() {
+    for ch in raw.trim().nfc() {
         // Fold smart quotes/dashes to ASCII equivalents.
         let ch = match ch {
             '\u{2018}' | '\u{2019}' | '\u{201B}' => '\'',
@@ -36,7 +37,7 @@ pub fn canonicalize(raw: &str) -> String {
     while out.ends_with(' ') {
         out.pop();
     }
-    out
+    out.nfc().collect()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -729,6 +730,14 @@ mod tests {
         );
         assert_eq!(super::canonicalize("a   b\t c"), "a b c");
         assert_eq!(super::canonicalize(""), "");
+        assert_eq!(
+            super::canonicalize("Caf\u{e9}"),
+            super::canonicalize("Cafe\u{301}")
+        );
+        assert_eq!(
+            super::canonicalize("\u{623}\u{62d}\u{645}\u{62f}"),
+            super::canonicalize("\u{627}\u{654}\u{62d}\u{645}\u{62f}")
+        );
     }
 
     #[test]
