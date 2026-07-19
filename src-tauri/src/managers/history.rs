@@ -663,7 +663,8 @@ impl HistoryManager {
         })
     }
 
-    /// Delete history rows first, then remove a recording only after its final owning row.
+    /// Delete shared-reference rows directly. For the last owning row, stage the row deletion in
+    /// a transaction, remove the recording, and commit only after the file is gone.
     ///
     /// Entries count history rows, not distinct recordings. Transform rows pass an empty
     /// filename and are excluded from the reference query, preserving their non-owning semantics.
@@ -680,43 +681,72 @@ impl HistoryManager {
             requested_count: entries.len(),
             ..HistoryDeletionOutcome::default()
         };
-        let mut remaining_references = conn.prepare(
-            "SELECT COUNT(*)
-             FROM transcription_history
-             WHERE file_name = ?1 AND transform_action IS NULL",
-        )?;
-
         for (id, file_name) in entries {
-            let deleted = conn.execute(
-                "DELETE FROM transcription_history WHERE id = ?1",
-                params![id],
-            )?;
-            outcome.deleted_count += deleted;
-            if deleted == 0 || file_name.trim().is_empty() {
+            let transaction = conn.unchecked_transaction()?;
+
+            if file_name.trim().is_empty() {
+                let deleted = transaction.execute(
+                    "DELETE FROM transcription_history WHERE id = ?1",
+                    params![id],
+                )?;
+                transaction.commit()?;
+                outcome.deleted_count += deleted;
                 continue;
             }
 
-            let reference_count: i64 =
-                remaining_references.query_row(params![file_name], |row| row.get(0))?;
-            if reference_count > 0 {
+            let other_reference_count: i64 = transaction.query_row(
+                "SELECT COUNT(*)
+                 FROM transcription_history
+                 WHERE file_name = ?1 AND id != ?2 AND transform_action IS NULL",
+                params![file_name, id],
+                |row| row.get(0),
+            )?;
+            if other_reference_count > 0 {
+                let deleted = transaction.execute(
+                    "DELETE FROM transcription_history WHERE id = ?1",
+                    params![id],
+                )?;
+                transaction.commit()?;
+                outcome.deleted_count += deleted;
                 debug!(
                     "Preserved shared WAV file {} with {} remaining history reference(s)",
-                    file_name, reference_count
+                    file_name, other_reference_count
                 );
+                continue;
+            }
+
+            let deleted = transaction.execute(
+                "DELETE FROM transcription_history WHERE id = ?1",
+                params![id],
+            )?;
+            if deleted == 0 {
+                transaction.commit()?;
                 continue;
             }
 
             let file_path = recordings_dir.join(file_name);
             match delete_file(&file_path) {
-                Ok(()) => debug!("Deleted unreferenced WAV file: {}", file_name),
+                Ok(()) => {
+                    transaction.commit()?;
+                    outcome.deleted_count += deleted;
+                    debug!("Deleted unreferenced WAV file: {}", file_name);
+                }
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    transaction.commit()?;
+                    outcome.deleted_count += deleted;
                     debug!("Unreferenced WAV file already absent: {}", file_name);
                 }
                 Err(error) => {
                     error!(
-                        "History row {} was deleted, but WAV file {} could not be removed: {}",
+                        "Preserved history row {} because WAV file {} could not be removed: {}",
                         id, file_name, error
                     );
+                    outcome.failures.push(HistoryDeletionFailure {
+                        id: Some(*id),
+                        file_name: file_name.clone(),
+                        reason: Self::deletion_failure_reason(&error),
+                    });
+                    transaction.rollback()?;
                 }
             }
         }
@@ -1655,8 +1685,17 @@ mod tests {
         )
         .expect("delete first shared row");
         assert_eq!(first_outcome.deleted_count, 1);
+        assert!(first_outcome.failures.is_empty());
         assert!(recording_path.exists(), "remaining row still owns the WAV");
         assert_eq!(delete_calls.get(), 0);
+        let remaining_rows: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM transcription_history WHERE file_name = 'shared.wav'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count remaining shared row");
+        assert_eq!(remaining_rows, 1);
 
         let second_outcome = HistoryManager::delete_entries_and_files_with(
             &conn,
@@ -1841,12 +1880,12 @@ mod tests {
         assert_eq!(
             delete_calls.get(),
             0,
-            "file deletion must happen after DB deletion"
+            "file deletion must happen only after DB deletion is validated"
         );
     }
 
     #[test]
-    fn file_delete_failure_is_non_fatal_after_row_deletion() {
+    fn locked_last_recording_preserves_row_and_reports_retryable_failure() {
         let conn = setup_conn();
         insert_entry_with_file_name(&conn, 100, "locked.wav", false, "delete row", None);
         let entry_id = conn.last_insert_rowid();
@@ -1865,11 +1904,18 @@ mod tests {
                 ))
             },
         )
-        .expect("file failure is logged but not fatal");
+        .expect("file failure produces a typed deletion outcome");
 
         assert_eq!(outcome.requested_count, 1);
-        assert_eq!(outcome.deleted_count, 1);
-        assert!(outcome.failures.is_empty());
+        assert_eq!(outcome.deleted_count, 0);
+        assert_eq!(
+            outcome.failures,
+            vec![HistoryDeletionFailure {
+                id: Some(entry_id),
+                file_name: "locked.wav".to_string(),
+                reason: HistoryDeletionFailureReason::PermissionDenied,
+            }]
+        );
         let row_count: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM transcription_history WHERE id = ?1",
@@ -1877,10 +1923,10 @@ mod tests {
                 |row| row.get(0),
             )
             .expect("count deleted row");
-        assert_eq!(row_count, 0);
+        assert_eq!(row_count, 1, "failed file deletion must remain retryable");
         assert!(
             recording_path.exists(),
-            "failed file deletion leaves an orphan for reconciliation"
+            "failed file deletion preserves the recording and its owning row"
         );
     }
 
