@@ -3566,19 +3566,61 @@ mod tests {
         assert_eq!(settings.auto_submit_key, AutoSubmitKey::Enter);
     }
 
+    fn forbidden_unlocked_settings_write(source: &str) -> Option<&'static str> {
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        let compact = production_source
+            .chars()
+            .filter(|character| !character.is_ascii_whitespace())
+            .collect::<String>();
+
+        [
+            ("write_settings(", "lock-free write_settings"),
+            (".set(\"settings\",", "direct settings store set"),
+            ("persist_settings_value(", "direct settings persistence"),
+            (
+                "write_settings_with_immediate_save(",
+                "direct settings persistence",
+            ),
+            (
+                "write_settings_to_store_with_immediate_save(",
+                "direct settings persistence",
+            ),
+        ]
+        .into_iter()
+        .find_map(|(needle, description)| compact.contains(needle).then_some(description))
+    }
+
     #[test]
-    fn dictionary_mutation_paths_do_not_call_write_settings_directly() {
-        // Guard: all settings mutation paths in these files must go through
-        // `mutate_settings_locked` or the locked domain writers
-        // (`write_settings_domain` / `try_write_settings_domain`). A direct
-        // `write_settings` call in any of them would reintroduce the lost-update race
-        // this hardening effort removed — originally for the dictionary paths, then
-        // extended to the remaining unlocked writers (audio/adaptive/transcription/
-        // models/local_llm/snippets/model-manager), then to the domain-write callers
-        // (shortcut/history/diagnostics/transcription-manager).
-        // The substring check is safe: `write_settings_domain(` does not contain
-        // `write_settings(`.
-        // CWD for unit tests is the manifest dir (src-tauri), so paths are relative to it.
+    fn settings_mutation_paths_reject_unlocked_and_direct_persistence_writers() {
+        for unsafe_source in [
+            "fn mutate(app: &AppHandle) { write_settings(app, next); }",
+            "fn mutate(store: &Store) { store.set(\"settings\", next); }",
+            "fn mutate(store: &Store) { persist_settings_value(store, next, true); }",
+            "fn mutate(store: &Store) { write_settings_to_store_with_immediate_save(\n store, next, true); }",
+        ] {
+            assert!(
+                forbidden_unlocked_settings_write(unsafe_source).is_some(),
+                "guard must reject direct persistence in: {unsafe_source}"
+            );
+        }
+        assert_eq!(
+            forbidden_unlocked_settings_write(
+                "fn mutate(app: &AppHandle) { write_settings_domain(app, domain, |settings| {}); }"
+            ),
+            None
+        );
+        assert_eq!(
+            forbidden_unlocked_settings_write(
+                "fn production() {}\n#[cfg(test)]\nmod tests { fn fixture(store: &Store) { store.set(\"settings\", value); } }"
+            ),
+            None,
+            "test-only store fixtures are outside this production guard"
+        );
+
+        // This guard covers the production portion of migrated settings-mutation files.
+        // It rejects the lock-free writer, direct `settings` store sets, and calls to
+        // internal persistence helpers. It intentionally does not inspect test fixtures
+        // or reject unrelated non-settings stores. CWD is the src-tauri manifest dir.
         for path in [
             "src/commands/dictionary.rs",
             "src/post_paste_learning.rs",
@@ -3597,8 +3639,9 @@ mod tests {
             let source = std::fs::read_to_string(path)
                 .unwrap_or_else(|error| panic!("failed to read {path}: {error}"));
             assert!(
-                !source.contains("write_settings("),
-                "{path} must mutate via mutate_settings_locked or the locked domain writers, not write_settings"
+                forbidden_unlocked_settings_write(&source).is_none(),
+                "{path} contains a forbidden {}",
+                forbidden_unlocked_settings_write(&source).unwrap_or("settings writer")
             );
         }
     }
