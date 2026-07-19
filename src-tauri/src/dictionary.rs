@@ -202,7 +202,8 @@ fn record_discarded_replacement_rule(
 /// Imported, or user-confirmed) outrank unconfirmed auto-learned entries; ties
 /// keep the first persisted entry. A discarded, distinct `replacement_of` is
 /// retained as a learn candidate for review instead of being silently lost.
-/// Display fields are copied from persisted values and are never normalized.
+/// Phrases are sanitized to the same representation accepted by normal writes
+/// before their canonical identity is established.
 pub fn migrate_dictionary_v3(settings: &mut AppSettings) -> bool {
     if settings.dictionary_schema_version >= 3 {
         return false;
@@ -210,7 +211,11 @@ pub fn migrate_dictionary_v3(settings: &mut AppSettings) -> bool {
 
     let mut groups: Vec<Vec<DictionaryEntry>> = Vec::new();
     let mut group_by_key = HashMap::new();
-    for entry in std::mem::take(&mut settings.dictionary_entries) {
+    for mut entry in std::mem::take(&mut settings.dictionary_entries) {
+        let Some(phrase) = sanitize_dictionary_phrase(&entry.phrase) else {
+            continue;
+        };
+        entry.phrase = phrase;
         let key = canonicalize(&entry.phrase);
         let group_index = *group_by_key.entry(key).or_insert_with(|| {
             groups.push(Vec::new());
@@ -1921,6 +1926,28 @@ mod tests {
             migrated.dictionary_auto_learn_suppressed
         );
         assert_eq!(settings.custom_words, migrated.custom_words);
+    }
+
+    #[test]
+    fn migration_v3_sanitizes_phrase_identity_before_stamping_current() {
+        let mut settings = get_default_settings();
+        settings.dictionary_schema_version = 2;
+        settings.dictionary_entries = vec![
+            entry("dict_legacy", "<Robyn>"),
+            entry("dict_invalid", "---"),
+        ];
+
+        assert!(migrate_dictionary_v3(&mut settings));
+
+        assert_eq!(settings.dictionary_schema_version, 3);
+        assert_eq!(settings.dictionary_entries.len(), 1);
+        assert_eq!(settings.dictionary_entries[0].phrase, "Robyn");
+        assert_eq!(settings.custom_words, vec!["Robyn"]);
+        assert_eq!(
+            upsert_manual_entry(&mut settings, 42, "Robyn".to_string(), None),
+            Err("Robyn is already in your dictionary".to_string())
+        );
+        assert_eq!(settings.dictionary_entries.len(), 1);
     }
 
     #[test]
