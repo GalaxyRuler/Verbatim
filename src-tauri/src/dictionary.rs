@@ -784,23 +784,60 @@ pub fn observe_correction(
 pub fn promote_candidate_to_entry(
     settings: &mut AppSettings,
     now_ms: u64,
-    candidate: LearnCandidate,
+    mut candidate: LearnCandidate,
     user_confirmed: bool,
 ) {
     let Some(phrase) = sanitize_dictionary_phrase(&candidate.phrase) else {
         return;
     };
-    if has_phrase(&settings.dictionary_entries, &phrase, None) {
-        return; // phrase already active; keep the existing entry's replacement_of
+    let candidate_rule = candidate
+        .replacement_of
+        .as_deref()
+        .and_then(sanitize_dictionary_phrase);
+    if let Some(existing_index) = settings
+        .dictionary_entries
+        .iter()
+        .position(|entry| entry.active && canonicalize(&entry.phrase) == canonicalize(&phrase))
+    {
+        let existing_rule = settings.dictionary_entries[existing_index]
+            .replacement_of
+            .as_deref()
+            .and_then(sanitize_dictionary_phrase);
+        let conflicting_rules = existing_rule
+            .as_deref()
+            .zip(candidate_rule.as_deref())
+            .is_some_and(|(existing, recovered)| canonicalize(existing) != canonicalize(recovered));
+
+        if conflicting_rules {
+            candidate.phrase = phrase;
+            candidate.replacement_of = candidate_rule;
+            let candidate_phrase_key = canonicalize(&candidate.phrase);
+            let candidate_rule_key = candidate.replacement_of.as_deref().map(canonicalize);
+            if !settings.dictionary_learn_candidates.iter().any(|pending| {
+                canonicalize(&pending.phrase) == candidate_phrase_key
+                    && pending.replacement_of.as_deref().map(canonicalize) == candidate_rule_key
+            }) {
+                settings.dictionary_learn_candidates.push(candidate);
+            }
+            return;
+        }
+
+        let existing = &mut settings.dictionary_entries[existing_index];
+        if existing.replacement_of.is_none() {
+            existing.replacement_of = candidate_rule;
+        }
+        if user_confirmed {
+            existing.user_confirmed = true;
+        }
+        existing.updated_at_ms = now_ms;
+        return;
     }
     unsuppress_auto_learn_phrase(settings, &phrase);
     let id = make_dictionary_entry_id(&settings.dictionary_entries, now_ms, &phrase);
     settings.dictionary_entries.push(DictionaryEntry {
         id,
         phrase,
-        replacement_of: candidate
-            .replacement_of
-            .and_then(|r| sanitize_dictionary_phrase(&r)),
+        replacement_of: candidate_rule,
         source: DictionaryEntrySource::AutoLearned,
         priority: DictionaryEntryPriority::Normal,
         created_at_ms: now_ms,
@@ -1952,6 +1989,57 @@ mod tests {
         assert_eq!(entry.phrase, "Robyn");
         assert!(s.dictionary_learn_candidates.is_empty());
         assert_eq!(s.dictionary_entries.len(), 1);
+    }
+
+    #[test]
+    fn approving_v3_recovered_rule_merges_into_retained_entry() {
+        let mut settings = get_default_settings();
+        settings.dictionary_schema_version = 2;
+        settings.dictionary_entries = vec![
+            entry_full("dict_retained", "Caf\u{e9}", None),
+            DictionaryEntry {
+                source: DictionaryEntrySource::AutoLearned,
+                ..entry_full("dict_discarded", "Cafe\u{301}", Some("cafe old"))
+            },
+        ];
+
+        assert!(migrate_dictionary_v3(&mut settings));
+        assert_eq!(settings.dictionary_learn_candidates.len(), 1);
+
+        let approved = approve_candidate(&mut settings, 42, "Cafe\u{301}", Some("cafe old"))
+            .expect("recovered rule owns the retained phrase");
+
+        assert_eq!(approved.id, "dict_retained");
+        assert_eq!(approved.replacement_of.as_deref(), Some("cafe old"));
+        assert!(approved.user_confirmed);
+        assert!(settings.dictionary_learn_candidates.is_empty());
+    }
+
+    #[test]
+    fn approving_conflicting_v3_rule_keeps_it_reviewable() {
+        let mut settings = get_default_settings();
+        settings.dictionary_schema_version = 2;
+        settings.dictionary_entries = vec![
+            entry_full("dict_retained", "Caf\u{e9}", Some("cafe current")),
+            DictionaryEntry {
+                source: DictionaryEntrySource::AutoLearned,
+                ..entry_full("dict_discarded", "Cafe\u{301}", Some("cafe old"))
+            },
+        ];
+
+        assert!(migrate_dictionary_v3(&mut settings));
+        let approved = approve_candidate(&mut settings, 42, "Cafe\u{301}", Some("cafe old"))
+            .expect("existing entry keeps ownership");
+
+        assert_eq!(approved.id, "dict_retained");
+        assert_eq!(approved.replacement_of.as_deref(), Some("cafe current"));
+        assert_eq!(settings.dictionary_learn_candidates.len(), 1);
+        assert_eq!(
+            settings.dictionary_learn_candidates[0]
+                .replacement_of
+                .as_deref(),
+            Some("cafe old")
+        );
     }
 
     #[test]
