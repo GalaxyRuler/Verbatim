@@ -21,7 +21,6 @@ use crate::utils::{
     self, show_processing_overlay, show_recording_overlay, show_transcribing_overlay,
 };
 use crate::TranscriptionCoordinator;
-use ferrous_opencc::{config::BuiltinConfig, OpenCC};
 use log::{debug, error, warn};
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
@@ -616,7 +615,7 @@ async fn run_optional_llm_stage_with<Invoke, InvokeFuture>(
     invoke: Invoke,
 ) -> OptionalLlmStageResult
 where
-    Invoke: FnOnce(AppSettings, Option<ResolvedPostProcessingPrompt>) -> InvokeFuture,
+    Invoke: FnOnce(AppSettings, Option<ResolvedPostProcessingPrompt>, String) -> InvokeFuture,
     InvokeFuture: std::future::Future<Output = Option<String>>,
 {
     if !should_run_requested_post_processing(requested, settings, private_session_enabled) {
@@ -650,7 +649,12 @@ where
     let prompt = resolved_prompt
         .as_ref()
         .map(|resolved| resolved.prompt.clone());
-    let llm_output = invoke(runtime_settings, resolved_prompt).await;
+    let llm_output = invoke(
+        runtime_settings,
+        resolved_prompt,
+        deterministic_output.to_string(),
+    )
+    .await;
     OptionalLlmStageResult {
         completion: crate::pipeline::PipelineCompletion {
             llm_output,
@@ -659,6 +663,58 @@ where
         prompt,
     }
 }
+struct SharedPipelineOutput {
+    pipeline: crate::pipeline::PipelineResult,
+    prompt: Option<String>,
+}
+
+async fn execute_post_transcription_pipeline_with<Invoke, InvokeFuture>(
+    settings: &AppSettings,
+    raw_input: &str,
+    adaptive_profile: Option<&crate::adaptive::profile::AdaptiveProfile>,
+    effective_language: Option<&str>,
+    post_process_requested: bool,
+    private_session_enabled: bool,
+    invoke: Invoke,
+) -> SharedPipelineOutput
+where
+    Invoke: FnOnce(AppSettings, Option<ResolvedPostProcessingPrompt>, String) -> InvokeFuture,
+    InvokeFuture: std::future::Future<Output = Option<String>>,
+{
+    let prepared = crate::pipeline::prepare_post_transcription_pipeline(
+        crate::pipeline::PipelinePreparationInput {
+            raw_input,
+            selected_language: &settings.selected_language,
+            formatting_level: settings.formatting_level,
+            adaptive_profile,
+            effective_language,
+        },
+    );
+    let deterministic_output = prepared.deterministic_output.clone();
+    let llm_stage = run_optional_llm_stage_with(
+        post_process_requested,
+        settings,
+        private_session_enabled,
+        adaptive_profile,
+        &deterministic_output,
+        invoke,
+    )
+    .await;
+    let pipeline =
+        crate::pipeline::finalize_post_transcription_pipeline(prepared, llm_stage.completion);
+    let prompt = if pipeline
+        .llm_output
+        .as_ref()
+        .is_some_and(|output| output == &pipeline.final_text)
+    {
+        llm_stage.prompt
+    } else {
+        None
+    };
+
+    SharedPipelineOutput { pipeline, prompt }
+}
+
 async fn invoke_single_llm_stage_with_fallback<Structured, StructuredFuture, Legacy, LegacyFuture>(
     supports_structured_output: bool,
     structured: Structured,
@@ -976,50 +1032,6 @@ async fn post_process_transcription(
     )
     .await
 }
-async fn maybe_convert_chinese_variant(
-    settings: &AppSettings,
-    transcription: &str,
-) -> Option<String> {
-    // Check if language is set to Simplified or Traditional Chinese
-    let is_simplified = settings.selected_language == "zh-Hans";
-    let is_traditional = settings.selected_language == "zh-Hant";
-
-    if !is_simplified && !is_traditional {
-        debug!("selected_language is not Simplified or Traditional Chinese; skipping translation");
-        return None;
-    }
-
-    debug!(
-        "Starting Chinese translation using OpenCC for language: {}",
-        settings.selected_language
-    );
-
-    // Use OpenCC to convert based on selected language
-    let config = if is_simplified {
-        // Convert Traditional Chinese to Simplified Chinese
-        BuiltinConfig::Tw2sp
-    } else {
-        // Convert Simplified Chinese to Traditional Chinese
-        BuiltinConfig::S2tw
-    };
-
-    match OpenCC::from_config(config) {
-        Ok(converter) => {
-            let converted = converter.convert(transcription);
-            debug!(
-                "OpenCC translation completed. Input length: {}, Output length: {}",
-                transcription.len(),
-                converted.len()
-            );
-            Some(converted)
-        }
-        Err(e) => {
-            error!("Failed to initialize OpenCC converter: {}. Falling back to original transcription.", e);
-            None
-        }
-    }
-}
-
 pub(crate) struct ProcessedTranscription {
     pub final_text: String,
     pub post_processed_text: Option<String>,
@@ -1028,40 +1040,21 @@ pub(crate) struct ProcessedTranscription {
 
 pub(crate) async fn process_transcription_output(
     app: &AppHandle,
+    settings: &AppSettings,
     transcription: &str,
-    post_process: bool,
+    post_process_requested: bool,
+    private_session_enabled: bool,
     operation_token: Option<OperationToken>,
 ) -> ProcessedTranscription {
-    let mut settings = get_settings(app);
-    crate::credentials::hydrate_runtime_post_process_api_keys(app, &mut settings);
-    let private_session_enabled = crate::private_session::is_enabled(app);
-    let mut final_text = transcription.to_string();
-    let mut post_processed_text: Option<String> = None;
-    let mut post_process_prompt: Option<String> = None;
-
-    if let Some(converted_text) = maybe_convert_chinese_variant(&settings, transcription).await {
-        final_text = converted_text;
-    }
-
-    let formatted_text = crate::adaptive::smart_formatting::format_transcript(
-        &final_text,
-        settings.formatting_level,
-    );
-    if formatted_text != final_text {
-        final_text = formatted_text;
-        post_processed_text = Some(final_text.clone());
-    }
-
-    let deterministic_output = final_text.clone();
-    let provider_input = deterministic_output.clone();
     let operation_token_for_llm = operation_token.clone();
-    let llm_stage = run_optional_llm_stage_with(
-        post_process,
-        &settings,
-        private_session_enabled,
+    let shared = execute_post_transcription_pipeline_with(
+        settings,
+        transcription,
         None,
-        &deterministic_output,
-        move |runtime_settings, resolved_prompt| async move {
+        None,
+        post_process_requested,
+        private_session_enabled,
+        move |runtime_settings, resolved_prompt, provider_input| async move {
             post_process_transcription(
                 app,
                 &runtime_settings,
@@ -1074,32 +1067,18 @@ pub(crate) async fn process_transcription_output(
     )
     .await;
 
-    if let Some(processed_text) = llm_stage.completion.llm_output {
-        if let Err(err) = validate_post_processed_text(transcription, &processed_text) {
-            warn!(
-                "Post-processing output rejected against raw transcript: {}. Falling back to deterministic formatted transcript.",
-                err
-            );
-            return ProcessedTranscription {
-                final_text,
-                post_processed_text,
-                post_process_prompt,
-            };
-        }
-        post_processed_text = Some(processed_text.clone());
-        post_process_prompt = llm_stage.prompt;
-        final_text = processed_text;
-    } else if final_text != transcription {
-        post_processed_text = Some(final_text.clone());
+    if let Some(reason) = &shared.pipeline.fallback_reason {
+        warn!("Post-transcription pipeline used a fallback: {:?}", reason);
     }
+    let post_processed_text = (shared.pipeline.final_text != shared.pipeline.raw_input)
+        .then(|| shared.pipeline.final_text.clone());
 
     ProcessedTranscription {
-        final_text,
+        final_text: shared.pipeline.final_text,
         post_processed_text,
-        post_process_prompt,
+        post_process_prompt: shared.prompt,
     }
 }
-
 fn serialize_json<T: serde::Serialize>(value: &T) -> Option<String> {
     serde_json::to_string(value).ok()
 }
@@ -1211,11 +1190,15 @@ fn force_ltr_input_direction_before_paste(
 }
 
 pub(crate) async fn process_adaptive_transcription_output(
+    app: &AppHandle,
     settings: &AppSettings,
     transcription: &str,
     effective_language: Option<&str>,
     context: crate::adaptive::types::CapturedContext,
     shortcut: crate::adaptive::types::ShortcutIntent,
+    post_process_requested: bool,
+    private_session_enabled: bool,
+    operation_token: Option<OperationToken>,
 ) -> crate::adaptive::types::AdaptiveProcessResult {
     let pre_route = crate::adaptive::routing::route_before_recording(
         &settings.adaptive_profiles,
@@ -1240,50 +1223,44 @@ pub(crate) async fn process_adaptive_transcription_output(
         &routing.profile_id,
     );
 
-    let final_text = if settings.formatting_level == crate::settings::FormattingLevel::None {
-        transcription.to_string()
-    } else {
-        crate::adaptive::processor::deterministic_process(
-            transcription,
-            profile,
-            effective_language,
-        )
-    };
-    let final_text = crate::adaptive::smart_formatting::format_transcript(
-        &final_text,
-        settings.formatting_level,
-    );
-    let final_text = match crate::adaptive::processor::validate_output(
+    let operation_token_for_llm = operation_token.clone();
+    let shared = execute_post_transcription_pipeline_with(
+        settings,
         transcription,
-        &final_text,
-        profile,
-    ) {
-        Ok(()) => final_text,
-        Err(err) => {
-            warn!(
-                    "Adaptive processing failed validation for profile '{}': {}. Falling back to raw transcript.",
-                    profile.id, err
-                );
-            transcription.to_string()
-        }
-    };
-    let post_process_prompt =
-        crate::adaptive::processor::build_profile_prompt(transcription, profile);
-    let post_processed_text = if final_text == transcription {
-        None
-    } else {
-        Some(final_text.clone())
-    };
+        Some(profile),
+        effective_language,
+        post_process_requested,
+        private_session_enabled,
+        move |runtime_settings, resolved_prompt, provider_input| async move {
+            post_process_transcription(
+                app,
+                &runtime_settings,
+                &provider_input,
+                resolved_prompt.as_ref(),
+                operation_token_for_llm.as_ref(),
+            )
+            .await
+        },
+    )
+    .await;
+
+    if let Some(reason) = &shared.pipeline.fallback_reason {
+        warn!(
+            "Adaptive post-transcription pipeline used a fallback for profile '{}': {:?}",
+            profile.id, reason
+        );
+    }
+    let post_processed_text = (shared.pipeline.final_text != shared.pipeline.raw_input)
+        .then(|| shared.pipeline.final_text.clone());
 
     crate::adaptive::types::AdaptiveProcessResult {
-        final_text,
+        final_text: shared.pipeline.final_text,
         post_processed_text,
-        post_process_prompt,
+        post_process_prompt: shared.prompt,
         language,
         routing,
     }
 }
-
 #[cfg(test)]
 mod adaptive_action_tests {
     use super::*;
@@ -1590,17 +1567,31 @@ mod adaptive_action_tests {
         }
     }
 
+    #[derive(Clone, Copy)]
+    enum TestPostTranscriptionMode {
+        Classic,
+        Adaptive,
+    }
+
     fn failed_history_rows_for(
+        mode: TestPostTranscriptionMode,
         transcription_result: Result<String, ()>,
         observed_active_signal: bool,
     ) -> usize {
         let mut context = CountingTranscriptionFailureContext::default();
-        let terminal = match transcription_result {
-            Err(()) => DictationTransactionTerminal::TranscriptionFailed,
-            Ok(final_text) => match classify_final_text(final_text, observed_active_signal) {
-                FinalTextDecision::Terminal(terminal) => terminal,
-                FinalTextDecision::Continue(_) => DictationTransactionTerminal::InsertionCompleted,
-            },
+        let terminal = match mode {
+            TestPostTranscriptionMode::Classic | TestPostTranscriptionMode::Adaptive => {
+                match transcription_result {
+                    Err(()) => DictationTransactionTerminal::TranscriptionFailed,
+                    Ok(final_text) => match classify_final_text(final_text, observed_active_signal)
+                    {
+                        FinalTextDecision::Terminal(terminal) => terminal,
+                        FinalTextDecision::Continue(_) => {
+                            DictationTransactionTerminal::InsertionCompleted
+                        }
+                    },
+                }
+            }
         };
 
         if terminal == DictationTransactionTerminal::TranscriptionFailed {
@@ -1614,10 +1605,15 @@ mod adaptive_action_tests {
     }
 
     #[test]
-    fn failed_history_rows_are_exactly_once_for_failure_terminals() {
-        assert_eq!(failed_history_rows_for(Err(()), false), 1);
-        assert_eq!(failed_history_rows_for(Ok(String::new()), true), 1);
-        assert_eq!(failed_history_rows_for(Ok(String::new()), false), 0);
+    fn one_dictation_finishes_exactly_one_terminal_in_both_pipeline_modes() {
+        for mode in [
+            TestPostTranscriptionMode::Classic,
+            TestPostTranscriptionMode::Adaptive,
+        ] {
+            assert_eq!(failed_history_rows_for(mode, Err(()), false), 1);
+            assert_eq!(failed_history_rows_for(mode, Ok(String::new()), true), 1);
+            assert_eq!(failed_history_rows_for(mode, Ok(String::new()), false), 0);
+        }
     }
 
     #[test]
@@ -2035,6 +2031,109 @@ mod adaptive_action_tests {
         assert_eq!(output, Some("structured output".to_string()));
         assert_eq!(legacy_calls.load(Ordering::SeqCst), 0);
     }
+    #[tokio::test]
+    async fn adaptive_requested_post_processing_invokes_shared_llm_and_uses_output() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let settings = post_processing_settings_for_provider("http://127.0.0.1:11434/v1", "");
+        let profile = settings
+            .adaptive_profiles
+            .iter()
+            .find(|profile| profile.id == "email")
+            .expect("email profile");
+        let invoke_count = Arc::new(AtomicUsize::new(0));
+        let invoke_count_for_call = Arc::clone(&invoke_count);
+
+        let output = execute_post_transcription_pipeline_with(
+            &settings,
+            "hello world",
+            Some(profile),
+            Some("en"),
+            true,
+            false,
+            move |_, _, _| {
+                invoke_count_for_call.fetch_add(1, Ordering::SeqCst);
+                std::future::ready(Some("Hello world.".to_string()))
+            },
+        )
+        .await;
+
+        assert_eq!(invoke_count.load(Ordering::SeqCst), 1);
+        assert!(output.pipeline.llm_invoked);
+        assert_eq!(output.pipeline.llm_output.as_deref(), Some("Hello world."));
+        assert_eq!(output.pipeline.final_text, "Hello world.");
+    }
+
+    #[tokio::test]
+    async fn adaptive_profile_prompt_is_sent_by_shared_llm_stage_without_user_prompt() {
+        let mut settings = post_processing_settings_for_provider("http://127.0.0.1:11434/v1", "");
+        settings.post_process_selected_prompt_id = None;
+        let profile = settings
+            .adaptive_profiles
+            .iter()
+            .find(|profile| profile.id == "email")
+            .expect("email profile");
+        let expected_prompt =
+            crate::adaptive::processor::build_profile_prompt("hello world", profile)
+                .expect("profile prompt");
+
+        let output = execute_post_transcription_pipeline_with(
+            &settings,
+            "hello world",
+            Some(profile),
+            Some("en"),
+            true,
+            false,
+            move |_, resolved_prompt, _| {
+                assert_eq!(
+                    resolved_prompt.map(|resolved| resolved.prompt),
+                    Some(expected_prompt)
+                );
+                std::future::ready(Some("Hello world.".to_string()))
+            },
+        )
+        .await;
+
+        assert_eq!(output.pipeline.final_text, "Hello world.");
+        assert!(output.pipeline.llm_invoked);
+    }
+
+    #[tokio::test]
+    async fn chinese_variant_conversion_is_shared_by_classic_and_adaptive_modes() {
+        let mut settings = crate::settings::get_default_settings();
+        settings.selected_language = "zh-Hans".to_string();
+        let profile = settings
+            .adaptive_profiles
+            .iter()
+            .find(|profile| profile.id == "default_clean")
+            .expect("default_clean profile");
+
+        let classic = execute_post_transcription_pipeline_with(
+            &settings,
+            "軟件",
+            None,
+            None,
+            false,
+            false,
+            |_, _, _| std::future::ready(None),
+        )
+        .await;
+        let adaptive = execute_post_transcription_pipeline_with(
+            &settings,
+            "軟件",
+            Some(profile),
+            None,
+            false,
+            false,
+            |_, _, _| std::future::ready(None),
+        )
+        .await;
+
+        assert_eq!(classic.pipeline.final_text, "软件");
+        assert_eq!(adaptive.pipeline.final_text, "软件");
+        assert!(classic.pipeline.zh_conversion_applied);
+        assert!(adaptive.pipeline.zh_conversion_applied);
+    }
 }
 
 impl ShortcutAction for TranscribeAction {
@@ -2327,7 +2426,11 @@ impl ShortcutAction for TranscribeAction {
                                 )
                             );
 
-                            let settings = get_settings(&ah);
+                            let mut settings = get_settings(&ah);
+                            crate::credentials::hydrate_runtime_post_process_api_keys(
+                                &ah,
+                                &mut settings,
+                            );
                             let effective_post_process = should_run_requested_post_processing(
                                 post_process,
                                 &settings,
@@ -2357,11 +2460,15 @@ impl ShortcutAction for TranscribeAction {
 
                             if let Some(context) = adaptive_context {
                                 let processed = process_adaptive_transcription_output(
+                                    &ah,
                                     &settings,
                                     &transcription,
                                     transcription_output.effective_language.as_deref(),
                                     context.clone(),
                                     crate::adaptive::types::ShortcutIntent::Default,
+                                    post_process,
+                                    private_session_enabled,
+                                    operation_token.clone(),
                                 )
                                 .await;
 
@@ -2486,8 +2593,10 @@ impl ShortcutAction for TranscribeAction {
                             } else {
                                 let processed = process_transcription_output(
                                     &ah,
+                                    &settings,
                                     &transcription,
-                                    effective_post_process,
+                                    post_process,
+                                    private_session_enabled,
                                     operation_token.clone(),
                                 )
                                 .await;

@@ -156,13 +156,16 @@ pub async fn retry_history_entry_transcription(
 
     ensure_retry_not_cancelled(operation_token.as_ref(), "post-processing")?;
 
-    let settings = crate::settings::get_settings(&app);
+    let mut settings = crate::settings::get_settings(&app);
+    crate::credentials::hydrate_runtime_post_process_api_keys(&app, &mut settings);
     let retry_post_process =
         should_retry_post_process(entry.post_process_requested, settings.post_process_enabled);
     let processed = process_transcription_output(
         &app,
+        &settings,
         &transcription,
         retry_post_process,
+        false,
         operation_token.clone(),
     )
     .await;
