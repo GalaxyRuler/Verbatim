@@ -1,4 +1,6 @@
-use crate::audio_toolkit::{apply_dictionary_entries, filter_transcription_output};
+use crate::audio_toolkit::{
+    apply_dictionary_entries, filter_transcription_output_with_protected_phrases,
+};
 use crate::managers::audio::AudioRecordingManager;
 use crate::managers::model::{EngineType, ModelManager};
 use crate::providers::{
@@ -1480,10 +1482,17 @@ fn apply_local_text_transforms(
         raw_text
     };
 
-    let filtered_result = filter_transcription_output(
+    let protected_dictionary_phrases = settings
+        .dictionary_entries
+        .iter()
+        .filter(|entry| entry.active)
+        .map(|entry| entry.phrase.clone())
+        .collect::<Vec<_>>();
+    let filtered_result = filter_transcription_output_with_protected_phrases(
         &corrected_result,
         effective_language,
         &settings.custom_filler_words,
+        &protected_dictionary_phrases,
     );
 
     if settings.snippets.is_empty() {
@@ -2128,6 +2137,34 @@ mod tests {
             needs_review: false,
         }];
         let validated = validate_selected_language("auto", &["en".to_string()]);
+        let effective = effective_validated_dictation_language(&validated);
+
+        let result =
+            apply_local_text_transforms("placeholder".to_string(), &settings, false, effective);
+
+        assert_eq!(result, "um");
+    }
+
+    #[test]
+    fn locked_english_preserves_dictionary_filler_output() {
+        let mut settings = crate::settings::get_default_settings();
+        settings.app_language = "pt".to_string();
+        settings.dictation_language_mode = crate::settings::DictationLanguageMode::Single;
+        settings.selected_language = "en".to_string();
+        settings.adaptive_language_shortlist = vec!["en".to_string()];
+        settings.dictionary_entries = vec![crate::settings::DictionaryEntry {
+            id: "dictionary_1_um".to_string(),
+            phrase: "um".to_string(),
+            replacement_of: Some("placeholder".to_string()),
+            source: crate::settings::DictionaryEntrySource::Manual,
+            priority: crate::settings::DictionaryEntryPriority::Normal,
+            created_at_ms: 1,
+            updated_at_ms: 1,
+            active: true,
+            user_confirmed: false,
+            needs_review: false,
+        }];
+        let validated = validate_selected_language("en", &["en".to_string()]);
         let effective = effective_validated_dictation_language(&validated);
 
         let result =

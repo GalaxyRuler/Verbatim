@@ -1,6 +1,7 @@
 use natural::phonetics::soundex;
 use once_cell::sync::Lazy;
 use regex::Regex;
+use std::collections::HashSet;
 use strsim::levenshtein;
 use unicode_normalization::char::is_combining_mark;
 
@@ -478,7 +479,22 @@ pub fn filter_transcription_output(
     lang: Option<&str>,
     custom_filler_words: &Option<Vec<String>>,
 ) -> String {
+    filter_transcription_output_with_protected_phrases(text, lang, custom_filler_words, &[])
+}
+
+/// Filters transcription output while preserving active dictionary output phrases from
+/// language-default filler removal. Explicit custom filler configuration is still authoritative.
+pub fn filter_transcription_output_with_protected_phrases(
+    text: &str,
+    lang: Option<&str>,
+    custom_filler_words: &Option<Vec<String>>,
+    protected_phrases: &[String],
+) -> String {
     let mut filtered = text.to_string();
+    let protected_phrase_keys = protected_phrases
+        .iter()
+        .map(|phrase| canonicalize(phrase))
+        .collect::<HashSet<_>>();
 
     // Build filler patterns from custom list or language defaults
     let patterns: Vec<Regex> = if let Some(words) = custom_filler_words {
@@ -489,6 +505,7 @@ pub fn filter_transcription_output(
     } else if let Some(lang) = lang {
         get_filler_words_for_language(lang)
             .iter()
+            .filter(|word| !protected_phrase_keys.contains(&canonicalize(word)))
             .map(|word| Regex::new(&format!(r"(?i)\b{}\b[,.]?", regex::escape(word))).unwrap())
             .collect()
     } else {
@@ -894,6 +911,21 @@ mod tests {
         let text = "okay so I think right this works";
         let result = filter_transcription_output(text, Some("en"), &custom);
         assert_eq!(result, "so I think this works");
+    }
+
+    #[test]
+    fn custom_fillers_override_dictionary_protection() {
+        let custom = Some(vec!["um".to_string()]);
+        let protected = vec!["UM".to_string()];
+
+        let result = filter_transcription_output_with_protected_phrases(
+            "um",
+            Some("en"),
+            &custom,
+            &protected,
+        );
+
+        assert_eq!(result, "");
     }
 
     #[test]

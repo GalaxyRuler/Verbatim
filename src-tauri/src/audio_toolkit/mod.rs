@@ -9,6 +9,9 @@ pub use audio::{
     list_output_devices, read_wav_samples, save_wav_file, verify_wav_file, AudioRecorder,
     CpalDeviceInfo,
 };
-pub use text::{apply_custom_words, apply_dictionary_entries, filter_transcription_output};
+pub use text::{
+    apply_custom_words, apply_dictionary_entries, filter_transcription_output,
+    filter_transcription_output_with_protected_phrases,
+};
 pub use utils::get_cpal_host;
 pub use vad::{SileroVad, VoiceActivityDetector};
