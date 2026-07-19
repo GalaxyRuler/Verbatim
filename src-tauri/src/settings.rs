@@ -693,8 +693,12 @@ pub fn normalize_bcp47(tag: &str) -> String {
     };
 
     let mut normalized = vec![primary.to_ascii_lowercase()];
+    let mut in_extension = false;
     normalized.extend(subtags.map(|subtag| {
-        if subtag.len() == 4 && subtag.bytes().all(|byte| byte.is_ascii_alphabetic()) {
+        if in_extension || subtag.len() == 1 {
+            in_extension = true;
+            subtag.to_ascii_lowercase()
+        } else if subtag.len() == 4 && subtag.bytes().all(|byte| byte.is_ascii_alphabetic()) {
             let mut bytes = subtag.to_ascii_lowercase().into_bytes();
             bytes[0] = bytes[0].to_ascii_uppercase();
             String::from_utf8(bytes).expect("ASCII BCP-47 script subtag remains UTF-8")
@@ -4084,6 +4088,15 @@ mod tests {
             settings.adaptive_language_shortlist,
             vec!["zh-Hans", "en-US", "pt-BR", "ar-SA"]
         );
+    }
+
+    #[test]
+    fn bcp47_extension_subtags_normalize_case_insensitively() {
+        assert_eq!(
+            normalize_bcp47("en-US-u-ca-gregory"),
+            normalize_bcp47("EN-us-U-CA-GREGORY")
+        );
+        assert_eq!(normalize_bcp47("EN-us-U-CA-GREGORY"), "en-US-u-ca-gregory");
     }
 
     #[test]
