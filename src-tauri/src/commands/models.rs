@@ -22,10 +22,14 @@ pub struct ModelSwitchOutcome {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ModelSwitchSnapshot {
-    selected_model: String,
-    selected_language: String,
-    dictation_language_mode: DictationLanguageMode,
-    adaptive_language_shortlist: Vec<String>,
+    previous_selected_model: String,
+    previous_selected_language: String,
+    previous_dictation_language_mode: DictationLanguageMode,
+    previous_adaptive_language_shortlist: Vec<String>,
+    written_selected_model: String,
+    written_selected_language: String,
+    written_dictation_language_mode: DictationLanguageMode,
+    written_adaptive_language_shortlist: Vec<String>,
 }
 
 fn begin_model_switch(
@@ -33,12 +37,10 @@ fn begin_model_switch(
     model_id: &str,
     supported_languages: &[String],
 ) -> (ModelSwitchSnapshot, ModelSwitchOutcome) {
-    let snapshot = ModelSwitchSnapshot {
-        selected_model: settings.selected_model.clone(),
-        selected_language: settings.selected_language.clone(),
-        dictation_language_mode: settings.dictation_language_mode,
-        adaptive_language_shortlist: settings.adaptive_language_shortlist.clone(),
-    };
+    let previous_selected_model = settings.selected_model.clone();
+    let previous_selected_language = settings.selected_language.clone();
+    let previous_dictation_language_mode = settings.dictation_language_mode;
+    let previous_adaptive_language_shortlist = settings.adaptive_language_shortlist.clone();
     settings.selected_model = model_id.to_string();
 
     let reason = if settings.selected_language != "auto"
@@ -56,14 +58,52 @@ fn begin_model_switch(
         None
     };
 
+    let snapshot = ModelSwitchSnapshot {
+        previous_selected_model,
+        previous_selected_language,
+        previous_dictation_language_mode,
+        previous_adaptive_language_shortlist,
+        written_selected_model: settings.selected_model.clone(),
+        written_selected_language: settings.selected_language.clone(),
+        written_dictation_language_mode: settings.dictation_language_mode,
+        written_adaptive_language_shortlist: settings.adaptive_language_shortlist.clone(),
+    };
+
     (snapshot, ModelSwitchOutcome { reason })
 }
 
 fn restore_model_switch(settings: &mut AppSettings, snapshot: ModelSwitchSnapshot) {
-    settings.selected_model = snapshot.selected_model;
-    settings.selected_language = snapshot.selected_language;
-    settings.dictation_language_mode = snapshot.dictation_language_mode;
-    settings.adaptive_language_shortlist = snapshot.adaptive_language_shortlist;
+    if settings.selected_model != snapshot.written_selected_model {
+        return;
+    }
+
+    settings.selected_model = snapshot.previous_selected_model;
+    if settings.selected_language == snapshot.written_selected_language {
+        settings.selected_language = snapshot.previous_selected_language;
+    }
+    if settings.dictation_language_mode == snapshot.written_dictation_language_mode {
+        settings.dictation_language_mode = snapshot.previous_dictation_language_mode;
+    }
+    if settings.adaptive_language_shortlist == snapshot.written_adaptive_language_shortlist {
+        settings.adaptive_language_shortlist = snapshot.previous_adaptive_language_shortlist;
+    }
+}
+
+fn finish_model_load(
+    load_result: Result<(), String>,
+    rollback: impl FnOnce() -> Result<(), String>,
+) -> Result<(), String> {
+    match load_result {
+        Ok(()) => Ok(()),
+        Err(load_error) => {
+            rollback().map_err(|rollback_error| {
+                format!(
+                    "{load_error}; failed to restore model and language settings: {rollback_error}"
+                )
+            })?;
+            Err(load_error)
+        }
+    }
 }
 
 #[tauri::command]
@@ -197,15 +237,16 @@ pub fn switch_active_model(app: &AppHandle, model_id: &str) -> Result<ModelSwitc
     }
 
     // Load the model. On failure, revert the persisted selection.
-    if let Err(e) = transcription_manager.load_model(model_id) {
-        write_settings_domain(app, SettingsWriteDomain::Models, |settings| {
-            restore_model_switch(settings, snapshot);
-        })
-        .map_err(|rollback_error| {
-            format!("{e}; failed to restore model and language settings: {rollback_error}")
-        })?;
-        return Err(e.to_string());
-    }
+    finish_model_load(
+        transcription_manager
+            .load_model(model_id)
+            .map_err(|error| error.to_string()),
+        || {
+            write_settings_domain(app, SettingsWriteDomain::Models, |settings| {
+                restore_model_switch(settings, snapshot);
+            })
+        },
+    )?;
 
     Ok(outcome)
 }
@@ -292,7 +333,7 @@ mod tests {
     }
 
     #[test]
-    fn failed_model_load_restores_model_and_full_language_tuple() {
+    fn failed_model_load_restores_the_persisted_switch_snapshot() {
         let mut settings = get_default_settings();
         settings.selected_model = "old-model".to_string();
         settings.selected_language = "zh-Hans".to_string();
@@ -301,10 +342,58 @@ mod tests {
         let before_language = language_tuple(&settings);
 
         let (snapshot, _) = begin_model_switch(&mut settings, "english-model", &["en".to_string()]);
-        restore_model_switch(&mut settings, snapshot);
+        let result = finish_model_load(Err("load failed".to_string()), || {
+            restore_model_switch(&mut settings, snapshot);
+            Ok(())
+        });
 
+        assert_eq!(result, Err("load failed".to_string()));
         assert_eq!(settings.selected_model, "old-model");
         assert_eq!(language_tuple(&settings), before_language);
+    }
+
+    #[test]
+    fn failed_model_load_preserves_a_newer_language_write() {
+        let mut settings = get_default_settings();
+        settings.selected_model = "old-model".to_string();
+        settings.selected_language = "zh-Hans".to_string();
+        settings.dictation_language_mode = DictationLanguageMode::Single;
+        settings.adaptive_language_shortlist = vec!["zh-Hans".to_string(), "en-US".to_string()];
+
+        let (snapshot, _) = begin_model_switch(&mut settings, "english-model", &["en".to_string()]);
+        settings.selected_language = "de".to_string();
+        settings.dictation_language_mode = DictationLanguageMode::Single;
+        settings.adaptive_language_shortlist = vec!["de".to_string(), "en".to_string()];
+        let result = finish_model_load(Err("load failed".to_string()), || {
+            restore_model_switch(&mut settings, snapshot);
+            Ok(())
+        });
+
+        assert_eq!(result, Err("load failed".to_string()));
+        assert_eq!(settings.selected_model, "old-model");
+        assert_eq!(
+            language_tuple(&settings),
+            (
+                "de".to_string(),
+                DictationLanguageMode::Single,
+                vec!["de".to_string(), "en".to_string()]
+            )
+        );
+    }
+
+    #[test]
+    fn failed_model_load_surfaces_rollback_persistence_failure() {
+        let result = finish_model_load(Err("load failed".to_string()), || {
+            Err("store write failed".to_string())
+        });
+
+        assert_eq!(
+            result,
+            Err(
+                "load failed; failed to restore model and language settings: store write failed"
+                    .to_string()
+            )
+        );
     }
 
     #[test]
