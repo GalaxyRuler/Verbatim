@@ -1235,6 +1235,53 @@ fn ensure_dictation_language_defaults(settings: &mut AppSettings) -> bool {
         settings.dictation_language_mode = DictationLanguageMode::Single;
     }
 
+    let requested_mode = settings.dictation_language_mode;
+    let requested_language = settings.selected_language.clone();
+    let requested_shortlist = settings.adaptive_language_shortlist.clone();
+    let mut reconciled = settings.clone();
+    if let Err(error) = reconciled.apply_dictation_language_mode(
+        requested_mode,
+        Some(requested_language.clone()),
+        requested_shortlist.clone(),
+    ) {
+        warn!(
+            "Repairing invalid persisted dictation language tuple during migration: {}",
+            error
+        );
+        let fallback = match requested_mode {
+            DictationLanguageMode::Single
+                if !requested_language.is_empty() && requested_language != "auto" =>
+            {
+                reconciled.apply_dictation_language_mode(
+                    DictationLanguageMode::Single,
+                    Some(requested_language),
+                    Vec::new(),
+                )
+            }
+            DictationLanguageMode::Multilingual if requested_shortlist.len() == 1 => reconciled
+                .apply_dictation_language_mode(
+                    DictationLanguageMode::Single,
+                    requested_shortlist.first().cloned(),
+                    requested_shortlist.clone(),
+                ),
+            _ => reconciled.apply_dictation_language_mode(
+                DictationLanguageMode::Auto,
+                None,
+                requested_shortlist,
+            ),
+        };
+        if let Err(fallback_error) = fallback {
+            warn!(
+                "Falling back to automatic dictation language after migration repair failed: {}",
+                fallback_error
+            );
+            reconciled.clear_dictation_language_lock();
+        }
+    }
+    settings.dictation_language_mode = reconciled.dictation_language_mode;
+    settings.selected_language = reconciled.selected_language;
+    settings.adaptive_language_shortlist = reconciled.adaptive_language_shortlist;
+
     settings.dictation_language_schema_version = DICTATION_LANGUAGE_SCHEMA_VERSION;
     true
 }
@@ -4100,6 +4147,45 @@ mod tests {
             DictationLanguageMode::Single
         );
         assert_eq!(settings.selected_language, "pt-BR");
+        assert_eq!(settings.dictation_language_schema_version, 1);
+    }
+
+    #[test]
+    fn invalid_dictation_language_migration_repairs_single_auto_tuple() {
+        let mut settings = get_default_settings();
+        settings.dictation_language_schema_version = 0;
+        settings.dictation_language_mode = DictationLanguageMode::Single;
+        settings.selected_language = "auto".to_string();
+        settings.adaptive_language_shortlist = vec!["EN".to_string()];
+
+        assert!(ensure_dictation_language_defaults(&mut settings));
+
+        assert_eq!(
+            settings.dictation_language_mode,
+            DictationLanguageMode::Single
+        );
+        assert_eq!(settings.selected_language, "en");
+        assert_eq!(settings.adaptive_language_shortlist, vec!["en"]);
+        assert_eq!(settings.dictation_language_schema_version, 1);
+        assert!(!ensure_dictation_language_defaults(&mut settings));
+    }
+
+    #[test]
+    fn invalid_dictation_language_migration_repairs_one_language_multilingual_tuple() {
+        let mut settings = get_default_settings();
+        settings.dictation_language_schema_version = 0;
+        settings.dictation_language_mode = DictationLanguageMode::Multilingual;
+        settings.selected_language = "auto".to_string();
+        settings.adaptive_language_shortlist = vec!["FR".to_string()];
+
+        assert!(ensure_dictation_language_defaults(&mut settings));
+
+        assert_eq!(
+            settings.dictation_language_mode,
+            DictationLanguageMode::Single
+        );
+        assert_eq!(settings.selected_language, "fr");
+        assert_eq!(settings.adaptive_language_shortlist, vec!["fr"]);
         assert_eq!(settings.dictation_language_schema_version, 1);
     }
 
