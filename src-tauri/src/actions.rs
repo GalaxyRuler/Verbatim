@@ -1038,10 +1038,12 @@ pub(crate) struct ProcessedTranscription {
     pub post_process_prompt: Option<String>,
 }
 
-pub(crate) async fn process_transcription_output(
+pub(crate) async fn process_transcription_output_with_profile(
     app: &AppHandle,
     settings: &AppSettings,
     transcription: &str,
+    adaptive_profile: Option<&crate::adaptive::profile::AdaptiveProfile>,
+    effective_language: Option<&str>,
     post_process_requested: bool,
     private_session_enabled: bool,
     operation_token: Option<OperationToken>,
@@ -1050,8 +1052,8 @@ pub(crate) async fn process_transcription_output(
     let shared = execute_post_transcription_pipeline_with(
         settings,
         transcription,
-        None,
-        None,
+        adaptive_profile,
+        effective_language,
         post_process_requested,
         private_session_enabled,
         move |runtime_settings, resolved_prompt, provider_input| async move {
@@ -1078,6 +1080,27 @@ pub(crate) async fn process_transcription_output(
         post_processed_text,
         post_process_prompt: shared.prompt,
     }
+}
+
+pub(crate) async fn process_transcription_output(
+    app: &AppHandle,
+    settings: &AppSettings,
+    transcription: &str,
+    post_process_requested: bool,
+    private_session_enabled: bool,
+    operation_token: Option<OperationToken>,
+) -> ProcessedTranscription {
+    process_transcription_output_with_profile(
+        app,
+        settings,
+        transcription,
+        None,
+        None,
+        post_process_requested,
+        private_session_enabled,
+        operation_token,
+    )
+    .await
 }
 fn serialize_json<T: serde::Serialize>(value: &T) -> Option<String> {
     serde_json::to_string(value).ok()
@@ -1224,40 +1247,22 @@ pub(crate) async fn process_adaptive_transcription_output(
         &routing.profile_id,
     );
 
-    let operation_token_for_llm = operation_token.clone();
-    let shared = execute_post_transcription_pipeline_with(
+    let processed = process_transcription_output_with_profile(
+        app,
         settings,
         transcription,
         Some(profile),
         effective_language,
         post_process_requested,
         private_session_enabled,
-        move |runtime_settings, resolved_prompt, provider_input| async move {
-            post_process_transcription(
-                app,
-                &runtime_settings,
-                &provider_input,
-                resolved_prompt.as_ref(),
-                operation_token_for_llm.as_ref(),
-            )
-            .await
-        },
+        operation_token,
     )
     .await;
 
-    if let Some(reason) = &shared.pipeline.fallback_reason {
-        warn!(
-            "Adaptive post-transcription pipeline used a fallback for profile '{}': {:?}",
-            profile.id, reason
-        );
-    }
-    let post_processed_text = (shared.pipeline.final_text != shared.pipeline.raw_input)
-        .then(|| shared.pipeline.final_text.clone());
-
     crate::adaptive::types::AdaptiveProcessResult {
-        final_text: shared.pipeline.final_text,
-        post_processed_text,
-        post_process_prompt: shared.prompt,
+        final_text: processed.final_text,
+        post_processed_text: processed.post_processed_text,
+        post_process_prompt: processed.post_process_prompt,
         language,
         routing,
     }
@@ -2063,6 +2068,37 @@ mod adaptive_action_tests {
         assert!(output.pipeline.llm_invoked);
         assert_eq!(output.pipeline.llm_output.as_deref(), Some("Hello world."));
         assert_eq!(output.pipeline.final_text, "Hello world.");
+    }
+    #[tokio::test]
+    async fn adaptive_profile_alone_does_not_authorize_an_llm_stage() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let settings = post_processing_settings_for_provider("http://127.0.0.1:11434/v1", "");
+        let profile = settings
+            .adaptive_profiles
+            .iter()
+            .find(|profile| profile.id == "email")
+            .expect("email profile");
+        let invoke_count = Arc::new(AtomicUsize::new(0));
+        let invoke_count_for_call = Arc::clone(&invoke_count);
+
+        let output = execute_post_transcription_pipeline_with(
+            &settings,
+            "hello world",
+            Some(profile),
+            Some("en"),
+            false,
+            false,
+            move |_, _, _| {
+                invoke_count_for_call.fetch_add(1, Ordering::SeqCst);
+                std::future::ready(Some("surprise output".to_string()))
+            },
+        )
+        .await;
+
+        assert_eq!(invoke_count.load(Ordering::SeqCst), 0);
+        assert!(!output.pipeline.llm_invoked);
+        assert!(output.pipeline.llm_output.is_none());
     }
 
     #[tokio::test]
