@@ -1038,7 +1038,44 @@ pub(crate) struct ProcessedTranscription {
     pub post_process_prompt: Option<String>,
 }
 
-pub(crate) async fn process_transcription_output_with_profile(
+async fn process_transcription_output_with_profile<Invoke, InvokeFuture>(
+    settings: &AppSettings,
+    transcription: &str,
+    adaptive_profile: Option<&crate::adaptive::profile::AdaptiveProfile>,
+    effective_language: Option<&str>,
+    post_process_requested: bool,
+    private_session_enabled: bool,
+    invoke: Invoke,
+) -> ProcessedTranscription
+where
+    Invoke: FnOnce(AppSettings, Option<ResolvedPostProcessingPrompt>, String) -> InvokeFuture,
+    InvokeFuture: std::future::Future<Output = Option<String>>,
+{
+    let shared = execute_post_transcription_pipeline_with(
+        settings,
+        transcription,
+        adaptive_profile,
+        effective_language,
+        post_process_requested,
+        private_session_enabled,
+        invoke,
+    )
+    .await;
+
+    if let Some(reason) = &shared.pipeline.fallback_reason {
+        warn!("Post-transcription pipeline used a fallback: {:?}", reason);
+    }
+    let post_processed_text = (shared.pipeline.final_text != shared.pipeline.raw_input)
+        .then(|| shared.pipeline.final_text.clone());
+
+    ProcessedTranscription {
+        final_text: shared.pipeline.final_text,
+        post_processed_text,
+        post_process_prompt: shared.prompt,
+    }
+}
+
+pub(crate) async fn process_transcription_output_with_profile_on_app(
     app: &AppHandle,
     settings: &AppSettings,
     transcription: &str,
@@ -1049,7 +1086,7 @@ pub(crate) async fn process_transcription_output_with_profile(
     operation_token: Option<OperationToken>,
 ) -> ProcessedTranscription {
     let operation_token_for_llm = operation_token.clone();
-    let shared = execute_post_transcription_pipeline_with(
+    process_transcription_output_with_profile(
         settings,
         transcription,
         adaptive_profile,
@@ -1067,19 +1104,7 @@ pub(crate) async fn process_transcription_output_with_profile(
             .await
         },
     )
-    .await;
-
-    if let Some(reason) = &shared.pipeline.fallback_reason {
-        warn!("Post-transcription pipeline used a fallback: {:?}", reason);
-    }
-    let post_processed_text = (shared.pipeline.final_text != shared.pipeline.raw_input)
-        .then(|| shared.pipeline.final_text.clone());
-
-    ProcessedTranscription {
-        final_text: shared.pipeline.final_text,
-        post_processed_text,
-        post_process_prompt: shared.prompt,
-    }
+    .await
 }
 
 pub(crate) async fn process_transcription_output(
@@ -1090,7 +1115,7 @@ pub(crate) async fn process_transcription_output(
     private_session_enabled: bool,
     operation_token: Option<OperationToken>,
 ) -> ProcessedTranscription {
-    process_transcription_output_with_profile(
+    process_transcription_output_with_profile_on_app(
         app,
         settings,
         transcription,
@@ -1247,7 +1272,7 @@ pub(crate) async fn process_adaptive_transcription_output(
         &routing.profile_id,
     );
 
-    let processed = process_transcription_output_with_profile(
+    let processed = process_transcription_output_with_profile_on_app(
         app,
         settings,
         transcription,
@@ -2037,6 +2062,38 @@ mod adaptive_action_tests {
         assert_eq!(output, Some("structured output".to_string()));
         assert_eq!(legacy_calls.load(Ordering::SeqCst), 0);
     }
+
+    #[tokio::test]
+    async fn adaptive_profile_processor_invokes_requested_llm_once_and_uses_its_output() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let settings = post_processing_settings_for_provider("http://127.0.0.1:11434/v1", "");
+        let profile = settings
+            .adaptive_profiles
+            .iter()
+            .find(|profile| profile.id == "email")
+            .expect("email profile");
+        let invoke_count = Arc::new(AtomicUsize::new(0));
+        let invoke_count_for_call = Arc::clone(&invoke_count);
+
+        let output = process_transcription_output_with_profile(
+            &settings,
+            "hello world",
+            Some(profile),
+            Some("en"),
+            true,
+            false,
+            move |_, _, _| {
+                invoke_count_for_call.fetch_add(1, Ordering::SeqCst);
+                std::future::ready(Some("Hello world.".to_string()))
+            },
+        )
+        .await;
+
+        assert_eq!(invoke_count.load(Ordering::SeqCst), 1);
+        assert_eq!(output.final_text, "Hello world.");
+    }
+
     #[tokio::test]
     async fn adaptive_requested_post_processing_invokes_shared_llm_and_uses_output() {
         use std::sync::atomic::{AtomicUsize, Ordering};

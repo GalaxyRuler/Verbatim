@@ -137,17 +137,19 @@ pub async fn reprocess_last_adaptive_entry(
             Ok((entry, settings))
         },
         move |entry, settings, profile| async move {
-            Ok(crate::actions::process_transcription_output_with_profile(
-                &process_app,
-                &settings,
-                &entry.transcription_text,
-                Some(&profile),
-                None,
-                entry.post_process_requested,
-                false,
-                None,
+            Ok(
+                crate::actions::process_transcription_output_with_profile_on_app(
+                    &process_app,
+                    &settings,
+                    &entry.transcription_text,
+                    Some(&profile),
+                    None,
+                    entry.post_process_requested,
+                    false,
+                    None,
+                )
+                .await,
             )
-            .await)
         },
         |reprocessed| {
             history_manager

@@ -1,4 +1,4 @@
-use crate::actions::process_transcription_output_with_profile;
+use crate::actions::process_transcription_output_with_profile_on_app;
 use crate::managers::{
     history::{HistoryDeletionOutcome, HistoryManager, PaginatedHistory},
     transcription::TranscriptionManager,
@@ -197,7 +197,7 @@ pub async fn retry_history_entry_transcription(
     let retry_post_process =
         should_retry_post_process(entry.post_process_requested, settings.post_process_enabled);
     let adaptive_profile = retry_adaptive_profile(&settings, &entry)?;
-    let processed = process_transcription_output_with_profile(
+    let processed = process_transcription_output_with_profile_on_app(
         &app,
         &settings,
         &transcription,
