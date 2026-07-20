@@ -693,8 +693,12 @@ pub fn normalize_bcp47(tag: &str) -> String {
     };
 
     let mut normalized = vec![primary.to_ascii_lowercase()];
+    let mut in_extension = false;
     normalized.extend(subtags.map(|subtag| {
-        if subtag.len() == 4 && subtag.bytes().all(|byte| byte.is_ascii_alphabetic()) {
+        if in_extension || subtag.len() == 1 {
+            in_extension = true;
+            subtag.to_ascii_lowercase()
+        } else if subtag.len() == 4 && subtag.bytes().all(|byte| byte.is_ascii_alphabetic()) {
             let mut bytes = subtag.to_ascii_lowercase().into_bytes();
             bytes[0] = bytes[0].to_ascii_uppercase();
             String::from_utf8(bytes).expect("ASCII BCP-47 script subtag remains UTF-8")
@@ -1234,6 +1238,53 @@ fn ensure_dictation_language_defaults(settings: &mut AppSettings) -> bool {
     {
         settings.dictation_language_mode = DictationLanguageMode::Single;
     }
+
+    let requested_mode = settings.dictation_language_mode;
+    let requested_language = settings.selected_language.clone();
+    let requested_shortlist = settings.adaptive_language_shortlist.clone();
+    let mut reconciled = settings.clone();
+    if let Err(error) = reconciled.apply_dictation_language_mode(
+        requested_mode,
+        Some(requested_language.clone()),
+        requested_shortlist.clone(),
+    ) {
+        warn!(
+            "Repairing invalid persisted dictation language tuple during migration: {}",
+            error
+        );
+        let fallback = match requested_mode {
+            DictationLanguageMode::Single
+                if !requested_language.is_empty() && requested_language != "auto" =>
+            {
+                reconciled.apply_dictation_language_mode(
+                    DictationLanguageMode::Single,
+                    Some(requested_language),
+                    Vec::new(),
+                )
+            }
+            DictationLanguageMode::Multilingual if requested_shortlist.len() == 1 => reconciled
+                .apply_dictation_language_mode(
+                    DictationLanguageMode::Single,
+                    requested_shortlist.first().cloned(),
+                    requested_shortlist.clone(),
+                ),
+            _ => reconciled.apply_dictation_language_mode(
+                DictationLanguageMode::Auto,
+                None,
+                requested_shortlist,
+            ),
+        };
+        if let Err(fallback_error) = fallback {
+            warn!(
+                "Falling back to automatic dictation language after migration repair failed: {}",
+                fallback_error
+            );
+            reconciled.clear_dictation_language_lock();
+        }
+    }
+    settings.dictation_language_mode = reconciled.dictation_language_mode;
+    settings.selected_language = reconciled.selected_language;
+    settings.adaptive_language_shortlist = reconciled.adaptive_language_shortlist;
 
     settings.dictation_language_schema_version = DICTATION_LANGUAGE_SCHEMA_VERSION;
     true
@@ -3515,19 +3566,61 @@ mod tests {
         assert_eq!(settings.auto_submit_key, AutoSubmitKey::Enter);
     }
 
+    fn forbidden_unlocked_settings_write(source: &str) -> Option<&'static str> {
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        let compact = production_source
+            .chars()
+            .filter(|character| !character.is_ascii_whitespace())
+            .collect::<String>();
+
+        [
+            ("write_settings(", "lock-free write_settings"),
+            (".set(\"settings\",", "direct settings store set"),
+            ("persist_settings_value(", "direct settings persistence"),
+            (
+                "write_settings_with_immediate_save(",
+                "direct settings persistence",
+            ),
+            (
+                "write_settings_to_store_with_immediate_save(",
+                "direct settings persistence",
+            ),
+        ]
+        .into_iter()
+        .find_map(|(needle, description)| compact.contains(needle).then_some(description))
+    }
+
     #[test]
-    fn dictionary_mutation_paths_do_not_call_write_settings_directly() {
-        // Guard: all settings mutation paths in these files must go through
-        // `mutate_settings_locked` or the locked domain writers
-        // (`write_settings_domain` / `try_write_settings_domain`). A direct
-        // `write_settings` call in any of them would reintroduce the lost-update race
-        // this hardening effort removed — originally for the dictionary paths, then
-        // extended to the remaining unlocked writers (audio/adaptive/transcription/
-        // models/local_llm/snippets/model-manager), then to the domain-write callers
-        // (shortcut/history/diagnostics/transcription-manager).
-        // The substring check is safe: `write_settings_domain(` does not contain
-        // `write_settings(`.
-        // CWD for unit tests is the manifest dir (src-tauri), so paths are relative to it.
+    fn settings_mutation_paths_reject_unlocked_and_direct_persistence_writers() {
+        for unsafe_source in [
+            "fn mutate(app: &AppHandle) { write_settings(app, next); }",
+            "fn mutate(store: &Store) { store.set(\"settings\", next); }",
+            "fn mutate(store: &Store) { persist_settings_value(store, next, true); }",
+            "fn mutate(store: &Store) { write_settings_to_store_with_immediate_save(\n store, next, true); }",
+        ] {
+            assert!(
+                forbidden_unlocked_settings_write(unsafe_source).is_some(),
+                "guard must reject direct persistence in: {unsafe_source}"
+            );
+        }
+        assert_eq!(
+            forbidden_unlocked_settings_write(
+                "fn mutate(app: &AppHandle) { write_settings_domain(app, domain, |settings| {}); }"
+            ),
+            None
+        );
+        assert_eq!(
+            forbidden_unlocked_settings_write(
+                "fn production() {}\n#[cfg(test)]\nmod tests { fn fixture(store: &Store) { store.set(\"settings\", value); } }"
+            ),
+            None,
+            "test-only store fixtures are outside this production guard"
+        );
+
+        // This guard covers the production portion of migrated settings-mutation files.
+        // It rejects the lock-free writer, direct `settings` store sets, and calls to
+        // internal persistence helpers. It intentionally does not inspect test fixtures
+        // or reject unrelated non-settings stores. CWD is the src-tauri manifest dir.
         for path in [
             "src/commands/dictionary.rs",
             "src/post_paste_learning.rs",
@@ -3546,8 +3639,9 @@ mod tests {
             let source = std::fs::read_to_string(path)
                 .unwrap_or_else(|error| panic!("failed to read {path}: {error}"));
             assert!(
-                !source.contains("write_settings("),
-                "{path} must mutate via mutate_settings_locked or the locked domain writers, not write_settings"
+                forbidden_unlocked_settings_write(&source).is_none(),
+                "{path} contains a forbidden {}",
+                forbidden_unlocked_settings_write(&source).unwrap_or("settings writer")
             );
         }
     }
@@ -4040,6 +4134,15 @@ mod tests {
     }
 
     #[test]
+    fn bcp47_extension_subtags_normalize_case_insensitively() {
+        assert_eq!(
+            normalize_bcp47("en-US-u-ca-gregory"),
+            normalize_bcp47("EN-us-U-CA-GREGORY")
+        );
+        assert_eq!(normalize_bcp47("EN-us-U-CA-GREGORY"), "en-US-u-ca-gregory");
+    }
+
+    #[test]
     fn legacy_concrete_language_without_mode_loads_as_single() {
         let mut legacy_value =
             serde_json::to_value(get_default_settings()).expect("serialize default settings");
@@ -4100,6 +4203,45 @@ mod tests {
             DictationLanguageMode::Single
         );
         assert_eq!(settings.selected_language, "pt-BR");
+        assert_eq!(settings.dictation_language_schema_version, 1);
+    }
+
+    #[test]
+    fn invalid_dictation_language_migration_repairs_single_auto_tuple() {
+        let mut settings = get_default_settings();
+        settings.dictation_language_schema_version = 0;
+        settings.dictation_language_mode = DictationLanguageMode::Single;
+        settings.selected_language = "auto".to_string();
+        settings.adaptive_language_shortlist = vec!["EN".to_string()];
+
+        assert!(ensure_dictation_language_defaults(&mut settings));
+
+        assert_eq!(
+            settings.dictation_language_mode,
+            DictationLanguageMode::Single
+        );
+        assert_eq!(settings.selected_language, "en");
+        assert_eq!(settings.adaptive_language_shortlist, vec!["en"]);
+        assert_eq!(settings.dictation_language_schema_version, 1);
+        assert!(!ensure_dictation_language_defaults(&mut settings));
+    }
+
+    #[test]
+    fn invalid_dictation_language_migration_repairs_one_language_multilingual_tuple() {
+        let mut settings = get_default_settings();
+        settings.dictation_language_schema_version = 0;
+        settings.dictation_language_mode = DictationLanguageMode::Multilingual;
+        settings.selected_language = "auto".to_string();
+        settings.adaptive_language_shortlist = vec!["FR".to_string()];
+
+        assert!(ensure_dictation_language_defaults(&mut settings));
+
+        assert_eq!(
+            settings.dictation_language_mode,
+            DictationLanguageMode::Single
+        );
+        assert_eq!(settings.selected_language, "fr");
+        assert_eq!(settings.adaptive_language_shortlist, vec!["fr"]);
         assert_eq!(settings.dictation_language_schema_version, 1);
     }
 

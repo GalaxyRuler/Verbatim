@@ -28,12 +28,17 @@ const shortlistOrDefault = (languages?: string[] | null): string[] => {
 
 const upperCode = (language: string): string => language.toUpperCase();
 
+const isDictationLanguageMode = (
+  value: unknown,
+): value is DictationLanguageMode =>
+  value === "auto" || value === "single" || value === "multilingual";
+
 export const getDictationLanguageMode = ({
   dictationLanguageMode,
   selectedLanguage,
   adaptiveLanguageShortlist,
 }: DictationLanguageSettings): DictationLanguageMode => {
-  if (dictationLanguageMode !== undefined && dictationLanguageMode !== null) {
+  if (isDictationLanguageMode(dictationLanguageMode)) {
     return dictationLanguageMode;
   }
   if (selectedLanguage && selectedLanguage !== "auto") return "single";

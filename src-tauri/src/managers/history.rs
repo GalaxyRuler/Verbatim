@@ -8,6 +8,7 @@ use specta::Type;
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::AppHandle;
 use tauri_specta::Event;
@@ -170,6 +171,7 @@ pub struct HistoryManager {
     app_handle: AppHandle,
     recordings_dir: PathBuf,
     db_path: PathBuf,
+    recording_mutations: Mutex<()>,
 }
 
 impl HistoryManager {
@@ -189,6 +191,7 @@ impl HistoryManager {
             app_handle: app_handle.clone(),
             recordings_dir,
             db_path,
+            recording_mutations: Mutex::new(()),
         };
 
         // Initialize database and run migrations synchronously
@@ -486,6 +489,10 @@ impl HistoryManager {
         metadata: AdaptiveHistoryMetadata,
         transform_metadata: TransformHistoryMetadata,
     ) -> Result<HistoryEntry> {
+        let _recording_mutation_guard = self
+            .recording_mutations
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let timestamp = Utc::now().timestamp();
         let title = self.format_timestamp_title(timestamp);
 
@@ -653,17 +660,38 @@ impl HistoryManager {
         &self,
         entries: &[(i64, String)],
     ) -> Result<HistoryDeletionOutcome> {
+        Self::delete_entries_and_files_serialized(
+            &self.recording_mutations,
+            &self.db_path,
+            &self.recordings_dir,
+            entries,
+            &|path| fs::remove_file(path),
+        )
+    }
+
+    fn delete_entries_and_files_serialized<F>(
+        recording_mutations: &Mutex<()>,
+        db_path: &Path,
+        recordings_dir: &Path,
+        entries: &[(i64, String)],
+        delete_file: &F,
+    ) -> Result<HistoryDeletionOutcome>
+    where
+        F: Fn(&Path) -> std::io::Result<()>,
+    {
         if entries.is_empty() {
             return Ok(HistoryDeletionOutcome::default());
         }
 
-        let conn = self.get_connection()?;
-        Self::delete_entries_and_files_with(&conn, &self.recordings_dir, entries, &|path| {
-            fs::remove_file(path)
-        })
+        let _recording_mutation_guard = recording_mutations
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let conn = Connection::open(db_path)?;
+        Self::delete_entries_and_files_with(&conn, recordings_dir, entries, delete_file)
     }
 
-    /// Delete history rows first, then remove a recording only after its final owning row.
+    /// Delete shared-reference rows directly. For the last owning row, stage the row deletion in
+    /// a transaction, remove the recording, and commit only after the file is gone.
     ///
     /// Entries count history rows, not distinct recordings. Transform rows pass an empty
     /// filename and are excluded from the reference query, preserving their non-owning semantics.
@@ -680,43 +708,72 @@ impl HistoryManager {
             requested_count: entries.len(),
             ..HistoryDeletionOutcome::default()
         };
-        let mut remaining_references = conn.prepare(
-            "SELECT COUNT(*)
-             FROM transcription_history
-             WHERE file_name = ?1 AND transform_action IS NULL",
-        )?;
-
         for (id, file_name) in entries {
-            let deleted = conn.execute(
-                "DELETE FROM transcription_history WHERE id = ?1",
-                params![id],
-            )?;
-            outcome.deleted_count += deleted;
-            if deleted == 0 || file_name.trim().is_empty() {
+            let transaction = conn.unchecked_transaction()?;
+
+            if file_name.trim().is_empty() {
+                let deleted = transaction.execute(
+                    "DELETE FROM transcription_history WHERE id = ?1",
+                    params![id],
+                )?;
+                transaction.commit()?;
+                outcome.deleted_count += deleted;
                 continue;
             }
 
-            let reference_count: i64 =
-                remaining_references.query_row(params![file_name], |row| row.get(0))?;
-            if reference_count > 0 {
+            let other_reference_count: i64 = transaction.query_row(
+                "SELECT COUNT(*)
+                 FROM transcription_history
+                 WHERE file_name = ?1 AND id != ?2 AND transform_action IS NULL",
+                params![file_name, id],
+                |row| row.get(0),
+            )?;
+            if other_reference_count > 0 {
+                let deleted = transaction.execute(
+                    "DELETE FROM transcription_history WHERE id = ?1",
+                    params![id],
+                )?;
+                transaction.commit()?;
+                outcome.deleted_count += deleted;
                 debug!(
                     "Preserved shared WAV file {} with {} remaining history reference(s)",
-                    file_name, reference_count
+                    file_name, other_reference_count
                 );
+                continue;
+            }
+
+            let deleted = transaction.execute(
+                "DELETE FROM transcription_history WHERE id = ?1",
+                params![id],
+            )?;
+            if deleted == 0 {
+                transaction.commit()?;
                 continue;
             }
 
             let file_path = recordings_dir.join(file_name);
             match delete_file(&file_path) {
-                Ok(()) => debug!("Deleted unreferenced WAV file: {}", file_name),
+                Ok(()) => {
+                    transaction.commit()?;
+                    outcome.deleted_count += deleted;
+                    debug!("Deleted unreferenced WAV file: {}", file_name);
+                }
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    transaction.commit()?;
+                    outcome.deleted_count += deleted;
                     debug!("Unreferenced WAV file already absent: {}", file_name);
                 }
                 Err(error) => {
                     error!(
-                        "History row {} was deleted, but WAV file {} could not be removed: {}",
+                        "Preserved history row {} because WAV file {} could not be removed: {}",
                         id, file_name, error
                     );
+                    outcome.failures.push(HistoryDeletionFailure {
+                        id: Some(*id),
+                        file_name: file_name.clone(),
+                        reason: Self::deletion_failure_reason(&error),
+                    });
+                    transaction.rollback()?;
                 }
             }
         }
@@ -733,6 +790,10 @@ impl HistoryManager {
     }
 
     fn reconcile_orphan_recordings(&self) -> Result<HistoryDeletionOutcome> {
+        let _recording_mutation_guard = self
+            .recording_mutations
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let conn = self.get_connection()?;
         Self::reconcile_orphan_recordings_with(&conn, &self.recordings_dir, &|path| {
             fs::remove_file(path)
@@ -1157,6 +1218,10 @@ impl HistoryManager {
     }
 
     pub async fn delete_entry(&self, id: i64) -> Result<HistoryDeletionOutcome> {
+        let _recording_mutation_guard = self
+            .recording_mutations
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let conn = self.get_connection()?;
         let entry = conn
             .query_row(
@@ -1192,6 +1257,10 @@ impl HistoryManager {
     }
 
     pub async fn clear_history(&self) -> Result<HistoryDeletionOutcome> {
+        let _recording_mutation_guard = self
+            .recording_mutations
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let conn = self.get_connection()?;
         let entries = Self::all_history_deletion_candidates(&conn)?;
         let outcome =
@@ -1203,6 +1272,10 @@ impl HistoryManager {
     }
 
     pub async fn clear_unsaved_recordings(&self) -> Result<HistoryDeletionOutcome> {
+        let _recording_mutation_guard = self
+            .recording_mutations
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let conn = self.get_connection()?;
         let entries = Self::unsaved_recording_file_candidates(&conn)?;
         let outcome =
@@ -1655,8 +1728,17 @@ mod tests {
         )
         .expect("delete first shared row");
         assert_eq!(first_outcome.deleted_count, 1);
+        assert!(first_outcome.failures.is_empty());
         assert!(recording_path.exists(), "remaining row still owns the WAV");
         assert_eq!(delete_calls.get(), 0);
+        let remaining_rows: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM transcription_history WHERE file_name = 'shared.wav'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count remaining shared row");
+        assert_eq!(remaining_rows, 1);
 
         let second_outcome = HistoryManager::delete_entries_and_files_with(
             &conn,
@@ -1668,6 +1750,69 @@ mod tests {
         assert_eq!(second_outcome.deleted_count, 1);
         assert!(!recording_path.exists());
         assert_eq!(delete_calls.get(), 1, "shared WAV is removed exactly once");
+    }
+
+    #[test]
+    fn recording_mutation_lock_orders_insert_before_last_reference_delete() {
+        let temp_dir = tempfile::tempdir().expect("history tempdir");
+        let db_path = temp_dir.path().join("history.db");
+        let recordings_dir = temp_dir.path().join("recordings");
+        std::fs::create_dir_all(&recordings_dir).expect("create recordings dir");
+        let conn = HistoryManager::migrate_database(&db_path).expect("create history database");
+        insert_entry_with_file_name(&conn, 100, "race.wav", false, "parent", None);
+        let parent_id = conn.last_insert_rowid();
+        drop(conn);
+        let recording_path = recordings_dir.join("race.wav");
+        std::fs::write(&recording_path, b"shared audio").expect("write shared recording");
+
+        let recording_mutations = std::sync::Arc::new(Mutex::new(()));
+        let guard = recording_mutations
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let delete_lock = std::sync::Arc::clone(&recording_mutations);
+        let delete_db_path = db_path.clone();
+        let delete_recordings_dir = recordings_dir.clone();
+        let (finished_tx, finished_rx) = std::sync::mpsc::channel();
+        let delete_thread = std::thread::spawn(move || {
+            let result = HistoryManager::delete_entries_and_files_serialized(
+                &delete_lock,
+                &delete_db_path,
+                &delete_recordings_dir,
+                &[(parent_id, "race.wav".to_string())],
+                &|path| std::fs::remove_file(path),
+            );
+            finished_tx.send(result).expect("report deletion result");
+        });
+
+        assert!(
+            finished_rx
+                .recv_timeout(std::time::Duration::from_millis(100))
+                .is_err(),
+            "deletion must wait while a recording-reference mutation owns the lock"
+        );
+        let insert_conn = Connection::open(&db_path).expect("open concurrent history connection");
+        insert_entry_with_file_name(&insert_conn, 200, "race.wav", false, "child", None);
+        drop(insert_conn);
+        drop(guard);
+
+        let outcome = finished_rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("deletion completes after insert releases lock")
+            .expect("delete parent row");
+        delete_thread.join().expect("join deletion thread");
+
+        assert_eq!(outcome.deleted_count, 1);
+        assert!(outcome.failures.is_empty());
+        assert!(recording_path.exists(), "new reference keeps WAV alive");
+        let remaining_conn = Connection::open(&db_path).expect("open history for assertion");
+        let remaining_references: i64 = remaining_conn
+            .query_row(
+                "SELECT COUNT(*) FROM transcription_history WHERE file_name = 'race.wav'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count remaining references");
+        assert_eq!(remaining_references, 1);
     }
 
     #[test]
@@ -1841,12 +1986,12 @@ mod tests {
         assert_eq!(
             delete_calls.get(),
             0,
-            "file deletion must happen after DB deletion"
+            "file deletion must happen only after DB deletion is validated"
         );
     }
 
     #[test]
-    fn file_delete_failure_is_non_fatal_after_row_deletion() {
+    fn locked_last_recording_preserves_row_and_reports_retryable_failure() {
         let conn = setup_conn();
         insert_entry_with_file_name(&conn, 100, "locked.wav", false, "delete row", None);
         let entry_id = conn.last_insert_rowid();
@@ -1865,11 +2010,18 @@ mod tests {
                 ))
             },
         )
-        .expect("file failure is logged but not fatal");
+        .expect("file failure produces a typed deletion outcome");
 
         assert_eq!(outcome.requested_count, 1);
-        assert_eq!(outcome.deleted_count, 1);
-        assert!(outcome.failures.is_empty());
+        assert_eq!(outcome.deleted_count, 0);
+        assert_eq!(
+            outcome.failures,
+            vec![HistoryDeletionFailure {
+                id: Some(entry_id),
+                file_name: "locked.wav".to_string(),
+                reason: HistoryDeletionFailureReason::PermissionDenied,
+            }]
+        );
         let row_count: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM transcription_history WHERE id = ?1",
@@ -1877,10 +2029,10 @@ mod tests {
                 |row| row.get(0),
             )
             .expect("count deleted row");
-        assert_eq!(row_count, 0);
+        assert_eq!(row_count, 1, "failed file deletion must remain retryable");
         assert!(
             recording_path.exists(),
-            "failed file deletion leaves an orphan for reconciliation"
+            "failed file deletion preserves the recording and its owning row"
         );
     }
 

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  type DictationLanguageMode,
   getDictationLanguageMode,
   getDictationLanguageModeLabel,
   getDictationLanguagePickerOptions,
@@ -37,14 +38,14 @@ describe("dictation language mode", () => {
     ).toBe("auto");
   });
 
-  test("treats an explicit backend mode as authoritative over a legacy language lock", () => {
+  test("ignores a defined but invalid backend mode and infers from legacy fields", () => {
     expect(
       getDictationLanguageMode({
-        dictationLanguageMode: "auto",
+        dictationLanguageMode: "unsupported" as DictationLanguageMode,
         selectedLanguage: "ar",
         adaptiveLanguageShortlist: ["ar", "en"],
       }),
-    ).toBe("auto");
+    ).toBe("single");
   });
 
   test("cycles through auto, each configured language, multilingual, then auto", () => {

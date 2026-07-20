@@ -813,11 +813,15 @@ focused, path = find_focused(window)
 if focused is None:
     raise SystemExit("no focused AT-SPI element")
 
+if not hasattr(focused, "getRoleName"):
+    raise SystemExit("__VERBATIM_SECURE_CHECK_ERROR__: focused element has no role API")
 try:
-    role = focused.getRoleName() if hasattr(focused, "getRoleName") else ""
+    role = focused.getRoleName()
 except Exception as exc:
     raise SystemExit(f"__VERBATIM_SECURE_CHECK_ERROR__: {exc}")
-if isinstance(role, str) and role.strip().lower() in ("password text", "password"):
+if not isinstance(role, str):
+    raise SystemExit("__VERBATIM_SECURE_CHECK_ERROR__: focused element returned an unusable role")
+if role.strip().lower() in ("password text", "password"):
     raise SystemExit("__VERBATIM_SECURE__")
 
 text = accessible_text(focused)
@@ -827,7 +831,7 @@ if text is None:
 parts = [
     getattr(app, "name", "") or "",
     getattr(window, "name", "") or "",
-    focused.getRoleName() if hasattr(focused, "getRoleName") else "",
+    role,
     path,
 ]
 print("|".join(parts))
@@ -907,11 +911,15 @@ focused, path = find_focused(window)
 if focused is None:
     raise SystemExit("no focused AT-SPI element")
 
+if not hasattr(focused, "getRoleName"):
+    raise SystemExit("__VERBATIM_SECURE_CHECK_ERROR__: focused element has no role API")
 try:
-    role = focused.getRoleName() if hasattr(focused, "getRoleName") else ""
+    role = focused.getRoleName()
 except Exception as exc:
     raise SystemExit(f"__VERBATIM_SECURE_CHECK_ERROR__: {exc}")
-if isinstance(role, str) and role.strip().lower() in ("password text", "password"):
+if not isinstance(role, str):
+    raise SystemExit("__VERBATIM_SECURE_CHECK_ERROR__: focused element returned an unusable role")
+if role.strip().lower() in ("password text", "password"):
     raise SystemExit("__VERBATIM_SECURE__")
 
 text_iface, text_value = accessible_text(focused)
@@ -1441,6 +1449,102 @@ mod tests {
             assert_eq!(
                 super::classify_secure_sentinel(stdout, stderr),
                 Some(expected)
+            );
+        }
+    }
+
+    fn run_linux_selection_script_with_fake_role(
+        role_method: Option<&str>,
+    ) -> std::process::Output {
+        let role_method = role_method.unwrap_or_default();
+        let probe = format!(
+            r#"
+import os
+import sys
+import types
+
+class FakeState:
+    def contains(self, _state):
+        return True
+
+class FakeText:
+    characterCount = 6
+
+    def getText(self, _start, _end):
+        return "secret"
+
+    def getNSelections(self):
+        return 0
+
+class FakeFocused:
+    name = "window"
+    childCount = 0
+{role_method}
+    def getState(self):
+        return FakeState()
+
+    def queryText(self):
+        return FakeText()
+
+class FakeApp(list):
+    name = "app"
+
+class FakeRegistry:
+    @staticmethod
+    def getDesktop(_index):
+        return [FakeApp([FakeFocused()])]
+
+sys.modules["pyatspi"] = types.SimpleNamespace(
+    Registry=FakeRegistry,
+    STATE_ACTIVE=1,
+    STATE_FOCUSED=2,
+)
+exec(os.environ["VERBATIM_LINUX_SELECTION_SCRIPT"])
+"#
+        );
+
+        for binary in ["python3", "python"] {
+            if let Ok(output) = std::process::Command::new(binary)
+                .args(["-c", &probe])
+                .env(
+                    "VERBATIM_LINUX_SELECTION_SCRIPT",
+                    linux_selection_script_source(),
+                )
+                .output()
+            {
+                return output;
+            }
+        }
+
+        panic!("python3 or python is required for Linux AT-SPI script tests");
+    }
+
+    fn linux_selection_script_source() -> &'static str {
+        const SOURCE: &str = include_str!("post_paste_learning.rs");
+        const START: &str = "const LINUX_FOCUSED_TEXT_SELECTION_SCRIPT: &str = r#\"";
+        let (_, script_and_suffix) = SOURCE
+            .split_once(START)
+            .expect("Linux selection script constant exists");
+        script_and_suffix
+            .split_once("\"#;")
+            .map(|(script, _)| script)
+            .expect("Linux selection script terminator exists")
+    }
+
+    #[test]
+    fn linux_selection_capture_fails_closed_for_unclassifiable_roles() {
+        for role_method in [
+            None,
+            Some("    def getRoleName(self):\n        return None\n"),
+        ] {
+            let output = run_linux_selection_script_with_fake_role(role_method);
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+
+            assert_eq!(
+                super::classify_secure_sentinel(&stdout, &stderr),
+                Some(SelectionCaptureError::SecureCheckError),
+                "unclassifiable AT-SPI roles must fail closed; stdout={stdout:?}, stderr={stderr:?}"
             );
         }
     }
