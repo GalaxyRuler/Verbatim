@@ -1,4 +1,4 @@
-use crate::actions::process_transcription_output;
+use crate::actions::process_transcription_output_with_profile_on_app;
 use crate::managers::{
     history::{HistoryDeletionOutcome, HistoryManager, PaginatedHistory},
     transcription::TranscriptionManager,
@@ -11,6 +11,42 @@ fn should_retry_post_process(
     live_post_process_enabled: bool,
 ) -> bool {
     stored_post_process_requested && live_post_process_enabled
+}
+
+fn retry_adaptive_profile_id(entry: &crate::managers::history::HistoryEntry) -> Option<String> {
+    entry.adaptive_profile_id.clone().or_else(|| {
+        entry
+            .adaptive_routing_json
+            .as_deref()
+            .and_then(|json| serde_json::from_str::<serde_json::Value>(json).ok())
+            .and_then(|routing| {
+                routing
+                    .get("profile_id")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string)
+            })
+    })
+}
+
+fn retry_adaptive_profile<'a>(
+    settings: &'a crate::settings::AppSettings,
+    entry: &crate::managers::history::HistoryEntry,
+) -> Result<Option<&'a crate::adaptive::profile::AdaptiveProfile>, String> {
+    let Some(profile_id) = retry_adaptive_profile_id(entry) else {
+        return Ok(None);
+    };
+
+    settings
+        .adaptive_profiles
+        .iter()
+        .find(|profile| profile.id == profile_id && profile.enabled)
+        .map(Some)
+        .ok_or_else(|| {
+            format!(
+                "Adaptive history profile '{}' is unavailable; retry cannot preserve its semantics",
+                profile_id
+            )
+        })
 }
 
 fn ensure_retriable_audio_entry(
@@ -156,13 +192,19 @@ pub async fn retry_history_entry_transcription(
 
     ensure_retry_not_cancelled(operation_token.as_ref(), "post-processing")?;
 
-    let settings = crate::settings::get_settings(&app);
+    let mut settings = crate::settings::get_settings(&app);
+    crate::credentials::hydrate_runtime_post_process_api_keys(&app, &mut settings);
     let retry_post_process =
         should_retry_post_process(entry.post_process_requested, settings.post_process_enabled);
-    let processed = process_transcription_output(
+    let adaptive_profile = retry_adaptive_profile(&settings, &entry)?;
+    let processed = process_transcription_output_with_profile_on_app(
         &app,
+        &settings,
         &transcription,
+        adaptive_profile,
+        None,
         retry_post_process,
+        false,
         operation_token.clone(),
     )
     .await;
@@ -370,5 +412,57 @@ mod tests {
             .expect_err("cancelled retry must block side effect");
 
         assert!(err.contains("history update"));
+    }
+    fn retry_entry() -> crate::managers::history::HistoryEntry {
+        crate::managers::history::HistoryEntry {
+            id: 1,
+            file_name: "retry.wav".to_string(),
+            timestamp: 1,
+            saved: false,
+            title: "Retry".to_string(),
+            transcription_text: "hello world".to_string(),
+            post_processed_text: None,
+            post_process_prompt: None,
+            post_process_requested: false,
+            adaptive_profile_id: None,
+            adaptive_profile_name: None,
+            adaptive_routing_json: None,
+            adaptive_context_json: None,
+            adaptive_language_json: None,
+            adaptive_insertion_json: None,
+            adaptive_parent_entry_id: None,
+            transform_action: None,
+            transform_original_text: None,
+            transform_result_text: None,
+            transform_target_language: None,
+            transform_provider_id: None,
+            transform_model: None,
+            transform_recovery_status: None,
+        }
+    }
+
+    #[test]
+    fn adaptive_retry_selects_stored_profile_metadata() {
+        let mut entry = retry_entry();
+        entry.adaptive_profile_id = Some("email".to_string());
+        entry.adaptive_routing_json = Some(r#"{"profile_id":"technical"}"#.to_string());
+
+        assert_eq!(retry_adaptive_profile_id(&entry).as_deref(), Some("email"));
+    }
+
+    #[test]
+    fn routing_only_adaptive_retry_selects_routed_profile() {
+        let mut entry = retry_entry();
+        entry.adaptive_routing_json = Some(r#"{"profile_id":"technical"}"#.to_string());
+
+        assert_eq!(
+            retry_adaptive_profile_id(&entry).as_deref(),
+            Some("technical")
+        );
+    }
+
+    #[test]
+    fn classic_retry_has_no_adaptive_profile() {
+        assert_eq!(retry_adaptive_profile_id(&retry_entry()), None);
     }
 }

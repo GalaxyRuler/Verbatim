@@ -27,6 +27,7 @@ mod overlay;
 #[cfg(any(target_os = "android", target_os = "ios"))]
 #[path = "overlay_stub.rs"]
 mod overlay;
+pub(crate) mod pipeline;
 pub mod portable;
 mod post_paste_learning;
 mod private_session;

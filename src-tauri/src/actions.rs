@@ -21,7 +21,6 @@ use crate::utils::{
     self, show_processing_overlay, show_recording_overlay, show_transcribing_overlay,
 };
 use crate::TranscriptionCoordinator;
-use ferrous_opencc::{config::BuiltinConfig, OpenCC};
 use log::{debug, error, warn};
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
@@ -535,6 +534,219 @@ fn should_run_requested_post_processing(
     requested && settings.post_process_enabled && !private_session_enabled
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PostProcessingPromptSource {
+    UserSelected,
+    AdaptiveProfile,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ResolvedPostProcessingPrompt {
+    prompt: String,
+    source: PostProcessingPromptSource,
+}
+
+fn resolve_post_processing_prompt(
+    settings: &AppSettings,
+    adaptive_profile: Option<&crate::adaptive::profile::AdaptiveProfile>,
+    deterministic_output: &str,
+) -> Option<ResolvedPostProcessingPrompt> {
+    if let Some(prompt_id) = settings.post_process_selected_prompt_id.as_deref() {
+        return settings
+            .post_process_prompts
+            .iter()
+            .find(|prompt| prompt.id == prompt_id && !prompt.prompt.trim().is_empty())
+            .map(|prompt| ResolvedPostProcessingPrompt {
+                prompt: prompt.prompt.clone(),
+                source: PostProcessingPromptSource::UserSelected,
+            });
+    }
+
+    adaptive_profile
+        .and_then(|profile| {
+            crate::adaptive::processor::build_profile_prompt(deterministic_output, profile)
+        })
+        .filter(|prompt| !prompt.trim().is_empty())
+        .map(|prompt| ResolvedPostProcessingPrompt {
+            prompt,
+            source: PostProcessingPromptSource::AdaptiveProfile,
+        })
+}
+
+fn settings_for_post_processing_prompt(
+    settings: &AppSettings,
+    resolved_prompt: Option<&ResolvedPostProcessingPrompt>,
+) -> AppSettings {
+    const ADAPTIVE_PROFILE_PROMPT_ID: &str = "__adaptive_profile_prompt";
+
+    let mut runtime_settings = settings.clone();
+    if let Some(ResolvedPostProcessingPrompt {
+        prompt,
+        source: PostProcessingPromptSource::AdaptiveProfile,
+    }) = resolved_prompt
+    {
+        runtime_settings
+            .post_process_prompts
+            .retain(|candidate| candidate.id != ADAPTIVE_PROFILE_PROMPT_ID);
+        runtime_settings
+            .post_process_prompts
+            .push(crate::settings::LLMPrompt {
+                id: ADAPTIVE_PROFILE_PROMPT_ID.to_string(),
+                name: "Adaptive profile".to_string(),
+                prompt: prompt.clone(),
+            });
+        runtime_settings.post_process_selected_prompt_id =
+            Some(ADAPTIVE_PROFILE_PROMPT_ID.to_string());
+    }
+    runtime_settings
+}
+
+struct OptionalLlmStageResult {
+    completion: crate::pipeline::PipelineCompletion,
+    prompt: Option<String>,
+}
+
+async fn run_optional_llm_stage_with<Invoke, InvokeFuture>(
+    requested: bool,
+    settings: &AppSettings,
+    private_session_enabled: bool,
+    adaptive_profile: Option<&crate::adaptive::profile::AdaptiveProfile>,
+    deterministic_output: &str,
+    invoke: Invoke,
+) -> OptionalLlmStageResult
+where
+    Invoke: FnOnce(AppSettings, Option<ResolvedPostProcessingPrompt>, String) -> InvokeFuture,
+    InvokeFuture: std::future::Future<Output = Option<String>>,
+{
+    if !should_run_requested_post_processing(requested, settings, private_session_enabled) {
+        return OptionalLlmStageResult {
+            completion: crate::pipeline::PipelineCompletion {
+                llm_output: None,
+                llm_invoked: false,
+            },
+            prompt: None,
+        };
+    }
+
+    let resolved_prompt =
+        resolve_post_processing_prompt(settings, adaptive_profile, deterministic_output);
+    let runtime_settings = settings_for_post_processing_prompt(settings, resolved_prompt.as_ref());
+    let runtime = crate::runtime_settings::post_processing_runtime(&runtime_settings, true);
+    if !runtime.should_run() {
+        debug!(
+            "Post-processing skipped by runtime settings: {:?}",
+            runtime.skip_reason()
+        );
+        return OptionalLlmStageResult {
+            completion: crate::pipeline::PipelineCompletion {
+                llm_output: None,
+                llm_invoked: false,
+            },
+            prompt: None,
+        };
+    }
+
+    let prompt = resolved_prompt
+        .as_ref()
+        .map(|resolved| resolved.prompt.clone());
+    let llm_output = invoke(
+        runtime_settings,
+        resolved_prompt,
+        deterministic_output.to_string(),
+    )
+    .await;
+    OptionalLlmStageResult {
+        completion: crate::pipeline::PipelineCompletion {
+            llm_output,
+            llm_invoked: true,
+        },
+        prompt,
+    }
+}
+struct SharedPipelineOutput {
+    pipeline: crate::pipeline::PipelineResult,
+    prompt: Option<String>,
+}
+
+async fn execute_post_transcription_pipeline_with<Invoke, InvokeFuture>(
+    settings: &AppSettings,
+    raw_input: &str,
+    adaptive_profile: Option<&crate::adaptive::profile::AdaptiveProfile>,
+    effective_language: Option<&str>,
+    post_process_requested: bool,
+    private_session_enabled: bool,
+    invoke: Invoke,
+) -> SharedPipelineOutput
+where
+    Invoke: FnOnce(AppSettings, Option<ResolvedPostProcessingPrompt>, String) -> InvokeFuture,
+    InvokeFuture: std::future::Future<Output = Option<String>>,
+{
+    let prepared = crate::pipeline::prepare_post_transcription_pipeline(
+        crate::pipeline::PipelinePreparationInput {
+            raw_input,
+            selected_language: &settings.selected_language,
+            formatting_level: settings.formatting_level,
+            adaptive_profile,
+            effective_language,
+        },
+    );
+    let deterministic_output = prepared.deterministic_output.clone();
+    let llm_stage = run_optional_llm_stage_with(
+        post_process_requested,
+        settings,
+        private_session_enabled,
+        adaptive_profile,
+        &deterministic_output,
+        invoke,
+    )
+    .await;
+    let pipeline =
+        crate::pipeline::finalize_post_transcription_pipeline(prepared, llm_stage.completion);
+    let prompt = if pipeline
+        .llm_output
+        .as_ref()
+        .is_some_and(|output| output == &pipeline.final_text)
+    {
+        llm_stage.prompt
+    } else {
+        None
+    };
+
+    SharedPipelineOutput { pipeline, prompt }
+}
+
+async fn invoke_single_llm_stage_with_fallback<Structured, StructuredFuture, Legacy, LegacyFuture>(
+    supports_structured_output: bool,
+    structured: Structured,
+    legacy: Legacy,
+) -> Option<String>
+where
+    Structured: FnOnce() -> StructuredFuture,
+    StructuredFuture: std::future::Future<Output = Result<Option<String>, String>>,
+    Legacy: FnOnce() -> LegacyFuture,
+    LegacyFuture: std::future::Future<Output = Result<Option<String>, String>>,
+{
+    if supports_structured_output {
+        match structured().await {
+            Ok(output) => return output,
+            Err(err) => {
+                warn!(
+                    "Structured post-processing failed: {}. Retrying the same logical LLM stage in legacy mode.",
+                    err
+                );
+            }
+        }
+    }
+
+    match legacy().await {
+        Ok(output) => output,
+        Err(err) => {
+            error!("Legacy post-processing failed: {}", err);
+            None
+        }
+    }
+}
+
 pub(crate) fn dictation_storage_policy(
     settings: &AppSettings,
     private_session_enabled: bool,
@@ -544,10 +756,36 @@ pub(crate) fn dictation_storage_policy(
     (history_enabled, recordings_enabled)
 }
 
+fn render_post_processing_prompt(
+    prompt: &ResolvedPostProcessingPrompt,
+    transcription: &str,
+) -> String {
+    match prompt.source {
+        PostProcessingPromptSource::UserSelected => {
+            prompt.prompt.replace("${output}", transcription)
+        }
+        PostProcessingPromptSource::AdaptiveProfile => prompt.prompt.clone(),
+    }
+}
+
+fn structured_post_processing_request_parts(
+    prompt: &ResolvedPostProcessingPrompt,
+    transcription: &str,
+) -> (String, Option<String>) {
+    match prompt.source {
+        PostProcessingPromptSource::UserSelected => (
+            transcription.to_string(),
+            Some(build_system_prompt(&prompt.prompt)),
+        ),
+        PostProcessingPromptSource::AdaptiveProfile => (prompt.prompt.clone(), None),
+    }
+}
+
 async fn post_process_with_managed_local_llm(
     app: &AppHandle,
     settings: &crate::local_llm::LocalLlmSettings,
     transcription: &str,
+    resolved_prompt: Option<&ResolvedPostProcessingPrompt>,
     operation_token: Option<&OperationToken>,
 ) -> Option<String> {
     let Some(manager) = app.try_state::<Arc<crate::local_llm::download::LocalLlmManager>>() else {
@@ -576,12 +814,15 @@ async fn post_process_with_managed_local_llm(
         return None;
     }
 
+    let user_content = resolved_prompt
+        .map(|prompt| render_post_processing_prompt(prompt, transcription))
+        .unwrap_or_else(|| transcription.to_string());
     let provider_cancellation = operation_token.map(|token| token.provider_cancellation());
     match crate::llm_client::send_chat_completion_with_schema_and_cancellation(
         &endpoint.provider,
         String::new(),
         &endpoint.model,
-        transcription.to_string(),
+        user_content,
         Some(crate::local_llm::runtime::local_post_processing_system_prompt()),
         None,
         None,
@@ -608,7 +849,7 @@ async fn post_process_with_managed_local_llm(
         }
         Err(err) => {
             warn!(
-                "Managed local post-processing failed: {}. Falling back to configured provider or raw transcript.",
+                "Managed local post-processing failed: {}. Falling back to deterministic transcript.",
                 err
             );
             None
@@ -620,22 +861,20 @@ async fn post_process_transcription(
     app: &AppHandle,
     settings: &AppSettings,
     transcription: &str,
+    resolved_prompt: Option<&ResolvedPostProcessingPrompt>,
     operation_token: Option<&OperationToken>,
 ) -> Option<String> {
     let runtime = crate::runtime_settings::post_processing_runtime(settings, true);
 
     if runtime.uses_managed_local() {
-        if let Some(processed_text) = post_process_with_managed_local_llm(
+        return post_process_with_managed_local_llm(
             app,
             &settings.local_llm,
             transcription,
+            resolved_prompt,
             operation_token,
         )
-        .await
-        {
-            return Some(processed_text);
-        }
-        return None;
+        .await;
     }
 
     let api_runtime = match runtime.api_provider() {
@@ -651,8 +890,14 @@ async fn post_process_transcription(
 
     let provider = api_runtime.provider;
     let model = api_runtime.model;
-    let prompt = api_runtime.prompt.prompt;
     let api_key = api_runtime.api_key;
+    let resolved_prompt =
+        resolved_prompt
+            .cloned()
+            .unwrap_or_else(|| ResolvedPostProcessingPrompt {
+                prompt: api_runtime.prompt.prompt,
+                source: PostProcessingPromptSource::UserSelected,
+            });
 
     debug!(
         "Starting LLM post-processing with provider '{}' (model: {})",
@@ -666,59 +911,53 @@ async fn post_process_transcription(
 
     let provider_cancellation = operation_token.map(|token| token.provider_cancellation());
 
-    if provider.supports_structured_output {
-        debug!("Using structured outputs for provider '{}'", provider.id);
+    if provider.supports_structured_output && provider.id == APPLE_INTELLIGENCE_PROVIDER_ID {
+        let (user_content, system_prompt) =
+            structured_post_processing_request_parts(&resolved_prompt, transcription);
 
-        let system_prompt = build_system_prompt(&prompt);
-        let user_content = transcription.to_string();
-
-        // Handle Apple Intelligence separately since it uses native Swift APIs
-        if provider.id == APPLE_INTELLIGENCE_PROVIDER_ID {
-            #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-            {
-                if !apple_intelligence::check_apple_intelligence_availability() {
-                    debug!(
-                        "Apple Intelligence selected but not currently available on this device"
-                    );
-                    return None;
-                }
-
-                let token_limit = model.trim().parse::<i32>().unwrap_or(0);
-                return match apple_intelligence::process_text_with_system_prompt(
-                    &system_prompt,
-                    &user_content,
-                    token_limit,
-                ) {
-                    Ok(result) => {
-                        if result.trim().is_empty() {
-                            debug!("Apple Intelligence returned an empty response");
-                            None
-                        } else {
-                            let result = crate::text_processing::strip_invisible_chars(&result);
-                            debug!(
-                                "Apple Intelligence post-processing succeeded. Output length: {} chars",
-                                result.len()
-                            );
-                            accept_post_processed_text(transcription, result, &provider.id)
-                        }
-                    }
-                    Err(err) => {
-                        error!("Apple Intelligence post-processing failed: {}", err);
-                        None
-                    }
-                };
-            }
-
-            #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
-            {
-                debug!("Apple Intelligence provider selected on unsupported platform");
+        #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+        {
+            if !apple_intelligence::check_apple_intelligence_availability() {
+                debug!("Apple Intelligence selected but not currently available on this device");
                 return None;
             }
+
+            let token_limit = model.trim().parse::<i32>().unwrap_or(0);
+            return match apple_intelligence::process_text_with_system_prompt(
+                system_prompt.as_deref().unwrap_or_default(),
+                &user_content,
+                token_limit,
+            ) {
+                Ok(result) if !result.trim().is_empty() => {
+                    let result = crate::text_processing::strip_invisible_chars(&result);
+                    accept_post_processed_text(transcription, result, &provider.id)
+                }
+                Ok(_) => {
+                    debug!("Apple Intelligence returned an empty response");
+                    None
+                }
+                Err(err) => {
+                    error!("Apple Intelligence post-processing failed: {}", err);
+                    None
+                }
+            };
         }
 
+        #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+        {
+            let _ = (user_content, system_prompt);
+            debug!("Apple Intelligence provider selected on unsupported platform");
+            return None;
+        }
+    }
+
+    let structured_prompt = resolved_prompt.clone();
+    let structured_request = || async {
+        let (user_content, system_prompt) =
+            structured_post_processing_request_parts(&structured_prompt, transcription);
         let request = crate::text_processing::TextProviderRequest::structured(
             user_content,
-            Some(system_prompt),
+            system_prompt,
             TRANSCRIPTION_FIELD,
             "The cleaned and processed transcription text",
         );
@@ -732,185 +971,162 @@ async fn post_process_transcription(
         )
         .await
         {
+            Ok(Some(content)) => Ok(accept_structured_post_processed_text(
+                transcription,
+                &content,
+                &provider.id,
+            )),
+            Ok(None) => {
+                error!("LLM API response has no content");
+                Ok(None)
+            }
+            Err(err) => Err(format!("provider '{}': {}", provider.id, err)),
+        }
+    };
+
+    let legacy_prompt = resolved_prompt.clone();
+    let legacy_request = || async {
+        if operation_is_cancelled(app, operation_token) {
+            debug!("Post-processing skipped because operation was cancelled before legacy request");
+            return Ok(None);
+        }
+
+        let processed_prompt = render_post_processing_prompt(&legacy_prompt, transcription);
+        debug!("Processed prompt length: {} chars", processed_prompt.len());
+        let request = crate::text_processing::TextProviderRequest::new(processed_prompt, None);
+
+        match crate::text_processing::send_text_provider_request_with_cancellation(
+            &provider,
+            api_key.clone(),
+            &model,
+            request,
+            provider_cancellation.as_ref(),
+        )
+        .await
+        {
             Ok(Some(content)) => {
-                return accept_structured_post_processed_text(
-                    transcription,
-                    &content,
-                    &provider.id,
+                let content = crate::text_processing::strip_invisible_chars(&content);
+                debug!(
+                    "LLM post-processing succeeded for provider '{}'. Output length: {} chars",
+                    provider.id,
+                    content.len()
                 );
+                Ok(accept_post_processed_text(
+                    transcription,
+                    content,
+                    &provider.id,
+                ))
             }
             Ok(None) => {
                 error!("LLM API response has no content");
-                return None;
+                Ok(None)
             }
-            Err(e) => {
-                warn!(
-                    "Structured output failed for provider '{}': {}. Falling back to legacy mode.",
-                    provider.id, e
-                );
-                // Fall through to legacy mode below
-            }
+            Err(err) => Err(format!("provider '{}': {}", provider.id, err)),
         }
-    }
-
-    // Legacy mode: Replace ${output} variable in the prompt with the actual text
-    let processed_prompt = prompt.replace("${output}", transcription);
-    debug!("Processed prompt length: {} chars", processed_prompt.len());
-    let request = crate::text_processing::TextProviderRequest::new(processed_prompt, None);
-
-    if operation_is_cancelled(app, operation_token) {
-        debug!("Post-processing skipped because operation was cancelled before legacy request");
-        return None;
-    }
-
-    match crate::text_processing::send_text_provider_request_with_cancellation(
-        &provider,
-        api_key,
-        &model,
-        request,
-        provider_cancellation.as_ref(),
-    )
-    .await
-    {
-        Ok(Some(content)) => {
-            let content = crate::text_processing::strip_invisible_chars(&content);
-            debug!(
-                "LLM post-processing succeeded for provider '{}'. Output length: {} chars",
-                provider.id,
-                content.len()
-            );
-            accept_post_processed_text(transcription, content, &provider.id)
-        }
-        Ok(None) => {
-            error!("LLM API response has no content");
-            None
-        }
-        Err(e) => {
-            error!(
-                "LLM post-processing failed for provider '{}': {}. Falling back to original transcription.",
-                provider.id,
-                e
-            );
-            None
-        }
-    }
-}
-
-async fn maybe_convert_chinese_variant(
-    settings: &AppSettings,
-    transcription: &str,
-) -> Option<String> {
-    // Check if language is set to Simplified or Traditional Chinese
-    let is_simplified = settings.selected_language == "zh-Hans";
-    let is_traditional = settings.selected_language == "zh-Hant";
-
-    if !is_simplified && !is_traditional {
-        debug!("selected_language is not Simplified or Traditional Chinese; skipping translation");
-        return None;
-    }
-
-    debug!(
-        "Starting Chinese translation using OpenCC for language: {}",
-        settings.selected_language
-    );
-
-    // Use OpenCC to convert based on selected language
-    let config = if is_simplified {
-        // Convert Traditional Chinese to Simplified Chinese
-        BuiltinConfig::Tw2sp
-    } else {
-        // Convert Simplified Chinese to Traditional Chinese
-        BuiltinConfig::S2tw
     };
 
-    match OpenCC::from_config(config) {
-        Ok(converter) => {
-            let converted = converter.convert(transcription);
-            debug!(
-                "OpenCC translation completed. Input length: {}, Output length: {}",
-                transcription.len(),
-                converted.len()
-            );
-            Some(converted)
-        }
-        Err(e) => {
-            error!("Failed to initialize OpenCC converter: {}. Falling back to original transcription.", e);
-            None
-        }
-    }
+    invoke_single_llm_stage_with_fallback(
+        provider.supports_structured_output,
+        structured_request,
+        legacy_request,
+    )
+    .await
 }
-
 pub(crate) struct ProcessedTranscription {
     pub final_text: String,
     pub post_processed_text: Option<String>,
     pub post_process_prompt: Option<String>,
 }
 
-pub(crate) async fn process_transcription_output(
-    app: &AppHandle,
+async fn process_transcription_output_with_profile<Invoke, InvokeFuture>(
+    settings: &AppSettings,
     transcription: &str,
-    post_process: bool,
-    operation_token: Option<OperationToken>,
-) -> ProcessedTranscription {
-    let mut settings = get_settings(app);
-    crate::credentials::hydrate_runtime_post_process_api_keys(app, &mut settings);
-    let private_session_enabled = crate::private_session::is_enabled(app);
-    let mut final_text = transcription.to_string();
-    let mut post_processed_text: Option<String> = None;
-    let mut post_process_prompt: Option<String> = None;
+    adaptive_profile: Option<&crate::adaptive::profile::AdaptiveProfile>,
+    effective_language: Option<&str>,
+    post_process_requested: bool,
+    private_session_enabled: bool,
+    invoke: Invoke,
+) -> ProcessedTranscription
+where
+    Invoke: FnOnce(AppSettings, Option<ResolvedPostProcessingPrompt>, String) -> InvokeFuture,
+    InvokeFuture: std::future::Future<Output = Option<String>>,
+{
+    let shared = execute_post_transcription_pipeline_with(
+        settings,
+        transcription,
+        adaptive_profile,
+        effective_language,
+        post_process_requested,
+        private_session_enabled,
+        invoke,
+    )
+    .await;
 
-    if let Some(converted_text) = maybe_convert_chinese_variant(&settings, transcription).await {
-        final_text = converted_text;
+    if let Some(reason) = &shared.pipeline.fallback_reason {
+        warn!("Post-transcription pipeline used a fallback: {:?}", reason);
     }
-
-    let formatted_text = crate::adaptive::smart_formatting::format_transcript(
-        &final_text,
-        settings.formatting_level,
-    );
-    if formatted_text != final_text {
-        final_text = formatted_text;
-        post_processed_text = Some(final_text.clone());
-    }
-
-    if should_run_requested_post_processing(post_process, &settings, private_session_enabled) {
-        if let Some(processed_text) =
-            post_process_transcription(app, &settings, &final_text, operation_token.as_ref()).await
-        {
-            if let Err(err) = validate_post_processed_text(transcription, &processed_text) {
-                warn!(
-                    "Post-processing output rejected against raw transcript: {}. Falling back to deterministic formatted transcript.",
-                    err
-                );
-                return ProcessedTranscription {
-                    final_text,
-                    post_processed_text,
-                    post_process_prompt,
-                };
-            }
-            post_processed_text = Some(processed_text.clone());
-            final_text = processed_text;
-
-            if let Some(prompt_id) = &settings.post_process_selected_prompt_id {
-                if let Some(prompt) = settings
-                    .post_process_prompts
-                    .iter()
-                    .find(|prompt| &prompt.id == prompt_id)
-                {
-                    post_process_prompt = Some(prompt.prompt.clone());
-                }
-            }
-        }
-    } else if final_text != transcription {
-        post_processed_text = Some(final_text.clone());
-    }
+    let post_processed_text = (shared.pipeline.final_text != shared.pipeline.raw_input)
+        .then(|| shared.pipeline.final_text.clone());
 
     ProcessedTranscription {
-        final_text,
+        final_text: shared.pipeline.final_text,
         post_processed_text,
-        post_process_prompt,
+        post_process_prompt: shared.prompt,
     }
 }
 
+pub(crate) async fn process_transcription_output_with_profile_on_app(
+    app: &AppHandle,
+    settings: &AppSettings,
+    transcription: &str,
+    adaptive_profile: Option<&crate::adaptive::profile::AdaptiveProfile>,
+    effective_language: Option<&str>,
+    post_process_requested: bool,
+    private_session_enabled: bool,
+    operation_token: Option<OperationToken>,
+) -> ProcessedTranscription {
+    let operation_token_for_llm = operation_token.clone();
+    process_transcription_output_with_profile(
+        settings,
+        transcription,
+        adaptive_profile,
+        effective_language,
+        post_process_requested,
+        private_session_enabled,
+        move |runtime_settings, resolved_prompt, provider_input| async move {
+            post_process_transcription(
+                app,
+                &runtime_settings,
+                &provider_input,
+                resolved_prompt.as_ref(),
+                operation_token_for_llm.as_ref(),
+            )
+            .await
+        },
+    )
+    .await
+}
+
+pub(crate) async fn process_transcription_output(
+    app: &AppHandle,
+    settings: &AppSettings,
+    transcription: &str,
+    post_process_requested: bool,
+    private_session_enabled: bool,
+    operation_token: Option<OperationToken>,
+) -> ProcessedTranscription {
+    process_transcription_output_with_profile_on_app(
+        app,
+        settings,
+        transcription,
+        None,
+        None,
+        post_process_requested,
+        private_session_enabled,
+        operation_token,
+    )
+    .await
+}
 fn serialize_json<T: serde::Serialize>(value: &T) -> Option<String> {
     serde_json::to_string(value).ok()
 }
@@ -1022,11 +1238,15 @@ fn force_ltr_input_direction_before_paste(
 }
 
 pub(crate) async fn process_adaptive_transcription_output(
+    app: &AppHandle,
     settings: &AppSettings,
     transcription: &str,
     effective_language: Option<&str>,
     context: crate::adaptive::types::CapturedContext,
     shortcut: crate::adaptive::types::ShortcutIntent,
+    post_process_requested: bool,
+    private_session_enabled: bool,
+    operation_token: Option<OperationToken>,
 ) -> crate::adaptive::types::AdaptiveProcessResult {
     let pre_route = crate::adaptive::routing::route_before_recording(
         &settings.adaptive_profiles,
@@ -1045,56 +1265,33 @@ pub(crate) async fn process_adaptive_transcription_output(
         &context,
         &language,
         None,
+        &settings.adaptive_default_profile_id,
     );
     let profile = crate::adaptive::profile::find_profile_or_default(
         &settings.adaptive_profiles,
         &routing.profile_id,
     );
 
-    let final_text = if settings.formatting_level == crate::settings::FormattingLevel::None {
-        transcription.to_string()
-    } else {
-        crate::adaptive::processor::deterministic_process(
-            transcription,
-            profile,
-            effective_language,
-        )
-    };
-    let final_text = crate::adaptive::smart_formatting::format_transcript(
-        &final_text,
-        settings.formatting_level,
-    );
-    let final_text = match crate::adaptive::processor::validate_output(
+    let processed = process_transcription_output_with_profile_on_app(
+        app,
+        settings,
         transcription,
-        &final_text,
-        profile,
-    ) {
-        Ok(()) => final_text,
-        Err(err) => {
-            warn!(
-                    "Adaptive processing failed validation for profile '{}': {}. Falling back to raw transcript.",
-                    profile.id, err
-                );
-            transcription.to_string()
-        }
-    };
-    let post_process_prompt =
-        crate::adaptive::processor::build_profile_prompt(transcription, profile);
-    let post_processed_text = if final_text == transcription {
-        None
-    } else {
-        Some(final_text.clone())
-    };
+        Some(profile),
+        effective_language,
+        post_process_requested,
+        private_session_enabled,
+        operation_token,
+    )
+    .await;
 
     crate::adaptive::types::AdaptiveProcessResult {
-        final_text,
-        post_processed_text,
-        post_process_prompt,
+        final_text: processed.final_text,
+        post_processed_text: processed.post_processed_text,
+        post_process_prompt: processed.post_process_prompt,
         language,
         routing,
     }
 }
-
 #[cfg(test)]
 mod adaptive_action_tests {
     use super::*;
@@ -1401,17 +1598,31 @@ mod adaptive_action_tests {
         }
     }
 
+    #[derive(Clone, Copy)]
+    enum TestPostTranscriptionMode {
+        Classic,
+        Adaptive,
+    }
+
     fn failed_history_rows_for(
+        mode: TestPostTranscriptionMode,
         transcription_result: Result<String, ()>,
         observed_active_signal: bool,
     ) -> usize {
         let mut context = CountingTranscriptionFailureContext::default();
-        let terminal = match transcription_result {
-            Err(()) => DictationTransactionTerminal::TranscriptionFailed,
-            Ok(final_text) => match classify_final_text(final_text, observed_active_signal) {
-                FinalTextDecision::Terminal(terminal) => terminal,
-                FinalTextDecision::Continue(_) => DictationTransactionTerminal::InsertionCompleted,
-            },
+        let terminal = match mode {
+            TestPostTranscriptionMode::Classic | TestPostTranscriptionMode::Adaptive => {
+                match transcription_result {
+                    Err(()) => DictationTransactionTerminal::TranscriptionFailed,
+                    Ok(final_text) => match classify_final_text(final_text, observed_active_signal)
+                    {
+                        FinalTextDecision::Terminal(terminal) => terminal,
+                        FinalTextDecision::Continue(_) => {
+                            DictationTransactionTerminal::InsertionCompleted
+                        }
+                    },
+                }
+            }
         };
 
         if terminal == DictationTransactionTerminal::TranscriptionFailed {
@@ -1425,10 +1636,15 @@ mod adaptive_action_tests {
     }
 
     #[test]
-    fn failed_history_rows_are_exactly_once_for_failure_terminals() {
-        assert_eq!(failed_history_rows_for(Err(()), false), 1);
-        assert_eq!(failed_history_rows_for(Ok(String::new()), true), 1);
-        assert_eq!(failed_history_rows_for(Ok(String::new()), false), 0);
+    fn one_dictation_finishes_exactly_one_terminal_in_both_pipeline_modes() {
+        for mode in [
+            TestPostTranscriptionMode::Classic,
+            TestPostTranscriptionMode::Adaptive,
+        ] {
+            assert_eq!(failed_history_rows_for(mode, Err(()), false), 1);
+            assert_eq!(failed_history_rows_for(mode, Ok(String::new()), true), 1);
+            assert_eq!(failed_history_rows_for(mode, Ok(String::new()), false), 0);
+        }
     }
 
     #[test]
@@ -1753,6 +1969,265 @@ mod adaptive_action_tests {
         assert!(!outcome.emit_inserted);
         assert!(outcome.recovery_copy.is_none());
     }
+
+    #[test]
+    fn adaptive_profile_prompt_is_selected_when_user_has_not_selected_one() {
+        let mut settings = crate::settings::get_default_settings();
+        settings.post_process_selected_prompt_id = None;
+        let profile = settings
+            .adaptive_profiles
+            .iter()
+            .find(|profile| profile.id == "email")
+            .expect("email profile");
+
+        let resolved =
+            resolve_post_processing_prompt(&settings, Some(profile), "Cleaned transcript")
+                .expect("adaptive profile prompt");
+
+        assert_eq!(resolved.source, PostProcessingPromptSource::AdaptiveProfile);
+        assert_eq!(
+            resolved.prompt,
+            crate::adaptive::processor::build_profile_prompt("Cleaned transcript", profile)
+                .expect("profile prompt")
+        );
+    }
+
+    #[test]
+    fn user_selected_prompt_wins_over_adaptive_profile_prompt() {
+        let mut settings = crate::settings::get_default_settings();
+        settings.post_process_selected_prompt_id = Some("custom".to_string());
+        settings.post_process_prompts = vec![crate::settings::LLMPrompt {
+            id: "custom".to_string(),
+            name: "Custom".to_string(),
+            prompt: "My explicit prompt: ${output}".to_string(),
+        }];
+        let profile = settings
+            .adaptive_profiles
+            .iter()
+            .find(|profile| profile.id == "email")
+            .expect("email profile");
+
+        let resolved =
+            resolve_post_processing_prompt(&settings, Some(profile), "Cleaned transcript")
+                .expect("user prompt");
+
+        assert_eq!(resolved.source, PostProcessingPromptSource::UserSelected);
+        assert_eq!(resolved.prompt, "My explicit prompt: ${output}");
+    }
+
+    #[tokio::test]
+    async fn structured_failure_uses_legacy_retry_for_one_logical_output() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let structured_calls = Arc::new(AtomicUsize::new(0));
+        let legacy_calls = Arc::new(AtomicUsize::new(0));
+        let structured_calls_for_request = Arc::clone(&structured_calls);
+        let legacy_calls_for_request = Arc::clone(&legacy_calls);
+
+        let output = invoke_single_llm_stage_with_fallback(
+            true,
+            move || async move {
+                structured_calls_for_request.fetch_add(1, Ordering::SeqCst);
+                Err("structured request failed".to_string())
+            },
+            move || async move {
+                legacy_calls_for_request.fetch_add(1, Ordering::SeqCst);
+                Ok(Some("legacy output".to_string()))
+            },
+        )
+        .await;
+
+        assert_eq!(output, Some("legacy output".to_string()));
+        assert_eq!(structured_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(legacy_calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn structured_success_does_not_apply_a_legacy_output() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let legacy_calls = Arc::new(AtomicUsize::new(0));
+        let legacy_calls_for_request = Arc::clone(&legacy_calls);
+
+        let output = invoke_single_llm_stage_with_fallback(
+            true,
+            || async { Ok(Some("structured output".to_string())) },
+            move || async move {
+                legacy_calls_for_request.fetch_add(1, Ordering::SeqCst);
+                Ok(Some("legacy output".to_string()))
+            },
+        )
+        .await;
+
+        assert_eq!(output, Some("structured output".to_string()));
+        assert_eq!(legacy_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn adaptive_profile_processor_invokes_requested_llm_once_and_uses_its_output() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let settings = post_processing_settings_for_provider("http://127.0.0.1:11434/v1", "");
+        let profile = settings
+            .adaptive_profiles
+            .iter()
+            .find(|profile| profile.id == "email")
+            .expect("email profile");
+        let invoke_count = Arc::new(AtomicUsize::new(0));
+        let invoke_count_for_call = Arc::clone(&invoke_count);
+
+        let output = process_transcription_output_with_profile(
+            &settings,
+            "hello world",
+            Some(profile),
+            Some("en"),
+            true,
+            false,
+            move |_, _, _| {
+                invoke_count_for_call.fetch_add(1, Ordering::SeqCst);
+                std::future::ready(Some("Hello world.".to_string()))
+            },
+        )
+        .await;
+
+        assert_eq!(invoke_count.load(Ordering::SeqCst), 1);
+        assert_eq!(output.final_text, "Hello world.");
+    }
+
+    #[tokio::test]
+    async fn adaptive_requested_post_processing_invokes_shared_llm_and_uses_output() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let settings = post_processing_settings_for_provider("http://127.0.0.1:11434/v1", "");
+        let profile = settings
+            .adaptive_profiles
+            .iter()
+            .find(|profile| profile.id == "email")
+            .expect("email profile");
+        let invoke_count = Arc::new(AtomicUsize::new(0));
+        let invoke_count_for_call = Arc::clone(&invoke_count);
+
+        let output = execute_post_transcription_pipeline_with(
+            &settings,
+            "hello world",
+            Some(profile),
+            Some("en"),
+            true,
+            false,
+            move |_, _, _| {
+                invoke_count_for_call.fetch_add(1, Ordering::SeqCst);
+                std::future::ready(Some("Hello world.".to_string()))
+            },
+        )
+        .await;
+
+        assert_eq!(invoke_count.load(Ordering::SeqCst), 1);
+        assert!(output.pipeline.llm_invoked);
+        assert_eq!(output.pipeline.llm_output.as_deref(), Some("Hello world."));
+        assert_eq!(output.pipeline.final_text, "Hello world.");
+    }
+    #[tokio::test]
+    async fn adaptive_profile_alone_does_not_authorize_an_llm_stage() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let settings = post_processing_settings_for_provider("http://127.0.0.1:11434/v1", "");
+        let profile = settings
+            .adaptive_profiles
+            .iter()
+            .find(|profile| profile.id == "email")
+            .expect("email profile");
+        let invoke_count = Arc::new(AtomicUsize::new(0));
+        let invoke_count_for_call = Arc::clone(&invoke_count);
+
+        let output = execute_post_transcription_pipeline_with(
+            &settings,
+            "hello world",
+            Some(profile),
+            Some("en"),
+            false,
+            false,
+            move |_, _, _| {
+                invoke_count_for_call.fetch_add(1, Ordering::SeqCst);
+                std::future::ready(Some("surprise output".to_string()))
+            },
+        )
+        .await;
+
+        assert_eq!(invoke_count.load(Ordering::SeqCst), 0);
+        assert!(!output.pipeline.llm_invoked);
+        assert!(output.pipeline.llm_output.is_none());
+    }
+
+    #[tokio::test]
+    async fn adaptive_profile_prompt_is_sent_by_shared_llm_stage_without_user_prompt() {
+        let mut settings = post_processing_settings_for_provider("http://127.0.0.1:11434/v1", "");
+        settings.post_process_selected_prompt_id = None;
+        let profile = settings
+            .adaptive_profiles
+            .iter()
+            .find(|profile| profile.id == "email")
+            .expect("email profile");
+        let expected_prompt =
+            crate::adaptive::processor::build_profile_prompt("hello world", profile)
+                .expect("profile prompt");
+
+        let output = execute_post_transcription_pipeline_with(
+            &settings,
+            "hello world",
+            Some(profile),
+            Some("en"),
+            true,
+            false,
+            move |_, resolved_prompt, _| {
+                assert_eq!(
+                    resolved_prompt.map(|resolved| resolved.prompt),
+                    Some(expected_prompt)
+                );
+                std::future::ready(Some("Hello world.".to_string()))
+            },
+        )
+        .await;
+
+        assert_eq!(output.pipeline.final_text, "Hello world.");
+        assert!(output.pipeline.llm_invoked);
+    }
+
+    #[tokio::test]
+    async fn chinese_variant_conversion_is_shared_by_classic_and_adaptive_modes() {
+        let mut settings = crate::settings::get_default_settings();
+        settings.selected_language = "zh-Hans".to_string();
+        let profile = settings
+            .adaptive_profiles
+            .iter()
+            .find(|profile| profile.id == "default_clean")
+            .expect("default_clean profile");
+
+        let classic = execute_post_transcription_pipeline_with(
+            &settings,
+            "軟件",
+            None,
+            None,
+            false,
+            false,
+            |_, _, _| std::future::ready(None),
+        )
+        .await;
+        let adaptive = execute_post_transcription_pipeline_with(
+            &settings,
+            "軟件",
+            Some(profile),
+            None,
+            false,
+            false,
+            |_, _, _| std::future::ready(None),
+        )
+        .await;
+
+        assert_eq!(classic.pipeline.final_text, "软件");
+        assert_eq!(adaptive.pipeline.final_text, "软件");
+        assert!(classic.pipeline.zh_conversion_applied);
+        assert!(adaptive.pipeline.zh_conversion_applied);
+    }
 }
 
 impl ShortcutAction for TranscribeAction {
@@ -2045,7 +2520,11 @@ impl ShortcutAction for TranscribeAction {
                                 )
                             );
 
-                            let settings = get_settings(&ah);
+                            let mut settings = get_settings(&ah);
+                            crate::credentials::hydrate_runtime_post_process_api_keys(
+                                &ah,
+                                &mut settings,
+                            );
                             let effective_post_process = should_run_requested_post_processing(
                                 post_process,
                                 &settings,
@@ -2075,11 +2554,15 @@ impl ShortcutAction for TranscribeAction {
 
                             if let Some(context) = adaptive_context {
                                 let processed = process_adaptive_transcription_output(
+                                    &ah,
                                     &settings,
                                     &transcription,
                                     transcription_output.effective_language.as_deref(),
                                     context.clone(),
                                     crate::adaptive::types::ShortcutIntent::Default,
+                                    post_process,
+                                    private_session_enabled,
+                                    operation_token.clone(),
                                 )
                                 .await;
 
@@ -2204,8 +2687,10 @@ impl ShortcutAction for TranscribeAction {
                             } else {
                                 let processed = process_transcription_output(
                                     &ah,
+                                    &settings,
                                     &transcription,
-                                    effective_post_process,
+                                    post_process,
+                                    private_session_enabled,
                                     operation_token.clone(),
                                 )
                                 .await;

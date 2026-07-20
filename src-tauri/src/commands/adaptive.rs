@@ -1,4 +1,4 @@
-use crate::adaptive::profile::{find_profile_or_default, AdaptiveProfile};
+use crate::adaptive::profile::AdaptiveProfile;
 use crate::managers::history::{AdaptiveHistoryMetadata, HistoryEntry, HistoryManager};
 use crate::settings::{get_settings, try_write_settings_domain, SettingsWriteDomain};
 use std::sync::Arc;
@@ -9,34 +9,45 @@ const PRIVATE_SESSION_REPROCESS_ERROR: &str = "private_session_active";
 struct ReprocessedAdaptiveEntry {
     file_name: String,
     raw_text: String,
+    post_process_requested: bool,
     post_processed_text: Option<String>,
+    post_process_prompt: Option<String>,
     metadata: AdaptiveHistoryMetadata,
+}
+
+fn select_reprocess_profile(
+    entry: &HistoryEntry,
+    settings: &crate::settings::AppSettings,
+    profile_id: Option<String>,
+) -> Result<AdaptiveProfile, String> {
+    let selected_profile_id = profile_id
+        .or(entry.adaptive_profile_id.clone())
+        .unwrap_or_else(|| settings.adaptive_default_profile_id.clone());
+
+    settings
+        .adaptive_profiles
+        .iter()
+        .find(|profile| profile.id == selected_profile_id && profile.enabled)
+        .cloned()
+        .ok_or_else(|| {
+            format!(
+                "Adaptive profile '{}' is unavailable; reprocess cannot preserve its semantics",
+                selected_profile_id
+            )
+        })
 }
 
 fn build_reprocessed_adaptive_entry(
     entry: &HistoryEntry,
-    profiles: &[AdaptiveProfile],
-    default_profile_id: &str,
-    profile_id: Option<String>,
-) -> Result<ReprocessedAdaptiveEntry, String> {
-    let selected_profile_id = profile_id
-        .or(entry.adaptive_profile_id.clone())
-        .unwrap_or(default_profile_id.to_string());
-    let profile = find_profile_or_default(profiles, &selected_profile_id);
-    // Reprocessing has no current model-validation result to prove a single locked language,
-    // so it must conservatively skip language-default filler removal.
-    let final_text =
-        crate::adaptive::processor::deterministic_process(&entry.transcription_text, profile, None);
-    crate::adaptive::processor::validate_output(&entry.transcription_text, &final_text, profile)?;
-
-    Ok(ReprocessedAdaptiveEntry {
+    profile: &AdaptiveProfile,
+    processed: crate::actions::ProcessedTranscription,
+) -> ReprocessedAdaptiveEntry {
+    ReprocessedAdaptiveEntry {
         file_name: entry.file_name.clone(),
         raw_text: entry.transcription_text.clone(),
-        post_processed_text: if final_text == entry.transcription_text {
-            None
-        } else {
-            Some(final_text)
-        },
+        post_process_requested: entry.post_process_requested,
+        post_processed_text: processed.post_processed_text,
+        post_process_prompt: processed.post_process_prompt,
         metadata: AdaptiveHistoryMetadata {
             profile_id: Some(profile.id.clone()),
             profile_name: Some(profile.name.clone()),
@@ -49,35 +60,39 @@ fn build_reprocessed_adaptive_entry(
             insertion_json: None,
             parent_entry_id: Some(entry.id),
         },
-    })
+    }
 }
 
-async fn reprocess_last_adaptive_entry_with<Load, LoadFuture, Save>(
+async fn reprocess_last_adaptive_entry_with<Load, LoadFuture, Process, ProcessFuture, Save>(
     private_session_enabled: bool,
     profile_id: Option<String>,
     load_latest: Load,
+    process: Process,
     save: Save,
 ) -> Result<(), String>
 where
     Load: FnOnce() -> LoadFuture,
     LoadFuture: std::future::Future<
-        Output = Result<(Option<HistoryEntry>, Vec<AdaptiveProfile>, String), String>,
+        Output = Result<(Option<HistoryEntry>, crate::settings::AppSettings), String>,
     >,
+    Process: FnOnce(HistoryEntry, crate::settings::AppSettings, AdaptiveProfile) -> ProcessFuture,
+    ProcessFuture:
+        std::future::Future<Output = Result<crate::actions::ProcessedTranscription, String>>,
     Save: FnOnce(ReprocessedAdaptiveEntry) -> Result<(), String>,
 {
     if private_session_enabled {
         return Err(PRIVATE_SESSION_REPROCESS_ERROR.to_string());
     }
 
-    let (entry, profiles, default_profile_id) = load_latest().await?;
+    let (entry, settings) = load_latest().await?;
     let entry =
         entry.ok_or_else(|| "No adaptive history entry available to reprocess".to_string())?;
-    let reprocessed =
-        build_reprocessed_adaptive_entry(&entry, &profiles, &default_profile_id, profile_id)?;
+    let profile = select_reprocess_profile(&entry, &settings, profile_id)?;
+    let processed = process(entry.clone(), settings, profile.clone()).await?;
+    let reprocessed = build_reprocessed_adaptive_entry(&entry, &profile, processed);
 
     save(reprocessed)
 }
-
 #[tauri::command]
 #[specta::specta]
 pub fn get_adaptive_profiles(
@@ -108,29 +123,42 @@ pub async fn reprocess_last_adaptive_entry(
     history_manager: State<'_, Arc<HistoryManager>>,
     profile_id: Option<String>,
 ) -> Result<(), String> {
+    let process_app = app.clone();
     reprocess_last_adaptive_entry_with(
         crate::private_session::is_enabled(&app),
         profile_id,
         || async {
-            let settings = get_settings(&app);
+            let mut settings = get_settings(&app);
+            crate::credentials::hydrate_runtime_post_process_api_keys(&app, &mut settings);
             let entry = history_manager
                 .get_latest_adaptive_entry()
                 .await
                 .map_err(|err| err.to_string())?;
-            Ok((
-                entry,
-                settings.adaptive_profiles,
-                settings.adaptive_default_profile_id,
-            ))
+            Ok((entry, settings))
+        },
+        move |entry, settings, profile| async move {
+            Ok(
+                crate::actions::process_transcription_output_with_profile_on_app(
+                    &process_app,
+                    &settings,
+                    &entry.transcription_text,
+                    Some(&profile),
+                    None,
+                    entry.post_process_requested,
+                    false,
+                    None,
+                )
+                .await,
+            )
         },
         |reprocessed| {
             history_manager
                 .save_entry_with_metadata(
                     reprocessed.file_name,
                     reprocessed.raw_text,
-                    true,
+                    reprocessed.post_process_requested,
                     reprocessed.post_processed_text,
-                    None,
+                    reprocessed.post_process_prompt,
                     reprocessed.metadata,
                 )
                 .map(|_| ())
@@ -187,16 +215,31 @@ mod tests {
         }
     }
 
+    fn processed_entry(
+        final_text: &str,
+        post_processed_text: Option<&str>,
+        prompt: Option<&str>,
+    ) -> crate::actions::ProcessedTranscription {
+        crate::actions::ProcessedTranscription {
+            final_text: final_text.to_string(),
+            post_processed_text: post_processed_text.map(str::to_string),
+            post_process_prompt: prompt.map(str::to_string),
+        }
+    }
+
     #[test]
     fn reprocess_helper_preserves_raw_text_and_links_parent() {
         let entry = adaptive_entry();
+        let mut settings = crate::settings::get_default_settings();
+        settings.adaptive_profiles = default_profiles();
+        let profile =
+            select_reprocess_profile(&entry, &settings, Some("default_clean".to_string()))
+                .expect("profile is available");
         let reprocessed = build_reprocessed_adaptive_entry(
             &entry,
-            &default_profiles(),
-            "default_clean",
-            Some("default_clean".to_string()),
-        )
-        .expect("reprocess succeeds");
+            &profile,
+            processed_entry(&entry.transcription_text, None, None),
+        );
 
         assert_eq!(reprocessed.file_name, "verbatim-42.wav");
         assert_eq!(reprocessed.raw_text, entry.transcription_text);
@@ -218,20 +261,40 @@ mod tests {
     }
 
     #[test]
-    fn reprocess_helper_falls_back_to_entry_profile() {
+    fn reprocess_helper_uses_stored_entry_profile() {
         let entry = adaptive_entry();
-        let reprocessed =
-            build_reprocessed_adaptive_entry(&entry, &default_profiles(), "default_clean", None)
-                .expect("reprocess succeeds");
+        let mut settings = crate::settings::get_default_settings();
+        settings.adaptive_profiles = default_profiles();
+        let profile =
+            select_reprocess_profile(&entry, &settings, None).expect("stored profile is available");
+        let reprocessed = build_reprocessed_adaptive_entry(
+            &entry,
+            &profile,
+            processed_entry(&entry.transcription_text, None, None),
+        );
 
         assert_eq!(reprocessed.metadata.profile_id.as_deref(), Some("email"));
     }
 
+    #[test]
+    fn reprocess_rejects_an_unavailable_stored_profile() {
+        let mut entry = adaptive_entry();
+        entry.adaptive_profile_id = Some("removed_profile".to_string());
+        let settings = crate::settings::get_default_settings();
+
+        let error = select_reprocess_profile(&entry, &settings, None)
+            .expect_err("missing profile must not silently change semantics");
+
+        assert!(error.contains("cannot preserve its semantics"));
+    }
+
     #[tokio::test]
-    async fn private_session_blocks_reprocess_before_history_query_or_save() {
+    async fn private_session_blocks_reprocess_before_history_query_process_or_save() {
         let query_count = Arc::new(AtomicUsize::new(0));
+        let process_count = Arc::new(AtomicUsize::new(0));
         let save_count = Arc::new(AtomicUsize::new(0));
         let query_count_for_load = Arc::clone(&query_count);
+        let process_count_for_process = Arc::clone(&process_count);
         let save_count_for_save = Arc::clone(&save_count);
 
         let result = reprocess_last_adaptive_entry_with(
@@ -241,9 +304,12 @@ mod tests {
                 query_count_for_load.fetch_add(1, Ordering::SeqCst);
                 std::future::ready(Ok((
                     Some(adaptive_entry()),
-                    default_profiles(),
-                    "default_clean".to_string(),
+                    crate::settings::get_default_settings(),
                 )))
+            },
+            move |entry, _, _| {
+                process_count_for_process.fetch_add(1, Ordering::SeqCst);
+                std::future::ready(Ok(processed_entry(&entry.transcription_text, None, None)))
             },
             move |_| {
                 save_count_for_save.fetch_add(1, Ordering::SeqCst);
@@ -254,14 +320,17 @@ mod tests {
 
         assert_eq!(result, Err(PRIVATE_SESSION_REPROCESS_ERROR.to_string()));
         assert_eq!(query_count.load(Ordering::SeqCst), 0);
+        assert_eq!(process_count.load(Ordering::SeqCst), 0);
         assert_eq!(save_count.load(Ordering::SeqCst), 0);
     }
 
     #[tokio::test]
-    async fn public_session_reprocesses_latest_entry() {
+    async fn public_session_reprocesses_latest_entry_with_stored_semantics() {
         let query_count = Arc::new(AtomicUsize::new(0));
+        let process_count = Arc::new(AtomicUsize::new(0));
         let save_count = Arc::new(AtomicUsize::new(0));
         let query_count_for_load = Arc::clone(&query_count);
+        let process_count_for_process = Arc::clone(&process_count);
         let save_count_for_save = Arc::clone(&save_count);
 
         let result = reprocess_last_adaptive_entry_with(
@@ -271,14 +340,31 @@ mod tests {
                 query_count_for_load.fetch_add(1, Ordering::SeqCst);
                 std::future::ready(Ok((
                     Some(adaptive_entry()),
-                    default_profiles(),
-                    "default_clean".to_string(),
+                    crate::settings::get_default_settings(),
+                )))
+            },
+            move |entry, _, profile| {
+                process_count_for_process.fetch_add(1, Ordering::SeqCst);
+                assert_eq!(profile.id, "email");
+                assert!(entry.post_process_requested);
+                std::future::ready(Ok(processed_entry(
+                    "Please send the file today.",
+                    Some("Please send the file today."),
+                    Some("email prompt"),
                 )))
             },
             move |reprocessed| {
                 save_count_for_save.fetch_add(1, Ordering::SeqCst);
                 assert_eq!(reprocessed.file_name, "verbatim-42.wav");
-                assert!(reprocessed.post_processed_text.is_none());
+                assert!(reprocessed.post_process_requested);
+                assert_eq!(
+                    reprocessed.post_processed_text.as_deref(),
+                    Some("Please send the file today.")
+                );
+                assert_eq!(
+                    reprocessed.post_process_prompt.as_deref(),
+                    Some("email prompt")
+                );
                 assert_eq!(reprocessed.metadata.profile_id.as_deref(), Some("email"));
                 assert_eq!(reprocessed.metadata.parent_entry_id, Some(42));
                 Ok(())
@@ -288,6 +374,24 @@ mod tests {
 
         assert_eq!(result, Ok(()));
         assert_eq!(query_count.load(Ordering::SeqCst), 1);
+        assert_eq!(process_count.load(Ordering::SeqCst), 1);
         assert_eq!(save_count.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn reprocess_preserves_stored_post_process_request() {
+        let mut entry = adaptive_entry();
+        entry.post_process_requested = false;
+        let mut settings = crate::settings::get_default_settings();
+        settings.adaptive_profiles = default_profiles();
+        let profile =
+            select_reprocess_profile(&entry, &settings, None).expect("stored profile is available");
+        let reprocessed = build_reprocessed_adaptive_entry(
+            &entry,
+            &profile,
+            processed_entry(&entry.transcription_text, None, None),
+        );
+
+        assert!(!reprocessed.post_process_requested);
     }
 }

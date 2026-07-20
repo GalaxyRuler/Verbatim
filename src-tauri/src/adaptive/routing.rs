@@ -65,6 +65,7 @@ pub fn route_after_transcription(
     context: &CapturedContext,
     language: &LanguageAnalysis,
     learned_profile_id: Option<&str>,
+    default_profile_id: &str,
 ) -> RoutingDecision {
     let mut reasons = pre_route.reasons.clone();
 
@@ -77,12 +78,20 @@ pub fn route_after_transcription(
         };
     }
 
+    let resolved_default_profile_id = profiles
+        .iter()
+        .any(|profile| {
+            profile.id == default_profile_id && profile.enabled && profile.id != "translation"
+        })
+        .then_some(default_profile_id)
+        .unwrap_or("default_clean");
     let mut profile_id = match context.target_kind {
         TargetKind::Email => "email",
         TargetKind::Technical => "technical",
         TargetKind::Notes => "notes_markdown",
-        TargetKind::CasualMessage => "default_clean",
-        TargetKind::BrowserPrompt | TargetKind::Unknown => "default_clean",
+        TargetKind::CasualMessage => resolved_default_profile_id,
+        TargetKind::BrowserPrompt => "default_clean",
+        TargetKind::Unknown => resolved_default_profile_id,
     }
     .to_string();
 
@@ -179,7 +188,8 @@ mod tests {
             "This should stay raw",
             &["en".to_string(), "ar".to_string()],
         );
-        let post = route_after_transcription(&profiles, pre, &ctx, &language, None);
+        let post =
+            route_after_transcription(&profiles, pre, &ctx, &language, None, "default_clean");
 
         assert_eq!(post.profile_id, "raw");
         assert!(post
@@ -203,7 +213,8 @@ mod tests {
             "Please send the attached file today",
             &["en".to_string(), "ar".to_string()],
         );
-        let post = route_after_transcription(&profiles, pre, &ctx, &language, None);
+        let post =
+            route_after_transcription(&profiles, pre, &ctx, &language, None, "default_clean");
 
         assert_eq!(post.profile_id, "email");
         assert!(post.confidence >= 70);
@@ -224,7 +235,8 @@ mod tests {
             "open the config and run cargo test",
             &["en".to_string(), "ar".to_string()],
         );
-        let post = route_after_transcription(&profiles, pre, &ctx, &language, None);
+        let post =
+            route_after_transcription(&profiles, pre, &ctx, &language, None, "default_clean");
 
         assert_eq!(post.profile_id, "technical");
     }
@@ -244,7 +256,8 @@ mod tests {
             "خلينا send it tomorrow",
             &["en".to_string(), "ar".to_string()],
         );
-        let post = route_after_transcription(&profiles, pre, &ctx, &language, None);
+        let post =
+            route_after_transcription(&profiles, pre, &ctx, &language, None, "default_clean");
 
         assert_eq!(post.profile_id, "mixed_multilingual");
     }
@@ -261,7 +274,14 @@ mod tests {
             "default_clean",
         );
         let language = analyze_language("هذا نص عربي واضح", &["en".to_string(), "ar".to_string()]);
-        let post = route_after_transcription(&profiles, pre, &ctx, &language, Some("translation"));
+        let post = route_after_transcription(
+            &profiles,
+            pre,
+            &ctx,
+            &language,
+            Some("translation"),
+            "default_clean",
+        );
 
         assert_eq!(post.profile_id, "default_clean");
     }
@@ -281,9 +301,56 @@ mod tests {
             "please send the file tomorrow",
             &["en".to_string(), "ar".to_string()],
         );
-        let post = route_after_transcription(&profiles, pre, &ctx, &language, None);
+        let post =
+            route_after_transcription(&profiles, pre, &ctx, &language, None, "default_clean");
 
         assert_eq!(post.profile_id, "default_clean");
         assert_eq!(post.confidence, 50);
+    }
+    #[test]
+    fn unknown_plain_text_routes_to_configured_default_profile() {
+        let profiles = default_profiles();
+        let ctx = context(TargetKind::Unknown, "unknown.exe");
+        let pre = route_before_recording(
+            &profiles,
+            ShortcutIntent::Default,
+            &ctx,
+            &["en".to_string(), "ar".to_string()],
+            "notes_markdown",
+        );
+        let language = analyze_language(
+            "please send the file tomorrow",
+            &["en".to_string(), "ar".to_string()],
+        );
+        let post =
+            route_after_transcription(&profiles, pre, &ctx, &language, None, "notes_markdown");
+
+        assert_eq!(post.profile_id, "notes_markdown");
+        assert_eq!(post.confidence, 50);
+    }
+    #[test]
+    fn disabled_configured_default_falls_back_to_default_clean() {
+        let mut profiles = default_profiles();
+        profiles
+            .iter_mut()
+            .find(|profile| profile.id == "notes_markdown")
+            .expect("notes profile")
+            .enabled = false;
+        let ctx = context(TargetKind::Unknown, "unknown.exe");
+        let pre = route_before_recording(
+            &profiles,
+            ShortcutIntent::Default,
+            &ctx,
+            &["en".to_string(), "ar".to_string()],
+            "notes_markdown",
+        );
+        let language = analyze_language(
+            "please send the file tomorrow",
+            &["en".to_string(), "ar".to_string()],
+        );
+        let post =
+            route_after_transcription(&profiles, pre, &ctx, &language, None, "notes_markdown");
+
+        assert_eq!(post.profile_id, "default_clean");
     }
 }
