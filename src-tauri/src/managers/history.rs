@@ -663,6 +663,10 @@ impl HistoryManager {
         })
     }
 
+    /// Delete history rows first, then remove a recording only after its final owning row.
+    ///
+    /// Entries count history rows, not distinct recordings. Transform rows pass an empty
+    /// filename and are excluded from the reference query, preserving their non-owning semantics.
     fn delete_entries_and_files_with<F>(
         conn: &Connection,
         recordings_dir: &Path,
@@ -676,31 +680,45 @@ impl HistoryManager {
             requested_count: entries.len(),
             ..HistoryDeletionOutcome::default()
         };
+        let mut remaining_references = conn.prepare(
+            "SELECT COUNT(*)
+             FROM transcription_history
+             WHERE file_name = ?1 AND transform_action IS NULL",
+        )?;
 
         for (id, file_name) in entries {
-            if !file_name.trim().is_empty() {
-                let file_path = recordings_dir.join(file_name);
-                match delete_file(&file_path) {
-                    Ok(()) => debug!("Deleted WAV file: {}", file_name),
-                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                        debug!("WAV file already absent: {}", file_name);
-                    }
-                    Err(error) => {
-                        error!("Failed to delete WAV file {}: {}", file_name, error);
-                        outcome.failures.push(HistoryDeletionFailure {
-                            id: Some(*id),
-                            file_name: file_name.clone(),
-                            reason: Self::deletion_failure_reason(&error),
-                        });
-                        continue;
-                    }
-                }
-            }
-
-            outcome.deleted_count += conn.execute(
+            let deleted = conn.execute(
                 "DELETE FROM transcription_history WHERE id = ?1",
                 params![id],
             )?;
+            outcome.deleted_count += deleted;
+            if deleted == 0 || file_name.trim().is_empty() {
+                continue;
+            }
+
+            let reference_count: i64 =
+                remaining_references.query_row(params![file_name], |row| row.get(0))?;
+            if reference_count > 0 {
+                debug!(
+                    "Preserved shared WAV file {} with {} remaining history reference(s)",
+                    file_name, reference_count
+                );
+                continue;
+            }
+
+            let file_path = recordings_dir.join(file_name);
+            match delete_file(&file_path) {
+                Ok(()) => debug!("Deleted unreferenced WAV file: {}", file_name),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    debug!("Unreferenced WAV file already absent: {}", file_name);
+                }
+                Err(error) => {
+                    error!(
+                        "History row {} was deleted, but WAV file {} could not be removed: {}",
+                        id, file_name, error
+                    );
+                }
+            }
         }
 
         Ok(outcome)
@@ -729,8 +747,11 @@ impl HistoryManager {
     where
         F: Fn(&Path) -> std::io::Result<()>,
     {
-        let mut stmt =
-            conn.prepare("SELECT file_name FROM transcription_history WHERE file_name != ''")?;
+        let mut stmt = conn.prepare(
+            "SELECT file_name
+             FROM transcription_history
+             WHERE file_name != '' AND transform_action IS NULL",
+        )?;
         let tracked_recordings = stmt
             .query_map([], |row| row.get::<_, String>(0))?
             .collect::<std::result::Result<HashSet<_>, _>>()?;
@@ -802,8 +823,9 @@ impl HistoryManager {
     }
 
     fn count_cleanup_candidates(conn: &Connection, limit: usize) -> Result<Vec<(i64, String)>> {
-        // Count-based retention protects dictation history. Text-only transform
-        // entries stay visible but must not evict older dictation rows.
+        // Count history rows, not distinct recording filenames, to preserve the user-visible
+        // history_limit behavior. Text-only transform entries stay visible but must not evict
+        // older dictation rows.
         let mut stmt = conn.prepare(
             "SELECT id, file_name
              FROM transcription_history
@@ -1209,6 +1231,7 @@ impl HistoryManager {
 mod tests {
     use super::*;
     use rusqlite::{params, Connection};
+    use std::cell::Cell;
 
     #[test]
     fn migrate_database_recovers_from_a_newer_schema() {
@@ -1609,13 +1632,227 @@ mod tests {
     }
 
     #[test]
-    fn delete_failure_preserves_row_and_reports_typed_retry_pending() {
+    fn shared_recording_is_deleted_only_after_its_last_row() {
         let conn = setup_conn();
-        insert_entry_with_file_name(&conn, 100, "locked.wav", false, "retry me", None);
+        insert_entry_with_file_name(&conn, 100, "shared.wav", false, "parent", None);
+        let first_id = conn.last_insert_rowid();
+        insert_entry_with_file_name(&conn, 200, "shared.wav", false, "child", None);
+        let second_id = conn.last_insert_rowid();
+        let recordings_dir = tempfile::tempdir().expect("recordings tempdir");
+        let recording_path = recordings_dir.path().join("shared.wav");
+        std::fs::write(&recording_path, b"shared audio").expect("write shared recording");
+        let delete_calls = Cell::new(0usize);
+        let delete_file = |path: &Path| {
+            delete_calls.set(delete_calls.get() + 1);
+            std::fs::remove_file(path)
+        };
+
+        let first_outcome = HistoryManager::delete_entries_and_files_with(
+            &conn,
+            recordings_dir.path(),
+            &[(first_id, "shared.wav".to_string())],
+            &delete_file,
+        )
+        .expect("delete first shared row");
+        assert_eq!(first_outcome.deleted_count, 1);
+        assert!(recording_path.exists(), "remaining row still owns the WAV");
+        assert_eq!(delete_calls.get(), 0);
+
+        let second_outcome = HistoryManager::delete_entries_and_files_with(
+            &conn,
+            recordings_dir.path(),
+            &[(second_id, "shared.wav".to_string())],
+            &delete_file,
+        )
+        .expect("delete last shared row");
+        assert_eq!(second_outcome.deleted_count, 1);
+        assert!(!recording_path.exists());
+        assert_eq!(delete_calls.get(), 1, "shared WAV is removed exactly once");
+    }
+
+    #[test]
+    fn deleting_adaptive_parent_first_preserves_child_playback() {
+        let conn = setup_conn();
+        insert_entry_with_file_name(&conn, 100, "adaptive.wav", false, "parent", None);
+        let parent_id = conn.last_insert_rowid();
+        insert_entry_with_file_name(&conn, 200, "adaptive.wav", false, "reprocessed", None);
+        let child_id = conn.last_insert_rowid();
+        conn.execute(
+            "UPDATE transcription_history SET adaptive_parent_entry_id = ?1 WHERE id = ?2",
+            params![parent_id, child_id],
+        )
+        .expect("link reprocessed child");
+        let recordings_dir = tempfile::tempdir().expect("recordings tempdir");
+        let recording_path = recordings_dir.path().join("adaptive.wav");
+        std::fs::write(&recording_path, b"adaptive audio").expect("write adaptive recording");
+
+        HistoryManager::delete_entries_and_files_with(
+            &conn,
+            recordings_dir.path(),
+            &[(parent_id, "adaptive.wav".to_string())],
+            &|path| std::fs::remove_file(path),
+        )
+        .expect("delete adaptive parent");
+        assert!(recording_path.exists(), "child must retain playable audio");
+
+        HistoryManager::delete_entries_and_files_with(
+            &conn,
+            recordings_dir.path(),
+            &[(child_id, "adaptive.wav".to_string())],
+            &|path| std::fs::remove_file(path),
+        )
+        .expect("delete adaptive child");
+        assert!(!recording_path.exists());
+    }
+
+    #[test]
+    fn count_retention_preserves_shared_recording_until_last_row() {
+        let conn = setup_conn();
+        insert_entry_with_file_name(&conn, 100, "count-shared.wav", false, "older", None);
+        insert_entry_with_file_name(&conn, 200, "count-shared.wav", false, "newer", None);
+        let recordings_dir = tempfile::tempdir().expect("recordings tempdir");
+        let recording_path = recordings_dir.path().join("count-shared.wav");
+        std::fs::write(&recording_path, b"count audio").expect("write count recording");
+
+        let first_sweep =
+            HistoryManager::count_cleanup_candidates(&conn, 1).expect("first count sweep");
+        assert_eq!(first_sweep.len(), 1, "history limit counts rows");
+        HistoryManager::delete_entries_and_files_with(
+            &conn,
+            recordings_dir.path(),
+            &first_sweep,
+            &|path| std::fs::remove_file(path),
+        )
+        .expect("delete count-retained subset");
+        assert!(recording_path.exists());
+
+        let final_sweep =
+            HistoryManager::count_cleanup_candidates(&conn, 0).expect("final count sweep");
+        HistoryManager::delete_entries_and_files_with(
+            &conn,
+            recordings_dir.path(),
+            &final_sweep,
+            &|path| std::fs::remove_file(path),
+        )
+        .expect("delete last count-retained row");
+        assert!(!recording_path.exists());
+    }
+
+    #[test]
+    fn time_retention_preserves_shared_recording_until_last_row() {
+        let conn = setup_conn();
+        insert_entry_with_file_name(&conn, 100, "time-shared.wav", false, "older", None);
+        insert_entry_with_file_name(&conn, 200, "time-shared.wav", false, "newer", None);
+        let recordings_dir = tempfile::tempdir().expect("recordings tempdir");
+        let recording_path = recordings_dir.path().join("time-shared.wav");
+        std::fs::write(&recording_path, b"time audio").expect("write time recording");
+
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, file_name FROM transcription_history
+                 WHERE saved = 0 AND timestamp < ?1 AND transform_action IS NULL",
+            )
+            .expect("prepare time retention query");
+        let first_sweep = stmt
+            .query_map([150], |row| Ok((row.get(0)?, row.get(1)?)))
+            .expect("query first time sweep")
+            .collect::<std::result::Result<Vec<(i64, String)>, _>>()
+            .expect("collect first time sweep");
+        drop(stmt);
+        HistoryManager::delete_entries_and_files_with(
+            &conn,
+            recordings_dir.path(),
+            &first_sweep,
+            &|path| std::fs::remove_file(path),
+        )
+        .expect("delete time-retained subset");
+        assert!(recording_path.exists());
+
+        let final_sweep = vec![(conn.last_insert_rowid(), "time-shared.wav".to_string())];
+        HistoryManager::delete_entries_and_files_with(
+            &conn,
+            recordings_dir.path(),
+            &final_sweep,
+            &|path| std::fs::remove_file(path),
+        )
+        .expect("delete last time-retained row");
+        assert!(!recording_path.exists());
+    }
+
+    #[test]
+    fn clear_all_shared_rows_deletes_recording_exactly_once() {
+        let conn = setup_conn();
+        insert_entry_with_file_name(&conn, 100, "clear-shared.wav", false, "parent", None);
+        insert_entry_with_file_name(&conn, 200, "clear-shared.wav", false, "child", None);
+        let recordings_dir = tempfile::tempdir().expect("recordings tempdir");
+        let recording_path = recordings_dir.path().join("clear-shared.wav");
+        std::fs::write(&recording_path, b"clear audio").expect("write clear recording");
+        let delete_calls = Cell::new(0usize);
+        let entries =
+            HistoryManager::all_history_deletion_candidates(&conn).expect("clear-all candidates");
+
+        let outcome = HistoryManager::delete_entries_and_files_with(
+            &conn,
+            recordings_dir.path(),
+            &entries,
+            &|path| {
+                delete_calls.set(delete_calls.get() + 1);
+                std::fs::remove_file(path)
+            },
+        )
+        .expect("clear shared rows");
+
+        assert_eq!(outcome.deleted_count, 2);
+        assert!(outcome.failures.is_empty());
+        assert_eq!(delete_calls.get(), 1);
+        assert!(!recording_path.exists());
+    }
+
+    #[test]
+    fn row_delete_failure_leaves_recording_untouched() {
+        let conn = setup_conn();
+        insert_entry_with_file_name(&conn, 100, "db-failure.wav", false, "blocked", None);
+        let entry_id = conn.last_insert_rowid();
+        conn.execute_batch(
+            "CREATE TRIGGER block_history_delete
+             BEFORE DELETE ON transcription_history
+             BEGIN
+                 SELECT RAISE(ABORT, 'blocked history delete');
+             END;",
+        )
+        .expect("create blocking delete trigger");
+        let recordings_dir = tempfile::tempdir().expect("recordings tempdir");
+        let recording_path = recordings_dir.path().join("db-failure.wav");
+        std::fs::write(&recording_path, b"must survive").expect("write protected recording");
+        let delete_calls = Cell::new(0usize);
+
+        let result = HistoryManager::delete_entries_and_files_with(
+            &conn,
+            recordings_dir.path(),
+            &[(entry_id, "db-failure.wav".to_string())],
+            &|path| {
+                delete_calls.set(delete_calls.get() + 1);
+                std::fs::remove_file(path)
+            },
+        );
+
+        assert!(result.is_err(), "row deletion failure must be propagated");
+        assert!(recording_path.exists());
+        assert_eq!(
+            delete_calls.get(),
+            0,
+            "file deletion must happen after DB deletion"
+        );
+    }
+
+    #[test]
+    fn file_delete_failure_is_non_fatal_after_row_deletion() {
+        let conn = setup_conn();
+        insert_entry_with_file_name(&conn, 100, "locked.wav", false, "delete row", None);
         let entry_id = conn.last_insert_rowid();
         let recordings_dir = tempfile::tempdir().expect("recordings tempdir");
         let recording_path = recordings_dir.path().join("locked.wav");
-        std::fs::write(&recording_path, b"sensitive audio").expect("write recording");
+        std::fs::write(&recording_path, b"locked audio").expect("write recording");
 
         let outcome = HistoryManager::delete_entries_and_files_with(
             &conn,
@@ -1628,29 +1865,70 @@ mod tests {
                 ))
             },
         )
-        .expect("partial deletion outcome");
+        .expect("file failure is logged but not fatal");
 
         assert_eq!(outcome.requested_count, 1);
-        assert_eq!(outcome.deleted_count, 0);
-        assert_eq!(
-            outcome.failures,
-            vec![HistoryDeletionFailure {
-                id: Some(entry_id),
-                file_name: "locked.wav".to_string(),
-                reason: HistoryDeletionFailureReason::PermissionDenied,
-            }]
-        );
+        assert_eq!(outcome.deleted_count, 1);
+        assert!(outcome.failures.is_empty());
         let row_count: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM transcription_history WHERE id = ?1",
                 [entry_id],
                 |row| row.get(0),
             )
-            .expect("count preserved row");
-        assert_eq!(row_count, 1, "failed deletion must remain retryable");
+            .expect("count deleted row");
+        assert_eq!(row_count, 0);
         assert!(
             recording_path.exists(),
-            "failed deletion must not hide the file"
+            "failed file deletion leaves an orphan for reconciliation"
+        );
+    }
+
+    #[test]
+    fn transform_rows_neither_own_nor_delete_recordings() {
+        let conn = setup_conn();
+        insert_entry_with_file_name(&conn, 100, "dictation.wav", false, "dictation", None);
+        let dictation_id = conn.last_insert_rowid();
+        let transform_id = insert_transform_entry(&conn, 200, "selected", "polished");
+        conn.execute(
+            "UPDATE transcription_history SET file_name = 'dictation.wav' WHERE id = ?1",
+            [transform_id],
+        )
+        .expect("make transform filename overlap dictation");
+        let recordings_dir = tempfile::tempdir().expect("recordings tempdir");
+        let recording_path = recordings_dir.path().join("dictation.wav");
+        std::fs::write(&recording_path, b"dictation audio").expect("write dictation recording");
+
+        HistoryManager::delete_entries_and_files_with(
+            &conn,
+            recordings_dir.path(),
+            &[(dictation_id, "dictation.wav".to_string())],
+            &|path| std::fs::remove_file(path),
+        )
+        .expect("delete sole owning row");
+        assert!(
+            !recording_path.exists(),
+            "transform row is not an owning reference"
+        );
+
+        let transform_candidates = HistoryManager::all_history_deletion_candidates(&conn)
+            .expect("transform deletion candidate");
+        assert_eq!(transform_candidates, vec![(transform_id, String::new())]);
+        let delete_calls = Cell::new(0usize);
+        HistoryManager::delete_entries_and_files_with(
+            &conn,
+            recordings_dir.path(),
+            &transform_candidates,
+            &|_| {
+                delete_calls.set(delete_calls.get() + 1);
+                Ok(())
+            },
+        )
+        .expect("delete transform row");
+        assert_eq!(
+            delete_calls.get(),
+            0,
+            "transform deletion never touches audio"
         );
     }
 
