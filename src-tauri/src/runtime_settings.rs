@@ -1,6 +1,6 @@
 use crate::settings::{
     is_insecure_lan_post_process_base_url, is_local_post_process_base_url, AppSettings, LLMPrompt,
-    OverlayPosition, PostProcessProvider, TranslationRoute,
+    OverlayPosition, PostProcessProvider,
 };
 use std::time::Duration;
 
@@ -138,78 +138,6 @@ pub fn context_runtime(settings: &AppSettings) -> ContextRuntime {
         capture_nearby_text,
         private_app_patterns: settings.adaptive_private_app_patterns.clone(),
     }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct DictationRuntime {
-    selected_language: String,
-    language_shortlist: Vec<String>,
-    native_translation_to_english: bool,
-}
-
-impl DictationRuntime {
-    pub fn selected_language(&self) -> &str {
-        &self.selected_language
-    }
-
-    #[cfg_attr(not(feature = "transcribe-rs-engine"), allow(dead_code))]
-    pub fn language_shortlist(&self) -> &[String] {
-        &self.language_shortlist
-    }
-
-    pub fn native_translation_to_english(&self) -> bool {
-        self.native_translation_to_english
-    }
-}
-
-pub fn dictation_runtime(
-    settings: &AppSettings,
-    supported_languages: &[String],
-    model_supports_translation: bool,
-) -> DictationRuntime {
-    let selected_language =
-        normalize_selected_language(&settings.selected_language, supported_languages);
-    let native_translation_to_english =
-        model_supports_translation && native_english_translation_requested(settings);
-
-    DictationRuntime {
-        selected_language,
-        language_shortlist: settings.adaptive_language_shortlist.clone(),
-        native_translation_to_english,
-    }
-}
-
-fn normalize_selected_language(selected_language: &str, supported_languages: &[String]) -> String {
-    if selected_language == "auto"
-        || supported_languages.is_empty()
-        || supported_languages
-            .iter()
-            .any(|language| language == selected_language)
-    {
-        selected_language.to_string()
-    } else {
-        "auto".to_string()
-    }
-}
-
-fn native_english_translation_requested(settings: &AppSettings) -> bool {
-    if !settings.translation_enabled {
-        return false;
-    }
-
-    let Some(request) = &settings.translation_request else {
-        return false;
-    };
-
-    let target_language = request.target_language.trim();
-    if !target_language.eq_ignore_ascii_case("en") {
-        return false;
-    }
-
-    matches!(
-        request.route,
-        TranslationRoute::Auto | TranslationRoute::DirectSpeech
-    )
 }
 
 #[derive(Clone, Debug)]

@@ -53,6 +53,14 @@ fn begin_model_switch(
             model_id
         );
         settings.clear_dictation_language_lock();
+        settings
+            .adaptive_language_shortlist
+            .retain(|language| supported_languages.contains(language));
+        if settings.adaptive_language_shortlist.is_empty() {
+            settings
+                .adaptive_language_shortlist
+                .extend(supported_languages.first().cloned());
+        }
         Some(ModelSwitchReason::LanguageLockClearedForModel)
     } else {
         None
@@ -322,6 +330,17 @@ mod tests {
     use super::*;
     use crate::settings::{get_default_settings, DictationLanguageMode};
 
+    fn reload_with_adaptive_defaults(settings: &AppSettings) -> AppSettings {
+        let serialized = serde_json::to_value(settings).expect("serialize settings");
+        let mut reloaded: AppSettings =
+            serde_json::from_value(serialized).expect("reload settings");
+        if reloaded.adaptive_language_shortlist.is_empty() {
+            reloaded.adaptive_language_shortlist =
+                get_default_settings().adaptive_language_shortlist;
+        }
+        reloaded
+    }
+
     fn language_tuple(
         settings: &crate::settings::AppSettings,
     ) -> (String, DictationLanguageMode, Vec<String>) {
@@ -333,7 +352,7 @@ mod tests {
     }
 
     #[test]
-    fn failed_model_load_restores_the_persisted_switch_snapshot() {
+    fn failed_model_load_restores_zero_overlap_shortlist_after_reload() {
         let mut settings = get_default_settings();
         settings.selected_model = "old-model".to_string();
         settings.selected_language = "zh-Hans".to_string();
@@ -342,6 +361,7 @@ mod tests {
         let before_language = language_tuple(&settings);
 
         let (snapshot, _) = begin_model_switch(&mut settings, "english-model", &["en".to_string()]);
+        settings = reload_with_adaptive_defaults(&settings);
         let result = finish_model_load(Err("load failed".to_string()), || {
             restore_model_switch(&mut settings, snapshot);
             Ok(())
@@ -397,25 +417,22 @@ mod tests {
     }
 
     #[test]
-    fn incompatible_model_switch_clears_language_tuple_and_reports_reason() {
+    fn incompatible_model_switch_filters_shortlist_without_defaulting() {
         let mut settings = get_default_settings();
         settings.selected_model = "old-model".to_string();
-        settings.selected_language = "ar".to_string();
+        settings.selected_language = "fr".to_string();
         settings.dictation_language_mode = DictationLanguageMode::Single;
-        settings.adaptive_language_shortlist = vec!["ar".to_string(), "en".to_string()];
+        settings.adaptive_language_shortlist = vec!["fr".to_string(), "de".to_string()];
 
-        let (_, outcome) = begin_model_switch(&mut settings, "english-model", &["en".to_string()]);
+        let (_, outcome) = begin_model_switch(&mut settings, "german-model", &["de".to_string()]);
 
-        assert_eq!(settings.selected_model, "english-model");
+        assert_eq!(settings.selected_model, "german-model");
         assert_eq!(settings.selected_language, "auto");
         assert_eq!(
             settings.dictation_language_mode,
             DictationLanguageMode::Auto
         );
-        assert_eq!(
-            settings.adaptive_language_shortlist,
-            vec!["en".to_string(), "ar".to_string()]
-        );
+        assert_eq!(settings.adaptive_language_shortlist, vec!["de".to_string()]);
         assert_eq!(
             outcome.reason,
             Some(ModelSwitchReason::LanguageLockClearedForModel)
@@ -423,6 +440,30 @@ mod tests {
         assert_eq!(
             serde_json::to_value(outcome.reason).expect("serialize model-switch reason"),
             serde_json::json!("language_lock_cleared_for_model")
+        );
+    }
+
+    #[test]
+    fn incompatible_model_switch_persists_supported_fallback_when_filter_is_empty() {
+        let mut settings = get_default_settings();
+        settings.selected_model = "old-model".to_string();
+        settings.selected_language = "fr".to_string();
+        settings.dictation_language_mode = DictationLanguageMode::Single;
+        settings.adaptive_language_shortlist = vec!["fr".to_string()];
+
+        let (_, outcome) = begin_model_switch(&mut settings, "english-model", &["en".to_string()]);
+        let reloaded = reload_with_adaptive_defaults(&settings);
+
+        assert_eq!(reloaded.selected_model, "english-model");
+        assert_eq!(reloaded.selected_language, "auto");
+        assert_eq!(
+            reloaded.dictation_language_mode,
+            DictationLanguageMode::Auto
+        );
+        assert_eq!(reloaded.adaptive_language_shortlist, vec!["en".to_string()]);
+        assert_eq!(
+            outcome.reason,
+            Some(ModelSwitchReason::LanguageLockClearedForModel)
         );
     }
 

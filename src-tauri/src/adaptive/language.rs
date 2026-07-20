@@ -68,7 +68,7 @@ fn is_arabic_char(ch: char) -> bool {
     )
 }
 
-fn is_technical_token(token: &str) -> bool {
+pub(crate) fn is_technical_token(token: &str) -> bool {
     let lower = token
         .trim_matches(|ch: char| ch.is_ascii_punctuation())
         .to_lowercase();

@@ -4,8 +4,9 @@ use crate::audio_toolkit::{
 use crate::managers::audio::AudioRecordingManager;
 use crate::managers::model::{EngineType, ModelManager};
 use crate::providers::{
-    resolve_whisper_gpu_device, CancellationToken, EngineProvider, LanguageOutcome, ModelLocator,
-    SpeechInput, SpeechResponse, Support, TranscribeRsProvider,
+    resolve_whisper_gpu_device, CancellationToken, EngineProvider, LanguageOutcome,
+    LanguageSelection, ModelLocator, SpeechInput, SpeechRequest, SpeechResponse, Support,
+    TranscribeRsProvider,
 };
 use crate::settings::{
     get_settings, AppSettings, ModelUnloadTimeout, OrtAcceleratorSetting, WhisperAcceleratorSetting,
@@ -78,6 +79,7 @@ fn engine_label(engine_type: EngineType) -> &'static str {
 
 const MAX_INFERENCE_TIMEOUT: Duration = Duration::from_secs(240);
 const MODEL_LOAD_DEADLINE: Duration = Duration::from_secs(120);
+const DETECTION_RETRY_MIN_CONFIDENCE: f32 = 0.85;
 static ABANDONED_INFERENCE_THREADS: AtomicUsize = AtomicUsize::new(0);
 
 const RUN_ACTIVE: u8 = 0;
@@ -88,6 +90,10 @@ const RUN_EXITED: u8 = 2;
 fn inference_timeout(sample_count: usize) -> Duration {
     let audio_secs = sample_count as u64 / 16_000;
     Duration::from_secs(60 + 3 * audio_secs).min(MAX_INFERENCE_TIMEOUT)
+}
+
+fn inference_timeout_for_attempts(sample_count: usize, attempts: u32) -> Duration {
+    inference_timeout(sample_count).saturating_mul(attempts)
 }
 
 fn new_inference_run_state() -> Arc<AtomicU8> {
@@ -486,6 +492,91 @@ fn apply_provider_language_metadata(outcome: &mut LanguageOutcome, response: &Sp
     outcome.detected = response.detected_language.clone();
     outcome.detection_confidence = response.detection_confidence;
     outcome.translation_performed = response.translation_performed;
+}
+
+fn detected_language_for_retry(
+    request: &SpeechRequest,
+    outcome: &LanguageOutcome,
+    supports_language_selection: bool,
+    supported_languages: &[String],
+) -> Option<String> {
+    if request.source_language != LanguageSelection::Auto || !supports_language_selection {
+        return None;
+    }
+
+    let confidence = outcome.detection_confidence?;
+    if !confidence.is_finite() || confidence < DETECTION_RETRY_MIN_CONFIDENCE {
+        return None;
+    }
+
+    let detected = crate::settings::normalize_bcp47(outcome.detected.as_deref()?);
+    if detected.is_empty() || detected == "auto" {
+        return None;
+    }
+
+    if !supported_languages.is_empty()
+        && !supported_languages
+            .iter()
+            .map(|language| crate::settings::normalize_bcp47(language))
+            .any(|language| language == detected)
+    {
+        return None;
+    }
+
+    Some(detected)
+}
+
+fn run_with_detection_retry<F>(
+    request: SpeechRequest,
+    mut outcome: LanguageOutcome,
+    supports_language_selection: bool,
+    supported_languages: &[String],
+    mut run: F,
+) -> Result<(SpeechResponse, LanguageOutcome)>
+where
+    F: FnMut(SpeechRequest) -> Result<SpeechResponse>,
+{
+    let mut retry_request = request.clone();
+    let response = run(request)?;
+    apply_provider_language_metadata(&mut outcome, &response);
+
+    let Some(detected_language) = detected_language_for_retry(
+        &retry_request,
+        &outcome,
+        supports_language_selection,
+        supported_languages,
+    ) else {
+        return Ok((response, outcome));
+    };
+
+    if retry_request.cancellation.is_cancelled() {
+        return Ok((response, outcome));
+    }
+
+    let forced_language = LanguageSelection::Language(detected_language.clone());
+    retry_request.source_language = forced_language.clone();
+    if let Some(translation) = retry_request.translation.as_mut() {
+        translation.source_language = forced_language;
+    }
+
+    debug!(
+        "Retrying transcription once with high-confidence detected language '{}'",
+        detected_language
+    );
+    match run(retry_request) {
+        Ok(retry_response) => {
+            outcome.effective = Some(detected_language);
+            outcome.translation_performed = retry_response.translation_performed;
+            Ok((retry_response, outcome))
+        }
+        Err(err) => {
+            warn!(
+                "Detected-language transcription retry failed; keeping the first response: {}",
+                err
+            );
+            Ok((response, outcome))
+        }
+    }
 }
 
 fn effective_validated_dictation_language(validated_language: &str) -> Option<&str> {
@@ -955,11 +1046,11 @@ impl TranscriptionManager {
         )
     }
 
-    fn complete_inference_result(
+    fn complete_inference_result<T>(
         &self,
         provider: TranscribeRsProvider,
-        transcribe_result: thread::Result<Result<SpeechResponse>>,
-    ) -> Result<SpeechResponse> {
+        transcribe_result: thread::Result<Result<T>>,
+    ) -> Result<T> {
         match transcribe_result {
             Ok(inner_result) => {
                 // Success or normal error — put the provider back.
@@ -1302,6 +1393,10 @@ impl TranscriptionManager {
                 .map(|info| info.supports_translation)
                 .unwrap_or(false),
         );
+        let supports_language_selection = current_model_info
+            .as_ref()
+            .map(|info| info.supports_language_selection)
+            .unwrap_or(false);
 
         // Validate selected language against the model's supported languages.
         // If the language isn't supported, fall back to "auto" to prevent errors.
@@ -1309,13 +1404,11 @@ impl TranscriptionManager {
             .as_ref()
             .map(|info| info.supported_languages.clone())
             .unwrap_or_default();
-        let (validated_language, mut language_outcome) = resolve_language_outcome(
+        let (validated_language, language_outcome) = resolve_language_outcome(
             &settings.selected_language,
             &supported_languages,
             settings.translate_to_english,
         );
-        let effective_language = language_outcome.effective.clone();
-
         if validated_language == "auto" && settings.selected_language != "auto" {
             warn!(
                 "Language '{}' not supported by current model, falling back to auto-detect",
@@ -1335,12 +1428,18 @@ impl TranscriptionManager {
             SpeechInput::Audio(audio) => audio.len(),
             SpeechInput::Text(_) => 0,
         };
-        let timeout = inference_timeout(sample_count);
+        let max_inference_attempts: u32 =
+            if request.source_language == LanguageSelection::Auto && supports_language_selection {
+                2
+            } else {
+                1
+            };
+        let timeout = inference_timeout_for_attempts(sample_count, max_inference_attempts);
 
         // Perform transcription with the appropriate provider.
         // We use catch_unwind to prevent engine panics from poisoning the mutex,
         // which would make the app hang indefinitely on subsequent operations.
-        let result = {
+        let (result, language_outcome) = {
             let mut engine_guard = self.lock_engine();
 
             // Take the provider out so we own it during transcription.
@@ -1374,10 +1473,17 @@ impl TranscriptionManager {
                     let _transcription_run_guard = worker_transcription_run_guard;
                     let _exit_guard = InferenceRunExitGuard::new(worker_run_state);
                     let mut provider = provider;
-                    let transcribe_result =
-                        catch_unwind(AssertUnwindSafe(|| -> Result<SpeechResponse> {
-                            provider.run(request)
-                        }));
+                    let transcribe_result = catch_unwind(AssertUnwindSafe(
+                        || -> Result<(SpeechResponse, LanguageOutcome)> {
+                            run_with_detection_retry(
+                                request,
+                                language_outcome,
+                                supports_language_selection,
+                                &supported_languages,
+                                |request| provider.run(request),
+                            )
+                        },
+                    ));
                     let _ = result_tx.send((provider, transcribe_result));
                 })
                 .map_err(|e| {
@@ -1420,8 +1526,8 @@ impl TranscriptionManager {
             .get_model_info(&settings.selected_model)
             .map(|info| matches!(info.engine_type, EngineType::Whisper))
             .unwrap_or(false);
+        let effective_language = language_outcome.effective.clone();
 
-        apply_provider_language_metadata(&mut language_outcome, &result);
         let SpeechResponse {
             text: raw_text,
             translation_performed,
@@ -1633,6 +1739,35 @@ mod tests {
 
     static ABANDONED_COUNTER_TEST_LOCK: Mutex<()> = Mutex::new(());
 
+    fn test_speech_response(
+        text: &str,
+        detected_language: Option<&str>,
+        detection_confidence: Option<f32>,
+    ) -> SpeechResponse {
+        SpeechResponse {
+            text: text.to_string(),
+            detected_language: detected_language.map(str::to_string),
+            detection_confidence,
+            translation_performed: false,
+            provider_id: "test-provider",
+            model_id: "test-model".to_string(),
+        }
+    }
+
+    fn test_speech_request(
+        selected_language: &str,
+        cancellation: CancellationToken,
+    ) -> SpeechRequest {
+        build_transcription_request(
+            vec![0.0; 160],
+            selected_language,
+            false,
+            &[],
+            &[],
+            cancellation,
+        )
+    }
+
     #[test]
     fn english_translation_requires_user_toggle_and_model_support() {
         assert!(effective_english_translation(true, true));
@@ -1715,6 +1850,124 @@ mod tests {
     }
 
     #[test]
+    fn high_confidence_auto_detection_retries_once_with_detected_language() {
+        let request = test_speech_request("auto", CancellationToken::default());
+        let (_, outcome) =
+            resolve_language_outcome("auto", &["en".to_string(), "ar".to_string()], false);
+        let mut call_languages = Vec::new();
+
+        let (response, outcome) = run_with_detection_retry(
+            request,
+            outcome,
+            true,
+            &["en".to_string(), "ar".to_string()],
+            |request| {
+                call_languages.push(request.source_language);
+                if call_languages.len() == 1 {
+                    Ok(test_speech_response("first pass", Some("ar"), Some(0.91)))
+                } else {
+                    Ok(test_speech_response("forced Arabic pass", None, None))
+                }
+            },
+        )
+        .expect("detection retry succeeds");
+
+        assert_eq!(
+            call_languages,
+            vec![
+                LanguageSelection::Auto,
+                LanguageSelection::Language("ar".to_string())
+            ]
+        );
+        assert_eq!(response.text, "forced Arabic pass");
+        assert_eq!(outcome.detected.as_deref(), Some("ar"));
+        assert_eq!(outcome.detection_confidence, Some(0.91));
+        assert_eq!(outcome.effective.as_deref(), Some("ar"));
+        assert!(!outcome.translation_performed);
+    }
+
+    #[test]
+    fn missing_detection_keeps_single_provider_run() {
+        let request = test_speech_request("auto", CancellationToken::default());
+        let (_, outcome) = resolve_language_outcome("auto", &[], false);
+        let mut call_count = 0;
+
+        let (response, outcome) = run_with_detection_retry(request, outcome, true, &[], |_| {
+            call_count += 1;
+            Ok(test_speech_response("single pass", None, None))
+        })
+        .expect("single provider run succeeds");
+
+        assert_eq!(call_count, 1);
+        assert_eq!(response.text, "single pass");
+        assert_eq!(outcome.detected, None);
+    }
+
+    #[test]
+    fn detection_retry_rejects_forced_low_confidence_or_incapable_runs() {
+        let forced_request = test_speech_request("ar", CancellationToken::default());
+        let auto_request = test_speech_request("auto", CancellationToken::default());
+        let high_confidence = LanguageOutcome {
+            detected: Some("ar".to_string()),
+            detection_confidence: Some(0.99),
+            ..LanguageOutcome::default()
+        };
+        let low_confidence = LanguageOutcome {
+            detected: Some("ar".to_string()),
+            detection_confidence: Some(0.84),
+            ..LanguageOutcome::default()
+        };
+
+        assert_eq!(
+            detected_language_for_retry(
+                &forced_request,
+                &high_confidence,
+                true,
+                &["ar".to_string()]
+            ),
+            None
+        );
+        assert_eq!(
+            detected_language_for_retry(&auto_request, &low_confidence, true, &["ar".to_string()]),
+            None
+        );
+        assert_eq!(
+            detected_language_for_retry(
+                &auto_request,
+                &high_confidence,
+                false,
+                &["ar".to_string()]
+            ),
+            None
+        );
+        assert_eq!(
+            detected_language_for_retry(&auto_request, &high_confidence, true, &["en".to_string()]),
+            None
+        );
+    }
+
+    #[test]
+    fn cancellation_after_detection_prevents_retry() {
+        let cancellation = CancellationToken::default();
+        let request = test_speech_request("auto", cancellation.clone());
+        let (_, outcome) = resolve_language_outcome("auto", &["ar".to_string()], false);
+        let mut call_count = 0;
+
+        run_with_detection_retry(request, outcome, true, &["ar".to_string()], |_| {
+            call_count += 1;
+            cancellation.cancel();
+            Ok(test_speech_response(
+                "cancelled pass",
+                Some("ar"),
+                Some(0.99),
+            ))
+        })
+        .expect("cancelled request keeps first response");
+
+        assert_eq!(call_count, 1);
+    }
+
+    #[test]
     fn inference_timeout_is_proportional_to_audio_length() {
         assert_eq!(
             inference_timeout(30 * 16_000),
@@ -1722,6 +1975,10 @@ mod tests {
         );
         assert_eq!(inference_timeout(160), Duration::from_secs(60));
         assert_eq!(inference_timeout(3_600 * 16_000), MAX_INFERENCE_TIMEOUT);
+        assert_eq!(
+            inference_timeout_for_attempts(160, 2),
+            Duration::from_secs(120)
+        );
     }
 
     #[test]
