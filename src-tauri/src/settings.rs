@@ -1535,7 +1535,6 @@ impl AppSettings {
     pub fn clear_dictation_language_lock(&mut self) {
         self.selected_language = "auto".to_string();
         self.dictation_language_mode = DictationLanguageMode::Auto;
-        self.adaptive_language_shortlist = default_adaptive_language_shortlist();
     }
 
     pub fn apply_dictation_language_mode(
@@ -4305,6 +4304,23 @@ mod tests {
             settings.adaptive_language_shortlist,
             vec!["fr".to_string(), "ja".to_string()]
         );
+    }
+
+    #[test]
+    fn clear_dictation_language_lock_preserves_shortlist() {
+        let mut settings = get_default_settings();
+        settings.selected_language = "fr".to_string();
+        settings.dictation_language_mode = DictationLanguageMode::Single;
+        settings.adaptive_language_shortlist = vec!["fr".to_string(), "de".to_string()];
+
+        settings.clear_dictation_language_lock();
+
+        assert_eq!(settings.selected_language, "auto");
+        assert_eq!(
+            settings.dictation_language_mode,
+            DictationLanguageMode::Auto
+        );
+        assert_eq!(settings.adaptive_language_shortlist, vec!["fr", "de"]);
     }
 
     #[test]
