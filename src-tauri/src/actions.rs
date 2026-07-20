@@ -1822,6 +1822,22 @@ mod adaptive_action_tests {
     }
 
     #[test]
+    fn multilingual_auto_mode_keeps_language_guard_inert() {
+        let outcome = LanguageOutcome {
+            requested: None,
+            effective: None,
+            supported: crate::providers::Support::Unknown,
+            detected: None,
+            ..LanguageOutcome::default()
+        };
+
+        assert!(!language_guard_should_block(
+            &outcome,
+            "This is a clear English sentence"
+        ));
+    }
+
+    #[test]
     fn language_guard_consumes_outcome_effective_instead_of_raw_setting() {
         let mut settings = crate::settings::get_default_settings();
         settings.selected_language = "en".to_string();
