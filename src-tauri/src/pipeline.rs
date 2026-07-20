@@ -107,7 +107,11 @@ pub(crate) fn finalize_post_transcription_pipeline(
     if completion.llm_invoked {
         match completion.llm_output.as_deref() {
             Some(output) => {
-                match validate_llm_output(&prepared.raw_input, output, prepared.adaptive_profile) {
+                match validate_llm_output(
+                    &prepared.deterministic_output,
+                    output,
+                    prepared.adaptive_profile,
+                ) {
                     Ok(()) => {
                         final_text = output.to_string();
                         fallback_reason = None;
@@ -167,16 +171,75 @@ fn convert_chinese_variant(selected_language: &str, input: &str) -> (String, boo
 }
 
 fn validate_llm_output(
-    raw_input: &str,
+    pre_llm_text: &str,
     output: &str,
     adaptive_profile: Option<&AdaptiveProfile>,
 ) -> Result<(), String> {
-    crate::text_processing::validate_preserved_text(raw_input, output)
-        .map_err(|err| err.to_string())?;
     if let Some(profile) = adaptive_profile {
-        crate::adaptive::processor::validate_output(raw_input, output, profile)?;
+        validate_declared_profile_policies(pre_llm_text, output, profile)?;
+        crate::adaptive::processor::validate_output(pre_llm_text, output, profile)?;
     }
+
+    crate::text_processing::validate_preserved_text(pre_llm_text, output)
+        .map_err(|err| err.to_string())
+}
+
+fn validate_declared_profile_policies(
+    pre_llm_text: &str,
+    output: &str,
+    profile: &AdaptiveProfile,
+) -> Result<(), String> {
+    if profile.validation.preserve_numbers && numeric_runs(pre_llm_text) != numeric_runs(output) {
+        return Err("preserve_numbers: numeric values were not preserved".to_string());
+    }
+
+    if profile.validation.preserve_raw_language {
+        validate_script_family_preservation(pre_llm_text, output)?;
+    }
+
     Ok(())
+}
+
+fn numeric_runs(text: &str) -> Vec<String> {
+    let mut runs = Vec::new();
+    let mut current = String::new();
+
+    for ch in text.chars() {
+        if ch.is_numeric() {
+            current.push(ch);
+        } else if !current.is_empty() {
+            runs.push(std::mem::take(&mut current));
+        }
+    }
+
+    if !current.is_empty() {
+        runs.push(current);
+    }
+
+    runs
+}
+
+fn validate_script_family_preservation(pre_llm_text: &str, output: &str) -> Result<(), String> {
+    let source_has_arabic = pre_llm_text.chars().any(is_arabic_script_char);
+    let output_has_arabic = output.chars().any(is_arabic_script_char);
+    if source_has_arabic && !output_has_arabic {
+        return Err("preserve_raw_language: Arabic script was not preserved".to_string());
+    }
+
+    let source_has_latin = pre_llm_text.chars().any(|ch| ch.is_ascii_alphabetic());
+    let output_has_latin = output.chars().any(|ch| ch.is_ascii_alphabetic());
+    if source_has_latin && !output_has_latin {
+        return Err("preserve_raw_language: Latin script was not preserved".to_string());
+    }
+
+    Ok(())
+}
+
+fn is_arabic_script_char(ch: char) -> bool {
+    matches!(
+        ch as u32,
+        0x0600..=0x06FF | 0x0750..=0x077F | 0x08A0..=0x08FF | 0xFB50..=0xFDFF | 0xFE70..=0xFEFF
+    )
 }
 
 #[cfg(test)]
@@ -263,5 +326,48 @@ mod tests {
             result.fallback_reason,
             Some(PipelineFallbackReason::LlmValidation(_))
         ));
+    }
+
+    #[test]
+    fn preserve_numbers_rejects_a_changed_numeric_run_and_falls_back() {
+        let profile = default_clean_profile();
+        let result = run_post_transcription_pipeline(PipelineInput {
+            raw_input: "Send 42 files",
+            selected_language: "en",
+            formatting_level: FormattingLevel::None,
+            adaptive_profile: Some(&profile),
+            effective_language: Some("en"),
+            llm_output: Some("Send 43 files".to_string()),
+            llm_invoked: true,
+        });
+
+        assert_eq!(result.final_text, result.deterministic_output);
+        let reason = match result.fallback_reason {
+            Some(PipelineFallbackReason::LlmValidation(reason)) => reason,
+            other => panic!("expected LLM validation fallback, got {other:?}"),
+        };
+        assert!(reason.contains("preserve_numbers"), "{reason}");
+    }
+
+    #[test]
+    fn preserve_raw_language_rejects_script_loss_and_falls_back() {
+        let mut profile = default_clean_profile();
+        profile.validation.forbid_unrequested_translation = false;
+        let result = run_post_transcription_pipeline(PipelineInput {
+            raw_input: "هذا نص عربي واضح",
+            selected_language: "ar",
+            formatting_level: FormattingLevel::None,
+            adaptive_profile: Some(&profile),
+            effective_language: Some("ar"),
+            llm_output: Some("This is clear English text".to_string()),
+            llm_invoked: true,
+        });
+
+        assert_eq!(result.final_text, result.deterministic_output);
+        let reason = match result.fallback_reason {
+            Some(PipelineFallbackReason::LlmValidation(reason)) => reason,
+            other => panic!("expected LLM validation fallback, got {other:?}"),
+        };
+        assert!(reason.contains("preserve_raw_language"), "{reason}");
     }
 }
