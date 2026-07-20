@@ -13,6 +13,7 @@ use crate::managers::history::HistoryManager;
 use crate::managers::transcription::TranscriptionManager;
 use crate::operation_cancellation::{OperationCancellationState, OperationToken};
 use crate::overlay::OverlayState;
+use crate::providers::LanguageOutcome;
 use crate::settings::{get_settings, AppSettings, APPLE_INTELLIGENCE_PROVIDER_ID};
 use crate::shortcut;
 use crate::transform_mode::TransformAction;
@@ -150,24 +151,49 @@ fn selected_model_supports_translation(app: &AppHandle, settings: &AppSettings) 
         .unwrap_or(false)
 }
 
-fn language_guard_blocks(app: &AppHandle, settings: &AppSettings, final_text: &str) -> bool {
-    if native_translation_allows_language_guard_bypass(
-        settings,
-        selected_model_supports_translation(app, settings),
-    ) {
+fn language_guard_should_block(
+    settings: &AppSettings,
+    outcome: &LanguageOutcome,
+    model_supports_translation: bool,
+    final_text: &str,
+) -> bool {
+    if native_translation_allows_language_guard_bypass(settings, model_supports_translation) {
         return false;
     }
 
-    if !crate::adaptive::language_guard::contradicts_locked_language(
-        &settings.selected_language,
+    if outcome.supported == crate::providers::Support::Unsupported {
+        return false;
+    }
+
+    let Some(effective_language) = outcome.effective.as_deref() else {
+        return false;
+    };
+
+    crate::adaptive::language_guard::contradicts_locked_language(effective_language, final_text)
+}
+
+fn language_guard_blocks(
+    app: &AppHandle,
+    settings: &AppSettings,
+    outcome: &LanguageOutcome,
+    final_text: &str,
+) -> bool {
+    if !language_guard_should_block(
+        settings,
+        outcome,
+        selected_model_supports_translation(app, settings),
         final_text,
     ) {
         return false;
     }
 
+    let Some(effective_language) = outcome.effective.as_deref() else {
+        return false;
+    };
+
     warn!(
         "Language guard blocked paste because output script contradicts locked language '{}'",
-        settings.selected_language
+        effective_language
     );
     copy_text_to_clipboard(app, final_text, "language guard block");
 
@@ -175,7 +201,7 @@ fn language_guard_blocks(app: &AppHandle, settings: &AppSettings, final_text: &s
     let _ = app.emit(
         "language-guard-blocked",
         LanguageGuardEvent {
-            locked_language: settings.selected_language.clone(),
+            locked_language: effective_language.to_string(),
             preview,
         },
     );
@@ -302,6 +328,7 @@ struct AdaptiveInsertionRequest {
     app: AppHandle,
     history_manager: Arc<HistoryManager>,
     settings: AppSettings,
+    language_outcome: LanguageOutcome,
     final_text: String,
     context: crate::adaptive::types::CapturedContext,
     saved_entry_id: Option<i64>,
@@ -315,6 +342,7 @@ fn complete_adaptive_insertion(request: AdaptiveInsertionRequest) {
         app,
         history_manager,
         settings,
+        language_outcome,
         final_text,
         context,
         saved_entry_id,
@@ -351,7 +379,7 @@ fn complete_adaptive_insertion(request: AdaptiveInsertionRequest) {
         None
     };
     let attempt = if target_verified {
-        if language_guard_blocks(&app, &settings, &final_text) {
+        if language_guard_blocks(&app, &settings, &language_outcome, &final_text) {
             crate::insertion::InsertionAttempt::adaptive_guard_blocked()
         } else {
             let paste_text = prepare_adaptive_paste_text(&final_text, &context);
@@ -412,6 +440,7 @@ fn complete_classic_insertion(
     app: AppHandle,
     history_manager: Arc<HistoryManager>,
     settings: AppSettings,
+    language_outcome: LanguageOutcome,
     final_text: String,
     saved_entry_id: Option<i64>,
     cancelled_wav_path: Option<std::path::PathBuf>,
@@ -437,7 +466,7 @@ fn complete_classic_insertion(
     let attempt = if !target_verified {
         error!("Classic paste skipped because the foreground target changed before insertion");
         crate::insertion::InsertionAttempt::classic_target_changed()
-    } else if language_guard_blocks(&app, &settings, &final_text) {
+    } else if language_guard_blocks(&app, &settings, &language_outcome, &final_text) {
         crate::insertion::InsertionAttempt::classic_guard_blocked()
     } else {
         crate::insertion::InsertionAttempt::classic_ready(final_text)
@@ -1793,6 +1822,63 @@ mod adaptive_action_tests {
     }
 
     #[test]
+    fn unsupported_locked_language_falls_back_to_auto_without_guard_block() {
+        let mut settings = crate::settings::get_default_settings();
+        settings.selected_language = "ar".to_string();
+        let outcome = LanguageOutcome {
+            requested: Some("ar".to_string()),
+            effective: None,
+            supported: crate::providers::Support::Unsupported,
+            ..LanguageOutcome::default()
+        };
+
+        assert!(!language_guard_should_block(
+            &settings,
+            &outcome,
+            false,
+            "This is a correct English transcription"
+        ));
+    }
+
+    #[test]
+    fn supported_locked_language_still_blocks_contradictory_script() {
+        let mut settings = crate::settings::get_default_settings();
+        settings.selected_language = "ar".to_string();
+        let outcome = LanguageOutcome {
+            requested: Some("ar".to_string()),
+            effective: Some("ar".to_string()),
+            supported: crate::providers::Support::Supported,
+            ..LanguageOutcome::default()
+        };
+
+        assert!(language_guard_should_block(
+            &settings,
+            &outcome,
+            false,
+            "This is a clear English sentence"
+        ));
+    }
+
+    #[test]
+    fn language_guard_consumes_outcome_effective_instead_of_raw_setting() {
+        let mut settings = crate::settings::get_default_settings();
+        settings.selected_language = "en".to_string();
+        let outcome = LanguageOutcome {
+            requested: Some("en".to_string()),
+            effective: Some("ar".to_string()),
+            supported: crate::providers::Support::Supported,
+            ..LanguageOutcome::default()
+        };
+
+        assert!(language_guard_should_block(
+            &settings,
+            &outcome,
+            false,
+            "This is a clear English sentence"
+        ));
+    }
+
+    #[test]
     fn short_false_positive_without_active_signal_is_not_usable_speech() {
         let result = crate::managers::audio::RecordingStopResult {
             samples: vec![0.01; 20_000],
@@ -2512,6 +2598,7 @@ impl ShortcutAction for TranscribeAction {
                     match transcription_result {
                         Ok(transcription_output) => {
                             let transcription = transcription_output.text;
+                            let language_outcome = transcription_output.outcome;
                             debug!(
                                 "{}",
                                 transcription_completed_log_message(
@@ -2658,6 +2745,7 @@ impl ShortcutAction for TranscribeAction {
                                     app: ah.clone(),
                                     history_manager: Arc::clone(&hm),
                                     settings: settings.clone(),
+                                    language_outcome,
                                     final_text,
                                     context: context.clone(),
                                     saved_entry_id,
@@ -2773,6 +2861,7 @@ impl ShortcutAction for TranscribeAction {
                                         app_for_insertion,
                                         Arc::clone(&hm),
                                         settings_for_insertion,
+                                        language_outcome,
                                         final_text,
                                         saved_entry_id,
                                         cancelled_wav_path,
