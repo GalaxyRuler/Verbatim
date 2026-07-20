@@ -736,8 +736,21 @@ pub fn change_translation_target_language_setting(
 #[tauri::command]
 #[specta::specta]
 pub fn change_selected_language_setting(app: AppHandle, language: String) -> Result<(), String> {
+    let language = settings::normalize_bcp47(&language);
     settings::write_settings_domain(&app, settings::SettingsWriteDomain::Adaptive, |settings| {
-        settings.selected_language = language;
+        settings.selected_language = language.clone();
+        if language != "auto" && !language.is_empty() {
+            settings.dictation_language_mode = DictationLanguageMode::Single;
+            if !settings.adaptive_language_shortlist.contains(&language) {
+                settings.adaptive_language_shortlist.push(language.clone());
+            }
+        } else if settings.dictation_language_mode == DictationLanguageMode::Single {
+            settings.dictation_language_mode = if settings.adaptive_language_shortlist.len() > 1 {
+                DictationLanguageMode::Multilingual
+            } else {
+                DictationLanguageMode::Auto
+            };
+        }
     })?;
     Ok(())
 }
@@ -969,7 +982,7 @@ pub fn change_adaptive_language_shortlist_setting(
 ) -> Result<(), String> {
     let cleaned = languages
         .into_iter()
-        .map(|language| language.trim().to_lowercase())
+        .map(|language| settings::normalize_bcp47(&language))
         .filter(|language| !language.is_empty())
         .fold(Vec::<String>::new(), |mut acc, language| {
             if !acc.contains(&language) {
@@ -1580,6 +1593,7 @@ pub fn change_lazy_stream_close_setting(app: AppHandle, enabled: bool) -> Result
 #[tauri::command]
 #[specta::specta]
 pub fn change_app_language_setting(app: AppHandle, language: String) -> Result<(), String> {
+    let language = settings::normalize_bcp47(&language);
     settings::write_settings_domain(&app, settings::SettingsWriteDomain::General, |settings| {
         settings.app_language = language.clone();
     })?;

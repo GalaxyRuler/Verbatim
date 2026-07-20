@@ -224,6 +224,7 @@
         "translation": "Překlad",
         "allLanguages": "Všechny jazyky"
       },
+      "languageLockClearedForModel": "Tento model nepodporuje uzamčený jazyk diktování. Režim jazyka byl resetován na Automaticky.",
       "noModelsMatch": "Tomuto filtru neodpovídají žádné modely.",
       "yourModels": "Stažené modely",
       "availableModels": "Dostupné ke stažení"

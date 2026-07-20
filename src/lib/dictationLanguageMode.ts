@@ -33,7 +33,9 @@ export const getDictationLanguageMode = ({
   selectedLanguage,
   adaptiveLanguageShortlist,
 }: DictationLanguageSettings): DictationLanguageMode => {
-  if (dictationLanguageMode) return dictationLanguageMode;
+  if (dictationLanguageMode !== undefined && dictationLanguageMode !== null) {
+    return dictationLanguageMode;
+  }
   if (selectedLanguage && selectedLanguage !== "auto") return "single";
 
   const shortlist = normalizeLanguageCodes(adaptiveLanguageShortlist ?? []);

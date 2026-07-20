@@ -819,6 +819,7 @@
         "translation": "ترجمة",
         "allLanguages": "جميع اللغات"
       },
+      "languageLockClearedForModel": "هذا النموذج لا يدعم لغة الإملاء المحددة. أُعيد ضبط وضع اللغة إلى «تلقائي».",
       "noModelsMatch": "لا توجد نماذج مطابقة لهذا الفلتر."
     },
     "dictionary": {

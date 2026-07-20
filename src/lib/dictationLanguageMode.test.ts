@@ -37,6 +37,16 @@ describe("dictation language mode", () => {
     ).toBe("auto");
   });
 
+  test("treats an explicit backend mode as authoritative over a legacy language lock", () => {
+    expect(
+      getDictationLanguageMode({
+        dictationLanguageMode: "auto",
+        selectedLanguage: "ar",
+        adaptiveLanguageShortlist: ["ar", "en"],
+      }),
+    ).toBe("auto");
+  });
+
   test("cycles through auto, each configured language, multilingual, then auto", () => {
     expect(
       getNextDictationLanguageSelection({

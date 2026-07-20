@@ -224,6 +224,7 @@
         "translation": "Übersetzung",
         "allLanguages": "Alle Sprachen"
       },
+      "languageLockClearedForModel": "Dieses Modell unterstützt die festgelegte Diktiersprache nicht. Der Sprachmodus wurde auf „Automatisch“ zurückgesetzt.",
       "noModelsMatch": "Keine Modelle entsprechen diesem Filter.",
       "yourModels": "Heruntergeladene Modelle",
       "availableModels": "Zum Download verfügbar"

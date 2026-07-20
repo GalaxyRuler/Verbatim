@@ -224,6 +224,7 @@
         "translation": "Traduzione",
         "allLanguages": "Tutte le lingue"
       },
+      "languageLockClearedForModel": "Questo modello non supporta la lingua di dettatura bloccata. La modalità della lingua è stata reimpostata su Automatica.",
       "noModelsMatch": "Nessun modello corrisponde a questo filtro.",
       "yourModels": "Modelli scaricati",
       "availableModels": "Disponibili per il Download"

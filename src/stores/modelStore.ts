@@ -3,6 +3,7 @@ import { subscribeWithSelector } from "zustand/middleware";
 import { produce } from "immer";
 import { listen } from "@tauri-apps/api/event";
 import { commands, type ModelInfo } from "@/bindings";
+import i18n from "@/i18n";
 import { toast } from "sonner";
 
 interface DownloadProgress {
@@ -153,6 +154,11 @@ export const useModelStore = create<ModelsStore>()(
             isFirstRun: false,
             hasAnyModels: true,
           });
+          if (result.data?.reason === "language_lock_cleared_for_model") {
+            toast.warning(
+              i18n.t("settings.models.languageLockClearedForModel"),
+            );
+          }
           return true;
         } else {
           set({ error: `Failed to switch to model: ${result.error}` });

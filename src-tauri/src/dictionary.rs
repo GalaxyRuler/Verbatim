@@ -2,7 +2,7 @@ use crate::dictionary_learning::canonicalize;
 use crate::settings::{
     AppSettings, DictionaryEntry, DictionaryEntryPriority, DictionaryEntrySource, LearnCandidate,
 };
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const AMBIGUOUS_ENTRY_ID: &str = "ambiguous_entry_id";
@@ -31,12 +31,6 @@ pub fn sanitize_dictionary_phrase(raw: &str) -> Option<String> {
     }
 
     Some(cleaned)
-}
-
-pub fn normalize_dictionary_key(raw: &str) -> String {
-    sanitize_dictionary_phrase(raw)
-        .unwrap_or_default()
-        .to_lowercase()
 }
 
 fn dictionary_entry_id_base(now_ms: u64, phrase: &str) -> String {
@@ -89,12 +83,17 @@ pub fn make_dictionary_entry_id(entries: &[DictionaryEntry], now_ms: u64, phrase
 
 /// Phrases of ACTIVE entries only. Feeds the ASR prompt context and the legacy
 /// `custom_words` mirror — quarantined (inactive) entries must not keep biasing
-/// transcription toward the very phrase the user reversed.
+/// transcription toward the very phrase the user reversed. Canonical duplicates
+/// keep the first entry's display text.
 pub fn dictionary_phrases(entries: &[DictionaryEntry]) -> Vec<String> {
+    let mut seen = HashSet::new();
     entries
         .iter()
         .filter(|entry| entry.active)
-        .map(|entry| entry.phrase.clone())
+        .filter_map(|entry| {
+            seen.insert(canonicalize(&entry.phrase))
+                .then(|| entry.phrase.clone())
+        })
         .collect()
 }
 
@@ -148,6 +147,105 @@ pub fn migrate_dictionary_v2(settings: &mut AppSettings) -> bool {
     }
 
     settings.dictionary_schema_version = 2;
+    true
+}
+
+fn is_manual_trust_entry(entry: &DictionaryEntry) -> bool {
+    entry.user_confirmed
+        || matches!(
+            entry.source,
+            DictionaryEntrySource::Manual | DictionaryEntrySource::Imported
+        )
+}
+
+fn record_discarded_replacement_rule(
+    candidates: &mut Vec<LearnCandidate>,
+    discarded: &DictionaryEntry,
+    retained: &DictionaryEntry,
+) {
+    let Some(discarded_source) = discarded.replacement_of.as_deref() else {
+        return;
+    };
+    if retained
+        .replacement_of
+        .as_deref()
+        .is_some_and(|source| canonicalize(source) == canonicalize(discarded_source))
+    {
+        return;
+    }
+
+    let source_key = canonicalize(discarded_source);
+    let phrase_key = canonicalize(&discarded.phrase);
+    if candidates.iter().any(|candidate| {
+        candidate
+            .replacement_of
+            .as_deref()
+            .is_some_and(|source| canonicalize(source) == source_key)
+            && canonicalize(&candidate.phrase) == phrase_key
+    }) {
+        return;
+    }
+
+    candidates.push(LearnCandidate {
+        replacement_of: Some(discarded_source.to_string()),
+        phrase: discarded.phrase.clone(),
+        occurrences: 1,
+        last_evidence_session: None,
+        created_at_ms: discarded.created_at_ms,
+        updated_at_ms: discarded.updated_at_ms,
+    });
+}
+
+/// v2 -> v3: recompute dictionary identity using the NFC canonical key.
+///
+/// Canonically equal entries collapse to one. Manual-tier entries (Manual,
+/// Imported, or user-confirmed) outrank unconfirmed auto-learned entries; ties
+/// keep the first persisted entry. A discarded, distinct `replacement_of` is
+/// retained as a learn candidate for review instead of being silently lost.
+/// Display fields are copied from persisted values and are never normalized.
+pub fn migrate_dictionary_v3(settings: &mut AppSettings) -> bool {
+    if settings.dictionary_schema_version >= 3 {
+        return false;
+    }
+
+    let mut groups: Vec<Vec<DictionaryEntry>> = Vec::new();
+    let mut group_by_key = HashMap::new();
+    for entry in std::mem::take(&mut settings.dictionary_entries) {
+        let key = canonicalize(&entry.phrase);
+        let group_index = *group_by_key.entry(key).or_insert_with(|| {
+            groups.push(Vec::new());
+            groups.len() - 1
+        });
+        groups[group_index].push(entry);
+    }
+
+    let mut reconciled = Vec::with_capacity(groups.len());
+    for group in groups {
+        let mut winner_index = 0;
+        for index in 1..group.len() {
+            if is_manual_trust_entry(&group[index]) && !is_manual_trust_entry(&group[winner_index])
+            {
+                winner_index = index;
+            }
+        }
+
+        let retained = group[winner_index].clone();
+        for (index, discarded) in group.iter().enumerate() {
+            if index != winner_index {
+                record_discarded_replacement_rule(
+                    &mut settings.dictionary_learn_candidates,
+                    discarded,
+                    &retained,
+                );
+            }
+        }
+        reconciled.push(retained);
+    }
+    settings.dictionary_entries = reconciled;
+
+    sync_auto_learn_suppression_keys(settings);
+    settings.custom_words = dictionary_phrases(&settings.dictionary_entries);
+    settings.dictionary_schema_version = 3;
     true
 }
 
@@ -393,17 +491,18 @@ pub fn replace_dictionary_phrases(
         let Some(phrase) = sanitize_dictionary_phrase(&phrase) else {
             continue;
         };
-        if !desired_phrases.iter().any(|existing: &String| {
-            normalize_dictionary_key(existing) == normalize_dictionary_key(&phrase)
-        }) {
+        if !desired_phrases
+            .iter()
+            .any(|existing: &String| canonicalize(existing) == canonicalize(&phrase))
+        {
             desired_phrases.push(phrase);
         }
     }
 
     settings.dictionary_entries.retain(|entry| {
-        desired_phrases.iter().any(|phrase| {
-            normalize_dictionary_key(phrase) == normalize_dictionary_key(&entry.phrase)
-        })
+        desired_phrases
+            .iter()
+            .any(|phrase| canonicalize(phrase) == canonicalize(&entry.phrase))
     });
 
     for phrase in desired_phrases {
@@ -457,7 +556,7 @@ fn sync_auto_learn_suppression_keys(settings: &mut AppSettings) -> bool {
     let mut normalized = Vec::new();
 
     for phrase in &settings.dictionary_auto_learn_suppressed {
-        let key = normalize_dictionary_key(phrase);
+        let key = canonicalize(phrase);
         if key.is_empty() {
             changed = true;
             continue;
@@ -479,7 +578,7 @@ fn sync_auto_learn_suppression_keys(settings: &mut AppSettings) -> bool {
 }
 
 fn auto_learn_phrase_is_suppressed(settings: &AppSettings, phrase: &str) -> bool {
-    let key = normalize_dictionary_key(phrase);
+    let key = canonicalize(phrase);
     !key.is_empty()
         && settings
             .dictionary_auto_learn_suppressed
@@ -488,7 +587,7 @@ fn auto_learn_phrase_is_suppressed(settings: &AppSettings, phrase: &str) -> bool
 }
 
 fn suppress_auto_learn_phrase(settings: &mut AppSettings, phrase: &str) -> bool {
-    let key = normalize_dictionary_key(phrase);
+    let key = canonicalize(phrase);
     if key.is_empty() || settings.dictionary_auto_learn_suppressed.contains(&key) {
         return false;
     }
@@ -498,7 +597,7 @@ fn suppress_auto_learn_phrase(settings: &mut AppSettings, phrase: &str) -> bool 
 }
 
 fn unsuppress_auto_learn_phrase(settings: &mut AppSettings, phrase: &str) -> bool {
-    let key = normalize_dictionary_key(phrase);
+    let key = canonicalize(phrase);
     if key.is_empty() {
         return false;
     }
@@ -518,9 +617,9 @@ fn dictionary_phrase_has_valid_token_boundaries(phrase: &str) -> bool {
 }
 
 fn has_phrase(entries: &[DictionaryEntry], phrase: &str, except_id: Option<&str>) -> bool {
-    let key = normalize_dictionary_key(phrase);
+    let key = canonicalize(phrase);
     entries.iter().any(|entry| {
-        except_id.is_none_or(|id| entry.id != id) && normalize_dictionary_key(&entry.phrase) == key
+        except_id.is_none_or(|id| entry.id != id) && canonicalize(&entry.phrase) == key
     })
 }
 
@@ -733,7 +832,7 @@ pub fn approve_candidate(
     settings
         .dictionary_entries
         .iter()
-        .find(|entry| normalize_dictionary_key(&entry.phrase) == normalize_dictionary_key(phrase))
+        .find(|entry| canonicalize(&entry.phrase) == canonicalize(phrase))
         .cloned()
 }
 
@@ -829,7 +928,7 @@ pub fn reset_dictionary_diagnostics(settings: &mut AppSettings, now_ms: u64) {
 mod tests {
     use super::{
         approve_candidate, delete_entries, dictionary_phrases, make_dictionary_entry_id,
-        migrate_dictionary_v1, migrate_dictionary_v2, observe_correction,
+        migrate_dictionary_v1, migrate_dictionary_v2, migrate_dictionary_v3, observe_correction,
         promote_candidate_to_entry, prune_learn_candidates, record_learn_outcomes,
         reject_candidate, replace_dictionary_phrases, sanitize_dictionary_phrase, set_entry_active,
         sync_legacy_custom_words, update_entry, upsert_auto_learn_entry, upsert_manual_entry,
@@ -909,6 +1008,34 @@ mod tests {
         assert_eq!(
             ids,
             vec!["dict_42_entry", "dict_42_entry-2", "dict_42_entry-3"]
+        );
+    }
+
+    #[test]
+    fn manual_entries_deduplicate_nfc_equivalent_arabic_and_latin_without_changing_display() {
+        let mut settings = get_default_settings();
+        let decomposed_arabic = "\u{627}\u{654}\u{62d}\u{645}\u{62f}";
+        let decomposed_latin = "Cafe\u{301}";
+
+        let arabic = upsert_manual_entry(&mut settings, 10, decomposed_arabic.to_string(), None)
+            .expect("insert decomposed Arabic display");
+        let latin = upsert_manual_entry(&mut settings, 11, decomposed_latin.to_string(), None)
+            .expect("insert decomposed Latin display");
+
+        assert!(upsert_manual_entry(
+            &mut settings,
+            12,
+            "\u{623}\u{62d}\u{645}\u{62f}".into(),
+            None,
+        )
+        .is_err());
+        assert!(upsert_manual_entry(&mut settings, 13, "Caf\u{e9}".into(), None).is_err());
+        assert_eq!(settings.dictionary_entries.len(), 2);
+        assert_eq!(arabic.phrase, decomposed_arabic);
+        assert_eq!(latin.phrase, decomposed_latin);
+        assert_eq!(
+            settings.custom_words,
+            vec![decomposed_arabic.to_string(), decomposed_latin.to_string()]
         );
     }
 
@@ -1686,6 +1813,77 @@ mod tests {
             settings.dictionary_schema_version,
             migrated.dictionary_schema_version
         );
+    }
+
+    #[test]
+    fn migration_v3_keeps_highest_trust_then_first_and_records_discarded_rules() {
+        let mut settings = get_default_settings();
+        settings.dictionary_schema_version = 2;
+        settings.dictionary_entries = vec![
+            DictionaryEntry {
+                source: DictionaryEntrySource::AutoLearned,
+                ..entry_full(
+                    "dict_auto_ar",
+                    "\u{627}\u{654}\u{62d}\u{645}\u{62f}",
+                    Some("\u{627}\u{62d}\u{645}\u{62f} \u{627}\u{644}\u{642}\u{62f}\u{64a}\u{645}"),
+                )
+            },
+            entry_full("dict_manual_ar", "\u{623}\u{62d}\u{645}\u{62f}", None),
+            DictionaryEntry {
+                source: DictionaryEntrySource::AutoLearned,
+                ..entry_full("dict_first_latin", "Cafe\u{301}", Some("cafe old"))
+            },
+            DictionaryEntry {
+                source: DictionaryEntrySource::AutoLearned,
+                ..entry_full("dict_second_latin", "Caf\u{e9}", Some("cafe newer"))
+            },
+        ];
+        settings.dictionary_auto_learn_suppressed = vec!["Cafe\u{301}".into(), "Caf\u{e9}".into()];
+
+        assert!(migrate_dictionary_v3(&mut settings));
+        assert_eq!(settings.dictionary_schema_version, 3);
+        assert_eq!(settings.dictionary_entries.len(), 2);
+        assert_eq!(settings.dictionary_entries[0].id, "dict_manual_ar");
+        assert_eq!(
+            settings.dictionary_entries[0].phrase,
+            "\u{623}\u{62d}\u{645}\u{62f}"
+        );
+        assert_eq!(settings.dictionary_entries[1].id, "dict_first_latin");
+        assert_eq!(settings.dictionary_entries[1].phrase, "Cafe\u{301}");
+        assert_eq!(settings.dictionary_learn_candidates.len(), 2);
+        assert!(settings.dictionary_learn_candidates.iter().any(|candidate| {
+            candidate.phrase == "\u{627}\u{654}\u{62d}\u{645}\u{62f}"
+                && candidate.replacement_of.as_deref()
+                    == Some("\u{627}\u{62d}\u{645}\u{62f} \u{627}\u{644}\u{642}\u{62f}\u{64a}\u{645}")
+        }));
+        assert!(settings
+            .dictionary_learn_candidates
+            .iter()
+            .any(|candidate| {
+                candidate.phrase == "Caf\u{e9}"
+                    && candidate.replacement_of.as_deref() == Some("cafe newer")
+            }));
+        assert_eq!(settings.dictionary_auto_learn_suppressed.len(), 1);
+        assert_eq!(
+            settings.custom_words,
+            vec![
+                "\u{623}\u{62d}\u{645}\u{62f}".to_string(),
+                "Cafe\u{301}".to_string()
+            ]
+        );
+
+        let migrated = settings.clone();
+        assert!(!migrate_dictionary_v3(&mut settings));
+        assert_eq!(settings.dictionary_entries, migrated.dictionary_entries);
+        assert_eq!(
+            settings.dictionary_learn_candidates,
+            migrated.dictionary_learn_candidates
+        );
+        assert_eq!(
+            settings.dictionary_auto_learn_suppressed,
+            migrated.dictionary_auto_learn_suppressed
+        );
+        assert_eq!(settings.custom_words, migrated.custom_words);
     }
 
     #[test]

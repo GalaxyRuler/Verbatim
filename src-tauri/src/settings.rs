@@ -12,6 +12,7 @@ use tauri_plugin_store::StoreExt;
 
 pub const APPLE_INTELLIGENCE_PROVIDER_ID: &str = "apple_intelligence";
 pub const APPLE_INTELLIGENCE_DEFAULT_MODEL_ID: &str = "Apple Intelligence";
+const DICTATION_LANGUAGE_SCHEMA_VERSION: u32 = 1;
 
 #[cfg_attr(not(test), allow(dead_code))]
 static SETTINGS_WRITE_LOCK: Mutex<()> = Mutex::new(());
@@ -550,6 +551,8 @@ pub struct AppSettings {
     pub selected_language: String,
     #[serde(default)]
     pub dictation_language_mode: DictationLanguageMode,
+    #[serde(default)]
+    pub dictation_language_schema_version: u32,
     #[serde(default = "default_overlay_position")]
     pub overlay_position: OverlayPosition,
     #[serde(default)]
@@ -681,6 +684,27 @@ fn default_audio_feedback() -> bool {
 
 fn default_adaptive_language_shortlist() -> Vec<String> {
     vec!["en".to_string(), "ar".to_string()]
+}
+
+pub fn normalize_bcp47(tag: &str) -> String {
+    let mut subtags = tag.trim().split('-').filter(|subtag| !subtag.is_empty());
+    let Some(primary) = subtags.next() else {
+        return String::new();
+    };
+
+    let mut normalized = vec![primary.to_ascii_lowercase()];
+    normalized.extend(subtags.map(|subtag| {
+        if subtag.len() == 4 && subtag.bytes().all(|byte| byte.is_ascii_alphabetic()) {
+            let mut bytes = subtag.to_ascii_lowercase().into_bytes();
+            bytes[0] = bytes[0].to_ascii_uppercase();
+            String::from_utf8(bytes).expect("ASCII BCP-47 script subtag remains UTF-8")
+        } else if subtag.len() == 2 && subtag.bytes().all(|byte| byte.is_ascii_alphabetic()) {
+            subtag.to_ascii_uppercase()
+        } else {
+            subtag.to_string()
+        }
+    }));
+    normalized.join("-")
 }
 
 fn default_adaptive_default_profile_id() -> String {
@@ -1186,6 +1210,35 @@ fn ensure_adaptive_defaults(settings: &mut AppSettings) -> bool {
     changed
 }
 
+fn ensure_dictation_language_defaults(settings: &mut AppSettings) -> bool {
+    if settings.dictation_language_schema_version >= DICTATION_LANGUAGE_SCHEMA_VERSION {
+        return false;
+    }
+
+    settings.selected_language = normalize_bcp47(&settings.selected_language);
+    settings.adaptive_language_shortlist = settings
+        .adaptive_language_shortlist
+        .iter()
+        .map(|language| normalize_bcp47(language))
+        .filter(|language| !language.is_empty() && language != "auto")
+        .fold(Vec::new(), |mut languages, language| {
+            if !languages.contains(&language) {
+                languages.push(language);
+            }
+            languages
+        });
+
+    if settings.dictation_language_mode == DictationLanguageMode::Auto
+        && !settings.selected_language.is_empty()
+        && settings.selected_language != "auto"
+    {
+        settings.dictation_language_mode = DictationLanguageMode::Single;
+    }
+
+    settings.dictation_language_schema_version = DICTATION_LANGUAGE_SCHEMA_VERSION;
+    true
+}
+
 fn ensure_translation_defaults(settings: &mut AppSettings) -> bool {
     if settings.translate_to_english && settings.translation_request.is_none() {
         settings.translation_enabled = true;
@@ -1230,7 +1283,8 @@ fn ensure_dictionary_defaults_for_loaded_value(
         settings,
         !settings_value_has_dictionary_entries(settings_value),
     );
-    migrated_v1 || migrated_v2 || synced
+    let migrated_v3 = crate::dictionary::migrate_dictionary_v3(settings);
+    migrated_v1 || migrated_v2 || migrated_v3 || synced
 }
 
 fn ensure_snippet_defaults(settings: &mut AppSettings) -> bool {
@@ -1238,6 +1292,7 @@ fn ensure_snippet_defaults(settings: &mut AppSettings) -> bool {
 }
 
 pub fn set_translation_target_language(settings: &mut AppSettings, target_language: String) {
+    let target_language = normalize_bcp47(&target_language);
     let mut request = settings
         .translation_request
         .clone()
@@ -1365,6 +1420,7 @@ pub fn get_default_settings() -> AppSettings {
         translation_request: None,
         selected_language: "auto".to_string(),
         dictation_language_mode: DictationLanguageMode::default(),
+        dictation_language_schema_version: DICTATION_LANGUAGE_SCHEMA_VERSION,
         overlay_position: default_overlay_position(),
         docked_pill_enabled: false,
         warn_on_elevated_target: true,
@@ -1425,6 +1481,12 @@ pub fn get_default_settings() -> AppSettings {
 }
 
 impl AppSettings {
+    pub fn clear_dictation_language_lock(&mut self) {
+        self.selected_language = "auto".to_string();
+        self.dictation_language_mode = DictationLanguageMode::Auto;
+        self.adaptive_language_shortlist = default_adaptive_language_shortlist();
+    }
+
     pub fn apply_dictation_language_mode(
         &mut self,
         mode: DictationLanguageMode,
@@ -1432,7 +1494,7 @@ impl AppSettings {
         languages: Vec<String>,
     ) -> Result<(), String> {
         let cleaned = languages.into_iter().fold(Vec::new(), |mut acc, language| {
-            let language = language.trim().to_lowercase();
+            let language = normalize_bcp47(&language);
             if !language.is_empty() && language != "auto" && !acc.contains(&language) {
                 acc.push(language);
             }
@@ -1444,8 +1506,7 @@ impl AppSettings {
             DictationLanguageMode::Single => {
                 let language = selected_language
                     .as_deref()
-                    .map(str::trim)
-                    .map(str::to_lowercase)
+                    .map(normalize_bcp47)
                     .filter(|language| !language.is_empty() && language != "auto")
                     .or_else(|| cleaned.first().cloned());
                 let Some(language) = language else {
@@ -1930,6 +1991,7 @@ fn reconcile_loaded_settings_defaults(
     let binding_changed = ensure_binding_defaults(settings);
     let post_process_changed = ensure_post_process_defaults(settings);
     let adaptive_changed = ensure_adaptive_defaults(settings);
+    let dictation_language_changed = ensure_dictation_language_defaults(settings);
     let translation_changed = ensure_translation_defaults(settings);
     let dictionary_changed =
         ensure_dictionary_defaults_for_loaded_value(settings, settings_value_for_defaults);
@@ -1938,6 +2000,7 @@ fn reconcile_loaded_settings_defaults(
     binding_changed
         || post_process_changed
         || adaptive_changed
+        || dictation_language_changed
         || translation_changed
         || dictionary_changed
         || snippet_changed
@@ -1960,6 +2023,7 @@ fn reconcile_selected_microphone_identity(previous_name: Option<&str>, settings:
 
 fn settings_change_requires_immediate_save(previous: &AppSettings, next: &AppSettings) -> bool {
     previous.dictionary_schema_version != next.dictionary_schema_version
+        || previous.dictation_language_schema_version != next.dictation_language_schema_version
         || previous.history_enabled != next.history_enabled
         || previous.recordings_enabled != next.recordings_enabled
         || previous.history_limit != next.history_limit
@@ -2324,6 +2388,39 @@ mod tests {
                 needs_review: false,
             },
         ];
+        settings
+    }
+
+    fn nfc_duplicate_dictionary_settings() -> AppSettings {
+        let mut settings = get_default_settings();
+        settings.dictionary_schema_version = 2;
+        settings.dictionary_entries = vec![
+            DictionaryEntry {
+                id: "dict_auto".to_string(),
+                phrase: "Cafe\u{301}".to_string(),
+                replacement_of: Some("cafe old".to_string()),
+                source: DictionaryEntrySource::AutoLearned,
+                priority: DictionaryEntryPriority::Normal,
+                created_at_ms: 1,
+                updated_at_ms: 1,
+                active: true,
+                user_confirmed: false,
+                needs_review: false,
+            },
+            DictionaryEntry {
+                id: "dict_manual".to_string(),
+                phrase: "Caf\u{e9}".to_string(),
+                replacement_of: None,
+                source: DictionaryEntrySource::Manual,
+                priority: DictionaryEntryPriority::Normal,
+                created_at_ms: 2,
+                updated_at_ms: 2,
+                active: true,
+                user_confirmed: false,
+                needs_review: false,
+            },
+        ];
+        settings.custom_words = vec!["Cafe\u{301}".to_string(), "Caf\u{e9}".to_string()];
         settings
     }
 
@@ -3161,7 +3258,7 @@ mod tests {
     }
 
     #[test]
-    fn dictionary_v2_migration_saves_immediately_without_auto_save() {
+    fn dictionary_migrations_save_immediately_without_auto_save() {
         let temp_dir = tempfile::tempdir().expect("create settings tempdir");
         let store_path = temp_dir.path().join("settings").join("settings.json");
         let app = tauri::test::mock_builder()
@@ -3182,14 +3279,14 @@ mod tests {
         let outcome = load_settings_from_store(app.handle(), store.as_ref());
 
         assert!(outcome.persistence_error.is_none());
-        assert_eq!(outcome.settings.dictionary_schema_version, 2);
+        assert_eq!(outcome.settings.dictionary_schema_version, 3);
         assert_eq!(outcome.settings.dictionary_entries[0].id, "dict_shared");
         assert_eq!(outcome.settings.dictionary_entries[1].id, "dict_shared-2");
         let persisted: serde_json::Value = serde_json::from_slice(
             &std::fs::read(&store_path).expect("read immediately persisted migration"),
         )
         .expect("persisted settings are valid JSON");
-        assert_eq!(persisted["settings"]["dictionary_schema_version"], 2);
+        assert_eq!(persisted["settings"]["dictionary_schema_version"], 3);
         assert_eq!(
             persisted["settings"]["dictionary_entries"][1]["id"],
             "dict_shared-2"
@@ -3240,6 +3337,108 @@ mod tests {
             outcome.settings.dictionary_entries,
             before.dictionary_entries
         );
+        assert_eq!(store.get("settings"), Some(before_value));
+        assert_eq!(emitted.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn dictionary_v3_migration_saves_reconciled_identity_immediately() {
+        let temp_dir = tempfile::tempdir().expect("create settings tempdir");
+        let store_path = temp_dir.path().join("settings").join("settings.json");
+        let app = tauri::test::mock_builder()
+            .plugin(tauri_plugin_store::Builder::new().build())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("build Tauri test app");
+        let store = app
+            .store_builder(&store_path)
+            .disable_auto_save()
+            .build()
+            .expect("build store");
+        let before = nfc_duplicate_dictionary_settings();
+        store.set(
+            "settings",
+            serde_json::to_value(&before).expect("serialize pre-v3 settings"),
+        );
+
+        let outcome = load_settings_from_store(app.handle(), store.as_ref());
+
+        assert!(outcome.persistence_error.is_none());
+        assert_eq!(outcome.settings.dictionary_schema_version, 3);
+        assert_eq!(outcome.settings.dictionary_entries.len(), 1);
+        assert_eq!(outcome.settings.dictionary_entries[0].id, "dict_manual");
+        assert_eq!(outcome.settings.dictionary_entries[0].phrase, "Caf\u{e9}");
+        assert_eq!(outcome.settings.dictionary_learn_candidates.len(), 1);
+        assert_eq!(
+            outcome.settings.dictionary_learn_candidates[0]
+                .replacement_of
+                .as_deref(),
+            Some("cafe old")
+        );
+
+        let persisted: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(&store_path).expect("read immediately persisted v3 migration"),
+        )
+        .expect("persisted settings are valid JSON");
+        assert_eq!(persisted["settings"]["dictionary_schema_version"], 3);
+        assert_eq!(
+            persisted["settings"]["dictionary_entries"][0]["id"],
+            "dict_manual"
+        );
+        assert_eq!(
+            persisted["settings"]["dictionary_learn_candidates"][0]["replacement_of"],
+            "cafe old"
+        );
+    }
+
+    #[test]
+    fn failed_dictionary_v3_migration_keeps_version_entries_cache_and_events_unchanged() {
+        let temp_dir = tempfile::tempdir().expect("create settings tempdir");
+        let store_dir = temp_dir.path().join("settings");
+        std::fs::create_dir_all(&store_dir).expect("create settings directory");
+        let store_path = store_dir.join("settings.json");
+        let before = nfc_duplicate_dictionary_settings();
+        let before_value = serde_json::to_value(&before).expect("serialize pre-v3 settings");
+        std::fs::write(
+            &store_path,
+            serde_json::to_vec(&serde_json::json!({ "settings": before_value.clone() }))
+                .expect("serialize settings store"),
+        )
+        .expect("seed settings store");
+        let app = tauri::test::mock_builder()
+            .plugin(tauri_plugin_store::Builder::new().build())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("build Tauri test app");
+        let store = app
+            .store_builder(&store_path)
+            .disable_auto_save()
+            .build()
+            .expect("load seeded store");
+        let emitted = Arc::new(AtomicUsize::new(0));
+        let emitted_for_listener = Arc::clone(&emitted);
+        let _listener = app.listen_any("dictionary-candidates-learned", move |_| {
+            emitted_for_listener.fetch_add(1, Ordering::SeqCst);
+        });
+        let moved_store_dir = temp_dir.path().join("settings-original");
+        std::fs::rename(&store_dir, &moved_store_dir).expect("move loaded store directory");
+        std::fs::write(&store_dir, "block settings parent")
+            .expect("replace settings directory with a file");
+
+        let outcome = load_settings_from_store(app.handle(), store.as_ref());
+
+        assert!(outcome
+            .persistence_error
+            .as_deref()
+            .is_some_and(|error| error.contains("atomically persist settings")));
+        assert_eq!(outcome.settings.dictionary_schema_version, 2);
+        assert_eq!(
+            outcome.settings.dictionary_entries,
+            before.dictionary_entries
+        );
+        assert_eq!(
+            outcome.settings.dictionary_learn_candidates,
+            before.dictionary_learn_candidates
+        );
+        assert_eq!(outcome.settings.custom_words, before.custom_words);
         assert_eq!(store.get("settings"), Some(before_value));
         assert_eq!(emitted.load(Ordering::SeqCst), 0);
     }
@@ -3814,6 +4013,94 @@ mod tests {
             settings.dictation_language_mode,
             DictationLanguageMode::Auto
         );
+    }
+
+    #[test]
+    fn dictation_language_setter_preserves_bcp47_casing() {
+        let mut settings = get_default_settings();
+
+        settings
+            .apply_dictation_language_mode(
+                DictationLanguageMode::Single,
+                Some("ZH-hans".to_string()),
+                vec![
+                    "ZH-hans".to_string(),
+                    "EN-us".to_string(),
+                    "PT-br".to_string(),
+                    "AR-sa".to_string(),
+                ],
+            )
+            .expect("single language mode with BCP-47 tags");
+
+        assert_eq!(settings.selected_language, "zh-Hans");
+        assert_eq!(
+            settings.adaptive_language_shortlist,
+            vec!["zh-Hans", "en-US", "pt-BR", "ar-SA"]
+        );
+    }
+
+    #[test]
+    fn legacy_concrete_language_without_mode_loads_as_single() {
+        let mut legacy_value =
+            serde_json::to_value(get_default_settings()).expect("serialize default settings");
+        let legacy = legacy_value
+            .as_object_mut()
+            .expect("settings serialize as an object");
+        legacy.remove("dictation_language_mode");
+        legacy.remove("dictation_language_schema_version");
+        legacy.insert("selected_language".to_string(), serde_json::json!("AR-sa"));
+        legacy.insert(
+            "adaptive_language_shortlist".to_string(),
+            serde_json::json!(["AR-sa", "EN-us"]),
+        );
+
+        let mut settings: AppSettings =
+            serde_json::from_value(legacy_value.clone()).expect("deserialize legacy fixture");
+        assert_eq!(
+            settings.dictation_language_mode,
+            DictationLanguageMode::Auto
+        );
+
+        assert!(reconcile_loaded_settings_defaults(
+            &mut settings,
+            Some(&legacy_value)
+        ));
+        assert_eq!(
+            settings.dictation_language_mode,
+            DictationLanguageMode::Single
+        );
+        assert_eq!(settings.selected_language, "ar-SA");
+        assert_eq!(settings.adaptive_language_shortlist, vec!["ar-SA", "en-US"]);
+        assert_eq!(settings.dictation_language_schema_version, 1);
+    }
+
+    #[test]
+    fn legacy_explicit_auto_mode_with_concrete_language_loads_as_single() {
+        let mut legacy_value =
+            serde_json::to_value(get_default_settings()).expect("serialize default settings");
+        let legacy = legacy_value
+            .as_object_mut()
+            .expect("settings serialize as an object");
+        legacy.remove("dictation_language_schema_version");
+        legacy.insert(
+            "dictation_language_mode".to_string(),
+            serde_json::json!("auto"),
+        );
+        legacy.insert("selected_language".to_string(), serde_json::json!("pt-BR"));
+
+        let mut settings: AppSettings =
+            serde_json::from_value(legacy_value.clone()).expect("deserialize legacy fixture");
+        assert!(reconcile_loaded_settings_defaults(
+            &mut settings,
+            Some(&legacy_value)
+        ));
+
+        assert_eq!(
+            settings.dictation_language_mode,
+            DictationLanguageMode::Single
+        );
+        assert_eq!(settings.selected_language, "pt-BR");
+        assert_eq!(settings.dictation_language_schema_version, 1);
     }
 
     #[test]

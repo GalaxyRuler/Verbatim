@@ -2,8 +2,8 @@ use crate::audio_toolkit::{apply_dictionary_entries, filter_transcription_output
 use crate::managers::audio::AudioRecordingManager;
 use crate::managers::model::{EngineType, ModelManager};
 use crate::providers::{
-    resolve_whisper_gpu_device, CancellationToken, EngineProvider, ModelLocator, SpeechInput,
-    SpeechResponse, TranscribeRsProvider,
+    resolve_whisper_gpu_device, CancellationToken, EngineProvider, LanguageOutcome, ModelLocator,
+    SpeechInput, SpeechResponse, Support, TranscribeRsProvider,
 };
 use crate::settings::{
     get_settings, AppSettings, ModelUnloadTimeout, OrtAcceleratorSetting, WhisperAcceleratorSetting,
@@ -37,6 +37,8 @@ pub struct ModelStateEvent {
 pub(crate) struct TranscriptionOutput {
     pub text: String,
     pub effective_language: Option<String>,
+    #[allow(dead_code)]
+    pub outcome: LanguageOutcome,
 }
 
 fn model_load_diagnostic_code(error: &anyhow::Error) -> &'static str {
@@ -439,6 +441,49 @@ fn validate_selected_language(selected_language: &str, supported_languages: &[St
     } else {
         "auto".to_string()
     }
+}
+
+fn resolve_language_outcome(
+    selected_language: &str,
+    supported_languages: &[String],
+    translation_requested: bool,
+) -> (String, LanguageOutcome) {
+    let requested = (selected_language != "auto").then(|| selected_language.to_string());
+    // An empty capability list means the model made no claim. Preserve the existing runtime
+    // behavior (pass the lock through) while recording support as Unknown rather than Supported.
+    let supported = match requested.as_deref() {
+        None => Support::Unknown,
+        Some(_) if supported_languages.is_empty() => Support::Unknown,
+        Some(language)
+            if supported_languages
+                .iter()
+                .any(|candidate| candidate == language) =>
+        {
+            Support::Supported
+        }
+        Some(_) => Support::Unsupported,
+    };
+    let validated = validate_selected_language(selected_language, supported_languages);
+    let effective = effective_validated_dictation_language(&validated).map(str::to_string);
+
+    (
+        validated,
+        LanguageOutcome {
+            requested,
+            effective,
+            supported,
+            detected: None,
+            detection_confidence: None,
+            translation_requested,
+            translation_performed: false,
+        },
+    )
+}
+
+fn apply_provider_language_metadata(outcome: &mut LanguageOutcome, response: &SpeechResponse) {
+    outcome.detected = response.detected_language.clone();
+    outcome.detection_confidence = response.detection_confidence;
+    outcome.translation_performed = response.translation_performed;
 }
 
 fn effective_validated_dictation_language(validated_language: &str) -> Option<&str> {
@@ -1226,6 +1271,7 @@ impl TranscriptionManager {
             return Ok(TranscriptionOutput {
                 text: String::new(),
                 effective_language: None,
+                outcome: LanguageOutcome::default(),
             });
         }
 
@@ -1257,15 +1303,16 @@ impl TranscriptionManager {
 
         // Validate selected language against the model's supported languages.
         // If the language isn't supported, fall back to "auto" to prevent errors.
-        let validated_language = validate_selected_language(
+        let supported_languages = current_model_info
+            .as_ref()
+            .map(|info| info.supported_languages.clone())
+            .unwrap_or_default();
+        let (validated_language, mut language_outcome) = resolve_language_outcome(
             &settings.selected_language,
-            &current_model_info
-                .as_ref()
-                .map(|info| info.supported_languages.clone())
-                .unwrap_or_default(),
+            &supported_languages,
+            settings.translate_to_english,
         );
-        let effective_language =
-            effective_validated_dictation_language(&validated_language).map(str::to_string);
+        let effective_language = language_outcome.effective.clone();
 
         if validated_language == "auto" && settings.selected_language != "auto" {
             warn!(
@@ -1372,15 +1419,22 @@ impl TranscriptionManager {
             .map(|info| matches!(info.engine_type, EngineType::Whisper))
             .unwrap_or(false);
 
+        apply_provider_language_metadata(&mut language_outcome, &result);
+        let SpeechResponse {
+            text: raw_text,
+            translation_performed,
+            ..
+        } = result;
+
         let final_result = apply_local_text_transforms(
-            result.text,
+            raw_text,
             &settings,
             is_whisper,
             effective_language.as_deref(),
         );
 
         let et = std::time::Instant::now();
-        let translation_note = if effective_translate_to_english {
+        let translation_note = if translation_performed {
             " (translated)"
         } else {
             ""
@@ -1402,6 +1456,7 @@ impl TranscriptionManager {
         Ok(TranscriptionOutput {
             text: final_result,
             effective_language,
+            outcome: language_outcome,
         })
     }
 }
@@ -1596,6 +1651,58 @@ mod tests {
     #[test]
     fn empty_supported_language_list_accepts_any_selected_language() {
         assert_eq!(validate_selected_language("ar", &[]), "ar");
+    }
+
+    #[test]
+    fn locked_supported_language_outcome_keeps_effective_lock() {
+        let (validated, outcome) =
+            resolve_language_outcome("ar", &["en".to_string(), "ar".to_string()], false);
+
+        assert_eq!(validated, "ar");
+        assert_eq!(outcome.requested.as_deref(), Some("ar"));
+        assert_eq!(outcome.effective.as_deref(), Some("ar"));
+        assert_eq!(outcome.supported, crate::providers::Support::Supported);
+        assert!(!outcome.translation_requested);
+    }
+
+    #[test]
+    fn locked_unsupported_language_outcome_falls_back_to_auto() {
+        let (validated, outcome) = resolve_language_outcome("ar", &["en".to_string()], true);
+
+        assert_eq!(validated, "auto");
+        assert_eq!(outcome.requested.as_deref(), Some("ar"));
+        assert_eq!(outcome.effective, None);
+        assert_eq!(outcome.supported, crate::providers::Support::Unsupported);
+        assert!(outcome.translation_requested);
+    }
+
+    #[test]
+    fn empty_supported_language_list_reports_unknown_without_dropping_lock() {
+        let (validated, outcome) = resolve_language_outcome("ar", &[], false);
+
+        assert_eq!(validated, "ar");
+        assert_eq!(outcome.effective.as_deref(), Some("ar"));
+        assert_eq!(outcome.supported, crate::providers::Support::Unknown);
+    }
+
+    #[test]
+    fn provider_language_metadata_reaches_structured_outcome() {
+        let (_, mut outcome) = resolve_language_outcome("auto", &[], true);
+        let response = SpeechResponse {
+            text: "نص عربي".to_string(),
+            detected_language: Some("ar".to_string()),
+            detection_confidence: Some(0.91),
+            translation_performed: true,
+            provider_id: "test-provider",
+            model_id: "test-model".to_string(),
+        };
+
+        apply_provider_language_metadata(&mut outcome, &response);
+
+        assert_eq!(outcome.detected.as_deref(), Some("ar"));
+        assert_eq!(outcome.detection_confidence, Some(0.91));
+        assert!(outcome.translation_requested);
+        assert!(outcome.translation_performed);
     }
 
     #[test]

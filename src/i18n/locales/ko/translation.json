@@ -316,6 +316,7 @@
         "translation": "번역",
         "allLanguages": "모든 언어"
       },
+      "languageLockClearedForModel": "이 모델은 고정된 받아쓰기 언어를 지원하지 않습니다. 언어 모드를 자동으로 재설정했습니다.",
       "noModelsMatch": "이 필터에 맞는 모델이 없습니다."
     },
     "advanced": {

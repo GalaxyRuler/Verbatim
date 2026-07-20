@@ -30,6 +30,26 @@ pub struct TranslationTarget {
     pub target_language: String,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum Support {
+    Supported,
+    Unsupported,
+    /// The model did not publish a capability list, so support cannot be claimed or denied.
+    #[default]
+    Unknown,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct LanguageOutcome {
+    pub requested: Option<String>,
+    pub effective: Option<String>,
+    pub supported: Support,
+    pub detected: Option<String>,
+    pub detection_confidence: Option<f32>,
+    pub translation_requested: bool,
+    pub translation_performed: bool,
+}
+
 #[derive(Clone, Debug)]
 pub struct SpeechRequest {
     pub task: SpeechTaskKind,
@@ -41,11 +61,12 @@ pub struct SpeechRequest {
     pub cancellation: CancellationToken,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct SpeechResponse {
     pub text: String,
     pub detected_language: Option<String>,
-    pub translated: bool,
+    pub detection_confidence: Option<f32>,
+    pub translation_performed: bool,
     pub provider_id: &'static str,
     pub model_id: String,
 }

@@ -2,7 +2,9 @@ use natural::phonetics::soundex;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use strsim::levenshtein;
+use unicode_normalization::char::is_combining_mark;
 
+use crate::dictionary_learning::canonicalize;
 use crate::settings::{DictionaryEntry, DictionaryEntrySource};
 
 /// Builds an n-gram string by cleaning and concatenating words
@@ -13,8 +15,9 @@ fn build_ngram(words: &[&str]) -> String {
     words
         .iter()
         .map(|w| {
-            w.trim_matches(|c: char| !c.is_alphanumeric())
-                .to_lowercase()
+            canonicalize(w)
+                .trim_matches(|c: char| !c.is_alphanumeric())
+                .to_string()
         })
         .collect::<Vec<_>>()
         .concat()
@@ -103,9 +106,7 @@ const FUZZY_MIN_TOKEN_LEN: usize = 4;
 const FUZZY_STRICT_SCORE: f64 = 0.14;
 
 fn fuzzy_replacement_allowed(original: &str, candidate: &str, score: f64) -> bool {
-    if original.eq_ignore_ascii_case(candidate)
-        || original.to_lowercase() == candidate.to_lowercase()
-    {
+    if canonicalize(original) == canonicalize(candidate) {
         return true;
     }
     if original.chars().count() < FUZZY_MIN_TOKEN_LEN {
@@ -134,11 +135,11 @@ pub fn apply_custom_words(text: &str, custom_words: &[String], threshold: f64) -
         return text.to_string();
     }
 
-    // Pre-compute lowercase versions to avoid repeated allocations
-    let custom_words_lower: Vec<String> = custom_words.iter().map(|w| w.to_lowercase()).collect();
+    // Pre-compute comparison keys without changing replacement display strings.
+    let custom_word_keys: Vec<String> = custom_words.iter().map(|w| canonicalize(w)).collect();
 
     // Pre-compute versions with spaces removed for n-gram comparison
-    let custom_words_nospace: Vec<String> = custom_words_lower
+    let custom_words_nospace: Vec<String> = custom_word_keys
         .iter()
         .map(|w| w.replace(' ', ""))
         .collect();
@@ -168,7 +169,7 @@ pub fn apply_custom_words(text: &str, custom_words: &[String], threshold: f64) -
 
                 // Extract punctuation from first and last words of the n-gram
                 let (prefix, _) = extract_punctuation(ngram_words[0]);
-                let (_, suffix) = extract_punctuation(ngram_words[n - 1]);
+                let suffix = dictionary_suffix_punctuation(ngram_words[n - 1]);
 
                 // Preserve case from first word
                 let corrected = preserve_case_pattern(ngram_words[0], replacement);
@@ -301,7 +302,7 @@ fn apply_dictionary_replacement_rules_ranked(text: &str, active: &[&DictionaryEn
 
             if candidate == expected {
                 let (prefix, _) = extract_punctuation(words[index]);
-                let (_, suffix) = extract_punctuation(words[index + rule_len - 1]);
+                let suffix = dictionary_suffix_punctuation(words[index + rule_len - 1]);
                 result.push(format!("{}{}{}", prefix, phrase, suffix));
                 index += rule_len;
                 matched = true;
@@ -356,6 +357,27 @@ fn extract_punctuation(word: &str) -> (&str, &str) {
         .unwrap_or(0);
 
     (&word[..prefix_end], &word[suffix_start..])
+}
+
+/// Dictionary replacements already carry their own composed display spelling.
+/// Do not append a trailing combining mark from a canonically equivalent input
+/// a second time, but keep the general punctuation helper's legacy contract.
+fn dictionary_suffix_punctuation(word: &str) -> &str {
+    let (_, suffix) = extract_punctuation(word);
+    let suffix_offset = word.len() - suffix.len();
+    if !word[..suffix_offset]
+        .chars()
+        .last()
+        .is_some_and(char::is_alphanumeric)
+    {
+        return suffix;
+    }
+
+    let punctuation_offset = suffix
+        .char_indices()
+        .find_map(|(offset, character)| (!is_combining_mark(character)).then_some(offset))
+        .unwrap_or(suffix.len());
+    &suffix[punctuation_offset..]
 }
 
 /// Returns filler words appropriate for the given language code.
@@ -510,6 +532,16 @@ mod tests {
     }
 
     #[test]
+    fn fuzzy_dictionary_match_uses_nfc_identity() {
+        let custom_words = vec!["Caf\u{e9}".to_string()];
+
+        assert_eq!(
+            apply_custom_words("Cafe\u{301}", &custom_words, 0.01),
+            "Caf\u{e9}"
+        );
+    }
+
+    #[test]
     fn short_tokens_require_exact_match() {
         assert!(!fuzzy_replacement_allowed("the", "Théa", 0.10));
         assert!(fuzzy_replacement_allowed("thea", "Théa", 0.0));
@@ -594,6 +626,20 @@ mod tests {
         );
 
         assert_eq!(result, "Robyn joined");
+    }
+
+    #[test]
+    fn exact_dictionary_rule_uses_nfc_identity() {
+        let result = apply_dictionary_entries(
+            "\u{627}\u{654}\u{62d}\u{645}\u{62f} joined",
+            &[dictionary_entry(
+                "\u{623}\u{62d}\u{645}\u{62f}",
+                Some("\u{623}\u{62d}\u{645}\u{62f}"),
+            )],
+            0.18,
+        );
+
+        assert_eq!(result, "\u{623}\u{62d}\u{645}\u{62f} joined");
     }
 
     #[test]
