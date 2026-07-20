@@ -1217,6 +1217,7 @@ pub(crate) async fn process_adaptive_transcription_output(
         &context,
         &language,
         None,
+        &settings.adaptive_default_profile_id,
     );
     let profile = crate::adaptive::profile::find_profile_or_default(
         &settings.adaptive_profiles,
