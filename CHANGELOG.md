@@ -12,6 +12,30 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/). Version
 
 ---
 
+## [0.14.0] — 2026-07-21
+
+Reliability hardening release. A three-round adversarial audit of the dictionary, context-awareness, and language-correctness subsystems produced a six-batch plan; every batch was code-reviewed, an independent adversarial re-review of the shipped code caught three additional privacy/data-loss defects, and the critical paths were verified on real hardware. No new user-facing features — this release makes existing behavior correct and trustworthy.
+
+### Security & Privacy
+
+- **Selected-text transforms can no longer read password or secure fields.** On Windows, macOS, and Linux the accessibility capture now checks whether the focused field is secure _before_ reading any text, and fails closed when that check cannot be made — matching behavior across all three platforms.
+- **Deleting a recording can no longer report success while leaving the audio on disk.** History deletion now removes the last owning row inside a transaction and deletes the WAV first; if the file cannot be removed it keeps both the row and the file and reports a typed failure so the deletion can be retried, instead of silently orphaning the recording.
+- **Adaptive history reprocessing now respects Private Session** and no longer writes new history entries while private mode is on.
+
+### Fixed
+
+- **Dictionary entry IDs can no longer collide.** Arabic-only phrases and same-millisecond batch inserts previously produced duplicate IDs, so deleting one entry could delete several. IDs are now collision-resistant, and a migration repairs any duplicates already on disk without dropping or reordering entries.
+- **Dictionary matching is now Unicode-correct.** Composed and decomposed forms (Arabic diacritics, accented Latin) are unified under one NFC identity used for learning, matching, and suppression, while the text you typed is preserved exactly. A migration reconciles existing entries and preserves any superseded correction rules for review.
+- **Dictionary writes are durable.** Entry, candidate, and learned-correction changes now report success only after the value is persisted, and roll back on save failure.
+- **Filler-word cleanup follows the dictation language, not the app's display language.** Speaking Arabic (or any language) while the interface is in another language no longer strips valid short words, and never removes a word your dictionary produced.
+- **Android no longer applies dictionary entries you quarantined**, and its formatter state is preserved across startup and load failures.
+- **Language tags keep their canonical casing** (`zh-Hans`, `en-US`), a locked language is no longer silently lost when a model switch fails, and switching to a model that cannot honor a locked language preserves your language shortlist instead of resetting it.
+- **Adaptive mode no longer disables your configured post-processing.** Classic and adaptive dictation now run one unified pipeline, so an explicitly configured cleanup step (and Chinese variant conversion) applies in both modes, and the configured default profile is honored.
+- **The paste-time language guard now judges the language the model actually used.** Locking a language a model cannot support no longer diverts a correct transcription to the clipboard, the translation bypass depends on translation actually happening rather than merely being supported, and a single URL in a sentence no longer lets a wrong-script result skip the check.
+- **UTF-8 punctuation handling no longer panics** on Arabic, combining marks, or emoji.
+
+---
+
 ## [0.13.1] — 2026-07-13
 
 Patch release fixing a regression in the audio device pickers.
