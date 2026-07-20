@@ -1,4 +1,4 @@
-use crate::adaptive::language::analyze_language;
+use crate::adaptive::language::{analyze_language, is_technical_token};
 use crate::adaptive::types::LanguageClass;
 
 /// Below this many alphabetic chars a script judgment is noise; never
@@ -53,10 +53,7 @@ pub fn contradicts_locked_language(selected_language: &str, text: &str) -> bool 
     };
 
     let analysis = analyze_language(text, &[]);
-    if matches!(
-        analysis.class,
-        LanguageClass::Empty | LanguageClass::Mixed | LanguageClass::TechnicalMixed
-    ) {
+    if matches!(analysis.class, LanguageClass::Empty | LanguageClass::Mixed) {
         return false;
     }
 
@@ -71,12 +68,17 @@ fn dominant_script(text: &str) -> Option<ExpectedScript> {
     let mut counts = ScriptCounts::default();
     let mut total = 0usize;
 
-    for ch in text.chars().filter(|ch| ch.is_alphabetic()) {
-        let Some(script) = script_for_char(ch) else {
-            continue;
-        };
-        counts.increment(script);
-        total += 1;
+    for token in text
+        .split_whitespace()
+        .filter(|token| !is_technical_token(token))
+    {
+        for ch in token.chars().filter(|ch| ch.is_alphabetic()) {
+            let Some(script) = script_for_char(ch) else {
+                continue;
+            };
+            counts.increment(script);
+            total += 1;
+        }
     }
 
     if total < MIN_ALPHABETIC_FOR_GUARD {
@@ -314,6 +316,22 @@ mod tests {
         assert!(!contradicts_locked_language(
             "ar",
             "run cargo test and check src-tauri/src/actions.rs"
+        ));
+    }
+
+    #[test]
+    fn url_does_not_hide_a_long_wrong_script_body() {
+        assert!(contradicts_locked_language(
+            "en",
+            "https://verylongenglishdomainname.example.com/verylongidentifier هذا النص العربي طويل وواضح بما يكفي للحجب"
+        ));
+    }
+
+    #[test]
+    fn url_with_matching_natural_language_is_not_blocked() {
+        assert!(!contradicts_locked_language(
+            "en",
+            "https://verylongenglishdomainname.example.com/verylongidentifier this English explanation clearly matches the selected language"
         ));
     }
 
