@@ -15,6 +15,8 @@ interface AdaptiveProfilesProps {
   grouped?: boolean;
 }
 
+const PRIVATE_SESSION_REPROCESS_ERROR = "private_session_active";
+
 export const AdaptiveProfiles: React.FC<AdaptiveProfilesProps> = ({
   descriptionMode = "tooltip",
   grouped = false,
@@ -24,6 +26,13 @@ export const AdaptiveProfiles: React.FC<AdaptiveProfilesProps> = ({
     useSettings();
   const [profiles, setProfiles] = useState<AdaptiveProfile[]>([]);
   const [isCommandRunning, setCommandRunning] = useState(false);
+
+  const reprocessErrorMessage = (error: unknown) => {
+    const rawError = error instanceof Error ? error.message : String(error);
+    return rawError === PRIVATE_SESSION_REPROCESS_ERROR
+      ? t("settings.advanced.adaptiveProfiles.actions.privateSessionBlocked")
+      : rawError;
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -70,7 +79,7 @@ export const AdaptiveProfiles: React.FC<AdaptiveProfilesProps> = ({
     try {
       const result = await commands.reprocessLastAdaptiveEntry(null);
       if (result.status === "error") {
-        toast.error(String(result.error));
+        toast.error(reprocessErrorMessage(result.error));
       } else {
         await refreshSettings();
         toast.success(
@@ -78,7 +87,7 @@ export const AdaptiveProfiles: React.FC<AdaptiveProfilesProps> = ({
         );
       }
     } catch (error) {
-      toast.error(String(error));
+      toast.error(reprocessErrorMessage(error));
     } finally {
       setCommandRunning(false);
     }

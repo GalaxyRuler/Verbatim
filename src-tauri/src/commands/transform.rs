@@ -1,3 +1,4 @@
+use std::future::Future;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
@@ -6,7 +7,9 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::adaptive::types::{InsertionMethod, InsertionReceipt};
 use crate::managers::history::HistoryManager;
-use crate::selection::{SelectionReplaceError, SelectionReplacementOutcome};
+use crate::selection::{
+    SelectionCaptureError, SelectionReplaceError, SelectionReplacementOutcome, SelectionSnapshot,
+};
 use crate::transform_mode::{self, TransformAction};
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -51,8 +54,34 @@ pub async fn run_transform_selected_text(
         return Err("Text transforms are disabled while Private Session is on".to_string());
     }
 
-    let captured = capture_selection_on_main_thread(&app).await?;
+    let capture_result = capture_selection_on_main_thread(&app).await;
+    run_transform_selected_text_with_executor(capture_result, move |captured| {
+        execute_captured_transform(app, history_manager, action, target_language, captured)
+    })
+    .await
+}
+
+async fn run_transform_selected_text_with_executor<E, F>(
+    capture_result: Result<SelectionSnapshot, SelectionCaptureError>,
+    executor: E,
+) -> Result<TransformCommandResult, String>
+where
+    E: FnOnce(SelectionSnapshot) -> F,
+    F: Future<Output = Result<TransformCommandResult, String>>,
+{
+    let captured = capture_result.map_err(transform_capture_error_for_command)?;
     crate::selection::validate_selected_text_anchor(&captured).map_err(|err| format!("{err:?}"))?;
+
+    executor(captured).await
+}
+
+async fn execute_captured_transform(
+    app: AppHandle,
+    history_manager: Arc<HistoryManager>,
+    action: TransformAction,
+    target_language: Option<String>,
+    captured: SelectionSnapshot,
+) -> Result<TransformCommandResult, String> {
     let task = transform_mode::build_transform_task(
         action.clone(),
         &captured.selected_text,
@@ -122,6 +151,14 @@ pub async fn run_transform_selected_text(
     })
 }
 
+fn transform_capture_error_for_command(error: SelectionCaptureError) -> String {
+    if let SelectionCaptureError::Unavailable(detail) = &error {
+        log::warn!("Selected-text capture unavailable: {detail}");
+    }
+
+    error.reason_code().to_string()
+}
+
 fn ensure_transform_not_cancelled(
     operation_token: Option<&crate::operation_cancellation::OperationToken>,
     stage: &str,
@@ -149,18 +186,17 @@ fn emit_transform_recovery_copied(app: &AppHandle) {
 
 async fn capture_selection_on_main_thread(
     app: &AppHandle,
-) -> Result<crate::selection::SelectionSnapshot, String> {
+) -> Result<SelectionSnapshot, SelectionCaptureError> {
     let (sender, receiver) = std::sync::mpsc::channel();
 
     app.run_on_main_thread(move || {
         let _ = sender.send(crate::selection::capture_current_selection_snapshot());
     })
-    .map_err(|err| err.to_string())?;
+    .map_err(|err| SelectionCaptureError::Unavailable(err.to_string()))?;
 
     receiver
         .recv()
-        .map_err(|err| err.to_string())?
-        .map_err(|err| format!("{err:?}"))
+        .map_err(|err| SelectionCaptureError::Unavailable(err.to_string()))?
 }
 
 async fn replace_selection_with_transaction_on_main_thread(
@@ -251,6 +287,7 @@ fn recovery_status(status: &TransformCommandStatus) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::Cell;
 
     #[test]
     fn shortcut_target_language_uses_configured_translation_target() {
@@ -281,5 +318,40 @@ mod tests {
             .expect_err("cancelled transform must block side effect");
 
         assert!(err.contains("history save"));
+    }
+
+    #[test]
+    fn secure_capture_errors_stop_executor_before_provider_history_or_mutation() {
+        for capture_error in [
+            SelectionCaptureError::SecureField,
+            SelectionCaptureError::SecureCheckError,
+        ] {
+            let provider_calls = Cell::new(0);
+            let history_writes = Cell::new(0);
+            let clipboard_mutations = Cell::new(0);
+            let selection_mutations = Cell::new(0);
+
+            let result = tauri::async_runtime::block_on(run_transform_selected_text_with_executor(
+                Err(capture_error.clone()),
+                |_| {
+                    provider_calls.set(provider_calls.get() + 1);
+                    history_writes.set(history_writes.get() + 1);
+                    clipboard_mutations.set(clipboard_mutations.get() + 1);
+                    selection_mutations.set(selection_mutations.get() + 1);
+                    std::future::ready(Err::<TransformCommandResult, String>(
+                        "injected executor should not run".to_string(),
+                    ))
+                },
+            ));
+
+            assert_eq!(
+                result.expect_err("secure capture errors must stop the command"),
+                capture_error.reason_code()
+            );
+            assert_eq!(provider_calls.get(), 0);
+            assert_eq!(history_writes.get(), 0);
+            assert_eq!(clipboard_mutations.get(), 0);
+            assert_eq!(selection_mutations.get(), 0);
+        }
     }
 }

@@ -49,6 +49,11 @@ struct LanguageGuardEvent {
     preview: String,
 }
 
+#[derive(Clone, serde::Serialize)]
+struct TransformSelectionCaptureBlockedEvent {
+    reason_code: String,
+}
+
 /// Drop guard that notifies the [`TranscriptionCoordinator`] when the
 /// transcription pipeline finishes — whether it completes normally or panics.
 struct FinishGuard(AppHandle, u64);
@@ -1019,6 +1024,7 @@ fn force_ltr_input_direction_before_paste(
 pub(crate) async fn process_adaptive_transcription_output(
     settings: &AppSettings,
     transcription: &str,
+    effective_language: Option<&str>,
     context: crate::adaptive::types::CapturedContext,
     shortcut: crate::adaptive::types::ShortcutIntent,
 ) -> crate::adaptive::types::AdaptiveProcessResult {
@@ -1048,7 +1054,11 @@ pub(crate) async fn process_adaptive_transcription_output(
     let final_text = if settings.formatting_level == crate::settings::FormattingLevel::None {
         transcription.to_string()
     } else {
-        crate::adaptive::processor::deterministic_process(transcription, profile)
+        crate::adaptive::processor::deterministic_process(
+            transcription,
+            profile,
+            effective_language,
+        )
     };
     let final_text = crate::adaptive::smart_formatting::format_transcript(
         &final_text,
@@ -1982,7 +1992,7 @@ impl ShortcutAction for TranscribeAction {
 
                     // Transcribe concurrently with WAV save
                     let transcription_time = Instant::now();
-                    let transcription_result = tm.transcribe_with_cancellation(
+                    let transcription_result = tm.transcribe_with_cancellation_context(
                         samples,
                         operation_token
                             .as_ref()
@@ -2025,7 +2035,8 @@ impl ShortcutAction for TranscribeAction {
                     }
 
                     match transcription_result {
-                        Ok(transcription) => {
+                        Ok(transcription_output) => {
+                            let transcription = transcription_output.text;
                             debug!(
                                 "{}",
                                 transcription_completed_log_message(
@@ -2066,6 +2077,7 @@ impl ShortcutAction for TranscribeAction {
                                 let processed = process_adaptive_transcription_output(
                                     &settings,
                                     &transcription,
+                                    transcription_output.effective_language.as_deref(),
                                     context.clone(),
                                     crate::adaptive::types::ShortcutIntent::Default,
                                 )
@@ -2394,6 +2406,18 @@ impl ShortcutAction for TransformShortcutAction {
                     );
                 }
                 Err(err) => {
+                    if matches!(
+                        err.as_str(),
+                        crate::selection::SECURE_FIELD_REASON_CODE
+                            | crate::selection::SECURE_CHECK_ERROR_REASON_CODE
+                    ) {
+                        let _ = app.emit(
+                            "transform-selection-capture-blocked",
+                            TransformSelectionCaptureBlockedEvent {
+                                reason_code: err.clone(),
+                            },
+                        );
+                    }
                     warn!("Transform shortcut '{}' failed: {}", binding_id, err);
                 }
             }

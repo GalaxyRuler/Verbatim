@@ -2,14 +2,21 @@ use crate::adaptive::language::analyze_language;
 use crate::adaptive::profile::{AdaptiveProfile, RewriteMode};
 use crate::adaptive::types::LanguageClass;
 
-pub fn deterministic_process(raw: &str, profile: &AdaptiveProfile) -> String {
+pub fn deterministic_process(
+    raw: &str,
+    profile: &AdaptiveProfile,
+    effective_language: Option<&str>,
+) -> String {
     if profile.rewrite.mode == RewriteMode::Disabled {
         return raw.to_string();
     }
 
     let mut tokens = Vec::new();
     for token in raw.split_whitespace() {
-        if profile.cleanup.remove_fillers && is_simple_filler(token) {
+        if profile.cleanup.remove_fillers
+            && effective_language.is_some_and(is_english_language)
+            && is_simple_filler(token)
+        {
             continue;
         }
         tokens.push(token);
@@ -23,6 +30,13 @@ pub fn deterministic_process(raw: &str, profile: &AdaptiveProfile) -> String {
         output = format_email_text(&output);
     }
     output
+}
+
+fn is_english_language(language: &str) -> bool {
+    language
+        .split(['-', '_'])
+        .next()
+        .is_some_and(|base| base.eq_ignore_ascii_case("en"))
 }
 
 pub fn validate_output(raw: &str, output: &str, profile: &AdaptiveProfile) -> Result<(), String> {
@@ -213,14 +227,27 @@ mod tests {
 
     #[test]
     fn raw_profile_returns_input_unchanged() {
-        let result = deterministic_process("um hello hello", &profile("raw"));
+        let result = deterministic_process("um hello hello", &profile("raw"), None);
         assert_eq!(result, "um hello hello");
     }
 
     #[test]
     fn clean_profile_removes_simple_english_fillers() {
-        let result = deterministic_process("um hello, uh we should go", &profile("default_clean"));
+        let result = deterministic_process(
+            "um hello, uh we should go",
+            &profile("default_clean"),
+            Some("en"),
+        );
         assert_eq!(result, "hello, we should go");
+    }
+
+    #[test]
+    fn clean_profile_preserves_english_fillers_without_locked_english() {
+        let auto = deterministic_process("um hello", &profile("default_clean"), None);
+        let portuguese = deterministic_process("um hello", &profile("default_clean"), Some("pt"));
+
+        assert_eq!(auto, "um hello");
+        assert_eq!(portuguese, "um hello");
     }
 
     #[test]
@@ -228,6 +255,7 @@ mod tests {
         let result = deterministic_process(
             "uh run cargo_test in src-tauri/src/actions.rs",
             &profile("technical"),
+            Some("en"),
         );
         assert!(result.contains("cargo_test"));
         assert!(result.contains("src-tauri/src/actions.rs"));
@@ -238,6 +266,7 @@ mod tests {
         let result = deterministic_process(
             "Dear James, I have received your Excel file. Sincerely, Abdullah Al-Khalid.",
             &profile("email"),
+            Some("en"),
         );
 
         assert_eq!(
@@ -251,6 +280,7 @@ mod tests {
         let result = deterministic_process(
             "Hello Dana, The report is attached. Best regards, Abdullah.",
             &profile("email"),
+            Some("en"),
         );
 
         assert_eq!(

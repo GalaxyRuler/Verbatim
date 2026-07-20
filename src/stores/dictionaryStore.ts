@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import i18n from "@/i18n";
 import {
   commands,
   type DictionaryDiagnostics,
@@ -14,6 +15,7 @@ type DictionaryState = {
   candidates: LearnCandidate[];
   diagnostics: DictionaryDiagnostics | null;
   isLoading: boolean;
+  entriesLoaded: boolean;
   updatingIds: Set<string>;
   loadEntries: () => Promise<void>;
   addEntry: (input: DictionaryEntryInput) => Promise<DictionaryEntry>;
@@ -65,7 +67,11 @@ const unwrapResult = <T>(
   result: { status: "ok"; data: T } | { status: "error"; error: string },
 ) => {
   if (result.status === "error") {
-    throw new Error(result.error);
+    const message =
+      result.error === "ambiguous_entry_id"
+        ? i18n.t("settings.dictionary.errors.ambiguousEntryId")
+        : result.error;
+    throw new Error(message);
   }
 
   return result.data;
@@ -77,13 +83,14 @@ export const useDictionaryStore = create<DictionaryState>()((set, get) => ({
   candidates: [],
   diagnostics: null,
   isLoading: false,
+  entriesLoaded: false,
   updatingIds: new Set<string>(),
 
   loadEntries: async () => {
     set({ isLoading: true });
     try {
       const entries = unwrapResult(await commands.listDictionaryEntries());
-      set({ entries: sortEntries(entries) });
+      set({ entries: sortEntries(entries), entriesLoaded: true });
     } finally {
       set({ isLoading: false });
     }

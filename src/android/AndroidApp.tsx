@@ -103,6 +103,7 @@ import {
   clearModelProgress,
   clearProgressEntry,
 } from "./modelProgress";
+import { buildAndroidTextFormatterSnapshot } from "./textFormatterSnapshot";
 import "./AndroidApp.css";
 
 type AndroidTab = "home" | "history" | "models" | "settings";
@@ -437,10 +438,14 @@ const WaveformPreview = () => (
 
 const useAndroidTextFormatterSync = () => {
   const dictionaryEntries = useDictionaryStore((store) => store.entries);
+  const dictionaryEntriesLoaded = useDictionaryStore(
+    (store) => store.entriesLoaded,
+  );
   const loadDictionaryEntries = useDictionaryStore(
     (store) => store.loadEntries,
   );
   const snippetEntries = useSnippetsStore((store) => store.entries);
+  const snippetEntriesLoaded = useSnippetsStore((store) => store.entriesLoaded);
   const loadSnippetEntries = useSnippetsStore((store) => store.loadEntries);
 
   useEffect(() => {
@@ -450,20 +455,22 @@ const useAndroidTextFormatterSync = () => {
   }, [loadDictionaryEntries, loadSnippetEntries]);
 
   useEffect(() => {
-    void syncTextFormatter(
-      JSON.stringify({
-        dictionary_entries: dictionaryEntries.map((entry) => ({
-          phrase: entry.phrase,
-          replacement_of: entry.replacement_of ?? null,
-          priority: entry.priority ?? "normal",
-        })),
-        snippets: snippetEntries.map((entry) => ({
-          trigger: entry.trigger,
-          content: entry.content,
-        })),
-      }),
+    const snapshot = buildAndroidTextFormatterSnapshot(
+      dictionaryEntries,
+      snippetEntries,
+      { dictionaryEntriesLoaded, snippetEntriesLoaded },
     );
-  }, [dictionaryEntries, snippetEntries]);
+    if (snapshot === null) {
+      return;
+    }
+
+    void syncTextFormatter(snapshot);
+  }, [
+    dictionaryEntries,
+    dictionaryEntriesLoaded,
+    snippetEntries,
+    snippetEntriesLoaded,
+  ]);
 };
 
 export default function AndroidApp() {

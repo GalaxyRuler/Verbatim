@@ -489,7 +489,8 @@
           "reprocess": "Reprocess last",
           "reset": "Reset memory",
           "reprocessDone": "Latest adaptive entry reprocessed.",
-          "resetDone": "Adaptive correction memory reset."
+          "resetDone": "Adaptive correction memory reset.",
+          "privateSessionBlocked": "Reprocessing is unavailable during a private session."
         }
       },
       "dockedPill": {
@@ -898,7 +899,8 @@
         "delete": "Failed to delete dictionary entry",
         "duplicate": "{{phrase}} is already in your dictionary",
         "approve": "Couldn't approve entry",
-        "reject": "Couldn't reject entry"
+        "reject": "Couldn't reject entry",
+        "ambiguousEntryId": "This entry matches more than one saved dictionary item. No changes were made."
       }
     },
     "snippets": {
@@ -1012,6 +1014,9 @@
     "pasteFailedCopyAction": "Copy again",
     "transformRecoveryCopiedTitle": "Transform Result Copied",
     "transformRecoveryCopiedDescription": "The selected text was transformed, but Verbatim could not replace it in the active app. The result was copied to your clipboard.",
+    "transformSecureFieldTitle": "Text Transformation Blocked",
+    "transformSecureFieldDescription": "Verbatim cannot transform selected text from password or secure fields.",
+    "transformSecureCheckErrorDescription": "Verbatim could not verify whether this field is secure, so no text was read or sent.",
     "languageGuardTitle": "Wrong Language Detected",
     "languageGuardDescription": "Verbatim blocked text that did not match your locked language ({{language}}). It was copied to your clipboard.",
     "languageGuardPreview": "Preview: {{preview}}",

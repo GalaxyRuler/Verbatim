@@ -467,7 +467,8 @@
           "reprocess": "إعادة معالجة الأخير",
           "reset": "إعادة ضبط الذاكرة",
           "reprocessDone": "تمت إعادة معالجة أحدث إدخال تكيفي.",
-          "resetDone": "تمت إعادة ضبط ذاكرة التصحيحات التكيفية."
+          "resetDone": "تمت إعادة ضبط ذاكرة التصحيحات التكيفية.",
+          "privateSessionBlocked": "إعادة المعالجة غير متاحة أثناء الجلسة الخاصة."
         }
       },
       "dockedPill": {
@@ -868,7 +869,8 @@
         "delete": "فشل حذف إدخال القاموس",
         "duplicate": "{{phrase}} موجود بالفعل في قاموسك",
         "approve": "تعذرت الموافقة على الإدخال",
-        "reject": "تعذر رفض الإدخال"
+        "reject": "تعذر رفض الإدخال",
+        "ambiguousEntryId": "يتطابق هذا الإدخال مع أكثر من عنصر محفوظ في القاموس. لم يتم إجراء أي تغييرات."
       },
       "pending": {
         "title": "قيد المراجعة",
@@ -1016,6 +1018,9 @@
     "languageGuardPasteAnyway": "الصق على أي حال",
     "transformRecoveryCopiedTitle": "تم نسخ نتيجة التحويل",
     "transformRecoveryCopiedDescription": "تم تحويل النص المحدد، لكن تعذر استبداله في التطبيق النشط. تم نسخ النتيجة إلى الحافظة.",
+    "transformSecureFieldTitle": "تم حظر تحويل النص",
+    "transformSecureFieldDescription": "لا يمكن لـ Verbatim تحويل النص المحدد في حقول كلمات المرور أو الحقول الآمنة.",
+    "transformSecureCheckErrorDescription": "تعذر على Verbatim التحقق مما إذا كان هذا الحقل آمنًا، لذلك لم تتم قراءة أي نص أو إرساله.",
     "coordinatorFailedMessage": "توقف منسق الإملاء بعد إخفاقات متكررة. أعد تشغيل Verbatim للاسترداد.",
     "coordinatorFailedStep": "منسق الإملاء",
     "coordinatorRestartedDescription": "استعاد Verbatim عامل الإملاء. إذا تكرر ذلك، افتح السجلات من إعدادات التصحيح.",
