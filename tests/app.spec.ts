@@ -1055,7 +1055,7 @@ const installTauriMocks = async (
                 ...appSettings,
                 selected_model: args?.modelId as string,
               };
-              return null;
+              return { reason: null };
             case "get_current_model":
             case "get_transcription_model_status":
               return appSettings.selected_model || currentModel;

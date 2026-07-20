@@ -154,7 +154,7 @@ export const useModelStore = create<ModelsStore>()(
             isFirstRun: false,
             hasAnyModels: true,
           });
-          if (result.data.reason === "language_lock_cleared_for_model") {
+          if (result.data?.reason === "language_lock_cleared_for_model") {
             toast.warning(
               i18n.t("settings.models.languageLockClearedForModel"),
             );
