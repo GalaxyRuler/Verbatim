@@ -17,6 +17,33 @@ OS virtual input device. The packaged app applies that selection before the
 recording manager initializes and reports it in status JSON, so the runner can
 fail if the app is still using the wrong microphone.
 
+## Local inference receipt
+
+An opt-in packaged smoke can prove that a real local model loads and produces a
+non-empty result from a deterministic 16 kHz mono PCM WAV. The receipt records
+only model ID, sample count, booleans, and failure class; it never stores the
+dictated audio or transcript. The runner also supplies an artifact-local data
+directory, including on Windows where setting `APPDATA` alone does not isolate
+known-folder application storage.
+
+```bash
+bun run smoke:native -- \
+  --app path/to/Verbatim \
+  --artifact-dir native-smoke-artifacts \
+  --real-inference-wav fixtures/synthetic-speech-16khz-mono.wav \
+  --real-inference-model moonshine-tiny-streaming-en \
+  --real-inference-model-dir fixtures/models \
+  --require-real-inference
+
+bun run check:native-smoke-artifacts -- \
+  --dir native-smoke-artifacts \
+  --require-real-inference
+```
+
+The model directory must be disposable; it is used as the smoke model root and
+can receive the model's local integrity inventory. This verifies the local ASR
+boundary, but it does not substitute for a virtual-microphone capture test.
+
 Use `bun run smoke:virtual-audio` to record virtual-input provisioning evidence.
 On Linux, `--create-linux-pulse-source` creates a PulseAudio/PipeWire-compatible
 source named `verbatim_smoke_source` and reports `pactl unload-module` cleanup
@@ -96,8 +123,9 @@ The drill never reads user clipboard contents.
 Remaining fixture work:
 
 - OS virtual audio input path for packaged transcription smoke.
-- Real inference smoke that records and transcribes the deterministic audio
-  fixture from the provisioned virtual input.
+- Wire the real inference receipt to audio captured from the provisioned
+  virtual input, rather than the deterministic WAV fed directly to the local
+  model.
 - N-1 to N updater application smoke.
 - Real provider load-failure execution that proves the native engine can recover
   after an actual accelerator load failure.

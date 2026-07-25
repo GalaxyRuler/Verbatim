@@ -53,6 +53,17 @@ type NativeSmokeStatus = {
   audio_fixture_path?: string | null;
   audio_fixture_sample_count?: number;
   audio_fixture_verified?: boolean;
+  real_inference?: {
+    checked?: boolean;
+    model_id?: string;
+    audio_sample_count?: number;
+    model_loaded?: boolean;
+    inference_started?: boolean;
+    inference_completed?: boolean;
+    transcript_non_empty?: boolean;
+    transcript_recorded?: boolean;
+    failure_class?: string | null;
+  } | null;
   resource_probe_checked?: boolean;
   resource_probe_failures?: string[];
   retention?: {
@@ -170,6 +181,11 @@ Options:
   --skip-startup-failure    Skip forced startup-failure recovery smoke.
   --skip-coordinator-panic  Skip forced coordinator panic supervision smoke.
   --smoke-microphone <name> Select a microphone by name for native smoke.
+  --real-inference-wav <path> Run an opt-in local model inference from this WAV.
+  --real-inference-model <id> Model ID used by --real-inference-wav.
+  --real-inference-model-dir <path>
+                            Disposable directory containing that model.
+  --require-real-inference  Fail if the requested real local inference is not proven.
   --desktop-target-drill    Run controlled OS text-target and clipboard drill.
   --require-desktop-target  Fail if the controlled desktop target is unavailable.
   --allow-text-entry        Allow typing a synthetic marker into the target.
@@ -210,6 +226,16 @@ const skipCoordinatorPanic = hasArg("--skip-coordinator-panic");
 const expectedSmokeMicrophone =
   argValue("--smoke-microphone") ??
   process.env.VERBATIM_SMOKE_SELECTED_MICROPHONE;
+const realInferenceWavArg =
+  argValue("--real-inference-wav") ??
+  process.env.VERBATIM_SMOKE_REAL_INFERENCE_WAV;
+const realInferenceModel =
+  argValue("--real-inference-model") ??
+  process.env.VERBATIM_SMOKE_SELECTED_MODEL;
+const realInferenceModelDirArg =
+  argValue("--real-inference-model-dir") ??
+  process.env.VERBATIM_SMOKE_MODEL_DIR;
+const requireRealInference = hasArg("--require-real-inference");
 const desktopTargetDrill = hasArg("--desktop-target-drill");
 const requireDesktopTarget = hasArg("--require-desktop-target");
 const allowTextEntry = hasArg("--allow-text-entry");
@@ -219,6 +245,28 @@ const appInsertionDrillsPath = resolve(
     join(artifactDir, "app-insertion-drills.json"),
 );
 const requireAppInsertionDrills = hasArg("--require-app-insertion-drills");
+
+const realInferenceWav = requiredRealInferencePath(
+  realInferenceWavArg,
+  "--real-inference-wav",
+);
+const realInferenceModelDir = requiredRealInferencePath(
+  realInferenceModelDirArg,
+  "--real-inference-model-dir",
+);
+if (requireRealInference && !realInferenceWav) {
+  throw new Error(
+    "--require-real-inference needs --real-inference-wav, --real-inference-model, and --real-inference-model-dir",
+  );
+}
+if (
+  realInferenceWav &&
+  (!realInferenceModel?.trim() || !realInferenceModelDir)
+) {
+  throw new Error(
+    "--real-inference-wav needs --real-inference-model and --real-inference-model-dir",
+  );
+}
 
 mkdirSync(artifactDir, { recursive: true });
 
@@ -243,6 +291,36 @@ expectCleanExit("first-launch", boot);
 assertSmokeStatus("first-launch", {
   requireTrayVisible: false,
 });
+
+if (realInferenceWav && realInferenceModel && realInferenceModelDir) {
+  const realInference = await runPhase({
+    name: "real-inference",
+    args: ["--debug", "--no-tray"],
+    // Model loading is intentionally bounded in the app. Leave
+    // enough room for an isolated packaged process to start and exit cleanly
+    // without silently downgrading the proof to the fixture-only smoke.
+    timeoutMs: Math.max(timeoutMs, 90000),
+    smokeExitMs: 2000,
+    env: {
+      VERBATIM_SMOKE_MODEL_FIXTURE: "0",
+      VERBATIM_SMOKE_REAL_INFERENCE_WAV: realInferenceWav,
+      VERBATIM_SMOKE_REAL_INFERENCE_TIMEOUT_MS: String(
+        Math.min(Math.max(timeoutMs, 90000), 300000),
+      ),
+      VERBATIM_SMOKE_SELECTED_MODEL: realInferenceModel.trim(),
+      VERBATIM_SMOKE_MODEL_DIR: realInferenceModelDir,
+    },
+  });
+  expectCleanExit("real-inference", realInference);
+  assertSmokeStatus("real-inference", {
+    requireTrayVisible: false,
+    expectedSelectedModelId: realInferenceModel.trim(),
+    expectedSelectedModelCustom: false,
+    expectedSelectedModelHasCatalogUrl: true,
+    requireRealInference: true,
+    expectedRealInferenceModel: realInferenceModel.trim(),
+  });
+}
 
 if (!skipStartupFailure) {
   const startupFailure = await runPhase({
@@ -365,6 +443,18 @@ function resolveAppPath(explicit: string | undefined): string {
   throw new Error(
     `Unable to locate packaged executable. Pass --app or VERBATIM_SMOKE_APP_PATH. Checked: ${candidates.join(", ")}`,
   );
+}
+
+function requiredRealInferencePath(
+  value: string | undefined,
+  option: string,
+): string | undefined {
+  if (!value?.trim()) return undefined;
+  const resolved = resolve(value);
+  if (!existsSync(resolved)) {
+    throw new Error(`${option} does not exist: ${resolved}`);
+  }
+  return resolved;
 }
 
 async function runSingleInstancePhase(): Promise<void> {
@@ -492,6 +582,7 @@ function smokeEnvForPhase(
     VERBATIM_SMOKE_EXIT_AFTER_MS: String(smokeExitMs),
     VERBATIM_SMOKE_MODEL_FIXTURE: "1",
     VERBATIM_SMOKE_STATUS_PATH: join(artifactDir, `${logPrefix}.status.json`),
+    VERBATIM_SMOKE_DATA_DIR: join(isolatedRoot, `${logPrefix}-data`),
     VERBATIM_NO_GTK_LAYER_SHELL: "1",
     XDG_CONFIG_HOME: join(isolatedRoot, "config"),
     XDG_DATA_HOME: join(isolatedRoot, "data"),
@@ -523,7 +614,14 @@ function startupStatus(status: NativeSmokeStatus): {
 
 function assertSmokeStatus(
   logPrefix: string,
-  options: { requireTrayVisible: boolean },
+  options: {
+    requireTrayVisible: boolean;
+    expectedSelectedModelId?: string;
+    expectedSelectedModelCustom?: boolean;
+    expectedSelectedModelHasCatalogUrl?: boolean;
+    requireRealInference?: boolean;
+    expectedRealInferenceModel?: string;
+  },
 ): void {
   const statusPath = join(artifactDir, `${logPrefix}.status.json`);
   if (!existsSync(statusPath)) {
@@ -536,6 +634,12 @@ function assertSmokeStatus(
     readFileSync(statusPath, "utf8"),
   ) as NativeSmokeStatus;
   const startup = startupStatus(status);
+  const expectedSelectedModelId =
+    options.expectedSelectedModelId ?? "verbatim-smoke-model";
+  const expectedSelectedModelCustom =
+    options.expectedSelectedModelCustom ?? true;
+  const expectedSelectedModelHasCatalogUrl =
+    options.expectedSelectedModelHasCatalogUrl ?? false;
 
   const failures = [
     startup.status === "ready"
@@ -554,14 +658,16 @@ function assertSmokeStatus(
     status.debug_mode_enabled ? null : "debug_mode_enabled=false",
     selectedMicrophoneFailure(status),
     status.selected_model_configured ? null : "selected_model_configured=false",
-    status.selected_model_id === "verbatim-smoke-model"
+    status.selected_model_id === expectedSelectedModelId
       ? null
       : `selected_model_id=${String(status.selected_model_id)}`,
     status.selected_model_downloaded ? null : "selected_model_downloaded=false",
-    status.selected_model_custom ? null : "selected_model_custom=false",
-    status.selected_model_has_remote_url
-      ? "selected_model_has_remote_url=true"
-      : null,
+    status.selected_model_custom === expectedSelectedModelCustom
+      ? null
+      : `selected_model_custom=${String(status.selected_model_custom)}`,
+    status.selected_model_has_remote_url === expectedSelectedModelHasCatalogUrl
+      ? null
+      : `selected_model_has_remote_url=${String(status.selected_model_has_remote_url)}`,
     status.audio_fixture_path ? null : "audio_fixture_path=missing",
     status.audio_fixture_sample_count === 32000
       ? null
@@ -619,6 +725,11 @@ function assertSmokeStatus(
     ...insertionSafetyDrillFailures(status.insertion_safety_drill),
     ...clipboardSafetyDrillFailures(status.clipboard_safety_drill),
     ...linuxEnvironmentFailures(status),
+    ...realInferenceFailures(
+      status.real_inference,
+      options.requireRealInference ?? false,
+      options.expectedRealInferenceModel,
+    ),
     options.requireTrayVisible && !status.tray_visible_requested
       ? "tray_visible_requested=false"
       : null,
@@ -636,6 +747,41 @@ function assertSmokeStatus(
     status,
   });
   writeSummary();
+}
+
+function realInferenceFailures(
+  inference: NativeSmokeStatus["real_inference"],
+  required: boolean,
+  expectedModel: string | undefined,
+): string[] {
+  if (!required) return [];
+  if (!inference) return ["real_inference=missing"];
+
+  return [
+    inference.checked ? null : "real_inference.checked=false",
+    expectedModel && inference.model_id !== expectedModel
+      ? `real_inference.model_id=${String(inference.model_id)}`
+      : null,
+    (inference.audio_sample_count ?? 0) > 0
+      ? null
+      : `real_inference.audio_sample_count=${String(inference.audio_sample_count)}`,
+    inference.model_loaded ? null : "real_inference.model_loaded=false",
+    inference.inference_started
+      ? null
+      : "real_inference.inference_started=false",
+    inference.inference_completed
+      ? null
+      : "real_inference.inference_completed=false",
+    inference.transcript_non_empty
+      ? null
+      : "real_inference.transcript_non_empty=false",
+    inference.transcript_recorded
+      ? "real_inference.transcript_recorded=true"
+      : null,
+    inference.failure_class
+      ? `real_inference.failure_class=${inference.failure_class}`
+      : null,
+  ].filter((failure): failure is string => Boolean(failure));
 }
 
 function selectedMicrophoneFailure(status: NativeSmokeStatus): string | null {
@@ -1292,9 +1438,27 @@ function listArtifacts(root: string): string[] {
   if (!existsSync(root)) return [];
   const files: string[] = [];
   const walk = (current: string) => {
-    for (const entry of readdirSync(current)) {
+    let entries: string[];
+    try {
+      entries = readdirSync(current);
+    } catch (error) {
+      // WebView runtimes clean up transient files asynchronously while the
+      // smoke app exits. A disappeared directory is not an artifact failure.
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+      throw error;
+    }
+
+    for (const entry of entries) {
       const fullPath = join(current, entry);
-      const stat = statSync(fullPath);
+      let stat: ReturnType<typeof statSync>;
+      try {
+        stat = statSync(fullPath);
+      } catch (error) {
+        // The directory listing is a snapshot; skip a temp file that vanishes
+        // between readdirSync and statSync during WebView shutdown.
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+        throw error;
+      }
       if (stat.isDirectory()) {
         walk(fullPath);
       } else {

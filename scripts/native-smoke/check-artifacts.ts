@@ -13,6 +13,17 @@ type NativeSmokeStatus = {
   startup_status?: string | { status?: string };
   settings_loaded?: boolean;
   audio_fixture_verified?: boolean;
+  real_inference?: {
+    checked?: boolean;
+    model_id?: string;
+    audio_sample_count?: number;
+    model_loaded?: boolean;
+    inference_started?: boolean;
+    inference_completed?: boolean;
+    transcript_non_empty?: boolean;
+    transcript_recorded?: boolean;
+    failure_class?: string | null;
+  } | null;
   resource_probe_checked?: boolean;
   retention?: {
     clean_profile_verified?: boolean;
@@ -81,6 +92,7 @@ Options:
   --require-installer             Require installer-smoke artifacts.
   --require-desktop-target        Require controlled desktop target evidence.
   --require-virtual-audio         Require virtual-audio input/playback/cleanup evidence.
+  --require-real-inference        Require redacted local-model inference evidence.
   --require-app-insertion-drills  Require full app-driven insertion race evidence.
   --require-platform <platform>   Require native-smoke-summary.json platform to match.
   --help                          Show this help text.
@@ -92,6 +104,7 @@ const artifactDir = resolve(argValue("--dir") ?? "native-smoke-artifacts");
 const requireInstaller = hasArg("--require-installer");
 const requireDesktopTarget = hasArg("--require-desktop-target");
 const requireVirtualAudio = hasArg("--require-virtual-audio");
+const requireRealInference = hasArg("--require-real-inference");
 const requireAppInsertionDrills = hasArg("--require-app-insertion-drills");
 const requiredPlatform = argValue("--require-platform");
 const failures: string[] = [];
@@ -120,6 +133,7 @@ requireScreenshotEvidence("after");
 if (requireInstaller) validateInstallerArtifacts();
 if (requireDesktopTarget) validateControlledDesktopTarget(summary);
 if (requireVirtualAudio) validateVirtualAudioArtifacts();
+if (requireRealInference) validateRealInferenceArtifacts();
 if (requireAppInsertionDrills) validateAppInsertionEvidence(summary);
 
 if (failures.length > 0) {
@@ -356,6 +370,50 @@ function validateVirtualAudioArtifacts(): void {
     for (const failure of cleanup.failures ?? []) {
       failures.push(`virtual-audio-cleanup failure: ${failure}`);
     }
+  }
+}
+
+function validateRealInferenceArtifacts(): void {
+  const status = readJson<NativeSmokeStatus>("real-inference.status.json");
+  const inference = status?.real_inference;
+  if (!inference) {
+    failures.push(
+      "real-inference.status.json real_inference evidence is missing.",
+    );
+    return;
+  }
+
+  if (inference.checked !== true) {
+    failures.push("real inference evidence must be checked.");
+  }
+  if (
+    typeof inference.model_id !== "string" ||
+    inference.model_id.trim() === ""
+  ) {
+    failures.push("real inference model_id is missing.");
+  }
+  if ((inference.audio_sample_count ?? 0) <= 0) {
+    failures.push("real inference audio_sample_count must be positive.");
+  }
+  if (inference.model_loaded !== true) {
+    failures.push("real inference model_loaded must be true.");
+  }
+  if (inference.inference_started !== true) {
+    failures.push("real inference inference_started must be true.");
+  }
+  if (inference.inference_completed !== true) {
+    failures.push("real inference inference_completed must be true.");
+  }
+  if (inference.transcript_non_empty !== true) {
+    failures.push("real inference transcript_non_empty must be true.");
+  }
+  if (inference.transcript_recorded !== false) {
+    failures.push(
+      "real inference must not retain transcript content in artifacts.",
+    );
+  }
+  if (inference.failure_class) {
+    failures.push(`real inference failure_class=${inference.failure_class}.`);
   }
 }
 

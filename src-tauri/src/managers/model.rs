@@ -5,7 +5,7 @@ use log::{debug, info, warn};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use specta::Type;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::fs::File;
 use std::io::{Read, Write};
@@ -98,12 +98,34 @@ pub struct ModelManager {
     verified_model_ids: Mutex<HashSet<String>>,
 }
 
+const DIRECTORY_INTEGRITY_MANIFEST: &str = ".verbatim-integrity.json";
+const DIRECTORY_INTEGRITY_MANIFEST_PARTIAL: &str = ".verbatim-integrity.json.partial";
+
+/// Integrity data recorded after extracting a built-in directory model from a
+/// checksum-verified archive. It detects later partial writes or disk changes
+/// before the model reaches an inference engine.
+///
+/// This is intentionally an integrity check, not a trust boundary: a local
+/// user who can alter a model directory can also alter this manifest. The
+/// archive checksum remains the authenticity check at download time.
+#[derive(Debug, Serialize, Deserialize)]
+struct DirectoryIntegrityManifest {
+    schema_version: u8,
+    model_id: String,
+    archive_sha256: String,
+    files: BTreeMap<String, String>,
+}
+
 impl ModelManager {
     pub fn new(app_handle: &AppHandle) -> Result<Self> {
-        // Create models directory in app data
-        let models_dir = crate::portable::app_data_dir(app_handle)
-            .map_err(|e| anyhow::anyhow!("Failed to get app data dir: {}", e))?
-            .join("models");
+        // A real-inference smoke can point at a disposable model directory so
+        // it never reads or mutates a user's downloaded models. This override
+        // is deliberately inert unless the opt-in WAV smoke is active.
+        let models_dir = native_smoke_real_inference_models_dir().unwrap_or(
+            crate::portable::app_data_dir(app_handle)
+                .map_err(|e| anyhow::anyhow!("Failed to get app data dir: {}", e))?
+                .join("models"),
+        );
 
         if !models_dir.exists() {
             fs::create_dir_all(&models_dir)?;
@@ -545,8 +567,140 @@ impl ModelManager {
         }
     }
 
+    fn directory_file_hashes(root: &Path) -> Result<BTreeMap<String, String>> {
+        fn collect(
+            root: &Path,
+            current: &Path,
+            files: &mut BTreeMap<String, String>,
+        ) -> Result<()> {
+            let mut entries = fs::read_dir(current)?.collect::<std::io::Result<Vec<_>>>()?;
+            entries.sort_by_key(|entry| entry.file_name());
+
+            for entry in entries {
+                let path = entry.path();
+                let file_type = entry.file_type()?;
+                if file_type.is_symlink() {
+                    anyhow::bail!(
+                        "Model directory contains an unsupported symbolic link: {}",
+                        path.display()
+                    );
+                }
+
+                let relative = path
+                    .strip_prefix(root)
+                    .map_err(|error| anyhow::anyhow!("Resolve model file path: {error}"))?;
+                if relative == Path::new(DIRECTORY_INTEGRITY_MANIFEST)
+                    || relative == Path::new(DIRECTORY_INTEGRITY_MANIFEST_PARTIAL)
+                {
+                    continue;
+                }
+
+                if file_type.is_dir() {
+                    collect(root, &path, files)?;
+                    continue;
+                }
+                if !file_type.is_file() {
+                    anyhow::bail!(
+                        "Model directory contains an unsupported entry: {}",
+                        path.display()
+                    );
+                }
+
+                let key = relative.to_string_lossy().replace('\\', "/");
+                files.insert(key, ModelManager::compute_sha256(&path)?);
+            }
+            Ok(())
+        }
+
+        let mut files = BTreeMap::new();
+        collect(root, root, &mut files)?;
+        if files.is_empty() {
+            anyhow::bail!(
+                "Model directory contains no model files: {}",
+                root.display()
+            );
+        }
+        Ok(files)
+    }
+
+    fn write_directory_integrity_manifest(
+        path: &Path,
+        model_id: &str,
+        expected_sha256: Option<&str>,
+    ) -> Result<()> {
+        let Some(expected_sha256) = expected_sha256 else {
+            return Ok(());
+        };
+
+        let manifest = DirectoryIntegrityManifest {
+            schema_version: 1,
+            model_id: model_id.to_string(),
+            archive_sha256: expected_sha256.to_ascii_lowercase(),
+            files: Self::directory_file_hashes(path)?,
+        };
+        let manifest_path = path.join(DIRECTORY_INTEGRITY_MANIFEST);
+        let partial_path = path.join(DIRECTORY_INTEGRITY_MANIFEST_PARTIAL);
+        fs::write(&partial_path, serde_json::to_vec_pretty(&manifest)?)?;
+        fs::rename(&partial_path, &manifest_path)?;
+        Ok(())
+    }
+
+    /// Validate an extracted built-in model against the file manifest produced
+    /// after its checksum-verified archive was unpacked. Older installations
+    /// did not have a manifest; establish a one-time baseline for those files
+    /// instead of deleting a working model during upgrade.
+    fn verify_existing_model_directory(
+        path: &Path,
+        expected_sha256: Option<&str>,
+        model_id: &str,
+    ) -> Result<()> {
+        let Some(expected_sha256) = expected_sha256 else {
+            return Ok(());
+        };
+        let manifest_path = path.join(DIRECTORY_INTEGRITY_MANIFEST);
+
+        if !manifest_path.exists() {
+            warn!(
+                "Built-in directory model {} predates integrity manifests; establishing a local baseline",
+                model_id
+            );
+            return Self::write_directory_integrity_manifest(path, model_id, Some(expected_sha256));
+        }
+
+        let manifest = fs::read(&manifest_path)
+            .map_err(|error| anyhow::anyhow!("Read model integrity manifest: {error}"))
+            .and_then(|contents| {
+                serde_json::from_slice::<DirectoryIntegrityManifest>(&contents)
+                    .map_err(|error| anyhow::anyhow!("Parse model integrity manifest: {error}"))
+            })?;
+
+        let manifest_matches_model = manifest.schema_version == 1
+            && manifest.model_id == model_id
+            && manifest
+                .archive_sha256
+                .eq_ignore_ascii_case(expected_sha256);
+        if !manifest_matches_model {
+            let _ = fs::remove_dir_all(path);
+            return Err(anyhow::anyhow!(
+                "Model verification failed for {}: the integrity manifest does not match this model. Please download it again.",
+                model_id
+            ));
+        }
+
+        let files = Self::directory_file_hashes(path)?;
+        if files == manifest.files {
+            return Ok(());
+        }
+
+        let _ = fs::remove_dir_all(path);
+        Err(anyhow::anyhow!(
+            "Model verification failed for {}: the extracted model files are corrupt. Please download it again.",
+            model_id
+        ))
+    }
+
     fn verify_model_before_use(&self, model_info: &ModelInfo, model_path: &Path) -> Result<()> {
-        if model_info.is_custom || model_info.is_directory || model_info.sha256.is_none() {
+        if model_info.is_custom || model_info.sha256.is_none() {
             return Ok(());
         }
 
@@ -557,11 +711,21 @@ impl ModelManager {
             }
         }
 
-        match Self::verify_existing_model_file(
-            model_path,
-            model_info.sha256.as_deref(),
-            &model_info.id,
-        ) {
+        let verification = if model_info.is_directory {
+            Self::verify_existing_model_directory(
+                model_path,
+                model_info.sha256.as_deref(),
+                &model_info.id,
+            )
+        } else {
+            Self::verify_existing_model_file(
+                model_path,
+                model_info.sha256.as_deref(),
+                &model_info.id,
+            )
+        };
+
+        match verification {
             Ok(()) => {
                 self.verified_model_ids
                     .lock()
@@ -609,6 +773,7 @@ impl ModelManager {
 
         let url = model_info
             .url
+            .clone()
             .ok_or_else(|| anyhow::anyhow!("No download URL for model"))?;
         let model_path = self.models_dir.join(&model_info.filename);
         let partial_path = self
@@ -622,39 +787,47 @@ impl ModelManager {
                 let _ = fs::remove_file(&partial_path);
             }
             if model_info.is_directory {
-                // Directory-model checksums cover the downloaded archive, not
-                // the extracted directory. Their atomic extraction path is
-                // validated separately below, so never treat a directory as a
-                // hashable file here.
-                self.update_download_status()?;
-                return Ok(());
-            }
-            match Self::verify_existing_model_file(
-                &model_path,
-                model_info.sha256.as_deref(),
-                model_id,
-            ) {
-                Ok(()) => {
-                    if !model_info.is_directory
-                        && !model_info.is_custom
-                        && model_info.sha256.is_some()
-                    {
-                        self.verified_model_ids
-                            .lock()
-                            .unwrap()
-                            .insert(model_id.to_string());
+                match self.verify_model_before_use(&model_info, &model_path) {
+                    Ok(()) => {
+                        self.update_download_status()?;
+                        return Ok(());
                     }
-                    self.update_download_status()?;
-                    return Ok(());
+                    Err(error) => {
+                        // A manifest mismatch removes the corrupted extracted
+                        // directory. Continue into a fresh download instead of
+                        // reporting a misleading success or requiring a second
+                        // click from the user.
+                        warn!(
+                            "Existing directory model {} failed verification; downloading a clean replacement: {}",
+                            model_id, error
+                        );
+                    }
                 }
-                Err(error) => {
-                    // The verifier removes the corrupt completed file. Continue
-                    // into a fresh download instead of reporting a misleading
-                    // success or requiring the user to click Download twice.
-                    warn!(
-                        "Existing model {} failed verification; downloading a clean replacement: {}",
-                        model_id, error
-                    );
+            } else {
+                match Self::verify_existing_model_file(
+                    &model_path,
+                    model_info.sha256.as_deref(),
+                    model_id,
+                ) {
+                    Ok(()) => {
+                        if !model_info.is_custom && model_info.sha256.is_some() {
+                            self.verified_model_ids
+                                .lock()
+                                .unwrap()
+                                .insert(model_id.to_string());
+                        }
+                        self.update_download_status()?;
+                        return Ok(());
+                    }
+                    Err(error) => {
+                        // The verifier removes the corrupt completed file. Continue
+                        // into a fresh download instead of reporting a misleading
+                        // success or requiring the user to click Download twice.
+                        warn!(
+                            "Existing model {} failed verification; downloading a clean replacement: {}",
+                            model_id, error
+                        );
+                    }
                 }
             }
         }
@@ -865,28 +1038,58 @@ impl ModelManager {
                 .join(format!("{}.extracting", &model_info.filename));
             let final_model_dir = self.models_dir.join(&model_info.filename);
 
-            // Clean up any previous incomplete extraction
-            if temp_extract_dir.exists() {
+            let extraction_result = (|| -> Result<()> {
+                // Clean up any previous incomplete extraction.
+                if temp_extract_dir.exists() {
+                    fs::remove_dir_all(&temp_extract_dir)?;
+                }
+                fs::create_dir_all(&temp_extract_dir)?;
+
+                // Extract only into the temporary directory. The archive has
+                // already passed its SHA256 check, so any later failure can
+                // safely discard it and require a clean replacement.
+                let tar_gz = File::open(&partial_path)?;
+                let tar = GzDecoder::new(tar_gz);
+                let mut archive = Archive::new(tar);
+                archive.unpack(&temp_extract_dir)?;
+
+                // Archives usually contain one top-level model directory, but
+                // retain support for archives with files at their root.
+                let extracted_dirs: Vec<_> = fs::read_dir(&temp_extract_dir)?
+                    .filter_map(|entry| entry.ok())
+                    .filter(|entry| entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false))
+                    .collect();
+                let source_dir = if extracted_dirs.len() == 1 {
+                    extracted_dirs[0].path()
+                } else {
+                    temp_extract_dir.clone()
+                };
+
+                // Write the manifest before replacing an existing working
+                // model. A directory only becomes selectable after both its
+                // verified archive and extracted-file inventory are complete.
+                Self::write_directory_integrity_manifest(
+                    &source_dir,
+                    model_id,
+                    model_info.sha256.as_deref(),
+                )?;
+
+                if final_model_dir.exists() {
+                    fs::remove_dir_all(&final_model_dir)?;
+                }
+                fs::rename(&source_dir, &final_model_dir)?;
+                if source_dir != temp_extract_dir {
+                    fs::remove_dir_all(&temp_extract_dir)?;
+                }
+                Ok(())
+            })();
+
+            if let Err(error) = extraction_result {
+                let error_msg = format!("Failed to extract archive: {error}");
                 let _ = fs::remove_dir_all(&temp_extract_dir);
-            }
-
-            // Create temporary extraction directory
-            fs::create_dir_all(&temp_extract_dir)?;
-
-            // Open the downloaded tar.gz file
-            let tar_gz = File::open(&partial_path)?;
-            let tar = GzDecoder::new(tar_gz);
-            let mut archive = Archive::new(tar);
-
-            // Extract to the temporary directory first
-            archive.unpack(&temp_extract_dir).map_err(|e| {
-                let error_msg = format!("Failed to extract archive: {}", e);
-                // Clean up failed extraction
-                let _ = fs::remove_dir_all(&temp_extract_dir);
-                // Delete the corrupt partial file so the next download attempt starts fresh
-                // instead of resuming from a broken archive (issue #858).
+                // Delete the archive so a retry never resumes from an asset
+                // that failed to extract or inventory successfully.
                 let _ = fs::remove_file(&partial_path);
-                // Remove from extracting set
                 {
                     let mut extracting = self.extracting_models.lock().unwrap();
                     extracting.remove(model_id);
@@ -898,30 +1101,7 @@ impl ModelManager {
                         "error": error_msg
                     }),
                 );
-                anyhow::anyhow!(error_msg)
-            })?;
-
-            // Find the actual extracted directory (archive might have a nested structure)
-            let extracted_dirs: Vec<_> = fs::read_dir(&temp_extract_dir)?
-                .filter_map(|entry| entry.ok())
-                .filter(|entry| entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false))
-                .collect();
-
-            if extracted_dirs.len() == 1 {
-                // Single directory extracted, move it to the final location
-                let source_dir = extracted_dirs[0].path();
-                if final_model_dir.exists() {
-                    fs::remove_dir_all(&final_model_dir)?;
-                }
-                fs::rename(&source_dir, &final_model_dir)?;
-                // Clean up temp directory
-                let _ = fs::remove_dir_all(&temp_extract_dir);
-            } else {
-                // Multiple items or no directories, rename the temp directory itself
-                if final_model_dir.exists() {
-                    fs::remove_dir_all(&final_model_dir)?;
-                }
-                fs::rename(&temp_extract_dir, &final_model_dir)?;
+                return Err(anyhow::anyhow!(error_msg));
             }
 
             info!("Successfully extracted archive for model: {}", model_id);
@@ -1067,6 +1247,9 @@ impl ModelManager {
         if model_info.is_directory {
             // For directory-based models, ensure the directory exists and is complete
             if model_path.exists() && model_path.is_dir() && !partial_path.exists() {
+                debug!("Verifying directory model {} before inference", model_id);
+                self.verify_model_before_use(&model_info, &model_path)?;
+                debug!("Verified directory model {} before inference", model_id);
                 Ok(model_path)
             } else {
                 Err(anyhow::anyhow!(
@@ -1131,6 +1314,18 @@ impl ModelManager {
         info!("Download cancellation initiated for: {}", model_id);
         Ok(())
     }
+}
+
+fn native_smoke_real_inference_models_dir() -> Option<PathBuf> {
+    if std::env::var_os("VERBATIM_SMOKE_REAL_INFERENCE_WAV").is_none() {
+        return None;
+    }
+    let value = std::env::var_os("VERBATIM_SMOKE_MODEL_DIR")?;
+    if value.is_empty() {
+        warn!("Ignoring empty VERBATIM_SMOKE_MODEL_DIR value");
+        return None;
+    }
+    Some(PathBuf::from(value))
 }
 
 #[cfg(test)]
@@ -1359,5 +1554,61 @@ mod tests {
 
         assert!(path.exists());
         drop(dir);
+    }
+
+    #[test]
+    fn legacy_directory_model_gets_an_integrity_baseline() {
+        let dir = TempDir::new().unwrap();
+        let model_dir = dir.path().join("moonshine");
+        fs::create_dir_all(model_dir.join("nested")).unwrap();
+        fs::write(model_dir.join("encoder.ort"), b"known model data").unwrap();
+        fs::write(model_dir.join("nested").join("tokens.txt"), b"vocabulary").unwrap();
+
+        ModelManager::verify_existing_model_directory(
+            &model_dir,
+            Some("verified-archive-sha"),
+            "moonshine",
+        )
+        .unwrap();
+
+        assert!(
+            model_dir.join(DIRECTORY_INTEGRITY_MANIFEST).exists(),
+            "a legacy directory must be baselined rather than deleted during upgrade"
+        );
+        ModelManager::verify_existing_model_directory(
+            &model_dir,
+            Some("verified-archive-sha"),
+            "moonshine",
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn directory_model_mutation_is_removed_before_inference() {
+        let dir = TempDir::new().unwrap();
+        let model_dir = dir.path().join("moonshine");
+        fs::create_dir_all(&model_dir).unwrap();
+        let model_file = model_dir.join("encoder.ort");
+        fs::write(&model_file, b"known model data").unwrap();
+        ModelManager::write_directory_integrity_manifest(
+            &model_dir,
+            "moonshine",
+            Some("verified-archive-sha"),
+        )
+        .unwrap();
+
+        fs::write(&model_file, b"corrupted after extraction").unwrap();
+        let error = ModelManager::verify_existing_model_directory(
+            &model_dir,
+            Some("verified-archive-sha"),
+            "moonshine",
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("corrupt"));
+        assert!(
+            !model_dir.exists(),
+            "a changed built-in directory model must not remain selectable"
+        );
     }
 }
