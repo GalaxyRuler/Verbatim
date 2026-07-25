@@ -402,6 +402,7 @@ fn initialize_core_logic(app_handle: &AppHandle) -> Result<(), StartupError> {
     app_handle.manage(local_llm_manager.clone());
     app_handle.manage(operation_cancellation::OperationCancellationState::default());
     app_handle.manage(adaptive::session::ActiveDictationContext::default());
+    app_handle.manage(adaptive::session::ActivePasteTarget::default());
 
     // Note: Shortcuts are NOT initialized here.
     // The frontend is responsible for calling the `initialize_shortcuts` command

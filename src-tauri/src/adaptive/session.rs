@@ -25,6 +25,38 @@ impl ActiveDictationContext {
     }
 }
 
+/// Runtime-only foreground-window identity captured when dictation starts.
+///
+/// This is deliberately separate from adaptive context: paste safety must not
+/// depend on context awareness, and this identity must never be written to
+/// history or exposed to the frontend.
+#[derive(Default)]
+pub struct ActivePasteTarget {
+    targets: Mutex<HashMap<String, String>>,
+}
+
+impl ActivePasteTarget {
+    pub fn insert(&self, binding_id: &str, target: Option<String>) {
+        if let Ok(mut targets) = self.targets.lock() {
+            if let Some(target) = target {
+                targets.insert(binding_id.to_string(), target);
+            } else {
+                targets.remove(binding_id);
+            }
+        }
+    }
+
+    pub fn take(&self, binding_id: &str) -> Option<String> {
+        self.targets.lock().ok()?.remove(binding_id)
+    }
+
+    pub fn clear(&self, binding_id: &str) {
+        if let Ok(mut targets) = self.targets.lock() {
+            targets.remove(binding_id);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -51,6 +83,18 @@ mod tests {
         assert_eq!(
             store.take("transcribe").unwrap().process_name.as_deref(),
             Some("OUTLOOK.EXE")
+        );
+        assert!(store.take("transcribe").is_none());
+    }
+
+    #[test]
+    fn paste_target_take_removes_runtime_identity() {
+        let store = ActivePasteTarget::default();
+        store.insert("transcribe", Some("notepad.exe|notepad|29|101".to_string()));
+
+        assert_eq!(
+            store.take("transcribe").as_deref(),
+            Some("notepad.exe|notepad|29|101")
         );
         assert!(store.take("transcribe").is_none());
     }
