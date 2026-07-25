@@ -92,6 +92,10 @@ pub struct ModelManager {
     available_models: Mutex<HashMap<String, ModelInfo>>,
     cancel_flags: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
     extracting_models: Arc<Mutex<HashSet<String>>>,
+    // Built-in model files are verified once immediately before first use.
+    // Keeping only identifiers here avoids re-hashing large models on every
+    // dictation while never persisting a trust decision across app launches.
+    verified_model_ids: Mutex<HashSet<String>>,
 }
 
 impl ModelManager {
@@ -120,6 +124,7 @@ impl ModelManager {
             available_models: Mutex::new(available_models),
             cancel_flags: Arc::new(Mutex::new(HashMap::new())),
             extracting_models: Arc::new(Mutex::new(HashSet::new())),
+            verified_model_ids: Mutex::new(HashSet::new()),
         };
 
         // Migrate any bundled models to user directory
@@ -501,6 +506,83 @@ impl ModelManager {
         }
     }
 
+    /// Verifies a completed built-in model before loading it. Unlike a partial
+    /// download failure, a mismatch here removes the completed file itself so
+    /// a corrupt asset cannot remain selectable or reach the inference engine.
+    fn verify_existing_model_file(
+        path: &Path,
+        expected_sha256: Option<&str>,
+        model_id: &str,
+    ) -> Result<()> {
+        let Some(expected) = expected_sha256 else {
+            return Ok(());
+        };
+
+        match Self::compute_sha256(path) {
+            Ok(actual) if actual == expected => {
+                info!("SHA256 verified existing model {}", model_id);
+                Ok(())
+            }
+            Ok(actual) => {
+                warn!(
+                    "SHA256 mismatch for existing model {}: expected {}, got {}",
+                    model_id, expected, actual
+                );
+                let _ = fs::remove_file(path);
+                Err(anyhow::anyhow!(
+                    "Model verification failed for {}: the local file is corrupt. Please download it again.",
+                    model_id
+                ))
+            }
+            Err(error) => {
+                let _ = fs::remove_file(path);
+                Err(anyhow::anyhow!(
+                    "Failed to verify local model {}: {}. Please download it again.",
+                    model_id,
+                    error
+                ))
+            }
+        }
+    }
+
+    fn verify_model_before_use(&self, model_info: &ModelInfo, model_path: &Path) -> Result<()> {
+        if model_info.is_custom || model_info.is_directory || model_info.sha256.is_none() {
+            return Ok(());
+        }
+
+        {
+            let verified = self.verified_model_ids.lock().unwrap();
+            if verified.contains(&model_info.id) {
+                return Ok(());
+            }
+        }
+
+        match Self::verify_existing_model_file(
+            model_path,
+            model_info.sha256.as_deref(),
+            &model_info.id,
+        ) {
+            Ok(()) => {
+                self.verified_model_ids
+                    .lock()
+                    .unwrap()
+                    .insert(model_info.id.clone());
+                Ok(())
+            }
+            Err(error) => {
+                if let Some(model) = self
+                    .available_models
+                    .lock()
+                    .unwrap()
+                    .get_mut(&model_info.id)
+                {
+                    model.is_downloaded = false;
+                }
+                Err(error)
+            }
+        }
+    }
+
     /// Computes the SHA256 hex digest of a file, reading in 64KB chunks to handle large models.
     fn compute_sha256(path: &Path) -> Result<String> {
         let mut file = File::open(path)?;
@@ -835,6 +917,12 @@ impl ModelManager {
                 model.partial_size = 0;
             }
         }
+        if !model_info.is_directory && !model_info.is_custom && model_info.sha256.is_some() {
+            self.verified_model_ids
+                .lock()
+                .unwrap()
+                .insert(model_id.to_string());
+        }
         self.cancel_flags.lock().unwrap().remove(model_id);
 
         // Emit completion event
@@ -911,6 +999,7 @@ impl ModelManager {
             self.update_download_status()?;
             debug!("ModelManager: download status updated");
         }
+        self.verified_model_ids.lock().unwrap().remove(model_id);
 
         // Emit event to notify UI
         let _ = self.app_handle.emit("model-deleted", model_id);
@@ -954,6 +1043,7 @@ impl ModelManager {
         } else {
             // For file-based models (existing logic)
             if model_path.exists() && !partial_path.exists() {
+                self.verify_model_before_use(&model_info, &model_path)?;
                 Ok(model_path)
             } else {
                 Err(anyhow::anyhow!(
@@ -1209,5 +1299,31 @@ mod tests {
             ModelManager::verify_sha256(&missing_path, Some("anyexpectedhash"), "missing_model");
 
         assert!(result.is_err(), "missing file must return an error");
+    }
+
+    #[test]
+    fn complete_builtin_model_with_wrong_hash_is_removed_before_inference() {
+        let (dir, path) = write_temp_file(b"corrupt model data");
+        let wrong_hash = "0000000000000000000000000000000000000000000000000000000000000000";
+
+        let result = ModelManager::verify_existing_model_file(&path, Some(wrong_hash), "tiny");
+
+        assert!(result.is_err());
+        assert!(
+            !path.exists(),
+            "a corrupt completed model must not remain selectable"
+        );
+        drop(dir);
+    }
+
+    #[test]
+    fn complete_builtin_model_with_matching_hash_is_preserved() {
+        let (dir, path) = write_temp_file(b"known good model data");
+        let expected = ModelManager::compute_sha256(&path).unwrap();
+
+        ModelManager::verify_existing_model_file(&path, Some(&expected), "tiny").unwrap();
+
+        assert!(path.exists());
+        drop(dir);
     }
 }
