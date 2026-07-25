@@ -2833,6 +2833,11 @@ impl ShortcutAction for TranscribeAction {
                             }
                         }
                         Err(err) => {
+                            if let Some(targets) =
+                                ah.try_state::<crate::adaptive::session::ActivePasteTarget>()
+                            {
+                                targets.clear(&binding_id);
+                            }
                             error!("Global Shortcut Transcription error: {}", err);
                             if operation_is_cancelled(&ah, operation_token.as_ref()) {
                                 if let Some(wav_path) = &saved_wav_path {
@@ -2855,6 +2860,11 @@ impl ShortcutAction for TranscribeAction {
                     }
                 }
                 RecordingStopDecision::Terminal(terminal) => {
+                    if let Some(targets) =
+                        ah.try_state::<crate::adaptive::session::ActivePasteTarget>()
+                    {
+                        targets.clear(&binding_id);
+                    }
                     let terminal = if operation_is_cancelled(&ah, operation_token.as_ref()) {
                         DictationTransactionTerminal::Cancelled
                     } else {
