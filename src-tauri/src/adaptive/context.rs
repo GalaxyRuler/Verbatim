@@ -216,8 +216,12 @@ fn capture_platform_context(capture_nearby_text: bool) -> CapturedContext {
             window_title.as_deref(),
             window_class.as_deref(),
         );
-        let target_fingerprint =
-            build_target_fingerprint(process_name.as_deref(), window_class.as_deref());
+        let target_fingerprint = build_target_fingerprint(
+            process_name.as_deref(),
+            window_class.as_deref(),
+            process_id,
+            hwnd,
+        );
 
         CapturedContext {
             captured_at_ms: Utc::now().timestamp_millis(),
@@ -272,11 +276,22 @@ unsafe fn read_window_class(hwnd: windows::Win32::Foundation::HWND) -> Option<St
 fn build_target_fingerprint(
     process_name: Option<&str>,
     window_class: Option<&str>,
+    process_id: u32,
+    hwnd: windows::Win32::Foundation::HWND,
 ) -> Option<String> {
     let process = process_name.unwrap_or_default().to_lowercase();
     let class = window_class.unwrap_or_default().to_lowercase();
     if process.is_empty() && class.is_empty() {
         None
+    } else if process_id != 0 && hwnd != windows::Win32::Foundation::HWND::default() {
+        // Process name and window class describe an application family, not a
+        // particular foreground window. Include the ephemeral process/window
+        // identity so a focus change between two Notepad, Outlook, or browser
+        // windows cannot be mistaken for the original insertion target.
+        Some(format!(
+            "{}|{}|{:x}|{:x}",
+            process, class, process_id, hwnd.0 as usize
+        ))
     } else {
         Some(format!("{}|{}", process, class))
     }
@@ -357,6 +372,41 @@ mod tests {
         assert_eq!(
             classify_target(Some("notepad.exe"), Some("Untitled - Notepad"), None),
             TargetKind::Notes
+        );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn target_fingerprint_binds_to_the_foreground_window_instance() {
+        use windows::Win32::Foundation::HWND;
+
+        let first = build_target_fingerprint(
+            Some("notepad.exe"),
+            Some("Notepad"),
+            41,
+            HWND(0x101usize as *mut std::ffi::c_void),
+        );
+        let second = build_target_fingerprint(
+            Some("notepad.exe"),
+            Some("Notepad"),
+            42,
+            HWND(0x202usize as *mut std::ffi::c_void),
+        );
+
+        assert_eq!(first.as_deref(), Some("notepad.exe|notepad|29|101"));
+        assert_eq!(second.as_deref(), Some("notepad.exe|notepad|2a|202"));
+        assert_ne!(first, second);
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn target_fingerprint_keeps_legacy_fallback_when_window_identity_is_missing() {
+        use windows::Win32::Foundation::HWND;
+
+        assert_eq!(
+            build_target_fingerprint(Some("notepad.exe"), Some("Notepad"), 0, HWND::default())
+                .as_deref(),
+            Some("notepad.exe|notepad")
         );
     }
 

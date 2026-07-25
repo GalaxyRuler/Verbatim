@@ -1402,6 +1402,14 @@ mod adaptive_action_tests {
     }
 
     #[test]
+    fn adaptive_target_verification_rejects_another_window_of_the_same_app() {
+        assert!(!adaptive_target_verified(
+            &context_with_fingerprint(Some("notepad.exe|notepad|29|101")),
+            &context_with_fingerprint(Some("notepad.exe|notepad|2a|202"))
+        ));
+    }
+
+    #[test]
     fn adaptive_target_verification_allows_unknown_original_target() {
         assert!(adaptive_target_verified(
             &context_with_fingerprint(None),
