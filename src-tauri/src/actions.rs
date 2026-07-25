@@ -1155,10 +1155,7 @@ fn target_privacy_exclusion_blocks_recording(
 }
 
 fn capture_paste_target() -> Option<String> {
-    // This captures only the foreground process/class/window identity. It
-    // deliberately passes no privacy patterns and never asks for nearby text,
-    // because this token exists solely to prevent an unsafe paste.
-    crate::adaptive::context::capture_context(&[], false).target_fingerprint
+    crate::adaptive::context::capture_dispatch_target()
 }
 
 fn paste_target_is_current(expected_target: Option<&str>) -> bool {

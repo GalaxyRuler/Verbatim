@@ -1620,10 +1620,9 @@ fn should_dispatch_paste(expected_target: Option<&str>, current_target: Option<&
 }
 
 fn target_still_focused(expected_target: &str) -> bool {
-    let current_context = crate::adaptive::context::capture_context(&[], false);
     should_dispatch_paste(
         Some(expected_target),
-        current_context.target_fingerprint.as_deref(),
+        crate::adaptive::context::capture_dispatch_target().as_deref(),
     )
 }
 

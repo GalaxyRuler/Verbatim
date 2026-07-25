@@ -57,6 +57,27 @@ desktop target, records user clipboard contents, or does not prove the expected
 focus-switch/clipboard-mutation condition. Do not use this gate with the
 controlled-target preflight artifact alone.
 
+## Golden dictation evidence contract
+
+The desktop release gate is only allowed to claim the golden dictation path
+after a fresh packaged build, running with an isolated profile, proves all of
+the following in one controlled session:
+
+1. The selected virtual microphone is the input used by the packaged app.
+2. A deterministic WAV fixture is played through that input.
+3. The app starts and completes local model inference from that recording.
+4. A focus change during inference blocks insertion into the replacement text
+   target.
+5. A synthetic clipboard mutation after Verbatim's clipboard write is left
+   intact; the evidence records booleans and reason codes only, never clipboard
+   contents or dictated text.
+
+Startup, unit-level insertion, and controlled-target preflight evidence are
+useful prerequisites, but none can substitute for this contract. Until the
+app-driven artifact is produced by that real path, keep
+`--require-app-insertion-drills` opt-in and describe the golden dictation path
+as unproven.
+
 Controlled desktop target coverage is opt-in:
 
 ```bash
