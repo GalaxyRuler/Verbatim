@@ -621,8 +621,42 @@ impl ModelManager {
             if partial_path.exists() {
                 let _ = fs::remove_file(&partial_path);
             }
-            self.update_download_status()?;
-            return Ok(());
+            if model_info.is_directory {
+                // Directory-model checksums cover the downloaded archive, not
+                // the extracted directory. Their atomic extraction path is
+                // validated separately below, so never treat a directory as a
+                // hashable file here.
+                self.update_download_status()?;
+                return Ok(());
+            }
+            match Self::verify_existing_model_file(
+                &model_path,
+                model_info.sha256.as_deref(),
+                model_id,
+            ) {
+                Ok(()) => {
+                    if !model_info.is_directory
+                        && !model_info.is_custom
+                        && model_info.sha256.is_some()
+                    {
+                        self.verified_model_ids
+                            .lock()
+                            .unwrap()
+                            .insert(model_id.to_string());
+                    }
+                    self.update_download_status()?;
+                    return Ok(());
+                }
+                Err(error) => {
+                    // The verifier removes the corrupt completed file. Continue
+                    // into a fresh download instead of reporting a misleading
+                    // success or requiring the user to click Download twice.
+                    warn!(
+                        "Existing model {} failed verification; downloading a clean replacement: {}",
+                        model_id, error
+                    );
+                }
+            }
         }
 
         // Check if we have a partial download to resume
