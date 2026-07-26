@@ -241,6 +241,11 @@ if ([System.IO.Path]::GetExtension($resolvedAppPath) -ne '.exe') {
 if ([System.IO.Path]::GetExtension($resolvedWavPath) -ne '.wav') {
     throw 'WavPath must be a WAV fixture.'
 }
+if ([System.IO.Path]::GetFileName($ModelId) -ne $ModelId) {
+    throw 'ModelId must be a single model directory name.'
+}
+
+$selectedModelDirectory = Resolve-RequiredPath -PathValue (Join-Path $resolvedModelDirectory $ModelId) -Label 'selected model directory' -Directory
 
 $installedAppRoot = Join-Path $env:LOCALAPPDATA 'Verbatim'
 if ($resolvedAppPath.StartsWith($installedAppRoot, [StringComparison]::OrdinalIgnoreCase)) {
@@ -365,9 +370,9 @@ Add-Type -Path $(ConvertTo-PowerShellLiteral $remotePlaybackSourcePath)
     $controllerReport.staged_runtime_file_count = $runtimeItems.Count
     Copy-ItemsToRemote -Items $runtimeItems -RemoteTarget ("{0}:{1}" -f $scpTarget, $remoteScpApp) -TimeoutSeconds $ConnectTimeoutSeconds -Label 'staged app runtime'
 
-    $modelItems = @(Get-ChildItem -LiteralPath $resolvedModelDirectory -Force)
+    $modelItems = @((Get-Item -LiteralPath $selectedModelDirectory))
     $controllerReport.staged_model_item_count = $modelItems.Count
-    Copy-ItemsToRemote -Items $modelItems -RemoteTarget ("{0}:{1}" -f $scpTarget, $remoteScpModels) -TimeoutSeconds $ConnectTimeoutSeconds -Label 'local model'
+    Copy-ItemsToRemote -Items $modelItems -RemoteTarget ("{0}:{1}" -f $scpTarget, $remoteScpModels) -TimeoutSeconds $ConnectTimeoutSeconds -Label 'selected local model'
     Invoke-Scp -Description 'Stage deterministic WAV fixture' -Arguments @('-q', '-o', 'BatchMode=yes', '-o', "ConnectTimeout=$ConnectTimeoutSeconds", $resolvedWavPath, ("{0}:{1}" -f $scpTarget, (ConvertTo-WindowsScpPath -WindowsPath $remoteWavPath)))
 
     $interactiveScriptItems = @(
