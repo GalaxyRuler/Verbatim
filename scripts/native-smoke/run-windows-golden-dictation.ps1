@@ -8,6 +8,11 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+# Model loading and first-pass inference can legitimately take several minutes
+# on a cold physical runner. Keep the bounded wait aligned with the native
+# smoke inference ceiling instead of failing the physical workflow early.
+$GoldenDictationWaitTimeoutMilliseconds = 300000
+
 function Resolve-RequiredPath {
     param(
         [Parameter(Mandatory)]
@@ -743,7 +748,7 @@ function Wait-InsertionReceipt {
         [string]$CaseName
     )
 
-    Wait-Until -TimeoutMilliseconds 90000 -Description "$CaseName insertion receipt" -Condition {
+    Wait-Until -TimeoutMilliseconds $GoldenDictationWaitTimeoutMilliseconds -Description "$CaseName insertion receipt" -Condition {
         return (Test-Path -LiteralPath $ReceiptPath -PathType Leaf) -and (Get-Item -LiteralPath $ReceiptPath).Length -gt 0
     }
     $lines = @(Get-Content -LiteralPath $ReceiptPath | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
@@ -813,6 +818,15 @@ function Get-SafeFailureDetail {
     $message = [string]$ErrorRecord.Exception.Message
     if ($message -like 'Timed out waiting for controlled target metadata refresh*') {
         return 'controlled_target_metadata_refresh_timed_out'
+    }
+    if ($message -like 'Timed out waiting for after-clipboard-payload barrier*') {
+        return 'clipboard_barrier_timeout'
+    }
+    if ($message -like 'Timed out waiting for before-insertion barrier*') {
+        return 'focus_barrier_timeout'
+    }
+    if ($message -like 'Timed out waiting for * insertion receipt*') {
+        return 'insertion_receipt_timeout'
     }
     if ($message -eq 'Stable focus did not produce a nonempty app-driven insertion.') {
         return 'stable_target_unchanged_after_success_receipt'
@@ -933,11 +947,10 @@ try {
         $clipboardPlayback = Invoke-AudioCapture -AppPath $appPath -Target $clipboardTarget -WavPath $wavPath -OutputDeviceName $outputDeviceName -PlaybackScriptPath $playbackScriptPath -PlaybackReceiptPath $clipboardPlaybackPath -CaptureEvidence $clipboardCaptureEvidence
         $clipboardReadyPath = Join-Path $clipboardBarrierDirectory 'after_clipboard_payload.ready.json'
         $currentStage = 'clipboard_wait_barrier'
-        Wait-Until -TimeoutMilliseconds 90000 -Description 'after-clipboard-payload barrier' -Condition { Test-Path -LiteralPath $clipboardReadyPath -PathType Leaf }
-        $currentStage = 'clipboard_require_empty_before_mutation'
-        if (-not [Verbatim.NativeSmoke.WindowInterop]::IsClipboardEmpty()) {
-            throw 'Clipboard mutation smoke requires an empty clipboard to preserve existing physical-session content.'
-        }
+        Wait-Until -TimeoutMilliseconds $GoldenDictationWaitTimeoutMilliseconds -Description 'after-clipboard-payload barrier' -Condition { Test-Path -LiteralPath $clipboardReadyPath -PathType Leaf }
+        # At this barrier Verbatim intentionally owns its freshly written
+        # payload. Replace it with the synthetic marker to model a user
+        # clipboard mutation after the write, then verify Verbatim preserves it.
         $currentStage = 'clipboard_mutate'
         $mutationMarker = "verbatim-golden-clipboard-$([Guid]::NewGuid().ToString('N'))"
         Set-Clipboard -Value $mutationMarker
@@ -1097,7 +1110,7 @@ try {
         $focusPlayback = Invoke-AudioCapture -AppPath $appPath -Target $originTarget -WavPath $wavPath -OutputDeviceName $outputDeviceName -PlaybackScriptPath $playbackScriptPath -PlaybackReceiptPath $focusPlaybackPath -CaptureEvidence $focusCaptureEvidence
         $focusReadyPath = Join-Path $focusBarrierDirectory 'before_insertion.ready.json'
         $currentStage = 'focus_wait_barrier'
-        Wait-Until -TimeoutMilliseconds 90000 -Description 'before-insertion barrier' -Condition { Test-Path -LiteralPath $focusReadyPath -PathType Leaf }
+        Wait-Until -TimeoutMilliseconds $GoldenDictationWaitTimeoutMilliseconds -Description 'before-insertion barrier' -Condition { Test-Path -LiteralPath $focusReadyPath -PathType Leaf }
         $currentStage = 'focus_switch_target'
         Set-ControlledTargetFocus -Target $replacementTarget -Label 'replacement target' -TargetEvidence $replacementTarget.Evidence
         [System.IO.File]::WriteAllText((Join-Path $focusBarrierDirectory 'before_insertion.continue'), '', [System.Text.UTF8Encoding]::new($false))
