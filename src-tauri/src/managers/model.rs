@@ -118,10 +118,10 @@ struct DirectoryIntegrityManifest {
 
 impl ModelManager {
     pub fn new(app_handle: &AppHandle) -> Result<Self> {
-        // A real-inference smoke can point at a disposable model directory so
-        // it never reads or mutates a user's downloaded models. This override
-        // is deliberately inert unless the opt-in WAV smoke is active.
-        let models_dir = native_smoke_real_inference_models_dir().unwrap_or(
+        // A native smoke can point at a disposable model directory so it never
+        // reads or mutates a user's downloaded models. The override is active
+        // only with the native-smoke status contract.
+        let models_dir = crate::native_smoke::model_directory_override().unwrap_or(
             crate::portable::app_data_dir(app_handle)
                 .map_err(|e| anyhow::anyhow!("Failed to get app data dir: {}", e))?
                 .join("models"),
@@ -1314,18 +1314,6 @@ impl ModelManager {
         info!("Download cancellation initiated for: {}", model_id);
         Ok(())
     }
-}
-
-fn native_smoke_real_inference_models_dir() -> Option<PathBuf> {
-    if std::env::var_os("VERBATIM_SMOKE_REAL_INFERENCE_WAV").is_none() {
-        return None;
-    }
-    let value = std::env::var_os("VERBATIM_SMOKE_MODEL_DIR")?;
-    if value.is_empty() {
-        warn!("Ignoring empty VERBATIM_SMOKE_MODEL_DIR value");
-        return None;
-    }
-    Some(PathBuf::from(value))
 }
 
 #[cfg(test)]

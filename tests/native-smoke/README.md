@@ -8,6 +8,7 @@ Current coverage lives in:
 - `scripts/native-smoke/run-packaged-smoke.ts`
 - `scripts/native-smoke/controlled-desktop-targets.ts`
 - `scripts/native-smoke/virtual-audio-input.ts`
+- `scripts/native-smoke/run-whiteknight-golden-dictation.ps1`
 
 The current smoke lane proves packaged startup, settings load, main-window creation, tray initialization, updater plugin registration, single-instance plugin registration, close-to-tray handler registration, clean quit, isolated profile use, clean-profile retention defaults and empty history/recordings state, production storage-policy behavior for disabled recordings, disabled history, and private session, credential-store health without retained legacy API keys, synthetic legacy API-key migration into the real OS credential backend when that backend is available, model-load fallback decision behavior for accelerator and generic provider failures, insertion safety for target-changed adaptive/classic paste attempts, clipboard ownership safety for same-text and changed-text mutation cases, production frontend main/overlay assets plus lazy locale chunks, packaged app resolution/decoding of critical bundled resources, deterministic WAV fixture generation, forced startup-failure recovery status, forced coordinator panic supervision status, single-instance duplicate exit, smoke-only local model selection without remote provider calls, installer/package launch from the produced NSIS/DMG/DEB artifact, Windows generated-uninstaller cleanup, Ubuntu package removal cleanup, and artifact capture.
 
@@ -100,10 +101,53 @@ the following in one controlled session:
    contents or dictated text.
 
 Startup, unit-level insertion, and controlled-target preflight evidence are
-useful prerequisites, but none can substitute for this contract. Until the
-app-driven artifact is produced by that real path, keep
-`--require-app-insertion-drills` opt-in and describe the golden dictation path
-as unproven.
+useful prerequisites, but none can substitute for this contract. The physical
+lane is deliberately opt-in: it uses the dedicated WhiteKnight desktop runner,
+never the developer workstation or a user's installed Verbatim app. It stages
+a fresh build, a local model, and the deterministic fixture under a unique
+`C:\AgentArtifacts\whiteknight-tasks\<run>` directory, then deletes that exact
+remote task directory after copying only redacted evidence back to the
+controller.
+
+Before invocation, the WhiteKnight readiness and interactive-desktop gates must
+be `Ready`. Its reversible desktop QA mode must be disabled after the run.
+The physical runner must already have the exact VB-Audio endpoints available;
+the lane does not install drivers, alter default audio devices, use a live
+microphone, or read pre-existing clipboard contents.
+
+```powershell
+# Run from the controller after building a fresh app payload.
+bun run smoke:golden-dictation -- `
+  -AppPath C:\build\verbatim.exe `
+  -ModelDirectory C:\fixtures\models `
+  -WavPath C:\fixtures\synthetic-speech-16khz-mono.wav `
+  -ModelId moonshine-tiny-streaming-en `
+  -InputDeviceName 'CABLE Output (VB-Audio Virtual Cable)' `
+  -OutputDeviceName 'Speakers (VB-Audio Virtual Cable)'
+```
+
+The command fails closed if any `verbatim.exe` is already running on
+WhiteKnight, if either requested virtual endpoint is absent, if the staged app
+is not the selected model/microphone, or if any of the three real desktop
+cases fails. The runner retains no dictated audio, transcript, or user
+clipboard value. Its only copied evidence is fixed-schema JSON/JSONL receipts
+containing booleans, device/model identity, insertion reason codes, and frame
+counts.
+
+To independently validate a copied evidence directory without requiring the
+normal packaged-smoke artifacts, run:
+
+```bash
+bun run check:native-smoke-artifacts -- \
+  --dir C:\CodexScratch\verbatim-golden-dictation\<run>\evidence \
+  --require-golden-dictation \
+  --golden-dictation-only
+```
+
+This gate permits only the documented fixed-schema fields, so it rejects an
+artifact that contains transcript, audio, or clipboard-content fields in
+addition to rejecting missing or failed stable-focus, focus-switch, and
+clipboard-mutation receipts.
 
 Controlled desktop target coverage is opt-in:
 
@@ -122,10 +166,6 @@ The drill never reads user clipboard contents.
 
 Remaining fixture work:
 
-- OS virtual audio input path for packaged transcription smoke.
-- Wire the real inference receipt to audio captured from the provisioned
-  virtual input, rather than the deterministic WAV fed directly to the local
-  model.
 - N-1 to N updater application smoke.
 - Real provider load-failure execution that proves the native engine can recover
   after an actual accelerator load failure.
@@ -136,12 +176,5 @@ Remaining fixture work:
   backend is unavailable or cannot persist the synthetic smoke key.
 - Full packaged webview CSP violation drill beyond the static config check and
   resource/locale asset smoke.
-- Wire the controlled paste targets into full Verbatim insertion smoke so the
-  app performs the paste into the target, not only the target launch/focus
-  preflight.
-- Focus-switch during inference with insertion blocked against a real desktop
-  target.
-- Clipboard mutation during paste with user clipboard preserved in an isolated
-  desktop session.
 
 Do not use live microphones, paid providers, or user clipboard contents in these tests.

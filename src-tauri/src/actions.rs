@@ -333,6 +333,18 @@ fn complete_adaptive_insertion(request: AdaptiveInsertionRequest) {
         return;
     }
 
+    if let Err(error) = crate::native_smoke::wait_for_barrier("before_insertion") {
+        error!("Native smoke insertion barrier failed: {error}");
+    }
+    if operation_is_cancelled(&app, operation_token.as_ref()) {
+        cleanup_cancelled_recording(
+            Arc::clone(&history_manager),
+            saved_entry_id,
+            cancelled_wav_path,
+        );
+        finish_cancelled_operation(&app);
+        return;
+    }
     let target_verified = paste_target_is_current(paste_target.as_deref());
     let expected_target = if target_verified { paste_target } else { None };
     let attempt = if target_verified {
@@ -366,6 +378,7 @@ fn complete_adaptive_insertion(request: AdaptiveInsertionRequest) {
     }
     let recovery_event = outcome.paste_recovery_event();
     let receipt = outcome.receipt;
+    crate::native_smoke::record_insertion_receipt(&receipt);
 
     if outcome.emit_inserted {
         debug!(
@@ -411,6 +424,14 @@ fn complete_classic_insertion(
         return;
     }
 
+    if let Err(error) = crate::native_smoke::wait_for_barrier("before_insertion") {
+        error!("Native smoke insertion barrier failed: {error}");
+    }
+    if operation_is_cancelled(&app, operation_token.as_ref()) {
+        cleanup_cancelled_recording(history_manager, saved_entry_id, cancelled_wav_path);
+        finish_cancelled_operation(&app);
+        return;
+    }
     let target_verified = paste_target_is_current(paste_target.as_deref());
     let expected_target = if target_verified { paste_target } else { None };
     let attempt = if !target_verified {
@@ -434,6 +455,9 @@ fn complete_classic_insertion(
         )
     });
     let outcome = insertion_transaction.run(attempt);
+    let recovery_event = outcome.paste_recovery_event();
+    let receipt = outcome.receipt;
+    crate::native_smoke::record_insertion_receipt(&receipt);
     if let Some(recovery) = &outcome.recovery_copy {
         copy_text_to_clipboard(&app, &recovery.text, recovery.reason);
     }
@@ -447,9 +471,9 @@ fn complete_classic_insertion(
     if outcome.emit_paste_error {
         error!(
             "Failed to paste transcription: {:?}",
-            outcome.receipt.error.as_deref()
+            receipt.error.as_deref()
         );
-        if let Some(recovery_event) = outcome.paste_recovery_event() {
+        if let Some(recovery_event) = recovery_event {
             let _ = app.emit("paste-error", recovery_event);
         }
     }

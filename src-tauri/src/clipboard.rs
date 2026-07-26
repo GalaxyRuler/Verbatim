@@ -764,10 +764,7 @@ fn wait_until_clipboard_owns_payload(
         }
 
         if started.elapsed() >= timeout {
-            return Err(format!(
-                "Clipboard did not report Verbatim paste payload within {}ms",
-                timeout.as_millis()
-            ));
+            return Err(crate::insertion::CLIPBOARD_CHANGED_BEFORE_PASTE.to_string());
         }
 
         let remaining = timeout.saturating_sub(started.elapsed());
@@ -862,6 +859,8 @@ fn paste_via_clipboard(
     write_text_clipboard(app_handle, text)?;
     let payload_marker = ClipboardPayloadMarker::capture_current();
     let session = ClipboardPasteSession::new(app_handle, text, clipboard_snapshot, payload_marker);
+
+    crate::native_smoke::wait_for_barrier("after_clipboard_payload")?;
 
     if let Err(err) = wait_until_clipboard_owns_payload(
         app_handle,

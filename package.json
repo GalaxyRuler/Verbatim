@@ -24,6 +24,7 @@
     "smoke:installer": "bun scripts/native-smoke/run-installer-smoke.ts",
     "smoke:desktop-targets": "bun scripts/native-smoke/controlled-desktop-targets.ts",
     "smoke:virtual-audio": "bun scripts/native-smoke/virtual-audio-input.ts",
+    "smoke:golden-dictation": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/native-smoke/run-whiteknight-golden-dictation.ps1",
     "check:native-smoke-artifacts": "bun scripts/native-smoke/check-artifacts.ts",
     "test:playwright": "playwright test",
     "test:playwright:ui": "playwright test --ui",

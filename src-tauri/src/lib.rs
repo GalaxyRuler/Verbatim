@@ -21,6 +21,7 @@ mod linux_readiness;
 mod llm_client;
 pub mod local_llm;
 mod managers;
+mod native_smoke;
 mod operation_cancellation;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod overlay;
@@ -503,10 +504,9 @@ fn initialize_core_logic(app_handle: &AppHandle) -> Result<(), StartupError> {
         return Err(error);
     }
 
-    // Note: Enigo (keyboard/mouse simulation) is NOT initialized here.
-    // The frontend is responsible for calling the `initialize_enigo` command
-    // after onboarding completes. This avoids triggering permission dialogs
-    // on macOS before the user is ready.
+    // Enigo (keyboard/mouse simulation) is normally initialized by the
+    // frontend after onboarding completes. This avoids triggering permission
+    // dialogs on macOS before the user is ready.
 
     // Initialize the managers
     let recording_manager = Arc::new(init_step(
@@ -539,6 +539,17 @@ fn initialize_core_logic(app_handle: &AppHandle) -> Result<(), StartupError> {
     app_handle.manage(operation_cancellation::OperationCancellationState::default());
     app_handle.manage(adaptive::session::ActiveDictationContext::default());
     app_handle.manage(adaptive::session::ActivePasteTarget::default());
+
+    // A native smoke runs from a disposable profile with no frontend onboarding
+    // interaction. Its status contract is the explicit opt-in for exercising
+    // the real insertion seam, including the input backend. Normal launches
+    // continue to initialize Enigo only after the frontend has permission.
+    if crate::native_smoke::is_enabled() {
+        init_step(
+            "native smoke input initialization",
+            commands::initialize_enigo(app_handle.clone()).map_err(anyhow::Error::msg),
+        )?;
+    }
 
     // Note: Shortcuts are NOT initialized here.
     // The frontend is responsible for calling the `initialize_shortcuts` command
