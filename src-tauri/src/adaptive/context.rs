@@ -18,6 +18,15 @@ pub fn capture_context(private_patterns: &[String], capture_nearby_text: bool) -
     finalize_captured_context(context, private_patterns, capture_nearby_text)
 }
 
+/// Returns a short-lived identity for the current foreground window.
+///
+/// This is deliberately separate from [`CapturedContext`]: window handles and
+/// process IDs make a paste guard precise, but must not enter adaptive context,
+/// history metadata, or any frontend payload.
+pub fn capture_dispatch_target() -> Option<String> {
+    capture_platform_dispatch_target()
+}
+
 fn finalize_captured_context(
     mut context: CapturedContext,
     private_patterns: &[String],
@@ -45,9 +54,13 @@ pub fn unknown_context() -> CapturedContext {
 }
 
 pub fn context_history_metadata_json(context: &CapturedContext) -> Option<String> {
+    let persistent_target_fingerprint = build_context_target_fingerprint(
+        context.process_name.as_deref(),
+        context.window_class.as_deref(),
+    );
     if context.process_name.is_none()
         && context.window_class.is_none()
-        && context.target_fingerprint.is_none()
+        && persistent_target_fingerprint.is_none()
         && context.target_kind == TargetKind::Unknown
         && !context.is_sensitive
     {
@@ -60,7 +73,10 @@ pub fn context_history_metadata_json(context: &CapturedContext) -> Option<String
         title_hash: context.window_title_hash.clone(),
         window_class: context.window_class.clone(),
         target_kind: context.target_kind.clone(),
-        target_fingerprint: context.target_fingerprint.clone(),
+        // Derive this from persistent-safe fields instead of copying the
+        // captured value. The paste guard's PID/HWND token must never be
+        // retained if a caller accidentally supplies it here.
+        target_fingerprint: persistent_target_fingerprint,
         is_sensitive: context.is_sensitive,
     };
 
@@ -165,8 +181,62 @@ fn capture_platform_context(_capture_nearby_text: bool) -> CapturedContext {
     }
 }
 
+#[cfg(not(target_os = "windows"))]
+fn capture_platform_dispatch_target() -> Option<String> {
+    None
+}
+
 #[cfg(target_os = "windows")]
 fn capture_platform_context(capture_nearby_text: bool) -> CapturedContext {
+    let target = capture_windows_foreground_target();
+    unsafe {
+        let window_title = capture_nearby_text
+            .then(|| read_window_title(target.hwnd))
+            .flatten();
+        let target_kind = classify_target(
+            target.process_name.as_deref(),
+            window_title.as_deref(),
+            target.window_class.as_deref(),
+        );
+        let target_fingerprint = build_context_target_fingerprint(
+            target.process_name.as_deref(),
+            target.window_class.as_deref(),
+        );
+
+        CapturedContext {
+            captured_at_ms: Utc::now().timestamp_millis(),
+            process_name: target.process_name,
+            window_title,
+            window_title_hash: None,
+            window_class: target.window_class,
+            target_kind,
+            target_fingerprint,
+            is_sensitive: false,
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn capture_platform_dispatch_target() -> Option<String> {
+    let target = capture_windows_foreground_target();
+    build_dispatch_target(
+        target.process_name.as_deref(),
+        target.window_class.as_deref(),
+        target.process_id,
+        target.hwnd,
+    )
+}
+
+#[cfg(target_os = "windows")]
+struct WindowsForegroundTarget {
+    hwnd: windows::Win32::Foundation::HWND,
+    process_id: u32,
+    process_name: Option<String>,
+    window_class: Option<String>,
+}
+
+#[cfg(target_os = "windows")]
+fn capture_windows_foreground_target() -> WindowsForegroundTarget {
     use std::path::Path;
     use windows::core::PWSTR;
     use windows::Win32::Foundation::{CloseHandle, HWND};
@@ -182,11 +252,6 @@ fn capture_platform_context(capture_nearby_text: bool) -> CapturedContext {
         if hwnd != HWND::default() {
             GetWindowThreadProcessId(hwnd, Some(&mut process_id));
         }
-
-        let window_title = capture_nearby_text
-            .then(|| read_window_title(hwnd))
-            .flatten();
-        let window_class = read_window_class(hwnd);
         let process_name = if process_id == 0 {
             None
         } else {
@@ -211,23 +276,12 @@ fn capture_platform_context(capture_nearby_text: bool) -> CapturedContext {
                     .map(|name| name.to_string())
             })
         };
-        let target_kind = classify_target(
-            process_name.as_deref(),
-            window_title.as_deref(),
-            window_class.as_deref(),
-        );
-        let target_fingerprint =
-            build_target_fingerprint(process_name.as_deref(), window_class.as_deref());
 
-        CapturedContext {
-            captured_at_ms: Utc::now().timestamp_millis(),
+        WindowsForegroundTarget {
+            hwnd,
+            process_id,
             process_name,
-            window_title,
-            window_title_hash: None,
-            window_class,
-            target_kind,
-            target_fingerprint,
-            is_sensitive: false,
+            window_class: read_window_class(hwnd),
         }
     }
 }
@@ -268,8 +322,7 @@ unsafe fn read_window_class(hwnd: windows::Win32::Foundation::HWND) -> Option<St
     Some(String::from_utf16_lossy(&buffer[..copied as usize]))
 }
 
-#[cfg(target_os = "windows")]
-fn build_target_fingerprint(
+fn build_context_target_fingerprint(
     process_name: Option<&str>,
     window_class: Option<&str>,
 ) -> Option<String> {
@@ -279,6 +332,29 @@ fn build_target_fingerprint(
         None
     } else {
         Some(format!("{}|{}", process, class))
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn build_dispatch_target(
+    process_name: Option<&str>,
+    window_class: Option<&str>,
+    process_id: u32,
+    hwnd: windows::Win32::Foundation::HWND,
+) -> Option<String> {
+    let process = process_name.unwrap_or_default().to_lowercase();
+    let class = window_class.unwrap_or_default().to_lowercase();
+    if process_id != 0 && hwnd != windows::Win32::Foundation::HWND::default() {
+        // Process name and window class describe an application family, not a
+        // particular foreground window. Include the ephemeral process/window
+        // identity so a focus change between two Notepad, Outlook, or browser
+        // windows cannot be mistaken for the original insertion target.
+        Some(format!(
+            "{}|{}|{:x}|{:x}",
+            process, class, process_id, hwnd.0 as usize
+        ))
+    } else {
+        build_context_target_fingerprint(process_name, window_class)
     }
 }
 
@@ -360,6 +436,49 @@ mod tests {
         );
     }
 
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn dispatch_target_binds_to_the_foreground_window_instance() {
+        use windows::Win32::Foundation::HWND;
+
+        let first = build_dispatch_target(
+            Some("notepad.exe"),
+            Some("Notepad"),
+            41,
+            HWND(0x101usize as *mut std::ffi::c_void),
+        );
+        let second = build_dispatch_target(
+            Some("notepad.exe"),
+            Some("Notepad"),
+            42,
+            HWND(0x202usize as *mut std::ffi::c_void),
+        );
+
+        assert_eq!(first.as_deref(), Some("notepad.exe|notepad|29|101"));
+        assert_eq!(second.as_deref(), Some("notepad.exe|notepad|2a|202"));
+        assert_ne!(first, second);
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn dispatch_target_keeps_legacy_fallback_when_window_identity_is_missing() {
+        use windows::Win32::Foundation::HWND;
+
+        assert_eq!(
+            build_dispatch_target(Some("notepad.exe"), Some("Notepad"), 0, HWND::default())
+                .as_deref(),
+            Some("notepad.exe|notepad")
+        );
+    }
+
+    #[test]
+    fn context_fingerprint_never_includes_runtime_window_identity() {
+        assert_eq!(
+            build_context_target_fingerprint(Some("notepad.exe"), Some("Notepad")).as_deref(),
+            Some("notepad.exe|notepad")
+        );
+    }
+
     #[test]
     fn sensitive_process_suppresses_title() {
         let context = sanitize_context(
@@ -428,6 +547,25 @@ mod tests {
         assert!(metadata.contains("\"process_name\":\"OUTLOOK.EXE\""));
         assert!(!metadata.contains("private@example.com"));
         assert!(!metadata.contains("window_title"));
+    }
+
+    #[test]
+    fn history_metadata_omits_runtime_window_identity() {
+        let context = CapturedContext {
+            captured_at_ms: 1,
+            process_name: Some("notepad.exe".to_string()),
+            window_title: None,
+            window_title_hash: None,
+            window_class: Some("Notepad".to_string()),
+            target_kind: TargetKind::Notes,
+            target_fingerprint: Some("notepad.exe|notepad|29|101".to_string()),
+            is_sensitive: false,
+        };
+
+        let metadata = context_history_metadata_json(&context).expect("metadata json");
+
+        assert!(metadata.contains("notepad.exe|notepad"));
+        assert!(!metadata.contains("|29|101"));
     }
 
     #[test]

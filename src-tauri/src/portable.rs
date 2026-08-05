@@ -15,6 +15,15 @@ const PORTABLE_MARKER: &str = "Verbatim Portable Mode";
 /// Must be called once at startup before Tauri initializes.
 pub fn init() {
     PORTABLE_DATA_DIR.get_or_init(|| {
+        if let Some(smoke_data_dir) = native_smoke_data_dir() {
+            std::fs::create_dir_all(&smoke_data_dir).ok()?;
+            eprintln!(
+                "[portable] using isolated native smoke data dir: {}",
+                smoke_data_dir.display()
+            );
+            return Some(smoke_data_dir);
+        }
+
         let exe_path = std::env::current_exe().ok()?;
         let exe_dir = exe_path.parent()?;
 
@@ -44,6 +53,31 @@ pub fn init() {
             None
         }
     });
+}
+
+/// Native smoke needs an isolated data directory on every platform. Windows
+/// resolves known folders directly instead of honoring APPDATA overrides, so
+/// setting the process environment alone can otherwise leave smoke artifacts
+/// in a real user profile. This test-only override is accepted only alongside
+/// the normal native-smoke status contract and only for an absolute path.
+fn native_smoke_data_dir() -> Option<PathBuf> {
+    if std::env::var_os("VERBATIM_SMOKE_STATUS_PATH").is_none() {
+        return None;
+    }
+    let value = std::env::var_os("VERBATIM_SMOKE_DATA_DIR")?;
+    if value.is_empty() {
+        eprintln!("[portable] ignoring empty VERBATIM_SMOKE_DATA_DIR");
+        return None;
+    }
+    let path = PathBuf::from(value);
+    if !path.is_absolute() {
+        eprintln!(
+            "[portable] ignoring non-absolute VERBATIM_SMOKE_DATA_DIR: {}",
+            path.display()
+        );
+        return None;
+    }
+    Some(path)
 }
 
 /// Returns `true` if running in portable mode.

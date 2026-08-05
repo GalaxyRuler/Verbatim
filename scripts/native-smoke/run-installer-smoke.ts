@@ -34,6 +34,10 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const tauriRoot = join(repoRoot, "src-tauri");
 const tauriConfigPath = join(tauriRoot, "tauri.conf.json");
 const hostPlatform = platform();
+// The installer runner is itself launched by Bun. Reuse that exact executable
+// for delegated smoke so Windows does not depend on resolving a `bun` shell
+// wrapper (`bun.ps1`/`bun.cmd`) through child_process.spawn.
+const bunExecutable = process.execPath;
 const args = process.argv.slice(2);
 
 if (args.includes("--help") || args.includes("-h")) {
@@ -276,7 +280,7 @@ async function runPackagedSmoke(appPath: string): Promise<void> {
   const delegatedArtifactDir = join(artifactDir, "packaged-smoke");
   mkdirSync(delegatedArtifactDir, { recursive: true });
   await runCommand(
-    "bun",
+    bunExecutable,
     [
       join(repoRoot, "scripts", "native-smoke", "run-packaged-smoke.ts"),
       "--app",

@@ -1,6 +1,8 @@
 use crate::adaptive::types::{InsertionMethod, InsertionReceipt};
 use serde::Serialize;
 
+pub(crate) const CLIPBOARD_CHANGED_BEFORE_PASTE: &str = "clipboard changed before paste";
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum InsertionKind {
     Adaptive,
@@ -328,14 +330,18 @@ where
         expected_target,
         auto_learn_eligible,
     });
-    let recovery_copy = if receipt.succeeded {
-        None
-    } else {
-        Some(RecoveryCopy {
-            text,
-            reason: recovery_reason,
-        })
-    };
+    // A paste session can detect that another application changed the clipboard
+    // after Verbatim wrote its own payload. The newer clipboard value belongs to
+    // that application, so generic failure recovery must not overwrite it.
+    let recovery_copy =
+        if receipt.succeeded || receipt.error.as_deref() == Some(CLIPBOARD_CHANGED_BEFORE_PASTE) {
+            None
+        } else {
+            Some(RecoveryCopy {
+                text,
+                reason: recovery_reason,
+            })
+        };
 
     InsertionOutcome {
         emit_paste_error: !receipt.succeeded,
@@ -507,6 +513,31 @@ mod tests {
         );
         assert!(outcome.auto_learn_eligible);
         assert!(outcome.emit_paste_error);
+    }
+
+    #[test]
+    fn clipboard_mutation_failure_does_not_overwrite_newer_clipboard_content() {
+        let outcome = resolve_insertion_attempt(
+            InsertionAttempt::classic_ready("recover me without clobbering"),
+            |request| InsertionReceipt {
+                attempted: true,
+                succeeded: false,
+                method: InsertionMethod::Clipboard,
+                target_verified: request.target_verified,
+                error: Some("clipboard changed before paste".to_string()),
+            },
+        );
+
+        assert!(outcome.emit_paste_error);
+        assert!(outcome.recovery_copy.is_none());
+        assert_eq!(
+            outcome.paste_recovery_event(),
+            Some(PasteRecoveryEvent {
+                reason: PasteRecoveryReason::PasteFailure,
+                copied: false,
+                paste_here_available: false,
+            })
+        );
     }
 
     #[test]

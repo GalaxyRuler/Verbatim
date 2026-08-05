@@ -1149,6 +1149,7 @@ impl TranscriptionManager {
             };
 
         let model_asset = self.model_manager.get_model_asset(model_id)?;
+        debug!("Resolved model asset for {}", model_id);
         let mut settings = get_settings(&self.app_handle);
         let mut preflight_fallback = None;
         if should_run_whisper_gpu_preflight(&settings, model_info.engine_type.clone()) {
@@ -1195,6 +1196,7 @@ impl TranscriptionManager {
         let whisper_use_gpu = settings.whisper_accelerator != WhisperAcceleratorSetting::Cpu;
         let whisper_gpu_device = settings.whisper_gpu_device;
         let mut provider = TranscribeRsProvider::new();
+        debug!("Constructing transcription provider for {}", model_id);
         let load_fallback = match provider.load_with_whisper_params(
             &model_asset,
             whisper_use_gpu,

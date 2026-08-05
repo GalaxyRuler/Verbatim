@@ -21,6 +21,7 @@ mod linux_readiness;
 mod llm_client;
 pub mod local_llm;
 mod managers;
+mod native_smoke;
 mod operation_cancellation;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod overlay;
@@ -146,6 +147,7 @@ struct NativeSmokeStatus {
     audio_fixture_path: Option<String>,
     audio_fixture_sample_count: usize,
     audio_fixture_verified: bool,
+    real_inference: Option<NativeSmokeRealInferenceStatus>,
     resource_probe_checked: bool,
     resource_probe_failures: Vec<String>,
     retention: Option<NativeSmokeRetentionStatus>,
@@ -204,6 +206,22 @@ struct NativeSmokeInsertionSafetyDrillCase {
     passed: bool,
 }
 
+/// Redacted evidence from an opt-in local inference smoke. It deliberately
+/// carries only booleans and failure classes: dictated audio and transcript
+/// content must never enter native-smoke artifacts.
+#[derive(Clone, Debug, Serialize)]
+struct NativeSmokeRealInferenceStatus {
+    checked: bool,
+    model_id: String,
+    audio_sample_count: usize,
+    model_loaded: bool,
+    inference_started: bool,
+    inference_completed: bool,
+    transcript_non_empty: bool,
+    transcript_recorded: bool,
+    failure_class: Option<String>,
+}
+
 fn native_smoke_forced_startup_failure() -> Option<StartupError> {
     if std::env::var("VERBATIM_SMOKE_FORCE_STARTUP_FAILURE").as_deref() != Ok("1") {
         return None;
@@ -239,6 +257,125 @@ fn apply_native_smoke_microphone_selection(app: &AppHandle, settings: &mut setti
         Ok(()) => settings::write_settings(app, settings.clone()),
         Err(error) => log::warn!("Failed to apply native smoke microphone selection: {error}"),
     }
+}
+
+fn apply_native_smoke_model_selection(app: &AppHandle, settings: &mut settings::AppSettings) {
+    let Ok(value) = std::env::var("VERBATIM_SMOKE_SELECTED_MODEL") else {
+        return;
+    };
+    let selected_model = value.trim();
+    if selected_model.is_empty() {
+        log::warn!("Ignoring empty VERBATIM_SMOKE_SELECTED_MODEL value");
+        return;
+    }
+
+    match settings::mutate_settings_domain(
+        settings,
+        settings::SettingsWriteDomain::Models,
+        |settings| settings.selected_model = selected_model.to_string(),
+    ) {
+        Ok(()) => settings::write_settings(app, settings.clone()),
+        Err(error) => log::warn!("Failed to apply native smoke model selection: {error}"),
+    }
+}
+
+fn read_native_smoke_real_inference_wav(path: &std::path::Path) -> anyhow::Result<Vec<f32>> {
+    let reader = hound::WavReader::open(path)?;
+    let spec = reader.spec();
+    if spec.sample_rate != 16_000
+        || spec.channels != 1
+        || spec.bits_per_sample != 16
+        || spec.sample_format != hound::SampleFormat::Int
+    {
+        anyhow::bail!(
+            "real inference smoke WAV must be 16 kHz, mono, signed 16-bit PCM (got {} Hz, {} channel(s), {}-bit {:?})",
+            spec.sample_rate,
+            spec.channels,
+            spec.bits_per_sample,
+            spec.sample_format
+        );
+    }
+    drop(reader);
+    crate::audio_toolkit::read_wav_samples(path)
+}
+
+fn native_smoke_real_inference_timeout() -> std::time::Duration {
+    const DEFAULT_TIMEOUT_MS: u64 = 90_000;
+    const MAX_TIMEOUT_MS: u64 = 300_000;
+
+    match std::env::var("VERBATIM_SMOKE_REAL_INFERENCE_TIMEOUT_MS") {
+        Ok(value) => match value.parse::<u64>() {
+            Ok(timeout_ms) if (10_000..=MAX_TIMEOUT_MS).contains(&timeout_ms) => {
+                std::time::Duration::from_millis(timeout_ms)
+            }
+            _ => {
+                log::warn!(
+                    "Ignoring invalid VERBATIM_SMOKE_REAL_INFERENCE_TIMEOUT_MS value: {value}"
+                );
+                std::time::Duration::from_millis(DEFAULT_TIMEOUT_MS)
+            }
+        },
+        Err(_) => std::time::Duration::from_millis(DEFAULT_TIMEOUT_MS),
+    }
+}
+
+fn run_native_smoke_real_inference(app: &AppHandle) -> Option<NativeSmokeRealInferenceStatus> {
+    let Ok(wav_path) = std::env::var("VERBATIM_SMOKE_REAL_INFERENCE_WAV") else {
+        return None;
+    };
+
+    let selected_model = get_settings(app).selected_model;
+    let mut status = NativeSmokeRealInferenceStatus {
+        checked: true,
+        model_id: selected_model,
+        audio_sample_count: 0,
+        model_loaded: false,
+        inference_started: false,
+        inference_completed: false,
+        transcript_non_empty: false,
+        transcript_recorded: false,
+        failure_class: None,
+    };
+
+    let samples = match read_native_smoke_real_inference_wav(std::path::Path::new(&wav_path)) {
+        Ok(samples) if !samples.is_empty() => samples,
+        Ok(_) | Err(_) => {
+            status.failure_class = Some("invalid_audio_fixture".to_string());
+            return Some(status);
+        }
+    };
+    status.audio_sample_count = samples.len();
+
+    let outcome = (|| -> anyhow::Result<bool> {
+        let manager = app.state::<Arc<TranscriptionManager>>();
+        manager.initiate_model_load();
+        let started = std::time::Instant::now();
+        let timeout = native_smoke_real_inference_timeout();
+        while !manager.is_model_loaded() && started.elapsed() < timeout {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        if !manager.is_model_loaded() {
+            anyhow::bail!("model_load_failed");
+        }
+        status.model_loaded = true;
+        status.inference_started = true;
+        let transcript = manager.transcribe(samples)?;
+        status.inference_completed = true;
+        Ok(!transcript.trim().is_empty())
+    })();
+
+    match outcome {
+        Ok(non_empty) => status.transcript_non_empty = non_empty,
+        Err(error) => {
+            status.failure_class = Some(if error.to_string().contains("model_load_failed") {
+                "model_load_failed".to_string()
+            } else {
+                "inference_failed".to_string()
+            })
+        }
+    }
+
+    Some(status)
 }
 
 fn level_filter_from_u8(value: u8) -> log::LevelFilter {
@@ -367,10 +504,9 @@ fn initialize_core_logic(app_handle: &AppHandle) -> Result<(), StartupError> {
         return Err(error);
     }
 
-    // Note: Enigo (keyboard/mouse simulation) is NOT initialized here.
-    // The frontend is responsible for calling the `initialize_enigo` command
-    // after onboarding completes. This avoids triggering permission dialogs
-    // on macOS before the user is ready.
+    // Enigo (keyboard/mouse simulation) is normally initialized by the
+    // frontend after onboarding completes. This avoids triggering permission
+    // dialogs on macOS before the user is ready.
 
     // Initialize the managers
     let recording_manager = Arc::new(init_step(
@@ -402,6 +538,18 @@ fn initialize_core_logic(app_handle: &AppHandle) -> Result<(), StartupError> {
     app_handle.manage(local_llm_manager.clone());
     app_handle.manage(operation_cancellation::OperationCancellationState::default());
     app_handle.manage(adaptive::session::ActiveDictationContext::default());
+    app_handle.manage(adaptive::session::ActivePasteTarget::default());
+
+    // A native smoke runs from a disposable profile with no frontend onboarding
+    // interaction. Its status contract is the explicit opt-in for exercising
+    // the real insertion seam, including the input backend. Normal launches
+    // continue to initialize Enigo only after the frontend has permission.
+    if crate::native_smoke::is_enabled() {
+        init_step(
+            "native smoke input initialization",
+            commands::initialize_enigo(app_handle.clone()).map_err(anyhow::Error::msg),
+        )?;
+    }
 
     // Note: Shortcuts are NOT initialized here.
     // The frontend is responsible for calling the `initialize_shortcuts` command
@@ -609,6 +757,28 @@ fn schedule_native_smoke_exit(app: AppHandle, status: NativeSmokeStatus) {
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(delay_ms));
         log::info!("Native smoke startup check completed; exiting after {delay_ms}ms");
+        app.exit(0);
+    });
+}
+
+/// Run the opt-in real-inference smoke after Tauri's event loop reports ready.
+/// Model loading emits state events, so performing it synchronously from
+/// `setup` can leave a native smoke waiting on startup rather than exercising
+/// the loaded engine.
+fn schedule_native_smoke_real_inference_exit(app: AppHandle, mut status: NativeSmokeStatus) {
+    let Ok(value) = std::env::var("VERBATIM_SMOKE_EXIT_AFTER_MS") else {
+        return;
+    };
+    let Ok(delay_ms) = value.parse::<u64>() else {
+        log::warn!("Ignoring invalid VERBATIM_SMOKE_EXIT_AFTER_MS value: {value}");
+        return;
+    };
+
+    std::thread::spawn(move || {
+        status.real_inference = run_native_smoke_real_inference(&app);
+        write_native_smoke_status(&status);
+        std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+        log::info!("Native smoke real-inference check completed; exiting after {delay_ms}ms");
         app.exit(0);
     });
 }
@@ -1346,6 +1516,8 @@ fn run_inner(cli_args: CliArgs) {
         .expect("Failed to export typescript bindings");
 
     let invoke_handler = specta_builder.invoke_handler();
+    let deferred_native_smoke_status = Arc::new(Mutex::new(None::<NativeSmokeStatus>));
+    let deferred_native_smoke_status_for_setup = Arc::clone(&deferred_native_smoke_status);
 
     #[allow(unused_mut)]
     let mut builder =
@@ -1476,6 +1648,7 @@ fn run_inner(cli_args: CliArgs) {
 
             let mut settings = get_settings(&app.handle());
             apply_native_smoke_microphone_selection(&app.handle(), &mut settings);
+            apply_native_smoke_model_selection(&app.handle(), &mut settings);
 
             // CLI --debug flag overrides debug_mode and log level (runtime-only, not persisted)
             if cli_args.debug {
@@ -1531,6 +1704,7 @@ fn run_inner(cli_args: CliArgs) {
                             audio_fixture_path: None,
                             audio_fixture_sample_count: 0,
                             audio_fixture_verified: false,
+                            real_inference: None,
                             resource_probe_checked: false,
                             resource_probe_failures: Vec::new(),
                             retention: None,
@@ -1594,6 +1768,8 @@ fn run_inner(cli_args: CliArgs) {
                     .state::<Arc<ModelManager>>()
                     .get_model_info(&settings.selected_model)
             };
+            let real_inference_requested =
+                std::env::var_os("VERBATIM_SMOKE_REAL_INFERENCE_WAV").is_some();
             let coordinator_health_events = run_native_smoke_coordinator_panic_drill(&app_handle);
             let (audio_fixture_path, audio_fixture_sample_count, audio_fixture_verified) =
                 prepare_native_smoke_audio_fixture();
@@ -1608,50 +1784,55 @@ fn run_inner(cli_args: CliArgs) {
             let insertion_safety_drill = native_smoke_insertion_safety_drill();
             let clipboard_safety_drill = crate::clipboard::native_smoke_clipboard_safety_drill();
 
-            schedule_native_smoke_exit(
-                app_handle,
-                NativeSmokeStatus {
-                    startup_status: startup_state.snapshot(),
-                    settings_loaded: true,
-                    main_window_created: true,
-                    tray_initialized: true,
-                    tray_visible_requested: tray_available,
-                    no_tray_cli: cli_args.no_tray,
-                    updater_plugin_registered: true,
-                    single_instance_plugin_registered: true,
-                    close_to_tray_handler_registered: true,
-                    debug_mode_enabled: settings.debug_mode,
-                    selected_microphone: settings
-                        .selected_microphone
-                        .clone()
-                        .unwrap_or_else(|| "default".to_string()),
-                    selected_model_configured: !settings.selected_model.trim().is_empty(),
-                    selected_model_id: settings.selected_model.clone(),
-                    selected_model_downloaded: selected_model_info
-                        .as_ref()
-                        .is_some_and(|model| model.is_downloaded),
-                    selected_model_custom: selected_model_info
-                        .as_ref()
-                        .is_some_and(|model| model.is_custom),
-                    selected_model_has_remote_url: selected_model_info
-                        .as_ref()
-                        .and_then(|model| model.url.as_ref())
-                        .is_some(),
-                    coordinator_health_events,
-                    audio_fixture_path,
-                    audio_fixture_sample_count,
-                    audio_fixture_verified,
-                    resource_probe_checked: true,
-                    resource_probe_failures,
-                    retention: Some(retention),
-                    linux_environment,
-                    credential_store,
-                    credential_migration: Some(credential_migration),
-                    model_load_fallback_drill,
-                    insertion_safety_drill,
-                    clipboard_safety_drill,
-                },
-            );
+            let native_smoke_status = NativeSmokeStatus {
+                startup_status: startup_state.snapshot(),
+                settings_loaded: true,
+                main_window_created: true,
+                tray_initialized: true,
+                tray_visible_requested: tray_available,
+                no_tray_cli: cli_args.no_tray,
+                updater_plugin_registered: true,
+                single_instance_plugin_registered: true,
+                close_to_tray_handler_registered: true,
+                debug_mode_enabled: settings.debug_mode,
+                selected_microphone: settings
+                    .selected_microphone
+                    .clone()
+                    .unwrap_or_else(|| "default".to_string()),
+                selected_model_configured: !settings.selected_model.trim().is_empty(),
+                selected_model_id: settings.selected_model.clone(),
+                selected_model_downloaded: selected_model_info
+                    .as_ref()
+                    .is_some_and(|model| model.is_downloaded),
+                selected_model_custom: selected_model_info
+                    .as_ref()
+                    .is_some_and(|model| model.is_custom),
+                selected_model_has_remote_url: selected_model_info
+                    .as_ref()
+                    .and_then(|model| model.url.as_ref())
+                    .is_some(),
+                coordinator_health_events,
+                audio_fixture_path,
+                audio_fixture_sample_count,
+                audio_fixture_verified,
+                real_inference: None,
+                resource_probe_checked: true,
+                resource_probe_failures,
+                retention: Some(retention),
+                linux_environment,
+                credential_store,
+                credential_migration: Some(credential_migration),
+                model_load_fallback_drill,
+                insertion_safety_drill,
+                clipboard_safety_drill,
+            };
+            if real_inference_requested {
+                *deferred_native_smoke_status_for_setup
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(native_smoke_status);
+            } else {
+                schedule_native_smoke_exit(app_handle, native_smoke_status);
+            }
 
             Ok(())
         })
@@ -1693,7 +1874,16 @@ fn run_inner(cli_args: CliArgs) {
         .invoke_handler(invoke_handler)
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|app, event| {
+        .run(move |app, event| {
+            if matches!(&event, tauri::RunEvent::Ready) {
+                let deferred_status = deferred_native_smoke_status
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .take();
+                if let Some(status) = deferred_status {
+                    schedule_native_smoke_real_inference_exit(app.clone(), status);
+                }
+            }
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Reopen { .. } = &event {
                 show_main_window(app);
@@ -1748,6 +1938,7 @@ mod tests {
             audio_fixture_path: None,
             audio_fixture_sample_count: 0,
             audio_fixture_verified: false,
+            real_inference: None,
             resource_probe_checked: false,
             resource_probe_failures: Vec::new(),
             retention: None,
@@ -1789,6 +1980,44 @@ mod tests {
         assert!(
             samples.iter().all(|sample| sample.abs() <= 0.2),
             "fixture should stay in a conservative amplitude range"
+        );
+    }
+
+    #[test]
+    fn native_smoke_real_inference_wav_requires_16khz_mono_pcm() {
+        let directory = tempfile::TempDir::new().unwrap();
+        let path = directory.path().join("wrong-rate.wav");
+        let spec = hound::WavSpec {
+            channels: 1,
+            sample_rate: 22_050,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
+        let mut writer = hound::WavWriter::create(&path, spec).unwrap();
+        writer.write_sample(0_i16).unwrap();
+        writer.finalize().unwrap();
+
+        let error = read_native_smoke_real_inference_wav(&path).unwrap_err();
+        assert!(error.to_string().contains("16 kHz, mono"));
+    }
+
+    #[test]
+    fn native_smoke_real_inference_wav_accepts_16khz_mono_pcm() {
+        let directory = tempfile::TempDir::new().unwrap();
+        let path = directory.path().join("valid.wav");
+        let spec = hound::WavSpec {
+            channels: 1,
+            sample_rate: 16_000,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
+        let mut writer = hound::WavWriter::create(&path, spec).unwrap();
+        writer.write_sample(12_345_i16).unwrap();
+        writer.finalize().unwrap();
+
+        assert_eq!(
+            read_native_smoke_real_inference_wav(&path).unwrap().len(),
+            1
         );
     }
 
@@ -1854,6 +2083,7 @@ mod tests {
             audio_fixture_path: None,
             audio_fixture_sample_count: 0,
             audio_fixture_verified: false,
+            real_inference: None,
             resource_probe_checked: false,
             resource_probe_failures: Vec::new(),
             retention: None,

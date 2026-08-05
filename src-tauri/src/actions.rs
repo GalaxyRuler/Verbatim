@@ -301,6 +301,7 @@ struct AdaptiveInsertionRequest {
     language_outcome: LanguageOutcome,
     final_text: String,
     context: crate::adaptive::types::CapturedContext,
+    paste_target: Option<String>,
     saved_entry_id: Option<i64>,
     cancelled_wav_path: Option<std::path::PathBuf>,
     operation_token: Option<OperationToken>,
@@ -311,10 +312,11 @@ fn complete_adaptive_insertion(request: AdaptiveInsertionRequest) {
     let AdaptiveInsertionRequest {
         app,
         history_manager,
-        settings,
+        settings: _settings,
         language_outcome,
         final_text,
         context,
+        paste_target,
         saved_entry_id,
         cancelled_wav_path,
         operation_token,
@@ -331,23 +333,20 @@ fn complete_adaptive_insertion(request: AdaptiveInsertionRequest) {
         return;
     }
 
-    let verify_adaptive_target =
-        should_verify_adaptive_target(&context) && should_capture_adaptive_context(&settings);
-    let target_verified = if verify_adaptive_target {
-        let context_runtime = crate::runtime_settings::context_runtime(&settings);
-        let current_context = crate::adaptive::context::capture_context(
-            context_runtime.private_app_patterns(),
-            context_runtime.should_capture_nearby_text(),
+    if let Err(error) = crate::native_smoke::wait_for_barrier("before_insertion") {
+        error!("Native smoke insertion barrier failed: {error}");
+    }
+    if operation_is_cancelled(&app, operation_token.as_ref()) {
+        cleanup_cancelled_recording(
+            Arc::clone(&history_manager),
+            saved_entry_id,
+            cancelled_wav_path,
         );
-        adaptive_target_verified(&context, &current_context)
-    } else {
-        true
-    };
-    let expected_target = if target_verified && verify_adaptive_target {
-        context.target_fingerprint.clone()
-    } else {
-        None
-    };
+        finish_cancelled_operation(&app);
+        return;
+    }
+    let target_verified = paste_target_is_current(paste_target.as_deref());
+    let expected_target = if target_verified { paste_target } else { None };
     let attempt = if target_verified {
         if language_guard_blocks(&app, &language_outcome, &final_text) {
             crate::insertion::InsertionAttempt::adaptive_guard_blocked()
@@ -379,6 +378,7 @@ fn complete_adaptive_insertion(request: AdaptiveInsertionRequest) {
     }
     let recovery_event = outcome.paste_recovery_event();
     let receipt = outcome.receipt;
+    crate::native_smoke::record_insertion_receipt(&receipt);
 
     if outcome.emit_inserted {
         debug!(
@@ -409,13 +409,13 @@ fn complete_adaptive_insertion(request: AdaptiveInsertionRequest) {
 fn complete_classic_insertion(
     app: AppHandle,
     history_manager: Arc<HistoryManager>,
-    settings: AppSettings,
+    _settings: AppSettings,
     language_outcome: LanguageOutcome,
     final_text: String,
     saved_entry_id: Option<i64>,
     cancelled_wav_path: Option<std::path::PathBuf>,
     operation_token: Option<OperationToken>,
-    context: Option<crate::adaptive::types::CapturedContext>,
+    paste_target: Option<String>,
     paste_started_at: Instant,
 ) {
     if operation_is_cancelled(&app, operation_token.as_ref()) {
@@ -424,15 +424,16 @@ fn complete_classic_insertion(
         return;
     }
 
-    let verify_classic_target = should_verify_classic_target(&settings, context.as_ref());
-    let target_verified = classic_target_verified(&settings, context.as_ref());
-    let expected_target = if target_verified && verify_classic_target {
-        context
-            .as_ref()
-            .and_then(|context| context.target_fingerprint.clone())
-    } else {
-        None
-    };
+    if let Err(error) = crate::native_smoke::wait_for_barrier("before_insertion") {
+        error!("Native smoke insertion barrier failed: {error}");
+    }
+    if operation_is_cancelled(&app, operation_token.as_ref()) {
+        cleanup_cancelled_recording(history_manager, saved_entry_id, cancelled_wav_path);
+        finish_cancelled_operation(&app);
+        return;
+    }
+    let target_verified = paste_target_is_current(paste_target.as_deref());
+    let expected_target = if target_verified { paste_target } else { None };
     let attempt = if !target_verified {
         error!("Classic paste skipped because the foreground target changed before insertion");
         crate::insertion::InsertionAttempt::classic_target_changed()
@@ -454,6 +455,9 @@ fn complete_classic_insertion(
         )
     });
     let outcome = insertion_transaction.run(attempt);
+    let recovery_event = outcome.paste_recovery_event();
+    let receipt = outcome.receipt;
+    crate::native_smoke::record_insertion_receipt(&receipt);
     if let Some(recovery) = &outcome.recovery_copy {
         copy_text_to_clipboard(&app, &recovery.text, recovery.reason);
     }
@@ -467,9 +471,9 @@ fn complete_classic_insertion(
     if outcome.emit_paste_error {
         error!(
             "Failed to paste transcription: {:?}",
-            outcome.receipt.error.as_deref()
+            receipt.error.as_deref()
         );
-        if let Some(recovery_event) = outcome.paste_recovery_event() {
+        if let Some(recovery_event) = recovery_event {
             let _ = app.emit("paste-error", recovery_event);
         }
     }
@@ -1134,6 +1138,7 @@ fn should_mute_before_start_feedback(settings: &AppSettings) -> bool {
     settings.mute_while_recording && !settings.audio_feedback
 }
 
+#[cfg(test)]
 fn adaptive_target_verified(
     original_context: &crate::adaptive::types::CapturedContext,
     current_context: &crate::adaptive::types::CapturedContext,
@@ -1173,34 +1178,17 @@ fn target_privacy_exclusion_blocks_recording(
     context.is_sensitive
 }
 
-fn should_verify_adaptive_target(context: &crate::adaptive::types::CapturedContext) -> bool {
-    context.target_fingerprint.is_some()
+fn capture_paste_target() -> Option<String> {
+    crate::adaptive::context::capture_dispatch_target()
 }
 
-fn should_verify_classic_target(
-    settings: &AppSettings,
-    context: Option<&crate::adaptive::types::CapturedContext>,
-) -> bool {
-    settings.context_awareness_enabled && context.is_some_and(should_verify_adaptive_target)
+fn paste_target_is_current(expected_target: Option<&str>) -> bool {
+    let current_target = capture_paste_target();
+    paste_target_matches(expected_target, current_target.as_deref())
 }
 
-fn classic_target_verified(
-    settings: &AppSettings,
-    context: Option<&crate::adaptive::types::CapturedContext>,
-) -> bool {
-    let Some(context) = context else {
-        return true;
-    };
-    if !should_verify_classic_target(settings, Some(context)) {
-        return true;
-    }
-
-    let context_runtime = crate::runtime_settings::context_runtime(settings);
-    let current_context = crate::adaptive::context::capture_context(
-        context_runtime.private_app_patterns(),
-        context_runtime.should_capture_nearby_text(),
-    );
-    adaptive_target_verified(context, &current_context)
+fn paste_target_matches(expected_target: Option<&str>, current_target: Option<&str>) -> bool {
+    expected_target.is_none() || current_target == expected_target
 }
 
 #[cfg(target_os = "windows")]
@@ -1402,6 +1390,14 @@ mod adaptive_action_tests {
     }
 
     #[test]
+    fn adaptive_target_verification_rejects_another_window_of_the_same_app() {
+        assert!(!adaptive_target_verified(
+            &context_with_fingerprint(Some("notepad.exe|notepad|29|101")),
+            &context_with_fingerprint(Some("notepad.exe|notepad|2a|202"))
+        ));
+    }
+
+    #[test]
     fn adaptive_target_verification_allows_unknown_original_target() {
         assert!(adaptive_target_verified(
             &context_with_fingerprint(None),
@@ -1410,33 +1406,18 @@ mod adaptive_action_tests {
     }
 
     #[test]
-    fn adaptive_target_recheck_requires_original_fingerprint() {
-        assert!(!should_verify_adaptive_target(&context_with_fingerprint(
-            None
-        )));
-        assert!(should_verify_adaptive_target(&context_with_fingerprint(
-            Some("notepad|edit")
-        )));
-    }
-
-    #[test]
-    fn classic_target_recheck_requires_context_awareness_and_fingerprint() {
-        let mut settings = crate::settings::get_default_settings();
-        settings.context_awareness_enabled = false;
-
-        assert!(!should_verify_classic_target(
-            &settings,
-            Some(&context_with_fingerprint(Some("notepad|edit")))
+    fn paste_target_guard_applies_without_context_awareness() {
+        assert!(paste_target_matches(
+            None,
+            Some("notepad.exe|notepad|29|101")
         ));
-
-        settings.context_awareness_enabled = true;
-        assert!(!should_verify_classic_target(
-            &settings,
-            Some(&context_with_fingerprint(None))
+        assert!(paste_target_matches(
+            Some("notepad.exe|notepad|29|101"),
+            Some("notepad.exe|notepad|29|101")
         ));
-        assert!(should_verify_classic_target(
-            &settings,
-            Some(&context_with_fingerprint(Some("notepad|edit")))
+        assert!(!paste_target_matches(
+            Some("notepad.exe|notepad|29|101"),
+            Some("notepad.exe|notepad|2a|202")
         ));
     }
 
@@ -2301,6 +2282,13 @@ impl ShortcutAction for TranscribeAction {
         let start_time = Instant::now();
         debug!("TranscribeAction::start called for binding: {}", binding_id);
 
+        // Keep a runtime-only identity for the exact foreground window. This
+        // does not read a title or nearby text, and lets every dictation mode
+        // reject a focus switch before it inserts text.
+        if let Some(targets) = app.try_state::<crate::adaptive::session::ActivePasteTarget>() {
+            targets.insert(binding_id, capture_paste_target());
+        }
+
         // Load model in the background
         let tm = app.state::<Arc<TranscriptionManager>>();
         let rm = app.state::<Arc<AudioRecordingManager>>();
@@ -2408,6 +2396,9 @@ impl ShortcutAction for TranscribeAction {
             if let Some(store) = app.try_state::<crate::adaptive::session::ActiveDictationContext>()
             {
                 store.clear(&binding_id);
+            }
+            if let Some(targets) = app.try_state::<crate::adaptive::session::ActivePasteTarget>() {
+                targets.clear(&binding_id);
             }
             utils::hide_recording_overlay(app);
             change_tray_icon(app, TrayIconState::Idle);
@@ -2600,6 +2591,9 @@ impl ShortcutAction for TranscribeAction {
                             let captured_context = ah
                                 .try_state::<crate::adaptive::session::ActiveDictationContext>()
                                 .and_then(|store| store.take(&binding_id));
+                            let paste_target = ah
+                                .try_state::<crate::adaptive::session::ActivePasteTarget>()
+                                .and_then(|targets| targets.take(&binding_id));
                             let adaptive_context = if settings.adaptive_profiles_enabled {
                                 Some(
                                     captured_context
@@ -2608,11 +2602,6 @@ impl ShortcutAction for TranscribeAction {
                                 )
                             } else {
                                 None
-                            };
-                            let classic_context = if settings.adaptive_profiles_enabled {
-                                None
-                            } else {
-                                captured_context
                             };
 
                             if effective_post_process || adaptive_context.is_some() {
@@ -2728,6 +2717,7 @@ impl ShortcutAction for TranscribeAction {
                                     language_outcome,
                                     final_text,
                                     context: context.clone(),
+                                    paste_target,
                                     saved_entry_id,
                                     cancelled_wav_path,
                                     operation_token: operation_token.clone(),
@@ -2846,7 +2836,7 @@ impl ShortcutAction for TranscribeAction {
                                         saved_entry_id,
                                         cancelled_wav_path,
                                         operation_token.clone(),
-                                        classic_context,
+                                        paste_target,
                                         paste_started_at,
                                     );
                                 };
@@ -2864,6 +2854,11 @@ impl ShortcutAction for TranscribeAction {
                             }
                         }
                         Err(err) => {
+                            if let Some(targets) =
+                                ah.try_state::<crate::adaptive::session::ActivePasteTarget>()
+                            {
+                                targets.clear(&binding_id);
+                            }
                             error!("Global Shortcut Transcription error: {}", err);
                             if operation_is_cancelled(&ah, operation_token.as_ref()) {
                                 if let Some(wav_path) = &saved_wav_path {
@@ -2886,6 +2881,11 @@ impl ShortcutAction for TranscribeAction {
                     }
                 }
                 RecordingStopDecision::Terminal(terminal) => {
+                    if let Some(targets) =
+                        ah.try_state::<crate::adaptive::session::ActivePasteTarget>()
+                    {
+                        targets.clear(&binding_id);
+                    }
                     let terminal = if operation_is_cancelled(&ah, operation_token.as_ref()) {
                         DictationTransactionTerminal::Cancelled
                     } else {
@@ -2922,6 +2922,9 @@ impl ShortcutAction for CancelAction {
         utils::cancel_current_operation(app);
         if let Some(store) = app.try_state::<crate::adaptive::session::ActiveDictationContext>() {
             store.clear(binding_id);
+        }
+        if let Some(targets) = app.try_state::<crate::adaptive::session::ActivePasteTarget>() {
+            targets.clear(binding_id);
         }
     }
 

@@ -24,6 +24,7 @@ Options:
   --attestations-dir <path>          Directory containing <asset>.attestation.json files. Defaults to <release-assets-dir>/attestations.
   --require-desktop-target           Require desktop-target evidence in each native smoke directory.
   --require-virtual-audio            Require virtual-audio evidence in each native smoke directory.
+  --require-real-inference           Require local-model inference evidence in each native smoke directory.
   --require-app-insertion-drills     Require app-driven insertion evidence in each native smoke directory.
   --require-benchmarks               Require representative Windows/macOS/Linux benchmark evidence.
   --require-branch-protection        Require branch protection native backend contexts.
@@ -48,6 +49,7 @@ const requireAttestations = hasArg("--require-attestations");
 const attestationsDir = argValue("--attestations-dir");
 const requireDesktopTarget = hasArg("--require-desktop-target");
 const requireVirtualAudio = hasArg("--require-virtual-audio");
+const requireRealInference = hasArg("--require-real-inference");
 const requireAppInsertionDrills = hasArg("--require-app-insertion-drills");
 const requireBenchmarks = hasArg("--require-benchmarks");
 const requireBranchProtection = hasArg("--require-branch-protection");
@@ -100,6 +102,7 @@ const checks: Check[] = [
     if (platform) nativeArgs.push("--require-platform", platform);
     if (requireDesktopTarget) nativeArgs.push("--require-desktop-target");
     if (requireVirtualAudio) nativeArgs.push("--require-virtual-audio");
+    if (requireRealInference) nativeArgs.push("--require-real-inference");
     if (requireAppInsertionDrills) {
       nativeArgs.push("--require-app-insertion-drills");
     }
