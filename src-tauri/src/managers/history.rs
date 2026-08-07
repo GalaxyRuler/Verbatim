@@ -489,94 +489,96 @@ impl HistoryManager {
         metadata: AdaptiveHistoryMetadata,
         transform_metadata: TransformHistoryMetadata,
     ) -> Result<HistoryEntry> {
-        let _recording_mutation_guard = self
-            .recording_mutations
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let timestamp = Utc::now().timestamp();
-        let title = self.format_timestamp_title(timestamp);
+        let entry = Self::run_recording_mutation_then_cleanup(
+            &self.recording_mutations,
+            || {
+                let timestamp = Utc::now().timestamp();
+                let title = self.format_timestamp_title(timestamp);
 
-        let conn = self.get_connection()?;
-        conn.execute(
-            "INSERT INTO transcription_history (
-                file_name,
-                timestamp,
-                saved,
-                title,
-                transcription_text,
-                post_processed_text,
-                post_process_prompt,
-                post_process_requested,
-                adaptive_profile_id,
-                adaptive_profile_name,
-                adaptive_routing_json,
-                adaptive_context_json,
-                adaptive_language_json,
-                adaptive_insertion_json,
-                adaptive_parent_entry_id,
-                transform_action,
-                transform_original_text,
-                transform_result_text,
-                transform_target_language,
-                transform_provider_id,
-                transform_model,
-                transform_recovery_status
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
-            params![
-                &file_name,
-                timestamp,
-                false,
-                &title,
-                &transcription_text,
-                &post_processed_text,
-                &post_process_prompt,
-                post_process_requested,
-                &metadata.profile_id,
-                &metadata.profile_name,
-                &metadata.routing_json,
-                &metadata.context_json,
-                &metadata.language_json,
-                &metadata.insertion_json,
-                &metadata.parent_entry_id,
-                &transform_metadata.action,
-                &transform_metadata.original_text,
-                &transform_metadata.result_text,
-                &transform_metadata.target_language,
-                &transform_metadata.provider_id,
-                &transform_metadata.model,
-                &transform_metadata.recovery_status,
-            ],
+                let conn = self.get_connection()?;
+                conn.execute(
+                    "INSERT INTO transcription_history (
+                        file_name,
+                        timestamp,
+                        saved,
+                        title,
+                        transcription_text,
+                        post_processed_text,
+                        post_process_prompt,
+                        post_process_requested,
+                        adaptive_profile_id,
+                        adaptive_profile_name,
+                        adaptive_routing_json,
+                        adaptive_context_json,
+                        adaptive_language_json,
+                        adaptive_insertion_json,
+                        adaptive_parent_entry_id,
+                        transform_action,
+                        transform_original_text,
+                        transform_result_text,
+                        transform_target_language,
+                        transform_provider_id,
+                        transform_model,
+                        transform_recovery_status
+                    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
+                    params![
+                        &file_name,
+                        timestamp,
+                        false,
+                        &title,
+                        &transcription_text,
+                        &post_processed_text,
+                        &post_process_prompt,
+                        post_process_requested,
+                        &metadata.profile_id,
+                        &metadata.profile_name,
+                        &metadata.routing_json,
+                        &metadata.context_json,
+                        &metadata.language_json,
+                        &metadata.insertion_json,
+                        &metadata.parent_entry_id,
+                        &transform_metadata.action,
+                        &transform_metadata.original_text,
+                        &transform_metadata.result_text,
+                        &transform_metadata.target_language,
+                        &transform_metadata.provider_id,
+                        &transform_metadata.model,
+                        &transform_metadata.recovery_status,
+                    ],
+                )?;
+
+                let entry = HistoryEntry {
+                    id: conn.last_insert_rowid(),
+                    file_name,
+                    timestamp,
+                    saved: false,
+                    title,
+                    transcription_text,
+                    post_processed_text,
+                    post_process_prompt,
+                    post_process_requested,
+                    adaptive_profile_id: metadata.profile_id,
+                    adaptive_profile_name: metadata.profile_name,
+                    adaptive_routing_json: metadata.routing_json,
+                    adaptive_context_json: metadata.context_json,
+                    adaptive_language_json: metadata.language_json,
+                    adaptive_insertion_json: metadata.insertion_json,
+                    adaptive_parent_entry_id: metadata.parent_entry_id,
+                    transform_action: transform_metadata.action,
+                    transform_original_text: transform_metadata.original_text,
+                    transform_result_text: transform_metadata.result_text,
+                    transform_target_language: transform_metadata.target_language,
+                    transform_provider_id: transform_metadata.provider_id,
+                    transform_model: transform_metadata.model,
+                    transform_recovery_status: transform_metadata.recovery_status,
+                };
+
+                debug!("Saved history entry with id {}", entry.id);
+
+                Ok(entry)
+            },
+            || self.cleanup_old_entries(),
         )?;
-
-        let entry = HistoryEntry {
-            id: conn.last_insert_rowid(),
-            file_name,
-            timestamp,
-            saved: false,
-            title,
-            transcription_text,
-            post_processed_text,
-            post_process_prompt,
-            post_process_requested,
-            adaptive_profile_id: metadata.profile_id,
-            adaptive_profile_name: metadata.profile_name,
-            adaptive_routing_json: metadata.routing_json,
-            adaptive_context_json: metadata.context_json,
-            adaptive_language_json: metadata.language_json,
-            adaptive_insertion_json: metadata.insertion_json,
-            adaptive_parent_entry_id: metadata.parent_entry_id,
-            transform_action: transform_metadata.action,
-            transform_original_text: transform_metadata.original_text,
-            transform_result_text: transform_metadata.result_text,
-            transform_target_language: transform_metadata.target_language,
-            transform_provider_id: transform_metadata.provider_id,
-            transform_model: transform_metadata.model,
-            transform_recovery_status: transform_metadata.recovery_status,
-        };
-
-        debug!("Saved history entry with id {}", entry.id);
-
-        self.cleanup_old_entries()?;
 
         // Emit typed event for real-time frontend updates
         if let Err(e) = (HistoryUpdatePayload::Added {
@@ -688,6 +690,27 @@ impl HistoryManager {
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let conn = Connection::open(db_path)?;
         Self::delete_entries_and_files_with(&conn, recordings_dir, entries, delete_file)
+    }
+
+    fn run_recording_mutation_then_cleanup<T, M, C>(
+        recording_mutations: &Mutex<()>,
+        mutation: M,
+        cleanup: C,
+    ) -> Result<T>
+    where
+        M: FnOnce() -> Result<T>,
+        C: FnOnce() -> Result<()>,
+    {
+        let mutation_result = {
+            let _recording_mutation_guard = recording_mutations
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            mutation()
+        };
+
+        let value = mutation_result?;
+        cleanup()?;
+        Ok(value)
     }
 
     /// Delete shared-reference rows directly. For the last owning row, stage the row deletion in
@@ -1813,6 +1836,33 @@ mod tests {
             )
             .expect("count remaining references");
         assert_eq!(remaining_references, 1);
+    }
+
+    #[test]
+    fn recording_mutation_guard_is_released_before_cleanup() {
+        let recording_mutations = Mutex::new(());
+        let insertion_ran = Cell::new(false);
+        let cleanup_ran = Cell::new(false);
+
+        let entry_id = HistoryManager::run_recording_mutation_then_cleanup(
+            &recording_mutations,
+            || {
+                insertion_ran.set(true);
+                Ok(42_i64)
+            },
+            || {
+                let _cleanup_guard = recording_mutations.try_lock().expect(
+                    "retention cleanup must reacquire the lock after the recording insert releases it",
+                );
+                cleanup_ran.set(true);
+                Ok(())
+            },
+        )
+        .expect("run recording insert and retention cleanup");
+
+        assert_eq!(entry_id, 42);
+        assert!(insertion_ran.get());
+        assert!(cleanup_ran.get());
     }
 
     #[test]
