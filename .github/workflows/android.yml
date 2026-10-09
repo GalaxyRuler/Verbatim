@@ -52,6 +52,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with: { targets: x86_64-linux-android }
       - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
       - name: Install NDK
         run: sdkmanager "ndk;${{ env.NDK_VERSION }}"
       - uses: Swatinem/rust-cache@v2

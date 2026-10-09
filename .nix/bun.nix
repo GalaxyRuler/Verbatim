@@ -1373,9 +1373,9 @@
     url = "https://registry.npmjs.org/use-sync-external-store/-/use-sync-external-store-1.6.0.tgz";
     hash = "sha512-Pp6GSwGP/NrPIrxVFAIkOQeyw8lFenOHijQWkUTrDvrF4ALqylP2C/KCkeS9dpUM3KvYRQhna5vt7IL95+ZQ9w==";
   };
-  "vite@6.4.1" = fetchurl {
-    url = "https://registry.npmjs.org/vite/-/vite-6.4.1.tgz";
-    hash = "sha512-+Oxm7q9hDoLMyJOYfUYBuHQo+dkAloi33apOPP56pzj+vsdJDzr+j1NISE5pyaAuKL4A3UD34qd0lx5+kfKp2g==";
+  "vite@6.4.4" = fetchurl {
+    url = "https://registry.npmjs.org/vite/-/vite-6.4.4.tgz";
+    hash = "sha512-xGjU/SyjeNyb0E4KxXBvYz/1C+3JXuujvf2hXNOtnlcE+58o5ajd9N2/n2VhkiJvpCP2qQasnUpx5PXNeI+p1Q==";
   };
   "void-elements@3.1.0" = fetchurl {
     url = "https://registry.npmjs.org/void-elements/-/void-elements-3.1.0.tgz";
