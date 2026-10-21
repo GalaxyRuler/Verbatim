@@ -1035,6 +1035,7 @@
     "startupResetSettingsFailed": "Failed to reset settings",
     "startupResettingSettings": "Resetting...",
     "startupRestart": "Restart Verbatim",
+    "startupTimedOut": "Startup did not finish within 30 seconds. Restart Verbatim or open the logs for details.",
     "startupUnknownStep": "Unknown startup step",
     "targetChangedTitle": "Insertion Blocked",
     "targetChangedDescription": "The active destination changed before Verbatim inserted text. Use Paste here only if the current field is the right destination.",

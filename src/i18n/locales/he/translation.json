@@ -1035,6 +1035,7 @@
     "startupResetSettingsFailed": "איפוס ההגדרות נכשל",
     "startupResettingSettings": "מאפס...",
     "startupRestart": "הפעל מחדש את Verbatim",
+    "startupTimedOut": "ההפעלה לא הושלמה בתוך 30 שניות. יש להפעיל מחדש את Verbatim או לפתוח את היומנים לפרטים נוספים.",
     "startupUnknownStep": "שלב אתחול לא ידוע",
     "targetChangedTitle": "ההכנסה נחסמה",
     "targetChangedDescription": "היעד הפעיל השתנה לפני ש-Verbatim הכניס את הטקסט. השתמש בהדבקה כאן רק אם השדה הנוכחי הוא היעד הנכון.",

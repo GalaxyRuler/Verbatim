@@ -367,6 +367,10 @@ Do not use `gpg` for these `.sig` files.
 
 ## Troubleshooting
 
+### Startup Stays on Starting
+
+Verbatim checks startup progress until the backend is ready. If startup does not finish within 30 seconds, the window shows recovery actions instead of waiting indefinitely. Choose **Restart Verbatim** to try again, or **Open Logs** to investigate the failure. Resetting settings is optional and is not required for the startup readiness fix.
+
 ### Manual Model Installation (For Proxy Users or Network Restrictions)
 
 If you're behind a proxy, firewall, or in a restricted network environment where Verbatim cannot download models automatically, you can manually download and install them. The URLs are publicly accessible from any browser.

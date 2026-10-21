@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import type { StartupStatus } from "../src/bindings";
 
 const adaptiveProfiles = [
   {
@@ -226,6 +227,8 @@ const installTauriMocks = async (
     androidLlmPacks?: Array<Record<string, unknown>>;
     learnCandidates?: Array<Record<string, unknown>>;
     dictionaryDiagnostics?: Record<string, unknown> | null;
+    startupStatuses?: StartupStatus[];
+    startupNeverResponds?: boolean;
   } = {},
 ) => {
   const availableModels = mockOptions.availableModels ?? models;
@@ -297,8 +300,11 @@ const installTauriMocks = async (
       localPostProcessingModels,
       initialHistoryEntries,
       osType,
+      startupStatuses,
+      startupNeverResponds,
     }) => {
       let appSettings = { ...settings };
+      let startupStatusIndex = 0;
       const callbacks = new Map<number, (payload?: unknown) => void>();
       const eventListeners = new Map<string, number[]>();
       let nextCallbackId = 1;
@@ -563,7 +569,10 @@ const installTauriMocks = async (
           }
           switch (cmd) {
             case "get_startup_status":
-              return { status: "ready" };
+              if (startupNeverResponds) return new Promise(() => {});
+              return startupStatuses[
+                Math.min(startupStatusIndex++, startupStatuses.length - 1)
+              ];
             case "get_default_settings":
             case "get_app_settings":
               syncDictionarySettings();
@@ -1388,6 +1397,8 @@ const installTauriMocks = async (
       localPostProcessingModels: localLlmModels,
       initialHistoryEntries: historyEntries,
       osType,
+      startupStatuses: mockOptions.startupStatuses ?? [{ status: "ready" }],
+      startupNeverResponds: mockOptions.startupNeverResponds ?? false,
     },
   );
 };
@@ -1547,6 +1558,110 @@ test.describe("Verbatim App", () => {
     expect(html).toContain("<html");
     expect(html).toContain("<body");
   });
+
+  test("startup waits for backend readiness instead of staying on Starting", async ({
+    page,
+  }) => {
+    await installTauriMocks(page, {}, [], "windows", {
+      startupStatuses: [
+        { status: "starting" },
+        { status: "starting" },
+        { status: "starting" },
+        { status: "ready" },
+      ],
+    });
+    await page.goto("/");
+
+    await expect(page.getByTitle("General")).toBeVisible();
+    await expect(page.getByText("Starting…", { exact: true })).toBeHidden();
+  });
+
+  test("startup preserves a backend failure after an initial Starting response", async ({
+    page,
+  }) => {
+    await installTauriMocks(page, {}, [], "windows", {
+      startupStatuses: [
+        { status: "starting" },
+        { status: "starting" },
+        { status: "starting" },
+        {
+          status: "failed",
+          step: "history manager",
+          message: "Synthetic database startup failure",
+        },
+      ],
+    });
+    await page.goto("/");
+
+    await expect(
+      page.getByRole("heading", { name: "Startup failed" }),
+    ).toBeVisible();
+    await expect(page.getByText("Failed step: history manager")).toBeVisible();
+    await expect(
+      page.getByText("Synthetic database startup failure"),
+    ).toBeVisible();
+  });
+
+  for (const laterStatus of ["ready", "starting"] as const) {
+    test(`startup preserves coordinator failure when the next snapshot is ${laterStatus}`, async ({
+      page,
+    }) => {
+      await page.clock.install();
+      await installTauriMocks(page, {}, [], "windows", {
+        startupStatuses: [
+          { status: "starting" },
+          { status: "starting" },
+          { status: laterStatus },
+        ],
+      });
+      await page.goto("/");
+      await expect(page.getByText("Starting…", { exact: true })).toBeVisible();
+      await page.evaluate(() => {
+        const win = window as typeof window & {
+          __VERBATIM_TEST_EMIT_EVENT__: (
+            event: string,
+            payload: unknown,
+          ) => void;
+        };
+        win.__VERBATIM_TEST_EMIT_EVENT__("transcription-coordinator-health", {
+          status: "disabled",
+          restart_count: 3,
+          reason: "Synthetic coordinator failure",
+        });
+      });
+      const failure = page.getByText(
+        "The dictation coordinator stopped after repeated failures. Restart Verbatim to recover.",
+      );
+      await expect(failure).toBeVisible();
+      await page.clock.runFor(30_100);
+
+      await expect(failure).toBeVisible();
+      await expect(page.getByTitle("General")).toBeHidden();
+    });
+  }
+
+  for (const neverResponds of [false, true]) {
+    test(`startup offers recovery when ${neverResponds ? "IPC never replies" : "the backend stays Starting"}`, async ({
+      page,
+    }) => {
+      await page.clock.install();
+      await installTauriMocks(page, {}, [], "windows", {
+        startupStatuses: [{ status: "starting" }],
+        startupNeverResponds: neverResponds,
+      });
+      await page.goto("/");
+      await expect(page.getByText("Starting…", { exact: true })).toBeVisible();
+      await page.clock.runFor(30_100);
+
+      await expect(
+        page.getByRole("heading", { name: "Startup failed" }),
+      ).toBeVisible();
+      await expect(
+        page.getByRole("button", { name: "Restart Verbatim" }),
+      ).toBeVisible();
+      await expect(page.getByText("Starting…", { exact: true })).toBeHidden();
+    });
+  }
 
   test("first-run onboarding verifies shortcut and microphone readiness", async ({
     page,

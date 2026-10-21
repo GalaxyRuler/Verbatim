@@ -1035,6 +1035,7 @@
     "startupResetSettingsFailed": "فشلت إعادة ضبط الإعدادات",
     "startupResettingSettings": "جارٍ إعادة الضبط...",
     "startupRestart": "إعادة تشغيل Verbatim",
+    "startupTimedOut": "لم يكتمل بدء تشغيل Verbatim خلال ٣٠ ثانية. أعد تشغيل التطبيق أو افتح السجلات للاطلاع على التفاصيل.",
     "startupUnknownStep": "خطوة بدء تشغيل غير معروفة",
     "targetChangedTitle": "تم منع الإدراج",
     "targetChangedDescription": "تغيرت الوجهة النشطة قبل أن يدرج Verbatim النص. استخدم اللصق هنا فقط إذا كان الحقل الحالي هو الوجهة الصحيحة.",

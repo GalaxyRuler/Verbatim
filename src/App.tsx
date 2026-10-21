@@ -106,25 +106,53 @@ function DesktopApp() {
   const [isResettingSettings, setIsResettingSettings] = useState(false);
 
   useEffect(() => {
-    let cancelled = false;
-
-    commands
-      .getStartupStatus()
-      .then((result) => {
-        if (cancelled) return;
-        setStartupStatus(result);
-      })
-      .catch((error) => {
-        if (cancelled) return;
-        setStartupStatus({
-          status: "failed",
-          step: t("errors.startupUnknownStep"),
-          message: String(error),
-        });
+    let stopped = false;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+    const finish = (result: StartupStatus) => {
+      if (stopped) return;
+      stopped = true;
+      clearTimeout(timeoutTimer);
+      clearTimeout(retryTimer);
+      // A coordinator failure event can arrive while the snapshot is pending.
+      setStartupStatus((current) =>
+        current?.status === "failed" ? current : result,
+      );
+    };
+    const timeoutTimer = setTimeout(() => {
+      finish({
+        status: "failed",
+        step: t("errors.startupUnknownStep"),
+        message: t("errors.startupTimedOut"),
       });
+    }, 30_000);
+
+    // The webview can query startup before backend setup has finished.
+    // Keep observing transitional replies, with a deadline even if IPC hangs.
+    const checkStartup = () => {
+      commands
+        .getStartupStatus()
+        .then((result) => {
+          if (stopped) return;
+          if (result.status === "starting") {
+            retryTimer = setTimeout(checkStartup, 250);
+          } else {
+            finish(result);
+          }
+        })
+        .catch((error) => {
+          finish({
+            status: "failed",
+            step: t("errors.startupUnknownStep"),
+            message: String(error),
+          });
+        });
+    };
+    checkStartup();
 
     return () => {
-      cancelled = true;
+      stopped = true;
+      clearTimeout(timeoutTimer);
+      clearTimeout(retryTimer);
     };
   }, [t]);
 
