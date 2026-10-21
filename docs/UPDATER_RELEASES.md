@@ -10,6 +10,12 @@ The release workflow must publish `latest.json`, matching updater `.sig` files,
 the expected desktop installers, `SHA256SUMS.txt`, and `RELEASE_MANIFEST.json`
 for every release.
 
+The updater enables TLS support for the published Windows EXE/MSI, macOS
+`.app.tar.gz`, and Linux DEB assets. Legacy Windows ZIP and Linux
+`.AppImage.tar.gz` updater payloads are disabled to exclude the vulnerable ZIP
+dependency. Keep these formats aligned with the release workflow when changing
+updater features.
+
 ## Signing Keys
 
 Tauri updater signing is separate from Apple Developer ID and Windows trusted code signing.

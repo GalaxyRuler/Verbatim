@@ -105,7 +105,8 @@ tauri-plugin-autostart = "2.5.1"
 tauri-plugin-global-shortcut = "2.3.1"
 tauri-plugin-notification = "2.3.1"
 tauri-plugin-single-instance = "2.3.2"
-tauri-plugin-updater = "2.10.0"
+# Current updater assets use raw EXE/MSI, macOS tar.gz, and Linux DEB.
+tauri-plugin-updater = { version = "2.10.0", default-features = false, features = ["rustls-tls"] }
 verbatim-keys = { path = "crates/verbatim-keys" }
 
 [target.'cfg(windows)'.dependencies]
